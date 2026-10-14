@@ -1,0 +1,108 @@
+@import "tailwindcss";
+
+:root {
+  --bg-main: #fbf9f5;
+  --bg-card: #ffffff;
+  --bg-secondary: #f4eee3;
+  --text-main: #1c1815;
+  --text-muted: #6b635b;
+  --primary-gold: #c5a059;
+  --primary-gold-dark: #9f7e38;
+  --artisan-navy: #0f1c2e;
+  --artisan-terracotta: #b85d43;
+  --artisan-indigo: #1e2c3d;
+  --border-color: #e8e1d5;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg-main: #0c1017;
+    --bg-card: #151b24;
+    --bg-secondary: #1c2430;
+    --text-main: #f5f2eb;
+    --text-muted: #9e978e;
+    --primary-gold: #dfc082;
+    --primary-gold-dark: #c5a059;
+    --artisan-navy: #090e17;
+    --artisan-terracotta: #cf7156;
+    --artisan-indigo: #2c3f56;
+    --border-color: #273142;
+  }
+}
+
+body {
+  background-color: var(--bg-main);
+  color: var(--text-main);
+  -webkit-font-smoothing: antialiased;
+  -webkit-tap-highlight-color: transparent;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+  transition: background-color 0.3s ease, color 0.3s ease;
+}
+
+/* Form Controls - Guarantee 100% visible, high-contrast, dark readable text on light backgrounds */
+input, select, textarea {
+  color: #1c1815 !important;
+}
+
+input::placeholder, textarea::placeholder {
+  color: #78716c !important;
+  opacity: 0.85;
+}
+
+/* Support dark inputs only when explicitly intended */
+.dark-input {
+  color: #f5f2eb !important;
+  background-color: #151b24 !important;
+}
+.dark-input::placeholder {
+  color: #9e978e !important;
+}
+
+/* Custom hide scrollbar for mobile horizontal lists */
+.no-scrollbar::-webkit-scrollbar {
+  display: none;
+}
+.no-scrollbar {
+  -ms-overflow-style: none;
+  scrollbar-width: none;
+}
+
+/* Smooth Running Marquee Ticker */
+@keyframes marquee-run {
+  0% {
+    transform: translateX(0%);
+  }
+  100% {
+    transform: translateX(-50%);
+  }
+}
+
+.animate-marquee-runner {
+  display: flex;
+  width: max-content;
+  animation: marquee-run linear infinite;
+  will-change: transform;
+}
+
+.animate-marquee-runner:hover {
+  animation-play-state: paused;
+}
+
+/* Print styles for Shipping Labels */
+@media print {
+  body * {
+    visibility: hidden;
+  }
+  #printable-shipping-label,
+  #printable-shipping-label * {
+    visibility: visible;
+  }
+  #printable-shipping-label {
+    position: absolute;
+    left: 0;
+    top: 0;
+    width: 100%;
+    margin: 0;
+    padding: 10px;
+  }
+}

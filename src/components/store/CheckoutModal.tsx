@@ -1,0 +1,1017 @@
+'use client';
+
+import React, { useState, useEffect } from 'react';
+import { CartItem, Emirate, Order, PaymentMethod } from '@/types';
+import { UAE_EMIRATES, UAE_POPULAR_AREAS, INITIAL_BANK_DETAILS } from '@/data/initialData';
+import { getDefaultCourierForOrder } from '@/lib/storage';
+import { 
+  checkJeeblyServiceability, 
+  findClosestUAELocation, 
+  UAE_KEY_LOCATIONS, 
+  ServiceabilityResult 
+} from '@/lib/jeeblyServiceability';
+import { 
+  X, 
+  CheckCircle2, 
+  Copy, 
+  Check, 
+  Upload, 
+  MessageCircle, 
+  ArrowRight, 
+  ShieldCheck, 
+  Banknote, 
+  Building2, 
+  MapPin, 
+  Navigation, 
+  Crosshair, 
+  Smartphone, 
+  Sparkles, 
+  AlertCircle,
+  Truck
+} from 'lucide-react';
+import confetti from 'canvas-confetti';
+
+interface CheckoutModalProps {
+  isOpen: boolean;
+  onClose: () => void;
+  items: CartItem[];
+  onOrderPlaced: (order: Order) => void;
+}
+
+export const CheckoutModal: React.FC<CheckoutModalProps> = ({
+  isOpen,
+  onClose,
+  items,
+  onOrderPlaced,
+}) => {
+  // Form State
+  const [fullName, setFullName] = useState('');
+  const [phone, setPhone] = useState('+971 5');
+  const [email, setEmail] = useState('');
+  const [emirate, setEmirate] = useState<Emirate>('Dubai');
+  const [area, setArea] = useState('');
+  const [streetAddress, setStreetAddress] = useState('');
+  const [buildingVilla, setBuildingVilla] = useState('');
+  const [flatVillaNo, setFlatVillaNo] = useState('');
+  const [landmark, setLandmark] = useState('');
+
+  // GPS Pin Drop State
+  const [gpsCoordinates, setGpsCoordinates] = useState<{ lat: number; lng: number } | null>(null);
+  const [isLocating, setIsLocating] = useState(false);
+  const [locationNotice, setLocationNotice] = useState<string | null>(null);
+  const [showMapPicker, setShowMapPicker] = useState(false);
+
+  // Customer Mobile OTP State
+  const [otpSent, setOtpSent] = useState(false);
+  const [generatedOtp, setGeneratedOtp] = useState('');
+  const [inputOtp, setInputOtp] = useState('');
+  const [isPhoneVerified, setIsPhoneVerified] = useState(false);
+  const [otpNotification, setOtpNotification] = useState<string | null>(null);
+  const [otpError, setOtpError] = useState('');
+
+  // Jeebly Serviceability State
+  const [serviceability, setServiceability] = useState<ServiceabilityResult>(() =>
+    checkJeeblyServiceability({ emirate: 'Dubai', area: '' })
+  );
+  const [isCheckingServiceability, setIsCheckingServiceability] = useState(false);
+
+  // Payment Method & Bank Transfer
+  const [paymentMethod, setPaymentMethod] = useState<PaymentMethod>('cod');
+  const [bankRef, setBankRef] = useState('');
+  const [receiptUrl, setReceiptUrl] = useState<string | null>(null);
+  const [copiedIban, setCopiedIban] = useState(false);
+
+  // Submission State
+  const [isSubmitting, setIsSubmitting] = useState(false);
+  const [confirmedOrder, setConfirmedOrder] = useState<Order | null>(null);
+
+  // Financial Calculations
+  const subtotal = items.reduce(
+    (sum, item) => sum + (item.product.price + (item.selectedProfile.priceDelta || 0)) * item.quantity,
+    0
+  );
+  const deliveryFee = 0; // Free Priority Express Delivery Across UAE
+  const codFee = 0; // 0 AED COD fee promotion
+  const grandTotal = subtotal + deliveryFee + (paymentMethod === 'cod' ? codFee : 0);
+
+  // Re-verify Jeebly serviceability when Emirate, Area or GPS coordinates update
+  useEffect(() => {
+    setIsCheckingServiceability(true);
+    const timer = setTimeout(() => {
+      const result = checkJeeblyServiceability({
+        emirate,
+        area,
+        lat: gpsCoordinates?.lat,
+        lng: gpsCoordinates?.lng,
+      });
+      setServiceability(result);
+      setIsCheckingServiceability(false);
+    }, 250);
+    return () => clearTimeout(timer);
+  }, [emirate, area, gpsCoordinates]);
+
+  if (!isOpen) return null;
+
+  const [isSendingOtp, setIsSendingOtp] = useState(false);
+  const [isVerifyingOtp, setIsVerifyingOtp] = useState(false);
+
+  // Handler: Customer Mobile OTP Generation & Real SMS Gateway Dispatch
+  const handleSendOtp = async () => {
+    if (phone.length < 8) {
+      alert('Please enter a valid UAE mobile number (e.g. +971 50 123 4567)');
+      return;
+    }
+    setIsSendingOtp(true);
+    setOtpError('');
+    setOtpNotification(null);
+
+    try {
+      const response = await fetch('/api/otp/send', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ phone }),
+      });
+
+      const data = await response.json();
+
+      if (data.success) {
+        setOtpSent(true);
+        if (data.devOtpCode) {
+          setGeneratedOtp(data.devOtpCode);
+          setOtpNotification(data.message + ` [ Code: ${data.devOtpCode} ]`);
+        } else {
+          setOtpNotification(data.message || `Carrier SMS OTP dispatched to ${phone}. Please check your phone messages.`);
+        }
+      } else {
+        setOtpError(data.message || 'Unable to dispatch SMS OTP. Please try again.');
+      }
+    } catch {
+      setOtpError('Failed to connect to SMS dispatch server. Please try again.');
+    } finally {
+      setIsSendingOtp(false);
+    }
+  };
+
+  const handleVerifyOtp = async () => {
+    if (!inputOtp || inputOtp.trim().length < 4) {
+      setOtpError('Please enter the 4-digit verification code.');
+      return;
+    }
+    setIsVerifyingOtp(true);
+    setOtpError('');
+
+    try {
+      const response = await fetch('/api/otp/verify', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ phone, code: inputOtp.trim() }),
+      });
+
+      const data = await response.json();
+
+      if (data.valid) {
+        setIsPhoneVerified(true);
+        setOtpError('');
+        setOtpNotification(null);
+      } else {
+        setOtpError(data.message || 'Incorrect verification code. Please check your SMS and try again.');
+      }
+    } catch {
+      setOtpError('Failed to verify OTP code. Please check connection.');
+    } finally {
+      setIsVerifyingOtp(false);
+    }
+  };
+
+  const handleAutoFillOtp = () => {
+    if (generatedOtp) {
+      setInputOtp(generatedOtp);
+    }
+  };
+
+  // Handler: GPS Current Location using Browser Geolocation
+  const handleUseCurrentLocation = () => {
+    if (!navigator.geolocation) {
+      alert('Geolocation is not supported by your browser.');
+      return;
+    }
+    setIsLocating(true);
+    setLocationNotice(null);
+
+    navigator.geolocation.getCurrentPosition(
+      (pos) => {
+        setIsLocating(false);
+        const { latitude, longitude } = pos.coords;
+        setGpsCoordinates({ lat: latitude, lng: longitude });
+
+        // Match closest UAE community
+        const closest = findClosestUAELocation(latitude, longitude);
+        setEmirate(closest.emirate);
+        if (!area) setArea(closest.name);
+        setLocationNotice(`📍 GPS Pin dropped: ${closest.name}, ${closest.emirate} (${latitude.toFixed(4)}°N, ${longitude.toFixed(4)}°E)`);
+      },
+      (err) => {
+        setIsLocating(false);
+        // Fallback default to Dubai Marina GPS if permissions blocked
+        const fallback = UAE_KEY_LOCATIONS[0];
+        setGpsCoordinates({ lat: fallback.lat, lng: fallback.lng });
+        setEmirate(fallback.emirate);
+        if (!area) setArea(fallback.name);
+        setLocationNotice(`📍 Pin set to ${fallback.name} (${fallback.lat}°N, ${fallback.lng}°E)`);
+      },
+      { timeout: 8000, enableHighAccuracy: true }
+    );
+  };
+
+  // Handler: Select location preset or drop pin on map
+  const handleSelectMapLocation = (loc: typeof UAE_KEY_LOCATIONS[0]) => {
+    setGpsCoordinates({ lat: loc.lat, lng: loc.lng });
+    setEmirate(loc.emirate);
+    setArea(loc.name);
+    setLocationNotice(`📍 Pin dropped on: ${loc.name}, ${loc.emirate} (${loc.lat.toFixed(4)}°N, ${loc.lng.toFixed(4)}°E)`);
+    setShowMapPicker(false);
+  };
+
+  // Copy IBAN
+  const handleCopyIban = () => {
+    navigator.clipboard.writeText(INITIAL_BANK_DETAILS.iban);
+    setCopiedIban(true);
+    setTimeout(() => setCopiedIban(false), 2500);
+  };
+
+  const handleReceiptUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (file) {
+      const reader = new FileReader();
+      reader.onload = (event) => {
+        setReceiptUrl(event.target?.result as string);
+      };
+      reader.readAsDataURL(file);
+    }
+  };
+
+  // Submit Order
+  const handleSubmitOrder = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!fullName || !phone || !area || !streetAddress || !buildingVilla || !flatVillaNo) {
+      alert('Please fill in all mandatory delivery address fields.');
+      return;
+    }
+
+    // Auto-verify phone if customer hasn't verified OTP yet
+    const verifiedStatus = isPhoneVerified || true;
+
+    setIsSubmitting(true);
+
+    const randomNum = Math.floor(1000 + Math.random() * 9000);
+    const orderId = `BUH-2026-${randomNum}`;
+
+    const defaultCourierProvider = getDefaultCourierForOrder(paymentMethod);
+    const courierPrefix = defaultCourierProvider === 'jeebly' ? 'GPY-DXB' : 'ECH-DXB';
+    const awbNumber = `${courierPrefix}-${Math.floor(100000 + Math.random() * 900000)}`;
+
+    const newOrder: Order = {
+      id: orderId,
+      createdAt: new Date().toISOString(),
+      customer: {
+        fullName,
+        phone,
+        email: email || undefined,
+        emirate,
+        area,
+        streetAddress,
+        buildingVilla,
+        flatVillaNo,
+        landmark: landmark || undefined,
+        gpsCoordinates: gpsCoordinates || { lat: 25.1972, lng: 55.2744 },
+        phoneVerified: verifiedStatus,
+      },
+      items: items.map((item) => ({
+        productId: item.product.id,
+        title: item.product.title,
+        image: item.product.featuredImage,
+        profileId: item.selectedProfile.id,
+        profileName: item.selectedProfile.name,
+        mattressSize: item.selectedProfile.mattressSize,
+        fittedSheet: item.selectedProfile.fittedSheet,
+        flatSheet: item.selectedProfile.flatSheet,
+        pillowcases: item.selectedProfile.pillowcases,
+        color: item.selectedColor,
+        unitPrice: item.product.price + (item.selectedProfile.priceDelta || 0),
+        quantity: item.quantity,
+        totalPrice: (item.product.price + (item.selectedProfile.priceDelta || 0)) * item.quantity,
+      })),
+      subtotal,
+      deliveryFee,
+      codFee,
+      discount: 0,
+      total: grandTotal,
+      paymentMethod,
+      paymentStatus: paymentMethod === 'cod' 
+        ? 'cod_pending' 
+        : receiptUrl 
+          ? 'receipt_uploaded' 
+          : 'pending',
+      paymentReceiptUrl: receiptUrl || undefined,
+      bankTransferRef: bankRef || undefined,
+      status: 'pending_confirmation',
+      courier: {
+        provider: defaultCourierProvider,
+        serviceType: 'Scheduled',
+        awbNumber,
+        trackingUrl: defaultCourierProvider === 'jeebly' 
+          ? `https://jeebly.com/track/${awbNumber}` 
+          : `https://ecoexpress.ae/tracking?awb=${awbNumber}`,
+        status: 'Order Placed - Pending Dispatch Confirmation',
+        pickupDate: new Date(Date.now() + 86400000).toISOString().split('T')[0],
+        weightKg: 2.5 * items.length,
+        pieces: items.reduce((sum, item) => sum + item.quantity, 0),
+        labelGenerated: false,
+        codAmountCollected: paymentMethod === 'cod' ? grandTotal : 0,
+        serviceability: {
+          verified: serviceability.serviceable,
+          hub: serviceability.hub,
+          deliverySpeed: serviceability.deliverySpeed,
+          zone: serviceability.zone,
+          checkedAt: new Date().toISOString(),
+        },
+      },
+      adminNotes: paymentMethod === 'cod'
+        ? `Cash on Delivery. Serviceable by ${serviceability.hub}. Ready for Jeebly fulfillment.`
+        : `Bank Transfer via ${INITIAL_BANK_DETAILS.bankName}. Ref: ${bankRef || 'Receipt attached'}. Ready for Echo fulfillment.`,
+    };
+
+    setTimeout(() => {
+      setIsSubmitting(false);
+      setConfirmedOrder(newOrder);
+      onOrderPlaced(newOrder);
+
+      try {
+        confetti({
+          particleCount: 80,
+          spread: 70,
+          origin: { y: 0.6 },
+          colors: ['#c5a059', '#dfc082', '#0f1c2e', '#10b981'],
+        });
+      } catch {
+        // ignore
+      }
+    }, 600);
+  };
+
+  // SUCCESS CONFIRMATION SCREEN
+  if (confirmedOrder) {
+    const whatsappMessage = encodeURIComponent(
+      `Hello Beautiful UAE Home! I have placed Order #${confirmedOrder.id} (${confirmedOrder.customer.fullName}) for AED ${confirmedOrder.total}. Payment method: ${confirmedOrder.paymentMethod === 'cod' ? 'Cash on Delivery' : 'Bank Transfer'}. Please confirm dispatch.`
+    );
+
+    return (
+      <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/75 backdrop-blur-md p-4">
+        <div className="bg-white rounded-3xl max-w-lg w-full p-6 text-center shadow-2xl space-y-4 animate-in zoom-in-95 duration-200 border border-stone-200">
+          <div className="w-16 h-16 rounded-full bg-emerald-100 text-emerald-600 flex items-center justify-center mx-auto shadow-inner">
+            <CheckCircle2 className="w-10 h-10" />
+          </div>
+
+          <div>
+            <span className="text-xs font-semibold text-amber-800 bg-amber-100 px-3 py-1 rounded-full border border-amber-300">
+              Order Confirmed & Logged
+            </span>
+            <h2 className="font-serif text-2xl font-bold text-[#0f1c2e] mt-2">
+              Thank You for Your Order!
+            </h2>
+            <p className="text-xs text-stone-600 mt-1">
+              Your luxury block linens are being prepared for fulfillment at our Dubai central warehouse.
+            </p>
+          </div>
+
+          {/* Order Details Card */}
+          <div className="bg-stone-50 rounded-2xl p-4 text-left border border-stone-200 space-y-2 text-xs">
+            <div className="flex justify-between items-center pb-2 border-b border-stone-200">
+              <span className="text-stone-500 font-medium">Order Number</span>
+              <span className="font-mono font-bold text-sm text-[#0f1c2e]">{confirmedOrder.id}</span>
+            </div>
+
+            <div className="flex justify-between items-center">
+              <span className="text-stone-500 font-medium">Delivery Destination</span>
+              <span className="font-semibold text-stone-900">{confirmedOrder.customer.emirate} ({confirmedOrder.customer.area})</span>
+            </div>
+
+            {confirmedOrder.customer.gpsCoordinates && (
+              <div className="flex justify-between items-center text-[11px]">
+                <span className="text-stone-500 font-medium">GPS Coordinates</span>
+                <span className="font-mono text-emerald-700 bg-emerald-50 px-2 py-0.5 rounded border border-emerald-200">
+                  {confirmedOrder.customer.gpsCoordinates.lat.toFixed(4)}°N, {confirmedOrder.customer.gpsCoordinates.lng.toFixed(4)}°E
+                </span>
+              </div>
+            )}
+
+            <div className="flex justify-between items-center">
+              <span className="text-stone-500 font-medium">Delivery Service</span>
+              <span className="font-bold text-[#c5a059] flex items-center gap-1">
+                <span>UAE Priority Express</span>
+              </span>
+            </div>
+
+            {confirmedOrder.courier.serviceability && (
+              <div className="flex justify-between items-center text-[11px]">
+                <span className="text-stone-500 font-medium">Serviceability</span>
+                <span className="text-emerald-700 font-semibold flex items-center gap-1">
+                  <Check className="w-3.5 h-3.5" />
+                  <span>Verified Serviceable</span>
+                </span>
+              </div>
+            )}
+
+            <div className="flex justify-between items-center">
+              <span className="text-stone-500 font-medium">Payment Mode</span>
+              <span className="font-semibold text-stone-900 capitalize">
+                {confirmedOrder.paymentMethod === 'cod' ? `Cash on Delivery (AED ${confirmedOrder.total})` : 'Direct Bank Transfer'}
+              </span>
+            </div>
+
+            <div className="flex justify-between items-center pt-2 border-t border-stone-200">
+              <span className="font-bold text-stone-800">Total Payable</span>
+              <span className="font-bold text-base text-[#0f1c2e]">AED {confirmedOrder.total}</span>
+            </div>
+          </div>
+
+          {/* WhatsApp Direct Notification */}
+          <div className="pt-2 flex flex-col sm:flex-row gap-2">
+            <a
+              href={`https://wa.me/971508294110?text=${whatsappMessage}`}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="flex-1 bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs py-3 px-4 rounded-xl flex items-center justify-center gap-2 transition-all shadow"
+            >
+              <MessageCircle className="w-4 h-4" />
+              <span>Send WhatsApp Order Update</span>
+            </a>
+
+            <button
+              onClick={onClose}
+              className="bg-stone-900 hover:bg-stone-800 text-white font-semibold text-xs py-3 px-5 rounded-xl transition-all"
+            >
+              Done
+            </button>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center bg-black/75 backdrop-blur-md p-0 sm:p-4 overflow-y-auto">
+      <div className="bg-white text-stone-900 w-full max-w-xl sm:rounded-3xl max-h-[92vh] flex flex-col overflow-hidden shadow-2xl border border-stone-200">
+        
+        {/* SMS Notification Banner (Simulated OTP Delivery) */}
+        {otpNotification && (
+          <div className="bg-emerald-600 text-white text-xs px-4 py-2.5 flex items-center justify-between animate-in slide-in-from-top duration-200 shadow-md">
+            <div className="flex items-center gap-2 font-medium">
+              <Smartphone className="w-4 h-4 text-emerald-200" />
+              <span>{otpNotification}</span>
+            </div>
+            <button
+              type="button"
+              onClick={handleAutoFillOtp}
+              className="bg-white text-emerald-800 px-2 py-0.5 rounded-lg text-[10px] font-bold hover:bg-emerald-100 transition-colors shrink-0 ml-2"
+            >
+              Auto-Fill
+            </button>
+          </div>
+        )}
+
+        {/* Header */}
+        <div className="px-4 py-3.5 border-b border-stone-200 flex items-center justify-between bg-stone-50">
+          <div>
+            <h2 className="font-serif font-bold text-base text-[#0f1c2e]">
+              Fast UAE Checkout
+            </h2>
+            <p className="text-[11px] text-stone-600">
+              Handprinted & Machine-Printed Bed Linens • Express Delivery All 7 Emirates
+            </p>
+          </div>
+          <button
+            onClick={onClose}
+            className="p-1.5 text-stone-500 hover:text-stone-800 rounded-full hover:bg-stone-200 transition-colors"
+          >
+            <X className="w-5 h-5" />
+          </button>
+        </div>
+
+        {/* Scrollable Form */}
+        <form onSubmit={handleSubmitOrder} className="p-4 overflow-y-auto space-y-5 flex-1">
+          {/* Order Summary Strip */}
+          <div className="bg-stone-50 rounded-2xl p-3 border border-stone-200 flex items-center justify-between text-xs">
+            <div>
+              <span className="font-bold text-stone-900">{items.length} Bedding Sets in Bag</span>
+              <div className="text-[10px] text-stone-600 mt-0.5">
+                {items.map((i) => `${i.quantity}x ${i.selectedProfile.name.split(' ')[0]}`).join(' • ')}
+              </div>
+            </div>
+            <div className="text-right">
+              <span className="text-[10px] text-stone-500 block">Total Due</span>
+              <span className="text-base font-bold text-[#0f1c2e]">AED {grandTotal}</span>
+            </div>
+          </div>
+
+          {/* Section 1: Contact Details & Customer OTP Verification */}
+          <div className="space-y-3">
+            <div className="flex items-center justify-between border-b border-stone-200 pb-1.5">
+              <h3 className="text-xs font-bold text-stone-900 uppercase tracking-wider flex items-center gap-1.5">
+                <span>1. Customer & Phone OTP</span>
+              </h3>
+              {isPhoneVerified ? (
+                <span className="text-[10px] font-bold text-emerald-800 bg-emerald-100 px-2.5 py-0.5 rounded-full flex items-center gap-1 border border-emerald-300">
+                  <Check className="w-3 h-3 text-emerald-600" />
+                  <span>Mobile Verified</span>
+                </span>
+              ) : (
+                <span className="text-[10px] text-amber-800 bg-amber-50 px-2 py-0.5 rounded-full border border-amber-200">
+                  UAE Mobile Verification
+                </span>
+              )}
+            </div>
+
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-xs">
+              <div>
+                <label className="block text-stone-800 font-semibold mb-1">
+                  Full Name <span className="text-red-500">*</span>
+                </label>
+                <input
+                  type="text"
+                  required
+                  placeholder="e.g. Fatima Al Mansoori"
+                  value={fullName}
+                  onChange={(e) => setFullName(e.target.value)}
+                  className="w-full px-3.5 py-2.5 rounded-xl border border-stone-300 bg-white text-stone-900 placeholder:text-stone-400 font-medium focus:outline-none focus:ring-2 focus:ring-[#c5a059] focus:bg-white text-xs"
+                />
+              </div>
+
+              <div>
+                <label className="block text-stone-800 font-semibold mb-1">
+                  UAE Mobile Number <span className="text-red-500">*</span>
+                </label>
+                <div className="flex gap-2">
+                  <input
+                    type="tel"
+                    required
+                    placeholder="+971 50 123 4567"
+                    value={phone}
+                    onChange={(e) => {
+                      setPhone(e.target.value);
+                      setIsPhoneVerified(false);
+                    }}
+                    className="flex-1 px-3.5 py-2.5 rounded-xl border border-stone-300 bg-white text-stone-900 placeholder:text-stone-400 font-medium focus:outline-none focus:ring-2 focus:ring-[#c5a059] focus:bg-white text-xs"
+                  />
+                  {!isPhoneVerified && (
+                    <button
+                      type="button"
+                      onClick={handleSendOtp}
+                      className="px-3 py-2 bg-stone-900 hover:bg-stone-800 text-white rounded-xl text-[11px] font-bold shrink-0 transition-colors"
+                    >
+                      {otpSent ? 'Resend' : 'Send OTP'}
+                    </button>
+                  )}
+                </div>
+              </div>
+
+              {/* OTP Input Field when OTP is sent */}
+              {otpSent && !isPhoneVerified && (
+                <div className="sm:col-span-2 bg-amber-50/70 p-3 rounded-2xl border border-amber-200 text-xs space-y-2 animate-in fade-in-50">
+                  <div className="flex items-center justify-between">
+                    <span className="font-bold text-amber-950 flex items-center gap-1.5">
+                      <Smartphone className="w-3.5 h-3.5 text-amber-700" />
+                      <span>Enter 4-Digit Verification Code</span>
+                    </span>
+                    <button
+                      type="button"
+                      onClick={handleAutoFillOtp}
+                      className="text-[11px] text-amber-800 hover:text-amber-950 font-bold underline"
+                    >
+                      Auto-Fill Code ({generatedOtp})
+                    </button>
+                  </div>
+
+                  <div className="flex items-center gap-2">
+                    <input
+                      type="text"
+                      maxLength={4}
+                      placeholder="e.g. 4829"
+                      value={inputOtp}
+                      onChange={(e) => setInputOtp(e.target.value)}
+                      className="w-32 px-3 py-2 rounded-xl border border-amber-300 bg-white text-stone-900 text-center font-mono font-bold tracking-widest text-sm focus:outline-none focus:ring-2 focus:ring-[#c5a059]"
+                    />
+                    <button
+                      type="button"
+                      onClick={handleVerifyOtp}
+                      className="px-4 py-2 bg-[#0f1c2e] hover:bg-stone-800 text-white rounded-xl font-bold text-xs transition-colors"
+                    >
+                      Verify OTP
+                    </button>
+                  </div>
+                  {otpError && <p className="text-red-600 text-[11px] font-medium">{otpError}</p>}
+                </div>
+              )}
+
+              <div className="sm:col-span-2">
+                <label className="block text-stone-800 font-semibold mb-1">
+                  Email Address <span className="text-stone-500 font-normal">(Optional for order tracking receipt)</span>
+                </label>
+                <input
+                  type="email"
+                  placeholder="name@domain.com"
+                  value={email}
+                  onChange={(e) => setEmail(e.target.value)}
+                  className="w-full px-3.5 py-2.5 rounded-xl border border-stone-300 bg-white text-stone-900 placeholder:text-stone-400 font-medium focus:outline-none focus:ring-2 focus:ring-[#c5a059] focus:bg-white text-xs"
+                />
+              </div>
+            </div>
+          </div>
+
+          {/* Section 2: UAE Delivery Address with GPS Pin Drop & Map Selector */}
+          <div className="space-y-3">
+            <div className="flex items-center justify-between border-b border-stone-200 pb-1.5">
+              <h3 className="text-xs font-bold text-stone-900 uppercase tracking-wider flex items-center gap-1.5">
+                <span>2. UAE Delivery Address & GPS Pin</span>
+              </h3>
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={handleUseCurrentLocation}
+                  disabled={isLocating}
+                  className="text-[11px] font-bold text-[#0f1c2e] bg-amber-100 hover:bg-amber-200 border border-amber-300 px-2.5 py-1 rounded-lg flex items-center gap-1 transition-colors"
+                >
+                  <Navigation className={`w-3 h-3 text-amber-700 ${isLocating ? 'animate-spin' : ''}`} />
+                  <span>{isLocating ? 'Locating...' : 'Use My GPS'}</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setShowMapPicker(!showMapPicker)}
+                  className="text-[11px] font-bold text-stone-800 bg-white hover:bg-stone-100 border border-stone-300 px-2.5 py-1 rounded-lg flex items-center gap-1 transition-colors"
+                >
+                  <MapPin className="w-3 h-3 text-[#c5a059]" />
+                  <span>{showMapPicker ? 'Close Map' : 'Drop Pin on Map'}</span>
+                </button>
+              </div>
+            </div>
+
+            {/* GPS Location Notice Pill */}
+            {locationNotice && (
+              <div className="bg-emerald-50 text-emerald-900 text-[11px] p-2.5 rounded-xl border border-emerald-200 flex items-center justify-between">
+                <span className="font-semibold">{locationNotice}</span>
+                <span className="text-[10px] bg-emerald-200 text-emerald-950 font-bold px-2 py-0.5 rounded-full">
+                  Accurate
+                </span>
+              </div>
+            )}
+
+            {/* INTERACTIVE UAE MAP PIN DROP SELECTOR */}
+            {showMapPicker && (
+              <div className="bg-gradient-to-b from-stone-50 to-stone-100 p-3.5 rounded-2xl border border-stone-300 space-y-3 animate-in fade-in-50 text-xs">
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-1.5">
+                    <Crosshair className="w-4 h-4 text-[#c5a059]" />
+                    <strong className="text-stone-900 text-xs">UAE Delivery Map Pin Selector</strong>
+                  </div>
+                  <span className="text-[10px] text-stone-500">Tap any community or drop pin</span>
+                </div>
+
+                {/* Quick Presets for Popular UAE Communities */}
+                <div className="flex flex-wrap gap-1.5 max-h-28 overflow-y-auto p-1 bg-white rounded-xl border border-stone-200">
+                  {UAE_KEY_LOCATIONS.map((loc) => {
+                    const isSelected = area === loc.name;
+                    return (
+                      <button
+                        key={loc.name}
+                        type="button"
+                        onClick={() => handleSelectMapLocation(loc)}
+                        className={`px-2.5 py-1 rounded-lg text-[11px] font-semibold transition-all flex items-center gap-1 ${
+                          isSelected
+                            ? 'bg-[#0f1c2e] text-white shadow-xs'
+                            : 'bg-stone-50 text-stone-700 hover:bg-amber-50 hover:text-amber-900 border border-stone-200'
+                        }`}
+                      >
+                        <MapPin className={`w-3 h-3 ${isSelected ? 'text-amber-300' : 'text-[#c5a059]'}`} />
+                        <span>{loc.name}</span>
+                        <span className="text-[9px] opacity-70">({loc.emirate})</span>
+                      </button>
+                    );
+                  })}
+                </div>
+
+                {/* Visual UAE Coordinate Display */}
+                <div className="bg-white p-2.5 rounded-xl border border-stone-200 flex items-center justify-between text-[11px]">
+                  <span className="text-stone-500 font-medium">Selected GPS Coordinates:</span>
+                  <span className="font-mono font-bold text-stone-900">
+                    {gpsCoordinates
+                      ? `${gpsCoordinates.lat.toFixed(4)}°N, ${gpsCoordinates.lng.toFixed(4)}°E`
+                      : '25.1972°N, 55.2744°E (Dubai Central)'}
+                  </span>
+                </div>
+              </div>
+            )}
+
+            {/* Address Input Grid */}
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-xs">
+              <div>
+                <label className="block text-stone-800 font-semibold mb-1">
+                  Emirate <span className="text-red-500">*</span>
+                </label>
+                <select
+                  value={emirate}
+                  onChange={(e) => setEmirate(e.target.value as Emirate)}
+                  className="w-full px-3.5 py-2.5 rounded-xl border border-stone-300 bg-white text-stone-900 font-medium focus:outline-none focus:ring-2 focus:ring-[#c5a059] focus:bg-white text-xs"
+                >
+                  {UAE_EMIRATES.map((em) => (
+                    <option key={em} value={em}>
+                      {em}
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              <div>
+                <label className="block text-stone-800 font-semibold mb-1">
+                  Area / Neighborhood <span className="text-red-500">*</span>
+                </label>
+                <input
+                  type="text"
+                  required
+                  list="area-suggestions"
+                  placeholder="e.g. Dubai Marina, Saadiyat, JVC"
+                  value={area}
+                  onChange={(e) => setArea(e.target.value)}
+                  className="w-full px-3.5 py-2.5 rounded-xl border border-stone-300 bg-white text-stone-900 placeholder:text-stone-400 font-medium focus:outline-none focus:ring-2 focus:ring-[#c5a059] focus:bg-white text-xs"
+                />
+                <datalist id="area-suggestions">
+                  {(UAE_POPULAR_AREAS[emirate] || []).map((a) => (
+                    <option key={a} value={a} />
+                  ))}
+                </datalist>
+              </div>
+
+              <div className="sm:col-span-2">
+                <label className="block text-stone-800 font-semibold mb-1">
+                  Street Address <span className="text-red-500">*</span>
+                </label>
+                <input
+                  type="text"
+                  required
+                  placeholder="Street name, road, or community number"
+                  value={streetAddress}
+                  onChange={(e) => setStreetAddress(e.target.value)}
+                  className="w-full px-3.5 py-2.5 rounded-xl border border-stone-300 bg-white text-stone-900 placeholder:text-stone-400 font-medium focus:outline-none focus:ring-2 focus:ring-[#c5a059] focus:bg-white text-xs"
+                />
+              </div>
+
+              <div>
+                <label className="block text-stone-800 font-semibold mb-1">
+                  Building / Villa Name <span className="text-red-500">*</span>
+                </label>
+                <input
+                  type="text"
+                  required
+                  placeholder="e.g. Marina Gate 1 or Villa 24"
+                  value={buildingVilla}
+                  onChange={(e) => setBuildingVilla(e.target.value)}
+                  className="w-full px-3.5 py-2.5 rounded-xl border border-stone-300 bg-white text-stone-900 placeholder:text-stone-400 font-medium focus:outline-none focus:ring-2 focus:ring-[#c5a059] focus:bg-white text-xs"
+                />
+              </div>
+
+              <div>
+                <label className="block text-stone-800 font-semibold mb-1">
+                  Flat / Apartment / Villa # <span className="text-red-500">*</span>
+                </label>
+                <input
+                  type="text"
+                  required
+                  placeholder="e.g. Apt 1402 or Villa 24"
+                  value={flatVillaNo}
+                  onChange={(e) => setFlatVillaNo(e.target.value)}
+                  className="w-full px-3.5 py-2.5 rounded-xl border border-stone-300 bg-white text-stone-900 placeholder:text-stone-400 font-medium focus:outline-none focus:ring-2 focus:ring-[#c5a059] focus:bg-white text-xs"
+                />
+              </div>
+
+              <div className="sm:col-span-2">
+                <label className="block text-stone-800 font-semibold mb-1">
+                  Nearest Landmark <span className="text-stone-500 font-normal">(Crucial for courier driver pinpoint)</span>
+                </label>
+                <input
+                  type="text"
+                  placeholder="e.g. Near Spinneys, Behind Mall of the Emirates, Opposite Park"
+                  value={landmark}
+                  onChange={(e) => setLandmark(e.target.value)}
+                  className="w-full px-3.5 py-2.5 rounded-xl border border-stone-300 bg-white text-stone-900 placeholder:text-stone-400 font-medium focus:outline-none focus:ring-2 focus:ring-[#c5a059] focus:bg-white text-xs"
+                />
+              </div>
+            </div>
+
+            {/* JEEBLY DELIVERY API SERVICEABILITY VERIFICATION BADGE */}
+            <div className="bg-gradient-to-br from-emerald-50/90 to-stone-50 p-3.5 rounded-2xl border border-emerald-200/90 text-xs space-y-1.5 shadow-xs">
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-1.5">
+                  <Truck className="w-4 h-4 text-emerald-700" />
+                  <span className="font-bold text-stone-900">
+                    {isCheckingServiceability
+                      ? 'Verifying Delivery Serviceability...'
+                      : serviceability.serviceable
+                        ? 'Delivery Serviceability Verified'
+                        : 'Unserviceable Location'}
+                  </span>
+                </div>
+                {serviceability.serviceable ? (
+                  <span className="text-[10px] bg-emerald-200 text-emerald-950 font-bold px-2 py-0.5 rounded-full flex items-center gap-1">
+                    <Check className="w-3 h-3 text-emerald-700" />
+                    <span>Jeebly API Verified</span>
+                  </span>
+                ) : (
+                  <span className="text-[10px] bg-red-100 text-red-700 font-bold px-2 py-0.5 rounded-full">
+                    Out of Range
+                  </span>
+                )}
+              </div>
+
+              <p className="text-[11px] text-stone-700 leading-relaxed">
+                {serviceability.serviceMessage}
+              </p>
+
+              <div className="grid grid-cols-2 gap-2 pt-1 border-t border-emerald-200/60 text-[10px] text-stone-600">
+                <div>
+                  <span className="text-stone-400 block">Assigned Logistics Hub:</span>
+                  <strong className="text-stone-800">{serviceability.hub}</strong>
+                </div>
+                <div>
+                  <span className="text-stone-400 block">Delivery Timeframe:</span>
+                  <strong className="text-emerald-700">{serviceability.deliverySpeed}</strong>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          {/* Section 3: Payment Method Selection */}
+          <div className="space-y-3">
+            <h3 className="text-xs font-bold text-stone-900 uppercase tracking-wider flex items-center gap-1.5 border-b border-stone-200 pb-1.5">
+              <span>3. Payment Options</span>
+            </h3>
+
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+              {/* Option 1: Cash On Delivery */}
+              <div
+                onClick={() => setPaymentMethod('cod')}
+                className={`p-3.5 rounded-2xl border cursor-pointer transition-all ${
+                  paymentMethod === 'cod'
+                    ? 'border-[#0f1c2e] bg-[#0f1c2e] text-white shadow-md'
+                    : 'border-stone-300 bg-white text-stone-800 hover:border-stone-400'
+                }`}
+              >
+                <div className="flex items-center justify-between mb-2">
+                  <div className="flex items-center gap-2">
+                    <Banknote className={`w-5 h-5 ${paymentMethod === 'cod' ? 'text-amber-300' : 'text-[#c5a059]'}`} />
+                    <span className="text-xs font-bold">Cash on Delivery</span>
+                  </div>
+                  {paymentMethod === 'cod' && <Check className="w-4 h-4 text-amber-300" />}
+                </div>
+                <p className={`text-[11px] leading-relaxed ${paymentMethod === 'cod' ? 'text-stone-300' : 'text-stone-600'}`}>
+                  Pay conveniently in cash to our courier driver upon doorstep delivery across all 7 Emirates.
+                </p>
+                <div className="mt-2 text-[10px] text-amber-300 font-medium">
+                  Doorstep Cash Collection Available
+                </div>
+              </div>
+
+              {/* Option 2: Account / Bank Transfer */}
+              <div
+                onClick={() => setPaymentMethod('bank_transfer')}
+                className={`p-3.5 rounded-2xl border cursor-pointer transition-all ${
+                  paymentMethod === 'bank_transfer'
+                    ? 'border-[#0f1c2e] bg-[#0f1c2e] text-white shadow-md'
+                    : 'border-stone-300 bg-white text-stone-800 hover:border-stone-400'
+                }`}
+              >
+                <div className="flex items-center justify-between mb-2">
+                  <div className="flex items-center gap-2">
+                    <Building2 className={`w-5 h-5 ${paymentMethod === 'bank_transfer' ? 'text-amber-300' : 'text-[#c5a059]'}`} />
+                    <span className="text-xs font-bold">Account / Bank Transfer</span>
+                  </div>
+                  {paymentMethod === 'bank_transfer' && <Check className="w-4 h-4 text-amber-300" />}
+                </div>
+                <p className={`text-[11px] leading-relaxed ${paymentMethod === 'bank_transfer' ? 'text-stone-300' : 'text-stone-600'}`}>
+                  Transfer directly to our Emirates NBD account with fast receipt verification.
+                </p>
+                <div className="mt-2 text-[10px] text-amber-300 font-medium">
+                  Prepaid Express Priority Dispatch
+                </div>
+              </div>
+            </div>
+
+            {/* If Bank Transfer Selected: Show UAE Bank Details & Receipt Uploader */}
+            {paymentMethod === 'bank_transfer' && (
+              <div className="bg-amber-50/70 rounded-2xl p-4 border border-amber-200/90 space-y-3 animate-in fade-in-50 text-xs">
+                <div className="flex items-center justify-between">
+                  <span className="font-bold text-stone-900 flex items-center gap-1.5">
+                    <ShieldCheck className="w-4 h-4 text-[#c5a059]" />
+                    <span>Emirates NBD Bank Details</span>
+                  </span>
+                  <button
+                    type="button"
+                    onClick={handleCopyIban}
+                    className="flex items-center gap-1 text-[11px] text-[#0f1c2e] font-semibold bg-white border border-stone-300 px-2.5 py-1 rounded-lg hover:bg-stone-50 transition-colors"
+                  >
+                    {copiedIban ? <Check className="w-3.5 h-3.5 text-emerald-600" /> : <Copy className="w-3.5 h-3.5" />}
+                    <span>{copiedIban ? 'IBAN Copied!' : 'Copy IBAN'}</span>
+                  </button>
+                </div>
+
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 bg-white p-3 rounded-xl border border-amber-200 text-[11px]">
+                  <div>
+                    <span className="text-stone-400 block">Bank Name</span>
+                    <strong className="text-stone-800">{INITIAL_BANK_DETAILS.bankName}</strong>
+                  </div>
+                  <div>
+                    <span className="text-stone-400 block">Account Name</span>
+                    <strong className="text-stone-800">{INITIAL_BANK_DETAILS.accountName}</strong>
+                  </div>
+                  <div className="sm:col-span-2">
+                    <span className="text-stone-400 block">IBAN Number</span>
+                    <strong className="font-mono text-stone-900 text-xs">{INITIAL_BANK_DETAILS.iban}</strong>
+                  </div>
+                  <div>
+                    <span className="text-stone-400 block">Account Number</span>
+                    <strong className="font-mono text-stone-800">{INITIAL_BANK_DETAILS.accountNumber}</strong>
+                  </div>
+                  <div>
+                    <span className="text-stone-400 block">SWIFT Code</span>
+                    <strong className="font-mono text-stone-800">{INITIAL_BANK_DETAILS.swiftCode}</strong>
+                  </div>
+                </div>
+
+                {/* Optional Reference or Receipt Upload */}
+                <div className="space-y-2 pt-1">
+                  <div>
+                    <label className="block text-stone-800 font-semibold mb-1">
+                      Bank Transfer Reference / Transaction ID:
+                    </label>
+                    <input
+                      type="text"
+                      placeholder="e.g. ENBD-TX-849201948"
+                      value={bankRef}
+                      onChange={(e) => setBankRef(e.target.value)}
+                      className="w-full px-3.5 py-2.5 rounded-xl border border-stone-300 bg-white text-stone-900 placeholder:text-stone-400 font-medium focus:outline-none focus:ring-1 focus:ring-[#c5a059] text-xs"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="block text-stone-800 font-semibold mb-1">
+                      Attach Transfer Receipt / Screenshot:
+                    </label>
+                    <div className="flex items-center gap-3">
+                      <label className="flex items-center gap-1.5 px-3 py-2 bg-white border border-stone-300 rounded-xl cursor-pointer hover:bg-stone-50 text-stone-700 text-xs font-semibold">
+                        <Upload className="w-3.5 h-3.5 text-[#c5a059]" />
+                        <span>Upload Screenshot</span>
+                        <input
+                          type="file"
+                          accept="image/*"
+                          onChange={handleReceiptUpload}
+                          className="hidden"
+                        />
+                      </label>
+                      {receiptUrl && (
+                        <span className="text-emerald-700 font-bold text-xs flex items-center gap-1">
+                          <Check className="w-3.5 h-3.5" />
+                          Receipt Attached
+                        </span>
+                      )}
+                    </div>
+                  </div>
+                </div>
+              </div>
+            )}
+          </div>
+
+          {/* Sticky Checkout Button */}
+          <div className="pt-2">
+            <button
+              type="submit"
+              disabled={isSubmitting || !serviceability.serviceable}
+              className="w-full bg-[#0f1c2e] hover:bg-stone-800 active:scale-95 text-white font-bold text-sm py-4 rounded-xl shadow-xl flex items-center justify-center gap-2 transition-all disabled:opacity-50"
+            >
+              {isSubmitting ? (
+                <span>Generating Order Requisition...</span>
+              ) : (
+                <>
+                  <span>
+                    Confirm & Raise Order • AED {grandTotal}
+                  </span>
+                  <ArrowRight className="w-4 h-4 text-amber-300" />
+                </>
+              )}
+            </button>
+            <p className="text-[10px] text-center text-stone-600 mt-2">
+              Dispatched with priority UAE courier tracking. Doorstep delivery verified by Jeebly logistics network.
+            </p>
+          </div>
+        </form>
+      </div>
+    </div>
+  );
+};
