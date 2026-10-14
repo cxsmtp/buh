@@ -1,5 +1,21 @@
 # Changelog
 
+## BUH-01.01.00 — 2026-10-14 19:58 UTC · [#2](https://github.com/cxsmtp/buh/pull/2)
+
+- **Orders are kept on the server.** Every order, product, setting and booking is stored in a database on the server, so the owner sees every customer's order in the Admin Hub on any device. Prices, totals and stock are worked out there; a forged price is ignored, a double tap gives one order, and the last item can't be sold twice.
+- **Customers pay the total they were shown.** If a price changes while someone is at checkout, the order is refused (nothing taken) and the bag reloads with the new total. Totals are summed in fils, and the bag no longer shows a delivery fee that was never charged.
+- **Backups every 12 hours, by email.** The full database, Excel-ready CSV files (orders, items, customers, products), receipts, photos and the audit log, encrypted with `BACKUP_PASSPHRASE`, emailed to `BACKUP_EMAIL`, with the newest 14 kept on the server. Courier and SMS keys are left out. A status line in the Admin Hub shows the last backup, and **Back up now** runs one. A failure is emailed once, not every 15 minutes.
+- **Safer stock and orders.** A stock edit can no longer undo a sale made meanwhile. One order holds at most 20 of a product, and a phone can have at most 3 orders waiting for confirmation.
+- **Real bank details only.** No demo account is shown: bank transfer appears at checkout once the real bank name, account name and IBAN are saved. Checkout shows your bank name and instructions, and the IBAN's check digits are verified.
+- **SMS gateway you choose is the one used.** Unifonic is removed (it looked active but sent nothing), and a gateway can't be switched on with missing fields.
+- **Admin Hub fixes.** Phone photos are shrunk before upload, so they save. "Ready for Dispatch" shows only on confirmed orders. You are warned before booking an unpaid transfer, or cancelling an order already booked with a courier.
+- **Deployment:** one Hostinger KVM VPS with Docker Compose (the shop plus Caddy for automatic HTTPS), data in one volume, a restore script and guide.
+- **Status.**
+  - **Benchmark:** same host, main vs this branch, 3 rounds each. Storefront main 769 / 729 / 605 req/s, branch 753 / 662 / 729 (p50 79–86 vs 82–88 ms). Serviceability API main 591 / 495 / 490, branch 568 / 598 / 525. New catalogue API (`/api/products`, absent on main, so main's runs show it as failed) 745 / 607 / 714 req/s, p50 128–162 ms. 0 failed requests on every branch run.
+  - **Tests:** 117 passed: unit tests, plus end-to-end tests against the production build and real-browser tests in Chromium at 375 px and 1280 px. Each review finding has a test that fails without its fix.
+  - **Dependency audit:** production 0 vulnerabilities (nodemailer upgraded to 10.1.1). The full audit lists the same 5 high findings in ESLint's dev-only chain as main.
+  - **Security scan:** two independent reviews (security, correctness) of this change; every finding fixed or explained in the pull request. No automated scanner is available here.
+
 ## BUH-01.00.00 — 2026-10-14 17:55 UTC · [#1](https://github.com/cxsmtp/buh/pull/1)
 
 - **Orders need a verified UAE mobile.** Customers confirm their number with a 6-digit SMS code before **Confirm & Raise Order** unlocks. The six code boxes accept typing, pasting into any box, phone autofill and Arabic digits, and show a resend timer and a clear verified badge. Anyone with a non-UAE number gets a one-tap email to the shop with their bag listed.
