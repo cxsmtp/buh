@@ -25,19 +25,28 @@ interface AdminInventoryTabProps {
   products: Product[];
   /** Save on the server; resolve to an error message, or null when saved. */
   onAddProduct: (product: Product) => Promise<string | null>;
-  onUpdateProduct: (id: string, changes: Partial<Product>) => Promise<string | null>;
+  onUpdateProduct: (id: string, changes: Partial<Product> & { expectedStock?: number }) => Promise<string | null>;
 }
 
 /** Price, stock and visibility, editable straight from the list. */
-function ProductQuickEdit({ product, onSave }: { product: Product; onSave: (changes: Partial<Product>) => Promise<string | null> }) {
+function ProductQuickEdit({
+  product,
+  onSave,
+  initialError = '',
+}: {
+  product: Product;
+  onSave: (changes: Partial<Product> & { expectedStock?: number }) => Promise<string | null>;
+  /** A message from the last save, kept when the row reloads with fresh stock. */
+  initialError?: string;
+}) {
   const [price, setPrice] = useState(String(product.price));
   const [stock, setStock] = useState(String(product.stockCount));
   const [saving, setSaving] = useState(false);
-  const [error, setError] = useState('');
+  const [error, setError] = useState(initialError);
   const visible = product.active !== false;
   const dirty = price !== String(product.price) || stock !== String(product.stockCount);
 
-  const save = async (changes: Partial<Product>) => {
+  const save = async (changes: Partial<Product> & { expectedStock?: number }) => {
     setSaving(true);
     setError('');
     const problem = await onSave(changes);
@@ -76,7 +85,13 @@ function ProductQuickEdit({ product, onSave }: { product: Product; onSave: (chan
           <button
             type="button"
             disabled={saving}
-            onClick={() => save({ price: Number(price), stockCount: Number(stock) })}
+            onClick={() =>
+              save({
+                price: Number(price),
+                // Only send stock when it was changed here, and say what it was, so a sale in between is not overwritten.
+                ...(stock !== String(product.stockCount) ? { stockCount: Number(stock), expectedStock: product.stockCount } : {}),
+              })
+            }
             className="text-[10px] font-bold px-2 py-0.5 rounded-md bg-[#0f1c2e] text-white disabled:opacity-50"
           >
             {saving ? 'Saving…' : 'Save'}
@@ -105,6 +120,7 @@ export const AdminInventoryTab: React.FC<AdminInventoryTabProps> = ({
   onUpdateProduct,
 }) => {
   const [saveError, setSaveError] = useState('');
+  const [quickErrors, setQuickErrors] = useState<Record<string, string>>({});
   const [savingProduct, setSavingProduct] = useState(false);
   const [isAdding, setIsAdding] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
@@ -675,7 +691,12 @@ export const AdminInventoryTab: React.FC<AdminInventoryTabProps> = ({
               <ProductQuickEdit
                 key={`${p.id}-${p.price}-${p.stockCount}-${p.active}`}
                 product={p}
-                onSave={(changes) => onUpdateProduct(p.id, changes)}
+                initialError={quickErrors[p.id]}
+                onSave={async (changes) => {
+                  const problem = await onUpdateProduct(p.id, changes);
+                  setQuickErrors((e) => ({ ...e, [p.id]: problem ?? '' }));
+                  return problem;
+                }}
               />
             </div>
           </div>

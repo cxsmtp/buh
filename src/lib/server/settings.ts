@@ -111,11 +111,52 @@ export async function updateSettings<K extends SettingsKey>(key: K, input: unkno
 export function withStoredSecrets<K extends SettingsKey>(key: K, input: unknown): Record<string, unknown> {
   const copy = structuredClone(input && typeof input === 'object' && !Array.isArray(input) ? input : {}) as Record<string, unknown>;
   const saved = getSettings(key) as unknown as Record<string, unknown>;
+  // A saved secret only goes to the host it was saved for: a test aimed at a new
+  // host must bring its own key, or it could be used to send the key elsewhere.
+  const savedHost: Record<string, string> = {};
+  const typedHost: Record<string, string> = {};
+  for (const [secret, urlPath] of Object.entries(SECRET_HOSTS[key])) {
+    const typed = getPath(copy, urlPath);
+    savedHost[secret] = hostOf(String(getPath(saved, urlPath) ?? ''));
+    typedHost[secret] = typed === undefined ? savedHost[secret] : hostOf(String(typed ?? ''));
+  }
   for (const p of SECRETS[key]) {
     const given = getPath(copy, p);
-    if (!(typeof given === 'string' && given.trim())) setPath(copy, p, getPath(saved, p) ?? '');
+    if (typeof given === 'string' && given.trim()) continue;
+    setPath(copy, p, p in savedHost && typedHost[p] !== savedHost[p] ? '' : getPath(saved, p) ?? '');
   }
   return copy;
+}
+
+/** Secrets tied to a URL a person can change: secret path → URL path. */
+const SECRET_HOSTS: Record<SettingsKey, Record<string, string>> = {
+  brand: {},
+  bank: {},
+  courier: {},
+  sms: { 'infobip.apiKey': 'infobip.baseUrl', 'customWebhook.bearerToken': 'customWebhook.endpointUrl' },
+};
+
+/**
+ * Blank every saved secret in a copy of the database (used on the backup
+ * snapshot, so courier and SMS keys never leave the server in an email).
+ * The caller VACUUMs afterwards so the old values are not left in free pages.
+ */
+export function blankSecretsIn(db: import('better-sqlite3').Database): void {
+  const rows = db.prepare('SELECT key, data FROM settings').all() as Array<{ key: string; data: string }>;
+  const update = db.prepare('UPDATE settings SET data = ? WHERE key = ?');
+  for (const row of rows) {
+    const paths = SECRETS[row.key as SettingsKey];
+    if (!paths?.length) continue;
+    let value: Obj;
+    try {
+      value = JSON.parse(row.data);
+    } catch {
+      update.run('{}', row.key);
+      continue;
+    }
+    for (const p of paths) if (getPath(value, p) !== undefined) setPath(value, p, '');
+    update.run(JSON.stringify(value), row.key);
+  }
 }
 
 // ── Validation (allow-lists; strings capped) ────────────────────────────────

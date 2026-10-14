@@ -17,7 +17,8 @@ const status = (fn: () => unknown) => {
 };
 
 let n = 0;
-function body(over: Record<string, unknown> = {}, phone = '+971501234567') {
+// A fresh phone per order by default: a phone may only have MAX_OPEN_PER_PHONE unconfirmed orders.
+function body(over: Record<string, unknown> = {}, phone = `+9715020${String(n + 1).padStart(5, '0')}`) {
   const p = listProducts()[0];
   return {
     idempotencyKey: `unit-test-key-${++n}-${Date.now()}`,
@@ -44,7 +45,10 @@ test('prices, totals and phone come from the server, not the request', () => {
   const p = listProducts()[0];
   const profile = p.profiles[p.profiles.length - 1];
   const { order } = orders.placeOrder(
-    body({ items: [{ productId: p.id, profileId: profile.id, quantity: 3, unitPrice: 1, totalPrice: 3 }], total: 3, subtotal: 3, customer: { ...body().customer, phone: '+971000000000' } })
+    body(
+      { items: [{ productId: p.id, profileId: profile.id, quantity: 3, unitPrice: 1, totalPrice: 3 }], total: 3, subtotal: 3, customer: { ...body().customer, phone: '+971000000000' } },
+      '+971501234567'
+    )
   );
   const unit = p.price + profile.priceDelta;
   assert.equal(order.items[0].unitPrice, unit);
@@ -154,6 +158,7 @@ test('Track Order needs the matching phone and reveals no address or email', () 
 });
 
 test('customers are built from orders: one per phone, cancelled orders not counted', () => {
+  for (let i = 0; i < 2; i++) orders.placeOrder(body({}, '+971501234567'));
   const list = orders.listCustomers();
   const fatima = list.find((c) => c.phone === '+971501234567')!;
   assert.ok(fatima.totalOrders >= 3);

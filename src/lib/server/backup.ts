@@ -7,14 +7,16 @@ import { audit } from './audit';
 import { dataDir, dataFile, writePrivateFile } from './dataDir';
 import { backupTo, getDb } from './db';
 import { logEvent } from './log';
-import { listCustomers, listOrders } from './orders';
+import { allOrders, listCustomers } from './orders';
+import { blankSecretsIn } from './settings';
 import { listProducts } from './products';
 import { readTar, writeTar, type TarEntry } from './tar';
 
 /**
  * Backups, every 12 hours (BACKUP_INTERVAL_HOURS), taken by the running shop:
  *
- *  - a consistent copy of the database (SQLite online backup, safe mid-sale);
+ *  - a consistent copy of the database (SQLite online backup, safe mid-sale),
+ *    with the courier and SMS keys blanked (re-enter them after a restore);
  *  - flat files anyone can open in Excel: orders.csv, order_items.csv,
  *    customers.csv, products.csv;
  *  - the bank-transfer receipts, the product photos and the audit log.
@@ -82,7 +84,7 @@ export function toCsv(headers: string[], rows: unknown[][]): string {
 }
 
 function csvFiles(): TarEntry[] {
-  const orders = listOrders({ limit: 1_000_000 });
+  const orders = allOrders();
   const o = (x: Order) => [
     x.id, x.createdAt, x.status, x.paymentMethod, x.paymentStatus, x.subtotal, x.deliveryFee, x.codFee, x.discount, x.total,
     x.customer.fullName, x.customer.phone, x.customer.email ?? '', x.customer.emirate, x.customer.area, x.customer.streetAddress,
@@ -134,13 +136,19 @@ function folderEntries(folder: string, prefix: string): TarEntry[] {
 
 // ── Encryption ──────────────────────────────────────────────────────────────
 
+// scrypt cost 2^17 (128 MB, about half a second): slow to guess offline.
+const SCRYPT_N = 131072;
+const SCRYPT_MAXMEM = 256 * 1024 * 1024;
+/** Shorter passphrases are accepted but flagged in the admin hub and the log. */
+export const MIN_PASSPHRASE_LENGTH = 12;
+
 export function seal(plain: Buffer, passphrase: string): Buffer {
   const salt = crypto.randomBytes(16);
   const iv = crypto.randomBytes(12);
-  const key = crypto.scryptSync(passphrase, salt, 32, { N: 16384, r: 8, p: 1 });
+  const key = crypto.scryptSync(passphrase, salt, 32, { N: SCRYPT_N, r: 8, p: 1, maxmem: SCRYPT_MAXMEM });
   const cipher = crypto.createCipheriv('aes-256-gcm', key, iv);
   const data = Buffer.concat([cipher.update(plain), cipher.final()]);
-  const head = JSON.stringify({ kdf: 'scrypt', N: 16384, r: 8, p: 1, salt: salt.toString('base64'), iv: iv.toString('base64'), tag: cipher.getAuthTag().toString('base64') });
+  const head = JSON.stringify({ kdf: 'scrypt', N: SCRYPT_N, r: 8, p: 1, salt: salt.toString('base64'), iv: iv.toString('base64'), tag: cipher.getAuthTag().toString('base64') });
   return Buffer.concat([Buffer.from(BACKUP_MAGIC), Buffer.from(head + '\n'), data]);
 }
 
@@ -149,7 +157,9 @@ export function unseal(sealed: Buffer, passphrase: string): Buffer {
   const rest = sealed.subarray(BACKUP_MAGIC.length);
   const nl = rest.indexOf(0x0a);
   const head = JSON.parse(rest.subarray(0, nl).toString());
-  const key = crypto.scryptSync(passphrase, Buffer.from(head.salt, 'base64'), 32, { N: head.N, r: head.r, p: head.p });
+  // Older backups used N=16384; refuse silly values from a tampered header.
+  if (![16384, SCRYPT_N].includes(head.N) || head.r !== 8 || head.p !== 1) throw new Error('Unknown backup encryption settings.');
+  const key = crypto.scryptSync(passphrase, Buffer.from(head.salt, 'base64'), 32, { N: head.N, r: 8, p: 1, maxmem: SCRYPT_MAXMEM });
   const decipher = crypto.createDecipheriv('aes-256-gcm', key, Buffer.from(head.iv, 'base64'));
   decipher.setAuthTag(Buffer.from(head.tag, 'base64'));
   try {
@@ -175,8 +185,19 @@ export async function createBackup(now = new Date()): Promise<BackupResult> {
   const tmpDb = path.join(dir, `.snapshot-${process.pid}-${Date.now()}.db`);
   try {
     await backupTo(tmpDb);
-    // Prove the snapshot is readable before shipping it.
     const Database = (await import('better-sqlite3')).default;
+    // Courier and SMS keys stay on the server: blank them in the copy, and
+    // VACUUM so the old values are not left behind in free pages.
+    const copy = new Database(tmpDb);
+    try {
+      copy.pragma('journal_mode = DELETE');
+      copy.pragma('secure_delete = ON');
+      blankSecretsIn(copy);
+      copy.exec('VACUUM');
+    } finally {
+      copy.close();
+    }
+    // Prove the snapshot is readable before shipping it.
     const check = new Database(tmpDb, { readonly: true });
     const ok = check.pragma('integrity_check', { simple: true });
     check.close();
@@ -215,6 +236,7 @@ export async function createBackup(now = new Date()): Promise<BackupResult> {
     fs.rmSync(tmpDb, { force: true });
     fs.rmSync(`${tmpDb}-wal`, { force: true });
     fs.rmSync(`${tmpDb}-shm`, { force: true });
+    fs.rmSync(`${tmpDb}-journal`, { force: true });
   }
 }
 
@@ -358,10 +380,25 @@ export function backupHealth(now = Date.now()) {
   const hours = intervalHours();
   const last = state.lastSuccessAt ? Date.parse(state.lastSuccessAt) : 0;
   const overdue = !last || now - last > (hours + 1) * 3600_000;
+  const passphrase = process.env.BACKUP_PASSPHRASE || '';
+  const notice = !passphrase
+    ? emailConfigured()
+      ? 'Backups are emailed unencrypted: set BACKUP_PASSPHRASE.'
+      : undefined
+    : passphrase.length < MIN_PASSPHRASE_LENGTH
+    ? `BACKUP_PASSPHRASE is short: use at least ${MIN_PASSPHRASE_LENGTH} characters.`
+    : undefined;
   const level: 'ok' | 'warning' | 'failing' =
-    state.lastError && (!last || Date.parse(state.lastAttemptAt || '') > last) ? 'failing' : overdue ? 'failing' : state.lastEmailError ? 'warning' : 'ok';
+    state.lastError && (!last || Date.parse(state.lastAttemptAt || '') > last)
+      ? 'failing'
+      : overdue
+      ? 'failing'
+      : state.lastEmailError || notice
+      ? 'warning'
+      : 'ok';
   return {
     level,
+    notice,
     intervalHours: hours,
     emailConfigured: emailConfigured(),
     encrypted: Boolean(process.env.BACKUP_PASSPHRASE),

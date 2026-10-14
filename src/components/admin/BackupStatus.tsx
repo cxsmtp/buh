@@ -15,6 +15,7 @@ interface Health {
   lastError?: string;
   lastEmailedAt?: string;
   lastEmailError?: string;
+  notice?: string;
 }
 
 function ago(iso?: string) {
@@ -63,6 +64,8 @@ export const BackupStatus: React.FC = () => {
         : `No backup in the last ${health.intervalHours + 1} hours.`
       : health.lastEmailError
       ? health.lastEmailError
+      : health.notice
+      ? `${health.notice} Emailed ${ago(health.lastEmailedAt)}.`
       : `Emailed ${ago(health.lastEmailedAt)}${health.encrypted ? ', encrypted' : ''}.`;
 
   return (

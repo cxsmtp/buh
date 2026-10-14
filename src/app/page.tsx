@@ -321,8 +321,9 @@ export default function HomePage() {
     return null;
   };
 
-  const handleUpdateProduct = async (id: string, changes: Partial<Product>): Promise<string | null> => {
-    const { ok, data } = await sendJson<{ message?: string }>('PATCH', `/api/admin/products/${encodeURIComponent(id)}`, { product: changes });
+  const handleUpdateProduct = async (id: string, changes: Partial<Product> & { expectedStock?: number }): Promise<string | null> => {
+    const { ok, status, data } = await sendJson<{ message?: string }>('PATCH', `/api/admin/products/${encodeURIComponent(id)}`, { product: changes });
+    if (status === 409) await Promise.all([loadAdminData(), loadCatalog()]); // show the stock as it is now
     if (!ok) return data.message || 'Could not save the product.';
     await Promise.all([loadAdminData(), loadCatalog()]);
     return null;

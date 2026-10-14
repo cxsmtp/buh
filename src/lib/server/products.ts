@@ -74,12 +74,31 @@ export function createProduct(input: unknown): StoredProduct {
 export function updateProduct(id: string, input: unknown): StoredProduct {
   const existing = getProduct(id);
   if (!existing) throw new HttpError(404, 'Product not found.');
-  const product = validateProduct({ ...existing, ...(input as object) });
+  const changes = { ...((input && typeof input === 'object' ? input : {}) as Record<string, unknown>) };
+  // Stock moves with every sale, so it is only written when it was sent, and
+  // with expectedStock only if nobody has bought one since the admin looked.
+  const setsStock = changes.stockCount !== undefined;
+  const expected = changes.expectedStock;
+  delete changes.expectedStock;
+  if (expected !== undefined && !(Number.isInteger(expected) && (expected as number) >= 0)) {
+    throw new HttpError(400, 'expectedStock must be a whole number.');
+  }
+  const product = validateProduct({ ...existing, ...changes });
   const { stockCount, active, ...rest } = { ...product, id: existing.id, createdAt: existing.createdAt };
-  getDb()
-    .prepare('UPDATE products SET data = ?, stock = ?, active = ?, updated_at = ? WHERE id = ?')
-    .run(JSON.stringify(rest), stockCount, active ? 1 : 0, new Date().toISOString(), id);
+  const now = new Date().toISOString();
+  const db = getDb();
+  const result = !setsStock
+    ? db.prepare('UPDATE products SET data = ?, active = ?, updated_at = ? WHERE id = ?').run(JSON.stringify(rest), active ? 1 : 0, now, id)
+    : expected === undefined
+    ? db.prepare('UPDATE products SET data = ?, stock = ?, active = ?, updated_at = ? WHERE id = ?').run(JSON.stringify(rest), stockCount, active ? 1 : 0, now, id)
+    : db
+        .prepare('UPDATE products SET data = ?, stock = ?, active = ?, updated_at = ? WHERE id = ? AND stock = ?')
+        .run(JSON.stringify(rest), stockCount, active ? 1 : 0, now, id, expected);
   invalidateProducts();
+  if (result.changes === 0) {
+    const current = getProduct(id);
+    throw new HttpError(409, `Stock changed while you were editing (now ${current?.stockCount ?? 0}). Check it and save again.`);
+  }
   return getProduct(id)!;
 }
 

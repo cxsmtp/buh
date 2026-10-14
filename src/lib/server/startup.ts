@@ -1,5 +1,5 @@
 import { ensureAdminAccount } from './adminAuth';
-import { emailConfigured, startBackupSchedule } from './backup';
+import { MIN_PASSPHRASE_LENGTH, emailConfigured, startBackupSchedule } from './backup';
 import { getDb } from './db';
 import { logEvent } from './log';
 import { liveGateways } from '@/lib/otpService';
@@ -20,6 +20,14 @@ export async function onStartup() {
   }
   if (process.env.NODE_ENV === 'production' && !emailConfigured()) {
     console.error('!! Backups are not emailed: set SMTP_HOST, SMTP_USER, SMTP_PASS and BACKUP_EMAIL (see HOSTINGER_DEPLOYMENT_GUIDE.md).');
+  }
+  const passphrase = process.env.BACKUP_PASSPHRASE || '';
+  if (process.env.NODE_ENV === 'production' && passphrase.length < MIN_PASSPHRASE_LENGTH) {
+    console.error(
+      passphrase
+        ? `!! BACKUP_PASSPHRASE is shorter than ${MIN_PASSPHRASE_LENGTH} characters: emailed backups are easier to crack.`
+        : '!! BACKUP_PASSPHRASE is not set: backups (customer names, phones, addresses) are emailed unencrypted.'
+    );
   }
 
   const gateways = await liveGateways().catch(() => ({}) as Awaited<ReturnType<typeof liveGateways>>);

@@ -12,8 +12,9 @@
 // Every file is checked against the backup's manifest, and the database is
 // integrity-checked, before anything is written. Then stop the shop, point
 // DATA_DIR at the new folder (or swap folders), and start it again. Admin
-// sign-in: the first start prints a new one-time password (keys and the admin
-// account are not in backups, on purpose).
+// sign-in: the first start prints a new one-time password. The admin account
+// is not in backups, and courier / SMS keys are blanked in them, on purpose:
+// re-enter the keys in the Admin Hub after a restore.
 import crypto from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
@@ -44,7 +45,11 @@ if (payload.subarray(0, MAGIC.length).toString() === MAGIC) {
   const rest = payload.subarray(MAGIC.length);
   const nl = rest.indexOf(0x0a);
   const head = JSON.parse(rest.subarray(0, nl).toString());
-  const key = crypto.scryptSync(passphrase, Buffer.from(head.salt, 'base64'), 32, { N: head.N, r: head.r, p: head.p });
+  if (![16384, 131072].includes(head.N) || head.r !== 8 || head.p !== 1) {
+    console.error('Unknown backup encryption settings.');
+    process.exit(1);
+  }
+  const key = crypto.scryptSync(passphrase, Buffer.from(head.salt, 'base64'), 32, { N: head.N, r: 8, p: 1, maxmem: 256 * 1024 * 1024 });
   const decipher = crypto.createDecipheriv('aes-256-gcm', key, Buffer.from(head.iv, 'base64'));
   decipher.setAuthTag(Buffer.from(head.tag, 'base64'));
   try {
@@ -81,7 +86,8 @@ for (const line of manifest.toString().trim().split('\n')) {
     console.error(`Damaged backup: ${name} does not match its checksum.`);
     process.exit(1);
   }
-  if (!/^(shop\.db|[a-z_]+\.csv|(receipts|images|audit)\/[A-Za-z0-9._-]+)$/.test(name)) {
+  // Only these names: never the shop's keys or admin account, never . or ..
+  if (!/^(shop\.db|[a-z_]+\.csv|(receipts|images)\/[A-Za-z0-9_-][A-Za-z0-9._-]*|audit\/audit-\d{4}-\d{2}\.jsonl)$/.test(name) || /\.\./.test(name)) {
     console.error(`Unexpected file in backup: ${name}`);
     process.exit(1);
   }

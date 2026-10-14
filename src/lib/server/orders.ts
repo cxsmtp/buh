@@ -24,6 +24,8 @@ export const DELIVERY_FEE = 0; // free delivery across the UAE
 export const COD_FEE = 0;
 const MAX_LINES = 20;
 const MAX_QTY = 20;
+/** Orders still waiting for confirmation, per phone. */
+export const MAX_OPEN_PER_PHONE = 3;
 
 const EMIRATES: Emirate[] = ['Dubai', 'Abu Dhabi', 'Sharjah', 'Ajman', 'Ras Al Khaimah', 'Fujairah', 'Umm Al Quwain'];
 export const ORDER_STATUSES: OrderStatus[] = ['pending_payment', 'pending_confirmation', 'confirmed', 'dispatched', 'out_for_delivery', 'delivered', 'cancelled'];
@@ -73,6 +75,15 @@ export function listOrders({ limit = 500, status }: { limit?: number; status?: s
     ? (getDb().prepare('SELECT data FROM orders WHERE status = ? ORDER BY created_at DESC LIMIT ?').all(status, n) as Row[])
     : (getDb().prepare('SELECT data FROM orders ORDER BY created_at DESC LIMIT ?').all(n) as Row[]);
   return rows.map((r) => JSON.parse(r.data) as Order);
+}
+
+/** Every order, newest first, for backups and the customer list (no cap). */
+export function allOrders(): Order[] {
+  const out: Order[] = [];
+  for (const r of getDb().prepare('SELECT data FROM orders ORDER BY created_at DESC').iterate() as IterableIterator<Row>) {
+    out.push(JSON.parse(r.data) as Order);
+  }
+  return out;
 }
 
 function writeOrder(order: Order, idempotencyKey?: string) {
@@ -181,9 +192,19 @@ export function placeOrder(input: unknown): PlaceOrderResult {
     };
   });
 
+  // The per-line cap also holds per product, so a bag can't split 100 units over five lines.
+  const perProduct = new Map<string, number>();
+  for (const l of lines) perProduct.set(l.productId, (perProduct.get(l.productId) ?? 0) + l.quantity);
+  if ([...perProduct.values()].some((q) => q > MAX_QTY)) throw new HttpError(400, `At most ${MAX_QTY} of one product per order.`);
+
   const courierSettings = getSettings('courier');
   listProducts({ includeHidden: true }); // load (and seed) the catalogue before the transaction
   const order = inTransaction(() => {
+    // One verified phone can't tie up the stock with a pile of unconfirmed orders.
+    const open = (getDb().prepare("SELECT COUNT(*) AS n FROM orders WHERE phone = ? AND status = 'pending_confirmation'").get(phone) as { n: number }).n;
+    if (open >= MAX_OPEN_PER_PHONE) {
+      throw new HttpError(429, `You already have ${open} orders waiting for confirmation. We'll call you shortly, or contact us to add to them.`);
+    }
     const items: Order['items'] = [];
     for (const line of lines) {
       const product = getProduct(line.productId);
@@ -407,7 +428,7 @@ export function lookupOrder(id: string, phone: string) {
 export function listCustomers(): Customer[] {
   const byPhone = new Map<string, Customer>();
   // Oldest first, so the latest order's name and address win.
-  for (const o of [...listOrders({ limit: 2000 })].reverse()) {
+  for (const o of allOrders().reverse()) {
     const c = byPhone.get(o.customer.phone) ?? {
       id: `cust-${o.customer.phone.replace(/\D/g, '')}`,
       fullName: o.customer.fullName,

@@ -112,8 +112,15 @@ test('scheduled run: emails the backup with flat files to BACKUP_EMAIL and recor
     assert.equal(mails.length, 1);
     assert.equal(mails[0].to, 'owner@test');
     for (const f of ['orders.csv', 'customers.csv', 'products.csv', 'order_items.csv', '.tar.gz']) assert.ok(mails[0].raw.includes(f), f);
+    // Emailed in the clear: flagged until a passphrase is set.
+    assert.equal(backup.backupHealth().level, 'warning');
+    assert.match(backup.backupHealth().notice ?? '', /BACKUP_PASSPHRASE/);
+    process.env.BACKUP_PASSPHRASE = 'short';
+    assert.match(backup.backupHealth().notice ?? '', /at least 12/);
+    process.env.BACKUP_PASSPHRASE = 'a long enough passphrase';
     assert.equal(backup.backupHealth().level, 'ok');
   } finally {
+    delete process.env.BACKUP_PASSPHRASE;
     server.close();
     for (const k of ['SMTP_HOST', 'SMTP_PORT', 'SMTP_SECURE', 'SMTP_FROM', 'BACKUP_EMAIL', 'SMTP_REQUIRE_TLS']) delete process.env[k];
   }
