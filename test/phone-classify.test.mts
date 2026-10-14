@@ -15,3 +15,17 @@ test('checkout phone classifier: UAE forms accepted, international routed to ema
   assert.equal(classifyPhone('51 123 4567').kind, 'invalid', 'no such mobile prefix');
   assert.equal(classifyPhone('').kind, 'empty');
 });
+
+test('regression: typing the country code shows no warning or foreign-number panel yet', () => {
+  for (const partial of ['+', '+9', '+97', '+971', '00', '009', '0097', '00971', '9', '97', '971', '0', '+971 0']) {
+    assert.equal(classifyPhone(partial).kind, 'uae-partial', partial);
+  }
+  assert.equal(classifyPhone('+44').kind, 'international');
+  assert.equal(classifyPhone('+1 ').kind, 'international');
+});
+
+test('regression: Arabic-Indic and Persian digits are understood', () => {
+  assert.equal(classifyPhone('٠٥٠١٢٣٤٥٦٧').e164, '+971501234567');
+  assert.equal(classifyPhone('+٩٧١ ٥٠ ١٢٣ ٤٥٦٧').e164, '+971501234567');
+  assert.equal(classifyPhone('۰۵۵۱۲۳۴۵۶۷').e164, '+971551234567');
+});

@@ -184,11 +184,17 @@ export default function HomePage() {
   };
 
   // Order Handlers
-  const handleOrderPlaced = (newOrder: Order) => {
-    const updated = addOrder(newOrder);
-    setOrders(updated);
+  /** Returns false when the order could not be saved, so checkout can say so instead of confirming. */
+  const handleOrderPlaced = (newOrder: Order): boolean => {
+    try {
+      setOrders(addOrder(newOrder));
+    } catch (err) {
+      console.error(err);
+      return false;
+    }
     setCustomers(getStoredCustomers());
     setCart([]);
+    return true;
   };
 
   const handleUpdateOrder = (orderId: string, updates: Partial<Order>) => {
@@ -439,12 +445,13 @@ export default function HomePage() {
       />
 
       {/* Checkout Modal */}
-      <CheckoutModal
+      {/* Mounted only while open, so every checkout starts fresh (a second order is not stuck on the first's confirmation). */}
+      {isCheckoutOpen && <CheckoutModal
         isOpen={isCheckoutOpen}
         onClose={() => setIsCheckoutOpen(false)}
         items={cart}
         onOrderPlaced={handleOrderPlaced}
-      />
+      />}
 
       {/* Order Tracking Modal */}
       <OrderTrackerModal

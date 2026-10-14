@@ -21,6 +21,8 @@ export function contentSecurityPolicy(): string {
     // Product photos come from https hosts; admin uploads are data:/blob: URLs.
     "img-src 'self' data: blob: https:",
     "font-src 'self' data:",
+    // Order-confirmation confetti draws in a worker created from a blob: URL.
+    "worker-src 'self' blob:",
     `connect-src 'self'${isDev ? ' ws: wss:' : ''}`,
     "object-src 'none'",
     "base-uri 'none'",

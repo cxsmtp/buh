@@ -75,20 +75,28 @@ export const AdminOrdersTab: React.FC<AdminOrdersTabProps> = ({
     // Only what the carrier needs: receipts and product photos can be megabytes of base64.
     const { paymentReceiptUrl: _receipt, ...orderForCarrier } = selectedOrderForConfirm;
     void _receipt;
-    const { ok, data } = await postJson<{ success?: boolean; message?: string; awbNumber?: string; trackingUrl?: string; isSimulated?: boolean }>(
-      '/api/courier/dispatch',
-      {
-        order: {
-          ...orderForCarrier,
-          items: orderForCarrier.items.map((item) => ({ ...item, image: '' })),
-          courier: { ...orderForCarrier.courier, pickupDate, weightKg, pieces },
-          adminNotes,
-        },
-        provider: chosenCourier,
-        settings: courierSettings,
+    const request = {
+      order: {
+        ...orderForCarrier,
+        items: orderForCarrier.items.map((item) => ({ ...item, image: '' })),
+        courier: { ...orderForCarrier.courier, pickupDate, weightKg, pieces },
+        adminNotes,
+      },
+      provider: chosenCourier,
+      settings: courierSettings,
+    };
+    type DispatchReply = { success?: boolean; message?: string; awbNumber?: string; trackingUrl?: string; isSimulated?: boolean; needsConfirm?: boolean; alreadyBooked?: boolean };
+    let { ok, status, data } = await postJson<DispatchReply>('/api/courier/dispatch', request);
+    // The last attempt got no answer from the carrier: only re-book once the owner has checked the portal.
+    if (status === 409 && data.needsConfirm) {
+      if (!window.confirm(`${data.message}\n\nBook again now?`)) {
+        setIsDispatching(false);
+        return;
       }
-    );
+      ({ ok, status, data } = await postJson<DispatchReply>('/api/courier/dispatch', { ...request, rebook: true }));
+    }
     setIsDispatching(false);
+    if (data.alreadyBooked) alert(data.message);
 
     // Never mark an order booked without a real AWB from the server.
     if (!ok || !data.success || !data.awbNumber) {
@@ -281,8 +289,8 @@ export const AdminOrdersTab: React.FC<AdminOrdersTabProps> = ({
                 {/* Action Buttons */}
                 <div className="flex items-center justify-between gap-2 pt-1">
                   <div className="flex items-center gap-2">
-                    {/* Print Label Button if confirmed */}
-                    {order.courier.awbNumber && (
+                    {/* Print Label only once the carrier has issued the AWB */}
+                    {order.courier.awbNumber && order.courier.labelGenerated && (
                       <button
                         onClick={() => setLabelOrder(order)}
                         className="flex items-center gap-1.5 text-xs text-stone-800 bg-stone-100 hover:bg-stone-200 border border-stone-300 font-semibold px-3 py-1.5 rounded-xl transition-colors"

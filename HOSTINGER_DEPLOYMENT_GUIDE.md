@@ -172,7 +172,7 @@ This script pulls code, builds the bundle, and executes a zero-downtime hot-relo
 ## 🔒 Security Hardening Included
 
 What is built in, and what you must do, is in [docs/security.md](docs/security.md). In short:
-1. **Admin sign-in is checked on the server** (scrypt-hashed password, HttpOnly session cookie, lockout after 5 wrong attempts). The first start prints a one-time password to the log.
+1. **Admin sign-in is checked on the server** (scrypt-hashed password, HttpOnly session cookie, sign-in paused after 5 wrong attempts from one address). The first start prints a one-time password to the log.
 2. **Every admin API route requires that session** and refuses cross-site requests.
 3. **Checkout phone verification** sends 6-digit codes to UAE mobile numbers only, with per-number, per-address and shop-wide limits against SMS-pumping fraud.
 4. **Security headers** on every page: a Content Security Policy, `X-Frame-Options: DENY`, `nosniff`, HSTS, and a tight `Permissions-Policy`.

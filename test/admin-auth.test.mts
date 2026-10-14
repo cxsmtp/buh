@@ -61,18 +61,46 @@ test('first run: random password, stored hashed with owner-only permissions, mus
   assert.equal((await auth.verifySessionToken(fresh))?.mustChangePassword, false);
 });
 
-test('lockout after 5 failures; only the right password learns about it', async () => {
-  for (let i = 0; i < 5; i++) assert.equal(await statusOf(auth.signIn('admin@beautifuluaehome.com', `bad-${i}`)), 401);
-  assert.equal(await statusOf(auth.signIn('admin@beautifuluaehome.com', 'still-bad')), 401);
-  assert.equal(await statusOf(auth.signIn('admin@beautifuluaehome.com', 'A-new-Admin-Passphrase!')), 423);
-  // After the lock period it works again.
-  const later = Date.now() + 16 * 60 * 1000;
-  const ok = await auth.signIn('admin@beautifuluaehome.com', 'A-new-Admin-Passphrase!', later);
-  assert.ok(ok.token);
+test('5 wrong passwords pause sign-in from that address only, without checking the password', async () => {
+  const PW = 'A-new-Admin-Passphrase!';
+  const attacker = { ip: '203.0.113.9' };
+  for (let i = 0; i < 5; i++) assert.equal(await statusOf(auth.signIn('admin@beautifuluaehome.com', `bad-${i}`, attacker)), 401);
+  // Paused: the right and the wrong password get the same answer (no oracle).
+  assert.equal(await statusOf(auth.signIn('admin@beautifuluaehome.com', 'still-bad', attacker)), 429);
+  assert.equal(await statusOf(auth.signIn('admin@beautifuluaehome.com', PW, attacker)), 429);
+  // The owner on another address is not locked out by the stranger.
+  assert.ok((await auth.signIn('admin@beautifuluaehome.com', PW, { ip: '198.51.100.7' })).token);
+  // The pause ends after 15 minutes.
+  assert.ok((await auth.signIn('admin@beautifuluaehome.com', PW, { ...attacker, now: Date.now() + 16 * 60 * 1000 })).token);
+});
+
+test('unknown emails are paused the same way (no hint that the account exists)', async () => {
+  const ip = { ip: '203.0.113.50' };
+  for (let i = 0; i < 5; i++) assert.equal(await statusOf(auth.signIn('nobody@example.com', `x${i}`, ip)), 401);
+  assert.equal(await statusOf(auth.signIn('nobody@example.com', 'x', ip)), 429);
+});
+
+test('a guess spread over many addresses pauses the account everywhere after 50 failures', async () => {
+  for (let i = 0; i < 50; i++) {
+    await auth.signIn('admin@beautifuluaehome.com', 'bad', { ip: `192.0.2.${i}` }).catch(() => {});
+  }
+  assert.equal(await statusOf(auth.signIn('admin@beautifuluaehome.com', 'A-new-Admin-Passphrase!', { ip: '198.51.100.99' })), 429);
+  auth._resetAdminAuthState();
+});
+
+test('signing out ends every session, including copied cookies', async () => {
+  const a = await auth.signIn('admin@beautifuluaehome.com', 'A-new-Admin-Passphrase!', { ip: '198.51.100.1' });
+  const b = await auth.signIn('admin@beautifuluaehome.com', 'A-new-Admin-Passphrase!', { ip: '198.51.100.2' });
+  assert.ok(await auth.verifySessionToken(a.token));
+  auth.endAllSessions();
+  assert.equal(await auth.verifySessionToken(a.token), null);
+  assert.equal(await auth.verifySessionToken(b.token), null);
+  const c = await auth.signIn('admin@beautifuluaehome.com', 'A-new-Admin-Passphrase!', { ip: '198.51.100.1' });
+  assert.ok(await auth.verifySessionToken(c.token), 'signing in again works');
 });
 
 test('session tokens: tampered, expired and malformed tokens are rejected', async () => {
-  const ok = await auth.signIn('admin@beautifuluaehome.com', 'A-new-Admin-Passphrase!', Date.now() + 20 * 60 * 1000);
+  const ok = await auth.signIn('admin@beautifuluaehome.com', 'A-new-Admin-Passphrase!', { ip: '198.51.100.3' });
   const [body, sig] = ok.token.split('.');
   const forged = Buffer.from(JSON.stringify({ ...JSON.parse(Buffer.from(body, 'base64url').toString()), exp: Date.now() + 1e9 })).toString('base64url');
   assert.equal(await auth.verifySessionToken(`${forged}.${sig}`), null);

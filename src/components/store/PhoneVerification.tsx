@@ -13,25 +13,34 @@ const UAE_MOBILE = /^5[024568]\d{7}$/;
 
 export type PhoneKind = 'empty' | 'uae' | 'uae-partial' | 'international' | 'invalid';
 
-/** Classify what the customer typed, accepting +971 / 00971 / 05x / 5x forms. */
+/** Arabic-Indic (٠-٩) and Persian (۰-۹) digits, as typed on Arabic keyboards, to 0-9. */
+export function toAsciiDigits(s: string): string {
+  return s.replace(/[\u0660-\u0669\u06F0-\u06F9]/g, (c) => String(c.charCodeAt(0) & 0xf));
+}
+
+/** Classify what the customer typed, accepting +971 / 00971 / 971 / 05x / 5x forms and Arabic digits. */
 export function classifyPhone(raw: string): { kind: PhoneKind; local: string; e164: string } {
-  const trimmed = raw.trim();
+  const trimmed = toAsciiDigits(raw.trim());
   const digits = trimmed.replace(/\D/g, '');
-  if (!digits) return { kind: 'empty', local: '', e164: '' };
+  if (!digits) return { kind: trimmed.startsWith('+') ? 'uae-partial' : 'empty', local: '', e164: '' };
 
   const explicitIntl = trimmed.startsWith('+') || digits.startsWith('00');
   let local = digits;
   if (explicitIntl) {
     const cc = digits.startsWith('00') ? digits.slice(2) : digits;
+    // Still typing the country code ("+9", "+97", "00", "009"…): not foreign yet.
+    if (cc.length < 3 && '971'.startsWith(cc)) return { kind: 'uae-partial', local: '', e164: '' };
     if (!cc.startsWith('971')) return { kind: 'international', local: '', e164: '' };
     local = cc.slice(3);
   } else if (digits.startsWith('971')) {
     local = digits.slice(3);
+  } else if ('971'.startsWith(digits)) {
+    return { kind: 'uae-partial', local: '', e164: '' };
   }
   if (local.startsWith('0')) local = local.slice(1);
 
   if (UAE_MOBILE.test(local)) return { kind: 'uae', local, e164: `+971${local}` };
-  if (/^5\d{0,7}$/.test(local)) return { kind: 'uae-partial', local, e164: '' };
+  if (local === '' || /^5\d{0,7}$/.test(local)) return { kind: 'uae-partial', local, e164: '' };
   return { kind: 'invalid', local, e164: '' };
 }
 
@@ -64,9 +73,13 @@ export const PhoneVerification: React.FC<PhoneVerificationProps> = ({
   const [notice, setNotice] = useState('');
   const [sandboxCode, setSandboxCode] = useState('');
   const [cooldown, setCooldown] = useState(0);
+  // The resend wait belongs to the number it was for: a new number can be sent at once.
+  const [cooldownFor, setCooldownFor] = useState('');
   const boxes = useRef<Array<HTMLInputElement | null>>([]);
+  const verifying = useRef(false);
 
   const info = classifyPhone(phone);
+  const wait = cooldownFor === info.e164 ? cooldown : 0;
 
   useEffect(() => {
     if (cooldown <= 0) return;
@@ -101,6 +114,7 @@ export const PhoneVerification: React.FC<PhoneVerificationProps> = ({
       resetCode();
       setStage('code');
       setCooldown(RESEND_SECONDS);
+      setCooldownFor(info.e164);
       setSandboxCode(data.devOtpCode || '');
       setNotice(
         data.devOtpCode
@@ -110,17 +124,23 @@ export const PhoneVerification: React.FC<PhoneVerificationProps> = ({
       setTimeout(() => boxes.current[0]?.focus(), 50);
     } else {
       if (status === 429) {
-        const wait = Number(String(data.message).match(/(\d+) seconds/)?.[1]);
-        if (wait) setCooldown(wait);
+        const seconds = Number(String(data.message).match(/(\d+) seconds/)?.[1]);
+        if (seconds) {
+          setCooldown(seconds);
+          setCooldownFor(info.e164);
+        }
       }
       setError(data.message || 'We could not send the code. Please try again.');
     }
   };
 
   const verify = async (code: string) => {
+    if (verifying.current) return; // one check at a time (double taps, autofill + typing)
+    verifying.current = true;
     setChecking(true);
     setError('');
     const { data } = await postJson<{ valid?: boolean; message?: string }>('/api/otp/verify', { phone: info.e164, code });
+    verifying.current = false;
     setChecking(false);
     if (data.valid) {
       onVerifiedChange(true);
@@ -140,7 +160,7 @@ export const PhoneVerification: React.FC<PhoneVerificationProps> = ({
   };
 
   const onDigit = (index: number, value: string) => {
-    const clean = value.replace(/\D/g, '');
+    const clean = toAsciiDigits(value).replace(/\D/g, '');
     if (clean.length > 1) {
       // Pasted or autofilled: spread across the boxes.
       const next = [...digits];
@@ -247,11 +267,11 @@ export const PhoneVerification: React.FC<PhoneVerificationProps> = ({
               <button
                 type="button"
                 onClick={sendCode}
-                disabled={sending || info.kind !== 'uae' || cooldown > 0}
+                disabled={sending || info.kind !== 'uae' || wait > 0}
                 className="px-4 py-2.5 bg-[#0f1c2e] hover:bg-stone-800 disabled:bg-stone-300 disabled:cursor-not-allowed text-white rounded-xl text-[11px] font-bold shrink-0 transition-colors flex items-center justify-center gap-1.5"
               >
                 {sending ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <MessageSquareText className="w-3.5 h-3.5 text-amber-300" />}
-                {sending ? 'Sending…' : cooldown > 0 ? `Wait ${cooldown}s` : 'Send code'}
+                {sending ? 'Sending…' : wait > 0 ? `Wait ${wait}s` : 'Send code'}
               </button>
             </div>
 
@@ -313,10 +333,18 @@ export const PhoneVerification: React.FC<PhoneVerificationProps> = ({
                   inputMode="numeric"
                   autoComplete={i === 0 ? 'one-time-code' : 'off'}
                   aria-label={`Digit ${i + 1}`}
-                  maxLength={i === 0 ? CODE_LENGTH : 1}
+                  maxLength={i === 0 ? CODE_LENGTH * 2 : 1}
                   value={d}
                   disabled={checking}
                   onChange={(e) => onDigit(i, e.target.value)}
+                  onPaste={(e) => {
+                    // A pasted code fills all six boxes, whichever box has focus.
+                    const pasted = toAsciiDigits(e.clipboardData.getData('text')).replace(/\D/g, '');
+                    if (pasted.length > 1) {
+                      e.preventDefault();
+                      onDigit(0, pasted.slice(0, CODE_LENGTH));
+                    }
+                  }}
                   onKeyDown={(e) => onKeyDown(i, e)}
                   onFocus={(e) => e.target.select()}
                   className={`w-10 h-12 sm:w-11 sm:h-13 text-center text-lg font-bold font-mono rounded-xl border bg-white text-[#0f1c2e] transition-all focus:outline-none focus:ring-2 focus:ring-[#c5a059] focus:border-[#c5a059] ${
@@ -339,17 +367,18 @@ export const PhoneVerification: React.FC<PhoneVerificationProps> = ({
               <button
                 type="button"
                 onClick={sendCode}
-                disabled={sending || cooldown > 0}
+                disabled={sending || wait > 0}
                 className="font-semibold text-[#0f1c2e] hover:underline disabled:text-stone-400 disabled:no-underline flex items-center gap-1"
               >
                 <RotateCcw className="w-3 h-3" />
-                {cooldown > 0 ? `Resend in ${cooldown}s` : 'Resend code'}
+                {wait > 0 ? `Resend in ${wait}s` : 'Resend code'}
               </button>
             </div>
 
             {sandboxCode && (
               <button
                 type="button"
+                disabled={checking}
                 onClick={() => onDigit(0, sandboxCode)}
                 className="w-full text-[11px] text-amber-900 bg-amber-50 border border-dashed border-amber-300 rounded-xl py-2 hover:bg-amber-100 transition-colors"
               >

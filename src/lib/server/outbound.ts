@@ -1,4 +1,6 @@
+import dns from 'node:dns';
 import { lookup } from 'node:dns/promises';
+import https from 'node:https';
 import net from 'node:net';
 import { HttpError } from './http';
 
@@ -31,29 +33,56 @@ const BLOCKED_V4: Array<[string, number]> = [
   ['240.0.0.0', 4],
 ];
 
-export function isPrivateAddress(address: string): boolean {
-  let ip = address.toLowerCase();
-  if (ip.startsWith('[') && ip.endsWith(']')) ip = ip.slice(1, -1);
-  const mapped = ip.match(/^::ffff:(\d+\.\d+\.\d+\.\d+)$/);
-  if (mapped) ip = mapped[1];
+function isBlockedV4(ip: string): boolean {
+  const n = ipv4ToInt(ip);
+  return BLOCKED_V4.some(([base, bits]) => {
+    const mask = bits === 0 ? 0 : (~0 << (32 - bits)) >>> 0;
+    return (n & mask) === (ipv4ToInt(base) & mask);
+  });
+}
 
-  if (net.isIPv4(ip)) {
-    const n = ipv4ToInt(ip);
-    return BLOCKED_V4.some(([base, bits]) => {
-      const mask = bits === 0 ? 0 : (~0 << (32 - bits)) >>> 0;
-      return (n & mask) === (ipv4ToInt(base) & mask);
-    });
+/** Expand an IPv6 address (with optional embedded IPv4 tail) to 8 16-bit groups, or null. */
+function parseIPv6(input: string): number[] | null {
+  let s = input.toLowerCase().replace(/%.*$/, '');
+  const v4 = s.match(/(\d+\.\d+\.\d+\.\d+)$/);
+  if (v4) {
+    if (!net.isIPv4(v4[1])) return null;
+    const n = ipv4ToInt(v4[1]);
+    s = `${s.slice(0, -v4[1].length)}${(n >>> 16).toString(16)}:${(n & 0xffff).toString(16)}`;
   }
-  if (net.isIPv6(ip)) {
-    if (ip === '::' || ip === '::1') return true;
-    const first = parseInt(ip.split(':')[0] || '0', 16);
-    if ((first & 0xfe00) === 0xfc00) return true; // fc00::/7 unique local
-    if ((first & 0xffc0) === 0xfe80) return true; // fe80::/10 link local
-    if ((first & 0xff00) === 0xff00) return true; // ff00::/8 multicast
-    if (ip.startsWith('64:ff9b:') || ip.startsWith('2001:db8:')) return true;
-    return false;
+  const halves = s.split('::');
+  if (halves.length > 2) return null;
+  const head = halves[0] ? halves[0].split(':') : [];
+  const tail = halves.length === 2 && halves[1] ? halves[1].split(':') : [];
+  const missing = 8 - head.length - tail.length;
+  if (halves.length === 1 ? missing !== 0 : missing < 1) return null;
+  const groups = [...head, ...Array(halves.length === 2 ? missing : 0).fill('0'), ...tail];
+  if (groups.some((g) => !/^[0-9a-f]{1,4}$/.test(g))) return null;
+  return groups.map((g) => parseInt(g, 16));
+}
+
+/**
+ * True for any address a server-side request must not reach. IPv6 is an
+ * allow-list: only global unicast (2000::/3) passes, minus documentation,
+ * Teredo and 6to4 (which tunnel to arbitrary IPv4). IPv4-mapped forms are
+ * judged by the IPv4 address inside them. Anything unparsable is refused.
+ */
+export function isPrivateAddress(address: string): boolean {
+  const ip = address.replace(/^\[|\]$/g, '');
+  if (net.isIPv4(ip)) return isBlockedV4(ip);
+  if (!net.isIPv6(ip)) return true;
+  const g = parseIPv6(ip);
+  if (!g) return true;
+  // ::ffff:a.b.c.d (mapped) and ::ffff:0:a.b.c.d (translated): judge the IPv4 inside.
+  const zeros = (n: number) => g.slice(0, n).every((x) => x === 0);
+  if ((zeros(5) && g[5] === 0xffff) || (zeros(4) && g[4] === 0xffff && g[5] === 0)) {
+    return isBlockedV4(`${g[6] >> 8}.${g[6] & 255}.${g[7] >> 8}.${g[7] & 255}`);
   }
-  return true; // not an IP at all: refuse rather than guess
+  if ((g[0] & 0xe000) !== 0x2000) return true; // outside 2000::/3: loopback, ULA, link-local, multicast, NAT64, discard…
+  if (g[0] === 0x2001 && (g[1] === 0x0db8 || g[1] === 0)) return true; // documentation, Teredo
+  if (g[0] === 0x2001 && (g[1] & 0xfff0) === 0x0010) return true; // ORCHID
+  if (g[0] === 0x2002) return true; // 6to4
+  return false;
 }
 
 export async function assertPublicHttpsUrl(raw: string, field = 'URL'): Promise<URL> {
@@ -86,39 +115,89 @@ export async function assertPublicHttpsUrl(raw: string, field = 'URL'): Promise<
 }
 
 /**
- * fetch with a timeout, no automatic redirects (a redirect could bounce a
- * vetted URL to an internal one) and a cap on how much of the reply is read.
+ * A DNS lookup that refuses to hand back any non-public address. Used as the
+ * connection's own lookup, so the address checked is the address connected
+ * to: a name that resolves differently a second time (DNS rebinding) cannot
+ * slip through.
  */
-export async function safeFetch(
-  url: string | URL,
-  init: RequestInit & { timeoutMs?: number; maxBytes?: number } = {}
-): Promise<{ status: number; ok: boolean; data: unknown }> {
-  const { timeoutMs = 10_000, maxBytes = 256 * 1024, ...rest } = init;
-  const res = await fetch(url, { ...rest, redirect: 'manual', signal: AbortSignal.timeout(timeoutMs) });
-  const text = await readCapped(res, maxBytes);
-  let data: unknown = null;
-  try {
-    data = text ? JSON.parse(text) : null;
-  } catch {
-    data = null;
-  }
-  return { status: res.status, ok: res.ok, data };
+function guardedLookup(
+  hostname: string,
+  options: dns.LookupOptions,
+  callback: (err: NodeJS.ErrnoException | null, address: string | dns.LookupAddress[], family?: number) => void
+) {
+  dns.lookup(hostname, { ...options, all: true, verbatim: true }, (err, addresses) => {
+    if (err) return callback(err, '');
+    const list = addresses as dns.LookupAddress[];
+    if (!list.length || list.some((a) => isPrivateAddress(a.address))) {
+      return callback(Object.assign(new Error(`Refusing to connect to a non-public address for ${hostname}`), { code: 'EBLOCKED' }), '');
+    }
+    if (options.all) return callback(null, list);
+    callback(null, list[0].address, list[0].family);
+  });
 }
 
-async function readCapped(res: Response, maxBytes: number): Promise<string> {
-  if (!res.body) return '';
-  const reader = res.body.getReader();
-  const chunks: Uint8Array[] = [];
-  let size = 0;
-  for (;;) {
-    const { done, value } = await reader.read();
-    if (done) break;
-    size += value.byteLength;
-    if (size > maxBytes) {
-      await reader.cancel().catch(() => {});
-      break;
-    }
-    chunks.push(value);
+/**
+ * HTTPS request with a timeout, no redirects (a redirect could bounce a vetted
+ * URL to an internal one), a cap on how much of the reply is read, and every
+ * connection checked against the non-public address ranges above.
+ */
+export function safeFetch(
+  url: string | URL,
+  init: { method?: string; headers?: Record<string, string>; body?: string; timeoutMs?: number; maxBytes?: number } = {}
+): Promise<{ status: number; ok: boolean; data: unknown }> {
+  const { method = 'GET', headers = {}, body, timeoutMs = 10_000, maxBytes = 256 * 1024 } = init;
+  const target = new URL(url);
+  if (target.protocol !== 'https:') return Promise.reject(new Error('Only https is allowed.'));
+  const host = target.hostname.replace(/^\[|\]$/g, '');
+  if (net.isIP(host) && isPrivateAddress(host)) {
+    return Promise.reject(Object.assign(new Error('Refusing to connect to a non-public address.'), { code: 'EBLOCKED' }));
   }
-  return Buffer.concat(chunks).toString('utf8');
+
+  return new Promise((resolve, reject) => {
+    const req = https.request(
+      target,
+      {
+        method,
+        headers: { ...headers, ...(body !== undefined ? { 'Content-Length': String(Buffer.byteLength(body)) } : {}) },
+        lookup: guardedLookup as unknown as typeof dns.lookup,
+        timeout: timeoutMs,
+      },
+      (res) => {
+        const chunks: Buffer[] = [];
+        let size = 0;
+        res.on('data', (chunk: Buffer) => {
+          size += chunk.length;
+          if (size > maxBytes) {
+            res.destroy();
+            return;
+          }
+          chunks.push(chunk);
+        });
+        const finish = () => {
+          const text = Buffer.concat(chunks).toString('utf8');
+          let data: unknown = null;
+          try {
+            data = text ? JSON.parse(text) : null;
+          } catch {
+            data = null;
+          }
+          const status = res.statusCode ?? 0;
+          resolve({ status, ok: status >= 200 && status < 300, data });
+        };
+        res.on('end', finish);
+        res.on('close', finish);
+        res.on('error', reject);
+      }
+    );
+    // Overall deadline, not just idle time.
+    const deadline = setTimeout(() => req.destroy(Object.assign(new Error('Request timed out.'), { code: 'ETIMEDOUT' })), timeoutMs);
+    req.on('timeout', () => req.destroy(Object.assign(new Error('Request timed out.'), { code: 'ETIMEDOUT' })));
+    req.on('error', (err) => {
+      clearTimeout(deadline);
+      reject(err);
+    });
+    req.on('close', () => clearTimeout(deadline));
+    if (body !== undefined) req.write(body);
+    req.end();
+  });
 }

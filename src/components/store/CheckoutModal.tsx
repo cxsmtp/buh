@@ -35,7 +35,8 @@ interface CheckoutModalProps {
   isOpen: boolean;
   onClose: () => void;
   items: CartItem[];
-  onOrderPlaced: (order: Order) => void;
+  /** Returns false when the order could not be saved. */
+  onOrderPlaced: (order: Order) => boolean;
 }
 
 export const CheckoutModal: React.FC<CheckoutModalProps> = ({
@@ -79,6 +80,7 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
   // Submission State
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [confirmedOrder, setConfirmedOrder] = useState<Order | null>(null);
+  const [submitError, setSubmitError] = useState('');
 
   // Financial Calculations
   const subtotal = items.reduce(
@@ -105,6 +107,16 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
     return () => clearTimeout(timer);
   }, [emirate, area, gpsCoordinates]);
 
+
+  // Escape closes checkout (not while an order is being saved).
+  useEffect(() => {
+    if (!isOpen) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape' && !isSubmitting) onClose();
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [isOpen, isSubmitting, onClose]);
 
   // Every hook must run on every render, so the early return comes after them all.
   if (!isOpen) return null;
@@ -185,14 +197,16 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
       return;
     }
 
+    setSubmitError('');
     setIsSubmitting(true);
 
-    const randomNum = Math.floor(1000 + Math.random() * 9000);
-    const orderId = `BUH-2026-${randomNum}`;
+    // Date + 6 random characters: unique without a server, and not guessable
+    // (the order number is what customers type into Track Order).
+    const alphabet = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
+    const random = Array.from(crypto.getRandomValues(new Uint8Array(6)), (b) => alphabet[b % alphabet.length]).join('');
+    const orderId = `BUH-${new Date().toISOString().slice(2, 10).replace(/-/g, '')}-${random}`;
 
     const defaultCourierProvider = getDefaultCourierForOrder(paymentMethod);
-    const courierPrefix = defaultCourierProvider === 'jeebly' ? 'GPY-DXB' : 'ECH-DXB';
-    const awbNumber = `${courierPrefix}-${Math.floor(100000 + Math.random() * 900000)}`;
 
     const newOrder: Order = {
       id: orderId,
@@ -242,10 +256,9 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
       courier: {
         provider: defaultCourierProvider,
         serviceType: 'Scheduled',
-        awbNumber,
-        trackingUrl: defaultCourierProvider === 'jeebly' 
-          ? `https://jeebly.com/track/${awbNumber}` 
-          : `https://ecoexpress.ae/tracking?awb=${awbNumber}`,
+        // Filled in only when the shop books the courier: never a made-up number.
+        awbNumber: '',
+        trackingUrl: '',
         status: 'Order Placed - Pending Dispatch Confirmation',
         pickupDate: new Date(Date.now() + 86400000).toISOString().split('T')[0],
         weightKg: 2.5 * items.length,
@@ -267,8 +280,13 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
 
     setTimeout(() => {
       setIsSubmitting(false);
+      if (!onOrderPlaced(newOrder)) {
+        setSubmitError(
+          'We could not save your order on this device (browser storage is full or blocked). Nothing was charged. Please try a smaller receipt image, or contact us on WhatsApp.'
+        );
+        return;
+      }
       setConfirmedOrder(newOrder);
-      onOrderPlaced(newOrder);
 
       try {
         confetti({
@@ -387,6 +405,26 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
     <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center bg-black/75 backdrop-blur-md p-0 sm:p-4 overflow-y-auto">
       <div className="bg-white text-stone-900 w-full max-w-xl sm:rounded-3xl max-h-[92vh] flex flex-col overflow-hidden shadow-2xl border border-stone-200">
         
+        {/* Header */}
+        <div className="px-4 py-3.5 border-b border-stone-200 flex items-center justify-between bg-stone-50">
+          <div>
+            <h2 className="font-serif font-bold text-base text-[#0f1c2e]">
+              Fast UAE Checkout
+            </h2>
+            <p className="text-[11px] text-stone-600">
+              Handprinted & Machine-Printed Bed Linens • Express Delivery All 7 Emirates
+            </p>
+          </div>
+          <button
+            type="button"
+            onClick={onClose}
+            aria-label="Close checkout"
+            className="p-1.5 text-stone-500 hover:text-stone-800 rounded-full hover:bg-stone-200 transition-colors"
+          >
+            <X className="w-5 h-5" />
+          </button>
+        </div>
+
         {/* Scrollable Form */}
         <form onSubmit={handleSubmitOrder} className="p-4 overflow-y-auto space-y-5 flex-1">
           {/* Order Summary Strip */}
@@ -822,7 +860,12 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
           </div>
 
           {/* Sticky Checkout Button */}
-          <div className="pt-2">
+          <div className="pt-2 space-y-2">
+            {submitError && (
+              <p role="alert" className="text-[11px] text-red-700 bg-red-50 border border-red-200 rounded-lg px-2.5 py-1.5 font-medium">
+                {submitError}
+              </p>
+            )}
             <button
               type="submit"
               disabled={isSubmitting || !serviceability.serviceable || !isPhoneVerified}

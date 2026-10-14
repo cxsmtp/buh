@@ -34,6 +34,13 @@ function num(value: unknown, field: string, min: number, max: number): number {
 }
 
 const PAYMENT = new Set(['cod', 'bank_transfer', 'online_card']);
+const EMIRATES = new Set(['Dubai', 'Abu Dhabi', 'Sharjah', 'Ajman', 'Ras Al Khaimah', 'Fujairah', 'Umm Al Quwain']);
+
+function emirate(value: unknown, field: string, fallback?: string): string {
+  const v = text(value, field, 40, fallback === undefined) || fallback!;
+  if (!EMIRATES.has(v)) throw new HttpError(400, `${field} must be one of the seven Emirates.`);
+  return v;
+}
 
 export function parseCourierProvider(value: unknown): 'jeebly' | 'echo' {
   if (value === 'jeebly' || value === 'echo') return value;
@@ -61,7 +68,7 @@ export function parseOrderForDispatch(value: unknown): Order {
       fullName: text(c.fullName, 'Customer name', 120),
       phone: text(c.phone, 'Customer phone', 32),
       email: text(c.email, 'Customer email', 254, false) || undefined,
-      emirate: text(c.emirate, 'Emirate', 40) as Order['customer']['emirate'],
+      emirate: emirate(c.emirate, 'Emirate') as Order['customer']['emirate'],
       area: text(c.area, 'Area', 120),
       streetAddress: text(c.streetAddress, 'Street address', 200, false),
       buildingVilla: text(c.buildingVilla, 'Building / villa', 120, false),
@@ -116,7 +123,7 @@ export function parseCourierSettings(value: unknown): CourierSettings {
       pickupLocationName: text(j.pickupLocationName, 'Pickup location', 120, false),
       pickupPhone: text(j.pickupPhone, 'Pickup phone', 32, false),
       pickupAddress: text(j.pickupAddress, 'Pickup address', 200, false),
-      pickupEmirate: (text(j.pickupEmirate, 'Pickup emirate', 40, false) || 'Dubai') as CourierSettings['jeebly']['pickupEmirate'],
+      pickupEmirate: emirate(j.pickupEmirate, 'Pickup emirate', 'Dubai') as CourierSettings['jeebly']['pickupEmirate'],
     },
     echo: {
       apiKey: text(e.apiKey, 'Eco Express API key', 200, false),

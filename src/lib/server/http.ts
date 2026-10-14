@@ -99,9 +99,9 @@ export function clientIp(req: Request): string | null {
  */
 export function assertSameOrigin(req: Request): void {
   const origin = req.headers.get('origin');
-  const host = req.headers.get('x-forwarded-host') && process.env.TRUST_PROXY === '1'
-    ? req.headers.get('x-forwarded-host')
-    : req.headers.get('host');
+  // Host only: X-Forwarded-Host is client-controlled unless the proxy rewrites it,
+  // and nginx here passes the real Host header through.
+  const host = req.headers.get('host');
   const allowed = new Set<string>();
   if (host) allowed.add(host.toLowerCase());
   const appUrl = process.env.NEXT_PUBLIC_APP_URL;

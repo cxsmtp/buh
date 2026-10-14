@@ -3,7 +3,8 @@ import { SmsGatewaySettings } from '@/types';
 import { HttpError } from '@/lib/server/http';
 import { logEvent, maskPhone } from '@/lib/server/log';
 import { assertPublicHttpsUrl, safeFetch } from '@/lib/server/outbound';
-import { rateLimit } from '@/lib/server/rateLimit';
+import { takeAll, type LimitRule } from '@/lib/server/rateLimit';
+import { audit } from '@/lib/server/audit';
 
 /**
  * Phone verification codes.
@@ -54,8 +55,13 @@ function codeHash(phone: string, code: string): string {
  *  "+971 50 123 4567" -> "+971501234567"
  *  "501234567" -> "+971501234567"
  */
+/** Arabic-Indic (٠-٩) and Persian (۰-۹) digits to 0-9. */
+function toAsciiDigits(s: string): string {
+  return s.replace(/[\u0660-\u0669\u06F0-\u06F9]/g, (c) => String(c.charCodeAt(0) & 0xf));
+}
+
 export function normalizePhoneNumber(rawPhone: string): string {
-  let cleaned = rawPhone.replace(/[^\d+]/g, '');
+  let cleaned = toAsciiDigits(rawPhone).replace(/[^\d+]/g, '');
 
   if (cleaned.startsWith('00')) {
     cleaned = '+' + cleaned.slice(2);
@@ -67,7 +73,16 @@ export function normalizePhoneNumber(rawPhone: string): string {
     cleaned = '+' + cleaned;
   }
 
-  return cleaned;
+  // "+971 050…" (international prefix plus the domestic trunk 0) is the same
+  // number as "+971 50…": fold it, so one number has one rate-limit key.
+  return cleaned.replace(/^\+9710/, '+971');
+}
+
+// UAE mobile networks: 50, 52, 54, 55, 56, 58. Matches the checkout form.
+const UAE_MOBILE = /^\+9715[024568]\d{7}$/;
+
+function supportEmail(): string {
+  return process.env.NEXT_PUBLIC_SUPPORT_EMAIL || 'orders@beautifuluaehome.com';
 }
 
 function allowedPrefixes(): string[] {
@@ -87,8 +102,11 @@ export function validatePhone(raw: unknown): string {
     throw new HttpError(400, 'Please provide a valid phone number (e.g. +971 50 123 4567)');
   }
   if (!allowedPrefixes().some((prefix) => phone.startsWith(prefix))) {
-    const email = process.env.NEXT_PUBLIC_SUPPORT_EMAIL || 'orders@beautifuluaehome.com';
-    throw new HttpError(400, `Online checkout verifies UAE mobile numbers only. For international orders, please email ${email}.`);
+    throw new HttpError(400, `Online checkout verifies UAE mobile numbers only. For international orders, please email ${supportEmail()}.`);
+  }
+  // A UAE number must be a mobile: landlines and short codes cannot receive the SMS.
+  if (phone.startsWith('+971') && !UAE_MOBILE.test(phone)) {
+    throw new HttpError(400, 'Please enter a UAE mobile number starting with 50, 52, 54, 55, 56 or 58.');
   }
   return phone;
 }
@@ -154,6 +172,16 @@ function devCodesAllowed() {
   return process.env.NODE_ENV !== 'production' || process.env.OTP_DEV_MODE === 'true';
 }
 
+let lastGlobalAlert = 0;
+/** Record (at most hourly) that the shop-wide cap was hit: a sign of SMS-pumping or a checkout outage. */
+function alertGlobalLimit(ip: string | null) {
+  logEvent('warn', 'otp_global_limit', { ip });
+  if (Date.now() - lastGlobalAlert > 60 * 60 * 1000) {
+    lastGlobalAlert = Date.now();
+    audit('otp.global_limit_reached', { limit: Number(process.env.OTP_MAX_PER_HOUR) || 300 });
+  }
+}
+
 function limited(message: string, retryAfterSec: number): never {
   throw new HttpError(429, message, { 'Retry-After': String(retryAfterSec) });
 }
@@ -165,18 +193,21 @@ export async function sendRealSmsOtp(
   const phone = validatePhone(rawPhone);
   const { gateways, ip } = options;
 
-  const cooldown = rateLimit(`otp:phone:30s:${phone}`, 1, 30 * 1000);
-  if (!cooldown.ok) limited(`Please wait ${cooldown.retryAfterSec} seconds before requesting another SMS.`, cooldown.retryAfterSec);
-  const perPhone = rateLimit(`otp:phone:1h:${phone}`, 5, 60 * 60 * 1000);
-  if (!perPhone.ok) limited('Too many codes requested for this number. Please try again later.', perPhone.retryAfterSec);
-  if (ip) {
-    const perIp = rateLimit(`otp:ip:${ip}`, 10, 60 * 60 * 1000);
-    if (!perIp.ok) limited('Too many codes requested. Please try again later.', perIp.retryAfterSec);
-  }
-  const global = rateLimit('otp:global', Number(process.env.OTP_MAX_PER_HOUR) || 300, 60 * 60 * 1000);
-  if (!global.ok) {
-    logEvent('warn', 'otp_global_limit', { ip });
-    limited('Phone verification is busy right now. Please try again shortly.', global.retryAfterSec);
+  // All limits are checked together and counted only if every one allows the
+  // send, so a refused request never uses up the shop-wide cap or a number's
+  // allowance. The shop-wide counter cannot be evicted (see rateLimit.ts).
+  const HOUR = 60 * 60 * 1000;
+  const rules: Array<LimitRule & { message: string }> = [
+    ...(ip ? [{ key: `otp:ip:${ip}`, max: 10, windowMs: HOUR, message: 'Too many codes requested. Please try again later.' }] : []),
+    { key: `otp:phone:30s:${phone}`, max: 1, windowMs: 30 * 1000, message: 'Please wait {s} seconds before requesting another SMS.' },
+    { key: `otp:phone:1h:${phone}`, max: 5, windowMs: HOUR, message: 'Too many codes requested for this number. Please try again later.' },
+    { key: 'global:otp', max: Number(process.env.OTP_MAX_PER_HOUR) || 300, windowMs: HOUR, message: 'Phone verification is busy right now. Please try again shortly.' },
+  ];
+  const refused = takeAll(rules);
+  if (refused) {
+    if (refused.rule.key === 'global:otp') alertGlobalLimit(ip);
+    const message = (refused.rule as (typeof rules)[number]).message.replace('{s}', String(refused.result.retryAfterSec));
+    limited(message, refused.result.retryAfterSec);
   }
 
   const code = crypto.randomInt(0, 10 ** OTP_LENGTH).toString().padStart(OTP_LENGTH, '0');
@@ -203,7 +234,7 @@ export async function sendRealSmsOtp(
     logEvent('error', 'otp_no_gateway', {});
     return {
       success: false,
-      message: 'Phone verification by SMS is not available right now. You can still place your order.',
+      message: `Phone verification is not available right now. Please try again shortly, or email ${supportEmail()} to order.`,
       provider: 'none',
       isSimulated: false,
     };
@@ -224,7 +255,7 @@ export async function sendRealSmsOtp(
   otpStore.delete(phone);
   return {
     success: false,
-    message: 'We could not send the SMS just now. Please try again in a minute.',
+    message: `We could not send the SMS just now. Please try again in a minute, or email ${supportEmail()} to order.`,
     provider: 'unavailable',
     isSimulated: false,
   };
@@ -320,7 +351,7 @@ export function verifyRealSmsOtp(rawPhone: string, inputCode: string): { valid: 
   }
 
   record.attempts += 1;
-  const given = Buffer.from(codeHash(phone, String(inputCode).trim()));
+  const given = Buffer.from(codeHash(phone, toAsciiDigits(String(inputCode)).replace(/\s+/g, '')));
   const expected = Buffer.from(record.hash);
   if (given.length === expected.length && crypto.timingSafeEqual(given, expected)) {
     otpStore.delete(phone); // single use
