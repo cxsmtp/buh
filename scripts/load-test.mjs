@@ -158,11 +158,20 @@ async function main() {
     50
   );
 
+  // Test 3: Catalogue API (every storefront visit loads it; 2,000 requests, concurrency 100)
+  const catalogTest = await runScenario(
+    "Catalogue API (products for every visit)",
+    "/api/products",
+    2000,
+    100
+  );
+
   console.log(`\n======================================================`);
   console.log(`🏆 BENCHMARK SUMMARY FOR HOSTINGER READINESS`);
   console.log(`======================================================`);
   console.log(`  Storefront Homepage:   ${homeTest.rps} RPS | p50: ${homeTest.stats.p50.toFixed(1)}ms | Success: ${homeTest.successRate}%`);
   console.log(`  Courier API Route:     ${apiTest.rps} RPS | p50: ${apiTest.stats.p50.toFixed(1)}ms | Success: ${apiTest.successRate}%`);
+  console.log(`  Catalogue API:         ${catalogTest.rps} RPS | p50: ${catalogTest.stats.p50.toFixed(1)}ms | Success: ${catalogTest.successRate}%`);
   console.log(`\n✅ High-concurrency performance verified for Hostinger deployment!`);
 }
 
