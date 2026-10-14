@@ -68,3 +68,11 @@ test('regression: an unknown client IP does not share one OTP limit across all s
     assert.equal(res.success, true, `shopper ${i}`);
   }
 });
+
+test('regression: "+971 0…" is the same number as "+971 …"; landlines and short codes are refused', () => {
+  assert.equal(otp.validatePhone('+971 050 123 4567'), '+971501234567');
+  assert.throws(() => otp.validatePhone('+97100000'), /valid|mobile/);
+  assert.throws(() => otp.validatePhone('+971 4 123 4567'), /mobile/);
+  assert.throws(() => otp.validatePhone('+971 53 123 4567'), /mobile/);
+  assert.equal(otp.validatePhone('٠٥٠١٢٣٤٥٦٧'), '+971501234567', 'Arabic-Indic digits');
+});

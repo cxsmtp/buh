@@ -15,7 +15,7 @@ export async function POST(req: Request) {
     const password = str(body.password, 'Password', 256, { trim: false });
 
     try {
-      const result = await signIn(email, password);
+      const result = await signIn(email, password, { ip });
       audit('admin.sign_in', { email: result.email, ip });
       const res = json({ success: true, email: result.email, mustChangePassword: result.mustChangePassword });
       res.cookies.set(sessionCookie(result.token));

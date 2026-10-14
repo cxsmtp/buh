@@ -12,6 +12,15 @@ const BRAND_SETTINGS_KEY = 'buh_brand_settings_v1';
 const SMS_SETTINGS_KEY = 'buh_sms_settings_v1';
 
 /**
+ * Demo orders and customers (with sample names and phone numbers) are for
+ * development and demos only. A production build starts empty, so a real
+ * shopper never sees, or finds in Track Order, someone else's sample order.
+ */
+const DEMO_DATA = process.env.NODE_ENV !== 'production' || process.env.NEXT_PUBLIC_DEMO_DATA === 'true';
+const SEED_ORDERS: Order[] = DEMO_DATA ? INITIAL_ORDERS : [];
+const SEED_CUSTOMERS: Customer[] = DEMO_DATA ? INITIAL_CUSTOMERS : [];
+
+/**
  * Read a JSON list from localStorage, falling back to (and restoring) the
  * defaults when it is missing, unreadable or not the expected shape, so one
  * corrupted entry cannot break the whole storefront.
@@ -69,17 +78,20 @@ export function addProduct(product: Product): Product[] {
 }
 
 export function getStoredOrders(): Order[] {
-  return readList(ORDERS_KEY, INITIAL_ORDERS);
+  return readList(ORDERS_KEY, SEED_ORDERS);
 }
 
-export function saveStoredOrders(orders: Order[]): void {
-  write(ORDERS_KEY, orders);
+export function saveStoredOrders(orders: Order[]): boolean {
+  return write(ORDERS_KEY, orders);
 }
 
+/** Save a new order. Throws if the browser could not store it, so checkout never confirms an order it lost. */
 export function addOrder(order: Order): Order[] {
   const currentOrders = getStoredOrders();
   const updatedOrders = [order, ...currentOrders];
-  saveStoredOrders(updatedOrders);
+  if (!saveStoredOrders(updatedOrders)) {
+    throw new Error('The order could not be saved in this browser (storage is full or blocked).');
+  }
   
   // Also update or add to CRM Customers
   syncCustomerFromOrder(order);
@@ -99,7 +111,7 @@ export function updateOrder(orderId: string, updates: Partial<Order>): Order[] {
 }
 
 export function getStoredCustomers(): Customer[] {
-  return readList(CUSTOMERS_KEY, INITIAL_CUSTOMERS);
+  return readList(CUSTOMERS_KEY, SEED_CUSTOMERS);
 }
 
 export function saveStoredCustomers(customers: Customer[]): void {

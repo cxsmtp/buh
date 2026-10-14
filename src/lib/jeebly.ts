@@ -1,8 +1,9 @@
 import crypto from 'node:crypto';
 import { Order, CourierSettings } from '@/types';
 
-function liveFailure(message: string, httpStatus?: number): JeeblyApiResponse {
-  return { success: false, awbNumber: '', trackingNumber: '', trackingUrl: '', message, isSimulated: false, httpStatus };
+/** `uncertain`: no answer from the carrier, so the shipment may or may not exist. */
+function liveFailure(message: string, httpStatus?: number, uncertain = false): JeeblyApiResponse {
+  return { success: false, awbNumber: '', trackingNumber: '', trackingUrl: '', message, isSimulated: false, httpStatus, uncertain };
 }
 
 export interface JeeblyCreateOrderPayload {
@@ -50,6 +51,7 @@ export interface JeeblyApiResponse {
   isSimulated: boolean;
   httpStatus?: number;
   rawResponse?: Record<string, unknown>;
+  uncertain?: boolean;
 }
 
 export async function createJeeblyShipment(
@@ -137,7 +139,13 @@ export async function createJeeblyShipment(
     }
   } catch (err) {
     console.warn('Jeebly API connection attempt error:', (err as Error).message);
-    if (settings.isLive) return liveFailure('Could not reach Jeebly. Please try again.');
+    if (settings.isLive) {
+      return liveFailure(
+        `No answer from Jeebly (timeout or network), so the shipment may or may not have been created. Check the Jeebly portal for reference ${order.id} before booking again.`,
+        undefined,
+        true
+      );
+    }
   }
 
   // Sandbox only: a clearly simulated AWB so the flow can be tried end to end.

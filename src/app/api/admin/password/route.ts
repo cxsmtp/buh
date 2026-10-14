@@ -15,7 +15,7 @@ export async function POST(req: Request) {
     const problem = passwordProblem(next);
     if (problem) throw new HttpError(400, problem);
 
-    const token = await changePassword(current, next);
+    const token = await changePassword(current, next, { ip: clientIp(req) });
     audit('admin.password_changed', { email: session.email, ip: clientIp(req) });
     const res = json({ success: true });
     res.cookies.set(sessionCookie(token));

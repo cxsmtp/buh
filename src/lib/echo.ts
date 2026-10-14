@@ -1,8 +1,9 @@
 import crypto from 'node:crypto';
 import { Order, CourierSettings } from '@/types';
 
-function liveFailure(message: string, httpStatus?: number): EchoApiResponse {
-  return { success: false, awbNumber: '', trackingNumber: '', trackingUrl: '', message, isSimulated: false, httpStatus };
+/** `uncertain`: no answer from the carrier, so the shipment may or may not exist. */
+function liveFailure(message: string, httpStatus?: number, uncertain = false): EchoApiResponse {
+  return { success: false, awbNumber: '', trackingNumber: '', trackingUrl: '', message, isSimulated: false, httpStatus, uncertain };
 }
 
 export interface EcoExpressCreateShipmentPayload {
@@ -61,6 +62,7 @@ export interface EchoApiResponse {
   httpStatus?: number;
   rawPayload?: Record<string, unknown>;
   rawResponse?: Record<string, unknown>;
+  uncertain?: boolean;
 }
 
 export async function createEchoShipment(
@@ -156,7 +158,13 @@ export async function createEchoShipment(
     }
   } catch (err) {
     console.warn('Eco Express API call error:', (err as Error).message);
-    if (settings.isLive) return liveFailure('Could not reach Eco Express. Please try again.');
+    if (settings.isLive) {
+      return liveFailure(
+        `No answer from Eco Express (timeout or network), so the shipment may or may not have been created. Check the Eco Express portal for reference ${order.id} before booking again.`,
+        undefined,
+        true
+      );
+    }
   }
 
   // Sandbox only: a clearly simulated AWB so the flow can be tried end to end.

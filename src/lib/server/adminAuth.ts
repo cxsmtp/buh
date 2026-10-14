@@ -15,23 +15,31 @@ import { dummyPasswordHash, generatePassword, hashPassword, verifyPassword } fro
  * ever sent to the browser.
  *
  * Sessions are stateless HMAC-signed cookies (HttpOnly, SameSite=Strict,
- * Secure in production, 8 h). Each carries the account's session version,
- * which a password change bumps, so every other session ends at once.
+ * Secure in production, 8 h). Each carries a session generation kept in
+ * DATA_DIR and a fingerprint of the password hash: signing out or changing the
+ * password bumps the generation, and rotating ADMIN_PASSWORD_HASH changes the
+ * fingerprint, so every earlier session ends at once.
+ *
+ * Wrong passwords: 5 in 15 minutes from one address pause sign-in for that
+ * email from that address for 15 minutes; 50 in an hour from anywhere pause
+ * it everywhere (a distributed guess). While paused the password is not
+ * checked at all, so a pause reveals nothing about whether a guess was right,
+ * and a stranger on another address cannot lock the owner out.
  */
 
 export const SESSION_COOKIE = 'buh_admin';
 export const SESSION_TTL_MS = 8 * 60 * 60 * 1000;
 
-const MAX_FAILED = 5;
-const LOCK_MS = 15 * 60 * 1000;
+const PER_ADDRESS_FAILS = 5;
+const PER_ADDRESS_WINDOW_MS = 15 * 60 * 1000;
+const ACCOUNT_FAILS = 50;
+const ACCOUNT_WINDOW_MS = 60 * 60 * 1000;
+const PAUSE_MS = 15 * 60 * 1000;
 
 interface AdminAccount {
   email: string;
   passwordHash: string;
-  sessionVersion: number;
   mustChangePassword: boolean;
-  failedLogins: number;
-  lockedUntil: number;
   managedByEnv: boolean;
 }
 
@@ -39,10 +47,11 @@ let cached: AdminAccount | null = null;
 let secret: Buffer | null = null;
 
 const ACCOUNT_FILE = () => dataFile('admin.json');
+const SESSION_STATE_FILE = () => dataFile('session-state.json');
 
 function serialize(account: AdminAccount): string {
-  const { email, passwordHash, sessionVersion, mustChangePassword, failedLogins, lockedUntil } = account;
-  return JSON.stringify({ email, passwordHash, sessionVersion, mustChangePassword, failedLogins, lockedUntil }, null, 2);
+  const { email, passwordHash, mustChangePassword } = account;
+  return JSON.stringify({ email, passwordHash, mustChangePassword }, null, 2);
 }
 
 function persist(account: AdminAccount) {
@@ -57,23 +66,20 @@ async function loadAccount(): Promise<AdminAccount> {
   const envEmail = process.env.ADMIN_EMAIL?.trim().toLowerCase();
   const envHash = process.env.ADMIN_PASSWORD_HASH?.trim();
   if (envEmail && envHash) {
-    cached = {
-      email: envEmail,
-      passwordHash: envHash,
-      sessionVersion: 1,
-      mustChangePassword: false,
-      failedLogins: 0,
-      lockedUntil: 0,
-      managedByEnv: true,
-    };
+    cached = { email: envEmail, passwordHash: envHash, mustChangePassword: false, managedByEnv: true };
     return cached;
   }
 
   const file = ACCOUNT_FILE();
   try {
     const stored = JSON.parse(fs.readFileSync(file, 'utf8'));
-    cached = { failedLogins: 0, lockedUntil: 0, ...stored, managedByEnv: false };
-    return cached!;
+    cached = {
+      email: String(stored.email),
+      passwordHash: String(stored.passwordHash),
+      mustChangePassword: stored.mustChangePassword === true,
+      managedByEnv: false,
+    };
+    return cached;
   } catch (err) {
     if ((err as NodeJS.ErrnoException).code !== 'ENOENT') throw err;
   }
@@ -84,10 +90,7 @@ async function loadAccount(): Promise<AdminAccount> {
   const account: AdminAccount = {
     email,
     passwordHash: await hashPassword(password),
-    sessionVersion: 1,
     mustChangePassword: true,
-    failedLogins: 0,
-    lockedUntil: 0,
     managedByEnv: false,
   };
   try {
@@ -113,6 +116,31 @@ async function loadAccount(): Promise<AdminAccount> {
     ].join('\n')
   );
   return account;
+}
+
+/** Create the owner account on first start, so its one-time password is in the log straight away. */
+export async function ensureAdminAccount(): Promise<void> {
+  await loadAccount();
+}
+
+/** The session generation: bumped to end every existing session. */
+function sessionGeneration(): number {
+  try {
+    const n = Number(JSON.parse(fs.readFileSync(SESSION_STATE_FILE(), 'utf8')).generation);
+    return Number.isSafeInteger(n) && n > 0 ? n : 1;
+  } catch {
+    return 1;
+  }
+}
+
+function bumpSessionGeneration(): number {
+  const next = sessionGeneration() + 1;
+  writePrivateFile(SESSION_STATE_FILE(), JSON.stringify({ generation: next }));
+  return next;
+}
+
+function hashFingerprint(passwordHash: string): string {
+  return crypto.createHash('sha256').update(passwordHash).digest('base64url').slice(0, 16);
 }
 
 function sessionSecret(): Buffer {
@@ -144,13 +172,20 @@ function sign(body: string): string {
 
 interface SessionPayload {
   e: string;
-  v: number;
+  g: number;
+  h: string;
   iat: number;
   exp: number;
 }
 
-export function createSessionToken(account: { email: string; sessionVersion: number }, now = Date.now()): string {
-  const payload: SessionPayload = { e: account.email, v: account.sessionVersion, iat: now, exp: now + SESSION_TTL_MS };
+export function createSessionToken(account: { email: string; passwordHash: string }, now = Date.now()): string {
+  const payload: SessionPayload = {
+    e: account.email,
+    g: sessionGeneration(),
+    h: hashFingerprint(account.passwordHash),
+    iat: now,
+    exp: now + SESSION_TTL_MS,
+  };
   const body = Buffer.from(JSON.stringify(payload)).toString('base64url');
   return `${body}.${sign(body)}`;
 }
@@ -180,8 +215,15 @@ export async function verifySessionToken(token: string | undefined, now = Date.n
   if (!Number.isFinite(payload.exp) || payload.exp <= now) return null;
 
   const account = await loadAccount();
-  if (payload.e !== account.email || payload.v !== account.sessionVersion) return null;
+  if (payload.e !== account.email) return null;
+  if (payload.g !== sessionGeneration()) return null; // signed out or password changed since
+  if (payload.h !== hashFingerprint(account.passwordHash)) return null; // password hash rotated
   return { email: account.email, mustChangePassword: account.mustChangePassword, expiresAt: payload.exp };
+}
+
+/** Sign out everywhere: every session issued so far stops working. */
+export function endAllSessions() {
+  bumpSessionGeneration();
 }
 
 export function sessionCookie(token: string) {
@@ -200,63 +242,105 @@ export function clearedSessionCookie() {
   return { ...sessionCookie(''), maxAge: 0 };
 }
 
+// ── Failed sign-in tracking (in memory; single instance) ─────────────────────
+
+interface FailState {
+  fails: number[];
+  pausedUntil: number;
+}
+const failStates = new Map<string, FailState>();
+const MAX_FAIL_KEYS = 10_000;
+
+function failState(key: string): FailState {
+  let state = failStates.get(key);
+  if (!state) {
+    state = { fails: [], pausedUntil: 0 };
+    failStates.set(key, state);
+    if (failStates.size > MAX_FAIL_KEYS) {
+      // Drop the oldest entry that is not currently paused.
+      for (const [k, s] of failStates) {
+        if (s.pausedUntil < Date.now()) {
+          failStates.delete(k);
+          break;
+        }
+      }
+    }
+  }
+  return state;
+}
+
+function recordFailure(key: string, max: number, windowMs: number, now: number): boolean {
+  const state = failState(key);
+  state.fails = state.fails.filter((t) => t > now - windowMs);
+  state.fails.push(now);
+  if (state.fails.length >= max) {
+    state.pausedUntil = now + PAUSE_MS;
+    state.fails = [];
+    return true;
+  }
+  return false;
+}
+
+function pausedFor(keys: string[], now: number): number {
+  return Math.max(0, ...keys.map((k) => (failStates.get(k)?.pausedUntil ?? 0) - now));
+}
+
 /**
- * Check a sign-in. The same "wrong email or password" answer is given whether
- * or not the account exists, and while locked; only someone who supplies the
- * correct password learns that the account is locked (423).
+ * Check a sign-in. Unknown email or wrong password get the same answer. While
+ * sign-in is paused for this email (from this address, or everywhere) the
+ * password is not checked: everyone gets the same 429.
  */
-export async function signIn(emailInput: string, password: string, now = Date.now()) {
+export async function signIn(emailInput: string, password: string, options: { ip?: string | null; now?: number } = {}) {
+  const now = options.now ?? Date.now();
   const account = await loadAccount();
   const email = emailInput.trim().toLowerCase();
-  const wrong = new HttpError(401, 'Wrong email or password.');
+  const addressKey = `addr|${email}|${options.ip ?? 'unknown'}`;
+  const accountKey = `acct|${email}`;
 
-  if (email !== account.email) {
-    await verifyPassword(password, await dummyPasswordHash());
-    throw wrong;
+  const paused = pausedFor([addressKey, accountKey], now);
+  if (paused > 0) {
+    const minutes = Math.ceil(paused / 60000);
+    throw new HttpError(429, `Sign-in is paused for ${minutes} minute${minutes === 1 ? '' : 's'} after repeated wrong passwords.`, {
+      'Retry-After': String(Math.ceil(paused / 1000)),
+    });
   }
 
-  const ok = await verifyPassword(password, account.passwordHash);
-  if (account.lockedUntil > now) {
-    if (!ok) throw wrong;
-    const minutes = Math.ceil((account.lockedUntil - now) / 60000);
-    throw new HttpError(423, `Too many failed attempts. Try again in ${minutes} minute${minutes === 1 ? '' : 's'}.`);
-  }
+  const ok = email === account.email
+    ? await verifyPassword(password, account.passwordHash)
+    : (await verifyPassword(password, await dummyPasswordHash()), false);
+
   if (!ok) {
-    account.failedLogins += 1;
-    if (account.failedLogins >= MAX_FAILED) {
-      account.lockedUntil = now + LOCK_MS;
-      account.failedLogins = 0;
-      logEvent('warn', 'admin_locked', { email });
+    const addressPaused = recordFailure(addressKey, PER_ADDRESS_FAILS, PER_ADDRESS_WINDOW_MS, now);
+    const accountPaused = recordFailure(accountKey, ACCOUNT_FAILS, ACCOUNT_WINDOW_MS, now);
+    if (addressPaused || accountPaused) {
+      logEvent('warn', 'admin_signin_paused', { email, ip: options.ip, everywhere: accountPaused });
     }
-    persist(account);
-    throw wrong;
+    throw new HttpError(401, 'Wrong email or password.');
   }
-  if (account.failedLogins || account.lockedUntil) {
-    account.failedLogins = 0;
-    account.lockedUntil = 0;
-    persist(account);
-  }
+
+  failStates.delete(addressKey);
   return { token: createSessionToken(account, now), mustChangePassword: account.mustChangePassword, email: account.email };
 }
 
-export async function changePassword(currentPassword: string, newPassword: string) {
+export async function changePassword(currentPassword: string, newPassword: string, options: { ip?: string | null } = {}) {
   const account = await loadAccount();
   if (account.managedByEnv) {
     throw new HttpError(409, 'This admin account is managed by ADMIN_PASSWORD_HASH. Change it there.');
   }
-  // Re-verify through signIn so lockout applies here as well.
-  await signIn(account.email, currentPassword);
+  // Re-verify through signIn so the same pauses apply here as well.
+  await signIn(account.email, currentPassword, options);
   if (currentPassword === newPassword) throw new HttpError(400, 'Choose a password different from the current one.');
 
   account.passwordHash = await hashPassword(newPassword);
-  account.sessionVersion += 1; // ends every other session
   account.mustChangePassword = false;
   persist(account);
+  endAllSessions();
   return createSessionToken(account);
 }
 
-/** Test hook: forget cached account/secret so a new DATA_DIR is picked up. */
+/** Test hook: forget cached account/secret/failures so a new DATA_DIR is picked up. */
 export function _resetAdminAuthState() {
   cached = null;
   secret = null;
+  failStates.clear();
 }
