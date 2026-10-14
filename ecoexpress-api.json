@@ -1,0 +1,439 @@
+﻿{
+    "name":  "Eco Express Merchant API Documentation",
+    "subdomain":  "ecoexpress",
+    "rootSubdomain":  "ecoexpress",
+    "lastUpdated":  "2026-01-20T08:10:06.261Z",
+    "apiDescriptionFormat":  "swagger",
+    "owner":  {
+                  "_id":  "6789fd2946c94a00a2e46e0f",
+                  "name":  "IT Eco"
+              },
+    "user":  {
+                 "trafficSecret":  "344c93a9f7",
+                 "isAnonymous":  true
+             },
+    "urls":  {
+                 "mock":  "https://private-anon-344c93a9f7-ecoexpress.apiary-mock.com/",
+                 "production":  "https://staging.ecofreight.ae:9443/",
+                 "proxy":  "https://private-anon-344c93a9f7-ecoexpress.apiary-proxy.com/"
+             },
+    "preferences":  {
+                        "privateTraffic":  true,
+                        "defaultConsoleMode":  "cloud",
+                        "documentation":  {
+
+                                          }
+                    },
+    "permissions":  {
+                        "editApi":  false,
+                        "accessApiSettings":  false,
+                        "inviteViewer":  false,
+                        "inviteEditor":  false,
+                        "viewTests":  false,
+                        "viewApiBlueprint":  true
+                    },
+    "editors":  [
+
+                ],
+    "authDefinitions":  [
+                            {
+                                "element":  "OAuth2 Scheme",
+                                "meta":  {
+                                             "id":  {
+                                                        "element":  "string",
+                                                        "attributes":  {
+                                                                           "sourceMap":  [
+                                                                                             "@{element=sourceMap; content=System.Object[]}"
+                                                                                         ]
+                                                                       },
+                                                        "content":  "oauth2ClientCredentials"
+                                                    }
+                                         },
+                                "content":  [
+                                                {
+                                                    "element":  "member",
+                                                    "attributes":  {
+                                                                       "sourceMap":  [
+                                                                                         "@{element=sourceMap; content=System.Object[]}"
+                                                                                     ]
+                                                                   },
+                                                    "content":  {
+                                                                    "key":  {
+                                                                                "element":  "string",
+                                                                                "content":  "grantType"
+                                                                            },
+                                                                    "value":  {
+                                                                                  "element":  "string",
+                                                                                  "content":  "client credentials"
+                                                                              }
+                                                                }
+                                                },
+                                                {
+                                                    "element":  "member",
+                                                    "content":  {
+                                                                    "key":  {
+                                                                                "element":  "string",
+                                                                                "content":  "scopes"
+                                                                            },
+                                                                    "value":  {
+                                                                                  "element":  "array",
+                                                                                  "content":  " "
+                                                                              }
+                                                                }
+                                                },
+                                                {
+                                                    "element":  "transition",
+                                                    "attributes":  {
+                                                                       "relation":  {
+                                                                                        "element":  "string",
+                                                                                        "attributes":  "@{sourceMap=System.Object[]}",
+                                                                                        "content":  "token"
+                                                                                    },
+                                                                       "href":  {
+                                                                                    "element":  "string",
+                                                                                    "attributes":  "@{sourceMap=System.Object[]}",
+                                                                                    "content":  "https://staging.ecofreight.ae:9443/connect/client/v2/authentication"
+                                                                                }
+                                                                   }
+                                                }
+                                            ]
+                            },
+                            {
+                                "element":  "Token Authentication Scheme",
+                                "meta":  {
+                                             "id":  {
+                                                        "element":  "string",
+                                                        "attributes":  {
+                                                                           "sourceMap":  [
+                                                                                             "@{element=sourceMap; content=System.Object[]}"
+                                                                                         ]
+                                                                       },
+                                                        "content":  "BearerAuth"
+                                                    },
+                                             "description":  {
+                                                                 "element":  "string",
+                                                                 "attributes":  {
+                                                                                    "sourceMap":  [
+                                                                                                      "@{element=sourceMap; content=System.Object[]}"
+                                                                                                  ]
+                                                                                },
+                                                                 "content":  "Provide your Bearer token in the format: `Bearer {token}`\n"
+                                                             }
+                                         },
+                                "content":  [
+                                                {
+                                                    "element":  "member",
+                                                    "attributes":  {
+                                                                       "sourceMap":  [
+                                                                                         "@{element=sourceMap; content=System.Object[]}"
+                                                                                     ]
+                                                                   },
+                                                    "content":  {
+                                                                    "key":  {
+                                                                                "element":  "string",
+                                                                                "content":  "httpHeaderName"
+                                                                            },
+                                                                    "value":  {
+                                                                                  "element":  "string",
+                                                                                  "content":  "Authorization"
+                                                                              }
+                                                                }
+                                                }
+                                            ]
+                            }
+                        ],
+    "dataStructures":  [
+
+                       ],
+    "blueprint":  "",
+    "description":  "\u003ch2\u003e\u003cstrong\u003eCreating API Account\u003c/strong\u003e\u003c/h2\u003e\n\u003col\u003e\n\u003cli\u003e\n\u003cp\u003eContact your Account Manager who is an Eco Freight representative, or contact \u003ca href=\"mailto:info@ecofreight.ae\"\u003einfo@ecofreight.ae\u003c/a\u003e to request for Merchant API Account creation.\u003c/p\u003e\n\u003c/li\u003e\n\u003cli\u003e\n\u003cp\u003eYour Account Manager will provide you with test and live environment access details for API, including the \u003ccode\u003ehost_name\u003c/code\u003e for each environment.\u003c/p\u003e\n\u003c/li\u003e\n\u003cli\u003e\n\u003cp\u003eOnce you have the access details and host_name provided, you can follow the rest of the documentation and request examples to use the API.\u003c/p\u003e\n\u003c/li\u003e\n\u003cli\u003e\n\u003cp\u003eAPI key will be provided by the account manager\u003c/p\u003e\n\u003c/li\u003e\n\u003c/ol\u003e\n\u003ch2\u003e\u003cstrong\u003eHTTP Request Errors\u003c/strong\u003e\u003c/h2\u003e\n\u003ctable\u003e\n\u003cthead\u003e\n\u003ctr\u003e\n\u003cth\u003e\u003cstrong\u003eError Value\u003c/strong\u003e\u003c/th\u003e\n\u003cth\u003e\u003cstrong\u003eError Message\u003c/strong\u003e\u003c/th\u003e\n\u003cth\u003e\u003cstrong\u003eCode\u003c/strong\u003e\u003c/th\u003e\n\u003c/tr\u003e\n\u003c/thead\u003e\n\u003ctbody\u003e\n\u003ctr\u003e\n\u003ctd\u003eAccess Denied\u003c/td\u003e\n\u003ctd\u003eDoes not have token or expired\u003c/td\u003e\n\u003ctd\u003e401\u003c/td\u003e\n\u003c/tr\u003e\n\u003ctr\u003e\n\u003ctd\u003eForbidden\u003c/td\u003e\n\u003ctd\u003eDoes not have permission\u003c/td\u003e\n\u003ctd\u003e403\u003c/td\u003e\n\u003c/tr\u003e\n\u003c/tbody\u003e\n\u003c/table\u003e",
+    "toc":  {
+                "introduction":  {
+                                     "items":  [
+                                                   {
+                                                       "level":  2,
+                                                       "name":  "Creating API Account",
+                                                       "subitems":  [
+
+                                                                    ]
+                                                   },
+                                                   {
+                                                       "level":  2,
+                                                       "name":  "HTTP Request Errors",
+                                                       "subitems":  [
+
+                                                                    ]
+                                                   }
+                                               ],
+                                     "lowestLevel":  2
+                                 }
+            },
+    "resourceGroups":  [
+                           {
+                               "name":  "",
+                               "description":  "",
+                               "resources":  [
+                                                 {
+                                                     "name":  "Booking",
+                                                     "model":  {
+
+                                                               },
+                                                     "headers":  {
+
+                                                                 },
+                                                     "parameters":  [
+
+                                                                    ],
+                                                     "uriTemplate":  "/connect/client/order/booking/create",
+                                                     "actions":  [
+                                                                     {
+                                                                         "name":  "Create a New Booking",
+                                                                         "relation":  "",
+                                                                         "uriTemplate":  "",
+                                                                         "description":  "\u003cul\u003e\n\u003cli\u003eTo create a booking, please use the \u003cstrong\u003ePOST\u003c/strong\u003e method.\u003c/li\u003e\n\u003cli\u003eKindly refer to \u003cstrong\u003e\u0026quot;Create a New Booking\u0026quot;\u003c/strong\u003e for more details.\u003c/li\u003e\n\u003cli\u003eEnsure that all mandatory fields are provided in the body in JSON format.\n\u003cul\u003e\n\u003cli\u003eFor the Service Type, refer to \u003cstrong\u003e\u0027Retrieve Service Type\u0027\u003c/strong\u003e below.\u003c/li\u003e\n\u003cli\u003eFor the Product Type, refer to \u003cstrong\u003e\u0027Retrieve Product Type\u0027\u003c/strong\u003e below.\u003c/li\u003e\n\u003cli\u003eFor the Country , refer to \u003cstrong\u003e\u0027Get Country\u0027\u003c/strong\u003e below.\u003c/li\u003e\n\u003cli\u003eFor the State, refer to \u003cstrong\u003e\u0027Get State\u0027\u003c/strong\u003e below.\u003c/li\u003e\n\u003cli\u003eFor the City , refer to \u003cstrong\u003e\u0027Get City\u0027\u003c/strong\u003e below.\u003c/li\u003e\n\u003cli\u003eFor the Currency, refer to \u003cstrong\u003e\u0027Get Currency\u0027\u003c/strong\u003e below.\u003c/li\u003e\n\u003c/ul\u003e\n\u003c/li\u003e\n\u003cli\u003e\u003cstrong\u003eNote\u003c/strong\u003e - Ensure all the required fields are accurate and aligned with the required data for successful booking creation.\u003c/li\u003e\n\u003c/ul\u003e\n\u003ctable\u003e\n\u003cthead\u003e\n\u003ctr\u003e\n\u003cth\u003e\u003cstrong\u003eName\u003c/strong\u003e\u003c/th\u003e\n\u003cth\u003e\u003cstrong\u003eRequired\u003c/strong\u003e\u003c/th\u003e\n\u003cth\u003e\u003cstrong\u003eType\u003c/strong\u003e\u003c/th\u003e\n\u003cth\u003e\u003cstrong\u003eDescription\u003c/strong\u003e\u003c/th\u003e\n\u003c/tr\u003e\n\u003c/thead\u003e\n\u003ctbody\u003e\n\u003ctr\u003e\n\u003ctd\u003eaccount_No\u003c/td\u003e\n\u003ctd\u003eyes\u003c/td\u003e\n\u003ctd\u003eString\u003c/td\u003e\n\u003ctd\u003eAccount number of the concerned booking\u003c/td\u003e\n\u003c/tr\u003e\n\u003ctr\u003e\n\u003ctd\u003eservice_type\u003c/td\u003e\n\u003ctd\u003eyes\u003c/td\u003e\n\u003ctd\u003eString\u003c/td\u003e\n\u003ctd\u003eThe Service type of the account. Example. \u0026quot;Next Day Delivery\u0026quot;, \u0026quot;Return Service\u0026quot;, \u0026quot;Express Delivery\u0026quot; \u003cstrong\u003ePossible Values\u003c/strong\u003e: \u003ccode\u003eNDD\u003c/code\u003e, \u003ccode\u003eRTS\u003c/code\u003e. Can be retrieved from the Service type API.\u003c/td\u003e\n\u003c/tr\u003e\n\u003ctr\u003e\n\u003ctd\u003eproduct_type\u003c/td\u003e\n\u003ctd\u003eyes\u003c/td\u003e\n\u003ctd\u003eString\u003c/td\u003e\n\u003ctd\u003eThe Product type of the account. Example. \u0026quot;Document\u0026quot;, \u0026quot;Non Document\u0026quot; \u003cstrong\u003ePossible Values\u003c/strong\u003e: \u003ccode\u003ePT1\u003c/code\u003e, \u003ccode\u003ePT2\u003c/code\u003e. Can be retrieved from the Prodcut type API.\u003c/td\u003e\n\u003c/tr\u003e\n\u003ctr\u003e\n\u003ctd\u003ecop\u003c/td\u003e\n\u003ctd\u003eno\u003c/td\u003e\n\u003ctd\u003eDouble\u003c/td\u003e\n\u003ctd\u003eCash on Pickup in AED.\u003c/td\u003e\n\u003c/tr\u003e\n\u003ctr\u003e\n\u003ctd\u003ecop_currency\u003c/td\u003e\n\u003ctd\u003eno\u003c/td\u003e\n\u003ctd\u003eString\u003c/td\u003e\n\u003ctd\u003eCurrency of Cash on Pickup.\u003c/td\u003e\n\u003c/tr\u003e\n\u003ctr\u003e\n\u003ctd\u003especial_instruction\u003c/td\u003e\n\u003ctd\u003eno\u003c/td\u003e\n\u003ctd\u003eString\u003c/td\u003e\n\u003ctd\u003eSpecial instruction for the booking.\u003c/td\u003e\n\u003c/tr\u003e\n\u003ctr\u003e\n\u003ctd\u003ebooking_date\u003c/td\u003e\n\u003ctd\u003eyes\u003c/td\u003e\n\u003ctd\u003eString\u003c/td\u003e\n\u003ctd\u003eThe date for the booking in the format \u0027YYYY-MM-DD\u0027.\u003cstrong\u003ePossible Value\u003c/strong\u003e: \u003ccode\u003e2025-01-06\u003c/code\u003e.\u003c/td\u003e\n\u003c/tr\u003e\n\u003ctr\u003e\n\u003ctd\u003evehicle_type\u003c/td\u003e\n\u003ctd\u003eyes\u003c/td\u003e\n\u003ctd\u003eString\u003c/td\u003e\n\u003ctd\u003eThe type of vehicle required for delivery. \u003cstrong\u003ePossible Values\u003c/strong\u003e: \u003ccode\u003ebicycle\u003c/code\u003e,\u003ccode\u003ebike\u003c/code\u003e, \u003ccode\u003ecar\u003c/code\u003e,\u003ccode\u003etruck\u003c/code\u003e.\u003c/td\u003e\n\u003c/tr\u003e\n\u003ctr\u003e\n\u003ctd\u003eweight\u003c/td\u003e\n\u003ctd\u003eyes\u003c/td\u003e\n\u003ctd\u003eDouble\u003c/td\u003e\n\u003ctd\u003eThe total weight of the shipment in kilograms. Example: \u0026quot;2\u0026quot; (for 2 kg).\u003c/td\u003e\n\u003c/tr\u003e\n\u003ctr\u003e\n\u003ctd\u003etotal_shipments\u003c/td\u003e\n\u003ctd\u003eyes\u003c/td\u003e\n\u003ctd\u003enumber\u003c/td\u003e\n\u003ctd\u003eThe total number of shipments in the booking. Example: \u0026quot;2\u0026quot; (for two shipments).\u003c/td\u003e\n\u003c/tr\u003e\n\u003ctr\u003e\n\u003ctd\u003edescription\u003c/td\u003e\n\u003ctd\u003eyes\u003c/td\u003e\n\u003ctd\u003estring\u003c/td\u003e\n\u003ctd\u003eA description of the shipment. Example: \u0026quot;Laptop\u0026quot;.\u003c/td\u003e\n\u003c/tr\u003e\n\u003ctr\u003e\n\u003ctd\u003eshipper_details\u003c/td\u003e\n\u003ctd\u003eyes\u003c/td\u003e\n\u003ctd\u003eobject\u003c/td\u003e\n\u003ctd\u003eDetails about the shipper.\u003c/td\u003e\n\u003c/tr\u003e\n\u003ctr\u003e\n\u003ctd\u003ecompany_name\u003c/td\u003e\n\u003ctd\u003eyes\u003c/td\u003e\n\u003ctd\u003estring\u003c/td\u003e\n\u003ctd\u003eName of the company shipping the goods.\u003c/td\u003e\n\u003c/tr\u003e\n\u003ctr\u003e\n\u003ctd\u003ename\u003c/td\u003e\n\u003ctd\u003eyes\u003c/td\u003e\n\u003ctd\u003estring\u003c/td\u003e\n\u003ctd\u003eName of the shipper.\u003c/td\u003e\n\u003c/tr\u003e\n\u003ctr\u003e\n\u003ctd\u003eaddress\u003c/td\u003e\n\u003ctd\u003eyes\u003c/td\u003e\n\u003ctd\u003estring\u003c/td\u003e\n\u003ctd\u003eAddress of the shipper.\u003c/td\u003e\n\u003c/tr\u003e\n\u003ctr\u003e\n\u003ctd\u003ecountry\u003c/td\u003e\n\u003ctd\u003eyes\u003c/td\u003e\n\u003ctd\u003estring\u003c/td\u003e\n\u003ctd\u003eCountry of the shipper. Possible values can be retrieved from the Countries API. Example: \u0026quot;UNITED ARAB EMIRATES\u0026quot; (Case sensitive).\u003c/td\u003e\n\u003c/tr\u003e\n\u003ctr\u003e\n\u003ctd\u003estate\u003c/td\u003e\n\u003ctd\u003eyes\u003c/td\u003e\n\u003ctd\u003estring\u003c/td\u003e\n\u003ctd\u003eState of the shipper. If UAE, enter Emirates name. Possible values can be retrieved from the State API. Example: \u0026quot;DXB\u0026quot; or \u0026quot;DUBAI\u0026quot; (Case sensitive).\u003c/td\u003e\n\u003c/tr\u003e\n\u003ctr\u003e\n\u003ctd\u003ecity\u003c/td\u003e\n\u003ctd\u003eyes\u003c/td\u003e\n\u003ctd\u003estring\u003c/td\u003e\n\u003ctd\u003eCity of the shipper - Area name. Possible values can be retrieved from the Cities API. Example: UMM \u0026quot;RAMOOL\u0026quot; (Case sensitive).\u003c/td\u003e\n\u003c/tr\u003e\n\u003ctr\u003e\n\u003ctd\u003emobile_no_1\u003c/td\u003e\n\u003ctd\u003eyes\u003c/td\u003e\n\u003ctd\u003estring\u003c/td\u003e\n\u003ctd\u003ePrimary mobile number of the shipper. Example: \u0026quot;526928838\u0026quot;.\u003c/td\u003e\n\u003c/tr\u003e\n\u003ctr\u003e\n\u003ctd\u003emobile_no_2\u003c/td\u003e\n\u003ctd\u003eno\u003c/td\u003e\n\u003ctd\u003estring\u003c/td\u003e\n\u003ctd\u003eSecondary mobile number of the shipper.\u003c/td\u003e\n\u003c/tr\u003e\n\u003ctr\u003e\n\u003ctd\u003econsignee_details\u003c/td\u003e\n\u003ctd\u003eyes\u003c/td\u003e\n\u003ctd\u003eobject\u003c/td\u003e\n\u003ctd\u003eDetails about the consignee (receiver of the shipment).\u003c/td\u003e\n\u003c/tr\u003e\n\u003ctr\u003e\n\u003ctd\u003ecompany_name\u003c/td\u003e\n\u003ctd\u003eyes\u003c/td\u003e\n\u003ctd\u003estring\u003c/td\u003e\n\u003ctd\u003eName of the company receiving the goods.\u003c/td\u003e\n\u003c/tr\u003e\n\u003ctr\u003e\n\u003ctd\u003ename\u003c/td\u003e\n\u003ctd\u003eyes\u003c/td\u003e\n\u003ctd\u003estring\u003c/td\u003e\n\u003ctd\u003eName of the consignee.\u003c/td\u003e\n\u003c/tr\u003e\n\u003ctr\u003e\n\u003ctd\u003eaddress\u003c/td\u003e\n\u003ctd\u003eyes\u003c/td\u003e\n\u003ctd\u003estring\u003c/td\u003e\n\u003ctd\u003eAddress of the consignee.\u003c/td\u003e\n\u003c/tr\u003e\n\u003ctr\u003e\n\u003ctd\u003ecountry\u003c/td\u003e\n\u003ctd\u003eyes\u003c/td\u003e\n\u003ctd\u003estring\u003c/td\u003e\n\u003ctd\u003eCountry of the consignee. Possible values can be retrieved from the Countries API. Example: \u0026quot;UNITED ARAB EMIRATES\u0026quot; (Case Sensitive).\u003c/td\u003e\n\u003c/tr\u003e\n\u003ctr\u003e\n\u003ctd\u003estate\u003c/td\u003e\n\u003ctd\u003eyes\u003c/td\u003e\n\u003ctd\u003estring\u003c/td\u003e\n\u003ctd\u003eState of the consignee. If UAE, enter Emirates name.Possible values can be retrieved from the State API. Example: \u0026quot;DUBAI\u0026quot; (Case Sensitive).\u003c/td\u003e\n\u003c/tr\u003e\n\u003ctr\u003e\n\u003ctd\u003ecity\u003c/td\u003e\n\u003ctd\u003eyes\u003c/td\u003e\n\u003ctd\u003estring\u003c/td\u003e\n\u003ctd\u003eCity of the consignee - Area name. Possible values can be retrieved from the Cities API. Example: \u0026quot;UMM RAMOOL\u0026quot; (Case sensitive).\u003c/td\u003e\n\u003c/tr\u003e\n\u003ctr\u003e\n\u003ctd\u003emobile_no_1\u003c/td\u003e\n\u003ctd\u003eyes\u003c/td\u003e\n\u003ctd\u003estring\u003c/td\u003e\n\u003ctd\u003ePrimary mobile number of the consignee. Example: \u0026quot;526928838\u0026quot;.\u003c/td\u003e\n\u003c/tr\u003e\n\u003ctr\u003e\n\u003ctd\u003emobile_no_2\u003c/td\u003e\n\u003ctd\u003eno\u003c/td\u003e\n\u003ctd\u003estring\u003c/td\u003e\n\u003ctd\u003eSecondary mobile number of the consignee.\u003c/td\u003e\n\u003c/tr\u003e\n\u003c/tbody\u003e\n\u003c/table\u003e",
+                                                                         "method":  "POST",
+                                                                         "parameters":  "",
+                                                                         "headers":  "",
+                                                                         "examples":  ""
+                                                                     }
+                                                                 ],
+                                                     "description":  ""
+                                                 },
+                                                 {
+                                                     "name":  "Shipment",
+                                                     "model":  {
+
+                                                               },
+                                                     "headers":  {
+
+                                                                 },
+                                                     "parameters":  [
+
+                                                                    ],
+                                                     "uriTemplate":  "/connect/client/order/shipment/create",
+                                                     "actions":  [
+                                                                     {
+                                                                         "name":  "Create a New Shipment",
+                                                                         "relation":  "",
+                                                                         "uriTemplate":  "",
+                                                                         "description":  "\u003cul\u003e\n\u003cli\u003eTo create a shipment, please use the \u003cstrong\u003ePOST\u003c/strong\u003e method.\u003c/li\u003e\n\u003cli\u003eKindly refer to \u003cstrong\u003e\u0026quot;Create a New Shipment\u0026quot;\u003c/strong\u003e for more details.\u003c/li\u003e\n\u003cli\u003eEnsure that all mandatory fields are provided in the body in JSON format.\n\u003cul\u003e\n\u003cli\u003eFor the Service Type, refer to \u003cstrong\u003e\u0027Retrieve Service Type\u0027\u003c/strong\u003e below.\u003c/li\u003e\n\u003cli\u003eFor the Product Type, refer to \u003cstrong\u003e\u0027Retrieve Product Type\u0027\u003c/strong\u003e below.\u003c/li\u003e\n\u003cli\u003eFor the Country, refer to \u003cstrong\u003e\u0027Get Country\u0027\u003c/strong\u003e below.\u003c/li\u003e\n\u003cli\u003eFor the State, refer to \u003cstrong\u003e\u0027Get State\u0027\u003c/strong\u003e below.\u003c/li\u003e\n\u003cli\u003eFor the City, refer to \u003cstrong\u003e\u0027Get City\u0027\u003c/strong\u003e below.\u003c/li\u003e\n\u003cli\u003eFor the Currency, refer to \u003cstrong\u003e\u0027Get Currency\u0027\u003c/strong\u003e below.\u003c/li\u003e\n\u003c/ul\u003e\n\u003c/li\u003e\n\u003cli\u003e\u003cstrong\u003eNote\u003c/strong\u003e - Ensure all the required fields are accurate and aligned with the required data for successful shipment creation.\u003c/li\u003e\n\u003c/ul\u003e\n\u003ctable\u003e\n\u003cthead\u003e\n\u003ctr\u003e\n\u003cth\u003e\u003cstrong\u003eName\u003c/strong\u003e\u003c/th\u003e\n\u003cth\u003e\u003cstrong\u003eRequired\u003c/strong\u003e\u003c/th\u003e\n\u003cth\u003e\u003cstrong\u003eType\u003c/strong\u003e\u003c/th\u003e\n\u003cth\u003e\u003cstrong\u003eDescription\u003c/strong\u003e\u003c/th\u003e\n\u003c/tr\u003e\n\u003c/thead\u003e\n\u003ctbody\u003e\n\u003ctr\u003e\n\u003ctd\u003eaccount_No\u003c/td\u003e\n\u003ctd\u003eyes\u003c/td\u003e\n\u003ctd\u003eString\u003c/td\u003e\n\u003ctd\u003eAccount number for the shipment.\u003c/td\u003e\n\u003c/tr\u003e\n\u003ctr\u003e\n\u003ctd\u003eservice_type\u003c/td\u003e\n\u003ctd\u003eyes\u003c/td\u003e\n\u003ctd\u003eString\u003c/td\u003e\n\u003ctd\u003eType of service for the shipment. Example : \u0026quot;Next Day Delivery\u0026quot;, \u0026quot;Return Service\u0026quot;. \u003cstrong\u003ePossible values\u003c/strong\u003e: \u003ccode\u003eNDD\u003c/code\u003e, \u003ccode\u003eRTS\u003c/code\u003e. Can be retrieved from the Service type API.\u003c/td\u003e\n\u003c/tr\u003e\n\u003ctr\u003e\n\u003ctd\u003eproduct_type\u003c/td\u003e\n\u003ctd\u003eyes\u003c/td\u003e\n\u003ctd\u003eString\u003c/td\u003e\n\u003ctd\u003eType of product for the shipment. Example : \u0026quot;Document\u0026quot;, \u0026quot;Non Document\u0026quot; \u003cstrong\u003ePossible values\u003c/strong\u003e: \u003ccode\u003ePT1\u003c/code\u003e, \u003ccode\u003ePT2\u003c/code\u003e. Can be retrieved from the Product type API.\u003c/td\u003e\n\u003c/tr\u003e\n\u003ctr\u003e\n\u003ctd\u003ereference_number\u003c/td\u003e\n\u003ctd\u003eno\u003c/td\u003e\n\u003ctd\u003eString\u003c/td\u003e\n\u003ctd\u003eShipper reference number for the shipment. Leave empty if not applicable. Example: \u0026quot;ref1010\u0026quot;.\u003c/td\u003e\n\u003c/tr\u003e\n\u003ctr\u003e\n\u003ctd\u003ecod\u003c/td\u003e\n\u003ctd\u003eno\u003c/td\u003e\n\u003ctd\u003eNumber\u003c/td\u003e\n\u003ctd\u003eCash on Delivery amount in AED.\u003c/td\u003e\n\u003c/tr\u003e\n\u003ctr\u003e\n\u003ctd\u003ecod_currency\u003c/td\u003e\n\u003ctd\u003eno\u003c/td\u003e\n\u003ctd\u003eString\u003c/td\u003e\n\u003ctd\u003eCurrency for COD amount.\u003c/td\u003e\n\u003c/tr\u003e\n\u003ctr\u003e\n\u003ctd\u003especial_instruction\u003c/td\u003e\n\u003ctd\u003eno\u003c/td\u003e\n\u003ctd\u003eString\u003c/td\u003e\n\u003ctd\u003eSpecial instructions for the shipment.\u003c/td\u003e\n\u003c/tr\u003e\n\u003ctr\u003e\n\u003ctd\u003einvoice_value\u003c/td\u003e\n\u003ctd\u003eno\u003c/td\u003e\n\u003ctd\u003eNumber\u003c/td\u003e\n\u003ctd\u003eValue of the invoice in AED.\u003c/td\u003e\n\u003c/tr\u003e\n\u003ctr\u003e\n\u003ctd\u003einvoice_currency\u003c/td\u003e\n\u003ctd\u003eno\u003c/td\u003e\n\u003ctd\u003eString\u003c/td\u003e\n\u003ctd\u003eCurrency of the invoice value.\u003c/td\u003e\n\u003c/tr\u003e\n\u003ctr\u003e\n\u003ctd\u003einvoice_date\u003c/td\u003e\n\u003ctd\u003eyes\u003c/td\u003e\n\u003ctd\u003eString\u003c/td\u003e\n\u003ctd\u003eDate of the invoice in the format \u0026quot;YYYY-MM-DD\u0026quot;.\u003ccode\u003e2025-01-13\u003c/code\u003e.\u003c/td\u003e\n\u003c/tr\u003e\n\u003ctr\u003e\n\u003ctd\u003eshipper_details\u003c/td\u003e\n\u003ctd\u003eyes\u003c/td\u003e\n\u003ctd\u003eObject\u003c/td\u003e\n\u003ctd\u003eDetails of the shipper.\u003c/td\u003e\n\u003c/tr\u003e\n\u003ctr\u003e\n\u003ctd\u003ecompany_name\u003c/td\u003e\n\u003ctd\u003eyes\u003c/td\u003e\n\u003ctd\u003eString\u003c/td\u003e\n\u003ctd\u003eName of the shipping company.\u003c/td\u003e\n\u003c/tr\u003e\n\u003ctr\u003e\n\u003ctd\u003ename\u003c/td\u003e\n\u003ctd\u003eyes\u003c/td\u003e\n\u003ctd\u003eString\u003c/td\u003e\n\u003ctd\u003eName of the shipper.\u003c/td\u003e\n\u003c/tr\u003e\n\u003ctr\u003e\n\u003ctd\u003eaddress\u003c/td\u003e\n\u003ctd\u003eyes\u003c/td\u003e\n\u003ctd\u003eString\u003c/td\u003e\n\u003ctd\u003eAddress of the shipper.\u003c/td\u003e\n\u003c/tr\u003e\n\u003ctr\u003e\n\u003ctd\u003ecountry\u003c/td\u003e\n\u003ctd\u003eyes\u003c/td\u003e\n\u003ctd\u003eString\u003c/td\u003e\n\u003ctd\u003eCountry of the shipper. Possible values can be retrieved from the Countries API. Example: \u0026quot;UNITED ARAB EMIRATES\u0026quot;.(Case sensitive).\u003c/td\u003e\n\u003c/tr\u003e\n\u003ctr\u003e\n\u003ctd\u003estate\u003c/td\u003e\n\u003ctd\u003eyes\u003c/td\u003e\n\u003ctd\u003eString\u003c/td\u003e\n\u003ctd\u003eState of the shipper. If UAE, enter Emirates name. Possible values can be retrieved from the State API. Example: \u0026quot;DXB\u0026quot; or \u0026quot;DUBAI\u0026quot; (Case sensitive).\u003c/td\u003e\n\u003c/tr\u003e\n\u003ctr\u003e\n\u003ctd\u003ecity\u003c/td\u003e\n\u003ctd\u003eyes\u003c/td\u003e\n\u003ctd\u003eString\u003c/td\u003e\n\u003ctd\u003eCity of the shipper - Area name. Possible values can be retrieved from the Cities API. Example: \u0026quot;UMM RAMOOL\u0026quot; (Case sensitive).\u003c/td\u003e\n\u003c/tr\u003e\n\u003ctr\u003e\n\u003ctd\u003emobile_no_1\u003c/td\u003e\n\u003ctd\u003eyes\u003c/td\u003e\n\u003ctd\u003eString\u003c/td\u003e\n\u003ctd\u003ePrimary mobile number of the shipper. Example: \u0026quot;526928838\u0026quot;\u003c/td\u003e\n\u003c/tr\u003e\n\u003ctr\u003e\n\u003ctd\u003emobile_no_2\u003c/td\u003e\n\u003ctd\u003eno\u003c/td\u003e\n\u003ctd\u003eString\u003c/td\u003e\n\u003ctd\u003eSecondary mobile number of the shipper.\u003c/td\u003e\n\u003c/tr\u003e\n\u003ctr\u003e\n\u003ctd\u003econsignee_details\u003c/td\u003e\n\u003ctd\u003eyes\u003c/td\u003e\n\u003ctd\u003eObject\u003c/td\u003e\n\u003ctd\u003eDetails of the consignee (receiver).\u003c/td\u003e\n\u003c/tr\u003e\n\u003ctr\u003e\n\u003ctd\u003ecompany_name\u003c/td\u003e\n\u003ctd\u003eyes\u003c/td\u003e\n\u003ctd\u003eString\u003c/td\u003e\n\u003ctd\u003eName of the consignee company.\u003c/td\u003e\n\u003c/tr\u003e\n\u003ctr\u003e\n\u003ctd\u003ename\u003c/td\u003e\n\u003ctd\u003eyes\u003c/td\u003e\n\u003ctd\u003eString\u003c/td\u003e\n\u003ctd\u003eName of the consignee.\u003c/td\u003e\n\u003c/tr\u003e\n\u003ctr\u003e\n\u003ctd\u003eaddress\u003c/td\u003e\n\u003ctd\u003eyes\u003c/td\u003e\n\u003ctd\u003eString\u003c/td\u003e\n\u003ctd\u003eAddress of the consignee.\u003c/td\u003e\n\u003c/tr\u003e\n\u003ctr\u003e\n\u003ctd\u003ecountry\u003c/td\u003e\n\u003ctd\u003eyes\u003c/td\u003e\n\u003ctd\u003eString\u003c/td\u003e\n\u003ctd\u003eCountry of the consignee. Possible values can be retrieved from the Countries API. Example: \u0026quot;UNITED ARAB EMIRATES\u0026quot; (Case Sensitive).\u003c/td\u003e\n\u003c/tr\u003e\n\u003ctr\u003e\n\u003ctd\u003estate\u003c/td\u003e\n\u003ctd\u003eyes\u003c/td\u003e\n\u003ctd\u003eString\u003c/td\u003e\n\u003ctd\u003eState of the consignee. If UAE, enter Emirates name.Possible values can be retrieved from the State API. Example: \u0026quot;DUBAI\u0026quot; (Case Sensitive).\u003c/td\u003e\n\u003c/tr\u003e\n\u003ctr\u003e\n\u003ctd\u003ecity\u003c/td\u003e\n\u003ctd\u003eyes\u003c/td\u003e\n\u003ctd\u003eString\u003c/td\u003e\n\u003ctd\u003eCity of the consignee - Area name. Possible values can be retrieved from the Cities API. Example: \u0026quot;UMM RAMOOL\u0026quot; (Case sensitive).\u003c/td\u003e\n\u003c/tr\u003e\n\u003ctr\u003e\n\u003ctd\u003emobile_no_1\u003c/td\u003e\n\u003ctd\u003eyes\u003c/td\u003e\n\u003ctd\u003eString\u003c/td\u003e\n\u003ctd\u003ePrimary mobile number of the consignee.\u003c/td\u003e\n\u003c/tr\u003e\n\u003ctr\u003e\n\u003ctd\u003emobile_no_2\u003c/td\u003e\n\u003ctd\u003eno\u003c/td\u003e\n\u003ctd\u003eString\u003c/td\u003e\n\u003ctd\u003eSecondary mobile number of the consignee.\u003c/td\u003e\n\u003c/tr\u003e\n\u003ctr\u003e\n\u003ctd\u003epackage_details\u003c/td\u003e\n\u003ctd\u003eyes\u003c/td\u003e\n\u003ctd\u003eArray\u003c/td\u003e\n\u003ctd\u003eDetails about the package(s).\u003c/td\u003e\n\u003c/tr\u003e\n\u003ctr\u003e\n\u003ctd\u003edescription\u003c/td\u003e\n\u003ctd\u003eyes\u003c/td\u003e\n\u003ctd\u003eString\u003c/td\u003e\n\u003ctd\u003eDescription of the package.\u003c/td\u003e\n\u003c/tr\u003e\n\u003ctr\u003e\n\u003ctd\u003equantity\u003c/td\u003e\n\u003ctd\u003eyes\u003c/td\u003e\n\u003ctd\u003eInteger\u003c/td\u003e\n\u003ctd\u003eQuantity of the item in the package.\u003c/td\u003e\n\u003c/tr\u003e\n\u003ctr\u003e\n\u003ctd\u003eweight\u003c/td\u003e\n\u003ctd\u003eyes\u003c/td\u003e\n\u003ctd\u003eNumber\u003c/td\u003e\n\u003ctd\u003eWeight of the package in kilograms.\u003c/td\u003e\n\u003c/tr\u003e\n\u003ctr\u003e\n\u003ctd\u003einvoice_items\u003c/td\u003e\n\u003ctd\u003eno\u003c/td\u003e\n\u003ctd\u003eArray\u003c/td\u003e\n\u003ctd\u003eDetails about the invoice items.\u003c/td\u003e\n\u003c/tr\u003e\n\u003ctr\u003e\n\u003ctd\u003edescription\u003c/td\u003e\n\u003ctd\u003eyes\u003c/td\u003e\n\u003ctd\u003eString\u003c/td\u003e\n\u003ctd\u003eDescription of the item in the invoice. Example: \u0026quot;Electronics\u0026quot;\u003c/td\u003e\n\u003c/tr\u003e\n\u003ctr\u003e\n\u003ctd\u003ehsCode\u003c/td\u003e\n\u003ctd\u003eno\u003c/td\u003e\n\u003ctd\u003eString\u003c/td\u003e\n\u003ctd\u003eHS Code of the item. Example: \u0026quot;8542\u0026quot;\u003c/td\u003e\n\u003c/tr\u003e\n\u003ctr\u003e\n\u003ctd\u003eorigin\u003c/td\u003e\n\u003ctd\u003eno\u003c/td\u003e\n\u003ctd\u003eString\u003c/td\u003e\n\u003ctd\u003eCountry of origin of the item. Example: \u0026quot;UNITED ARAB EMIRATES\u0026quot;\u003c/td\u003e\n\u003c/tr\u003e\n\u003ctr\u003e\n\u003ctd\u003eunits\u003c/td\u003e\n\u003ctd\u003eyes\u003c/td\u003e\n\u003ctd\u003eInteger\u003c/td\u003e\n\u003ctd\u003eQuantity of units in the item.\u003c/td\u003e\n\u003c/tr\u003e\n\u003ctr\u003e\n\u003ctd\u003eunitPrice\u003c/td\u003e\n\u003ctd\u003eyes\u003c/td\u003e\n\u003ctd\u003eNumber\u003c/td\u003e\n\u003ctd\u003ePrice per unit.\u003c/td\u003e\n\u003c/tr\u003e\n\u003ctr\u003e\n\u003ctd\u003eunitOfMeasurement\u003c/td\u003e\n\u003ctd\u003eyes\u003c/td\u003e\n\u003ctd\u003eString\u003c/td\u003e\n\u003ctd\u003eMeasurement unit of the item.\u003c/td\u003e\n\u003c/tr\u003e\n\u003c/tbody\u003e\n\u003c/table\u003e",
+                                                                         "method":  "POST",
+                                                                         "parameters":  "",
+                                                                         "headers":  "",
+                                                                         "examples":  ""
+                                                                     }
+                                                                 ],
+                                                     "description":  ""
+                                                 },
+                                                 {
+                                                     "name":  "Booking Tracking",
+                                                     "model":  {
+
+                                                               },
+                                                     "headers":  {
+
+                                                                 },
+                                                     "parameters":  [
+
+                                                                    ],
+                                                     "uriTemplate":  "/connect/client/order/booking/track",
+                                                     "actions":  [
+                                                                     {
+                                                                         "name":  "Track a Booking",
+                                                                         "relation":  "",
+                                                                         "uriTemplate":  "",
+                                                                         "description":  "\u003cul\u003e\n\u003cli\u003eTo track a booking, please use the \u003cstrong\u003ePOST\u003c/strong\u003e method.\u003c/li\u003e\n\u003cli\u003eKindly refer to \u003cstrong\u003e\u0026quot;Track a Booking\u0026quot;\u003c/strong\u003e for more details.\u003c/li\u003e\n\u003cli\u003eEnsure that the body contains the following mandatory field in JSON format:\n\u003cul\u003e\n\u003cli\u003e\u003cstrong\u003eBooking Number\u003c/strong\u003e: Provide the valid booking number to retrieve the booking details.\u003c/li\u003e\n\u003c/ul\u003e\n\u003c/li\u003e\n\u003c/ul\u003e",
+                                                                         "method":  "POST",
+                                                                         "parameters":  "",
+                                                                         "headers":  "",
+                                                                         "examples":  ""
+                                                                     }
+                                                                 ],
+                                                     "description":  ""
+                                                 },
+                                                 {
+                                                     "name":  "Shipment Tracking",
+                                                     "model":  {
+
+                                                               },
+                                                     "headers":  {
+
+                                                                 },
+                                                     "parameters":  [
+
+                                                                    ],
+                                                     "uriTemplate":  "/connect/client/order/shipment/track",
+                                                     "actions":  [
+                                                                     {
+                                                                         "name":  "Track a Shipment",
+                                                                         "relation":  "",
+                                                                         "uriTemplate":  "",
+                                                                         "description":  "\u003cul\u003e\n\u003cli\u003eTo track a shipment, please use the \u003cstrong\u003ePOST\u003c/strong\u003e method.\u003c/li\u003e\n\u003cli\u003eKindly refer to \u003cstrong\u003e\u0026quot;Track a Shipment\u0026quot;\u003c/strong\u003e for more details.\u003c/li\u003e\n\u003cli\u003eEnsure that the body contains the following mandatory field in JSON format:\n\u003cul\u003e\n\u003cli\u003e\u003cstrong\u003eAWB Number\u003c/strong\u003e: Provide the valid AWB (Air Waybill) number to retrieve the shipment details.\u003c/li\u003e\n\u003c/ul\u003e\n\u003c/li\u003e\n\u003c/ul\u003e",
+                                                                         "method":  "POST",
+                                                                         "parameters":  "",
+                                                                         "headers":  "",
+                                                                         "examples":  ""
+                                                                     }
+                                                                 ],
+                                                     "description":  ""
+                                                 },
+                                                 {
+                                                     "name":  "Fetch Service Type",
+                                                     "model":  {
+
+                                                               },
+                                                     "headers":  {
+
+                                                                 },
+                                                     "parameters":  [
+
+                                                                    ],
+                                                     "uriTemplate":  "/connect/client/services",
+                                                     "actions":  [
+                                                                     {
+                                                                         "name":  "Retrieve Service Type",
+                                                                         "relation":  "",
+                                                                         "uriTemplate":  "",
+                                                                         "description":  "\u003cul\u003e\n\u003cli\u003e\n\u003cp\u003eTo retrieve the service types, please use the \u003cstrong\u003ePOST\u003c/strong\u003e method.\u003c/p\u003e\n\u003c/li\u003e\n\u003cli\u003e\n\u003cp\u003eKindly refer to \u003cstrong\u003e\u0026quot;Retrieve Service Type\u0026quot;\u003c/strong\u003e for more details.\u003c/p\u003e\n\u003c/li\u003e\n\u003cli\u003e\n\u003cp\u003eEnsure that the body contains the following mandatory field in JSON format:\u003c/p\u003e\n\u003cul\u003e\n\u003cli\u003e\u003cstrong\u003ePortal Account Number\u003c/strong\u003e: Provide your valid portal account number to fetch the available service types.\u003c/li\u003e\n\u003c/ul\u003e\n\u003c/li\u003e\n\u003cli\u003e\n\u003cp\u003eThe retrieved service types can be used when creating an AWB or booking associated with your account.\u003c/p\u003e\n\u003c/li\u003e\n\u003cli\u003e\n\u003cp\u003e\u003cstrong\u003eNote\u003c/strong\u003e: Ensure that the portal account number provided is valid and corresponds to your account to retrieve the correct service types.\u003c/p\u003e\n\u003c/li\u003e\n\u003c/ul\u003e",
+                                                                         "method":  "POST",
+                                                                         "parameters":  "",
+                                                                         "headers":  "",
+                                                                         "examples":  ""
+                                                                     }
+                                                                 ],
+                                                     "description":  ""
+                                                 },
+                                                 {
+                                                     "name":  "Fetch Product Type",
+                                                     "model":  {
+
+                                                               },
+                                                     "headers":  {
+
+                                                                 },
+                                                     "parameters":  [
+
+                                                                    ],
+                                                     "uriTemplate":  "/connect/client/product",
+                                                     "actions":  [
+                                                                     {
+                                                                         "name":  "Retrieve Product Type",
+                                                                         "relation":  "",
+                                                                         "uriTemplate":  "",
+                                                                         "description":  "\u003cul\u003e\n\u003cli\u003e\n\u003cp\u003eTo retrieve the product types, please use the \u003cstrong\u003ePOST\u003c/strong\u003e method.\u003c/p\u003e\n\u003c/li\u003e\n\u003cli\u003e\n\u003cp\u003eKindly refer to \u003cstrong\u003e\u0026quot;Retrieve Product Type\u0026quot;\u003c/strong\u003e for more details.\u003c/p\u003e\n\u003c/li\u003e\n\u003cli\u003e\n\u003cp\u003eEnsure that the body contains the following mandatory field in JSON format:\u003c/p\u003e\n\u003cul\u003e\n\u003cli\u003e\u003cstrong\u003ePortal Account Number\u003c/strong\u003e: Provide your valid portal account number to fetch the available product types.\u003c/li\u003e\n\u003c/ul\u003e\n\u003c/li\u003e\n\u003cli\u003e\n\u003cp\u003eThe retrieved product types can be used when creating an AWB or booking associated with your account.\u003c/p\u003e\n\u003c/li\u003e\n\u003cli\u003e\n\u003cp\u003e\u003cstrong\u003eNote\u003c/strong\u003e: Ensure that the portal account number provided is valid and corresponds to your account to retrieve the correct product types.\u003c/p\u003e\n\u003c/li\u003e\n\u003c/ul\u003e",
+                                                                         "method":  "POST",
+                                                                         "parameters":  "",
+                                                                         "headers":  "",
+                                                                         "examples":  ""
+                                                                     }
+                                                                 ],
+                                                     "description":  ""
+                                                 },
+                                                 {
+                                                     "name":  "Fetch Countries",
+                                                     "model":  {
+
+                                                               },
+                                                     "headers":  {
+
+                                                                 },
+                                                     "parameters":  [
+
+                                                                    ],
+                                                     "uriTemplate":  "/connect/client/countries",
+                                                     "actions":  [
+                                                                     {
+                                                                         "name":  "Get Countries",
+                                                                         "relation":  "",
+                                                                         "uriTemplate":  "",
+                                                                         "description":  "\u003cul\u003e\n\u003cli\u003e\n\u003cp\u003eTo retrieve the list of available countries, please use the \u003cstrong\u003eGET\u003c/strong\u003e method.\u003c/p\u003e\n\u003c/li\u003e\n\u003cli\u003e\n\u003cp\u003eKindly refer to \u003cstrong\u003e\u0026quot;Get Countries\u0026quot;\u003c/strong\u003e for more details.\u003c/p\u003e\n\u003c/li\u003e\n\u003cli\u003e\n\u003cp\u003eThe response will contain the list of country details, including:\u003c/p\u003e\n\u003cul\u003e\n\u003cli\u003e\u003cstrong\u003eCountry Name\u003c/strong\u003e: The full name of the country.\u003c/li\u003e\n\u003cli\u003e\u003cstrong\u003eCountry Code\u003c/strong\u003e: The corresponding ISO Alpha-3 country code.\u003c/li\u003e\n\u003c/ul\u003e\n\u003c/li\u003e\n\u003cli\u003e\n\u003cp\u003eWhen generating an AWB or making a booking, ensure to use the appropriate country name or code associated with your account.\u003c/p\u003e\n\u003c/li\u003e\n\u003cli\u003e\n\u003cp\u003e\u003cstrong\u003eNote\u003c/strong\u003e: Ensure that the selected country details match the ones required for your account to avoid any discrepancies.\u003c/p\u003e\n\u003c/li\u003e\n\u003c/ul\u003e",
+                                                                         "method":  "GET",
+                                                                         "parameters":  "",
+                                                                         "headers":  "",
+                                                                         "examples":  ""
+                                                                     }
+                                                                 ],
+                                                     "description":  ""
+                                                 },
+                                                 {
+                                                     "name":  "Fetch States",
+                                                     "model":  {
+
+                                                               },
+                                                     "headers":  {
+
+                                                                 },
+                                                     "parameters":  [
+
+                                                                    ],
+                                                     "uriTemplate":  "/connect/client/states",
+                                                     "actions":  [
+                                                                     {
+                                                                         "name":  "Get States",
+                                                                         "relation":  "",
+                                                                         "uriTemplate":  "",
+                                                                         "description":  "\u003cul\u003e\n\u003cli\u003e\n\u003cp\u003eTo retrieve the list of available states for a specific country, please use the \u003cstrong\u003ePOST\u003c/strong\u003e method.\u003c/p\u003e\n\u003c/li\u003e\n\u003cli\u003e\n\u003cp\u003eKindly refer to \u003cstrong\u003e\u0026quot;Get States\u0026quot;\u003c/strong\u003e for more details.\u003c/p\u003e\n\u003c/li\u003e\n\u003cli\u003e\n\u003cp\u003eEnsure to provide the \u003cstrong\u003eCountry Code\u003c/strong\u003e in the request body to filter states for that country.\u003c/p\u003e\n\u003c/li\u003e\n\u003cli\u003e\n\u003cp\u003eThe response will include:\u003c/p\u003e\n\u003cul\u003e\n\u003cli\u003e\u003cstrong\u003eState Name\u003c/strong\u003e: The full name of the state.\u003c/li\u003e\n\u003cli\u003e\u003cstrong\u003eState Code\u003c/strong\u003e: The corresponding state code.\u003c/li\u003e\n\u003c/ul\u003e\n\u003c/li\u003e\n\u003cli\u003e\n\u003cp\u003eWhen generating an AWB or making a booking, ensure to use the appropriate state name or code associated with the country in your account.\u003c/p\u003e\n\u003c/li\u003e\n\u003cli\u003e\n\u003cp\u003e\u003cstrong\u003eNote\u003c/strong\u003e: Verify that the provided country code is valid and matches the one required for your account to retrieve accurate state details.\u003c/p\u003e\n\u003c/li\u003e\n\u003c/ul\u003e",
+                                                                         "method":  "POST",
+                                                                         "parameters":  "",
+                                                                         "headers":  "",
+                                                                         "examples":  ""
+                                                                     }
+                                                                 ],
+                                                     "description":  ""
+                                                 },
+                                                 {
+                                                     "name":  "Fetch Cities",
+                                                     "model":  {
+
+                                                               },
+                                                     "headers":  {
+
+                                                                 },
+                                                     "parameters":  [
+
+                                                                    ],
+                                                     "uriTemplate":  "/connect/client/cities",
+                                                     "actions":  [
+                                                                     {
+                                                                         "name":  "Get Cities",
+                                                                         "relation":  "",
+                                                                         "uriTemplate":  "",
+                                                                         "description":  "\u003cul\u003e\n\u003cli\u003e\n\u003cp\u003eTo retrieve the list of available cities for a specific state, please use the \u003cstrong\u003ePOST\u003c/strong\u003e method.\u003c/p\u003e\n\u003c/li\u003e\n\u003cli\u003e\n\u003cp\u003eKindly refer to \u003cstrong\u003e\u0026quot;Get Cities\u0026quot;\u003c/strong\u003e for more details.\u003c/p\u003e\n\u003c/li\u003e\n\u003cli\u003e\n\u003cp\u003eEnsure to provide the \u003cstrong\u003eState Code\u003c/strong\u003e in the request body to filter cities for that state.\u003c/p\u003e\n\u003c/li\u003e\n\u003cli\u003e\n\u003cp\u003eThe response will include:\u003c/p\u003e\n\u003cul\u003e\n\u003cli\u003e\u003cstrong\u003eCity Name\u003c/strong\u003e: The full name of the city.\u003c/li\u003e\n\u003cli\u003e\u003cstrong\u003eCity Code\u003c/strong\u003e: The corresponding city code.\u003c/li\u003e\n\u003c/ul\u003e\n\u003c/li\u003e\n\u003cli\u003e\n\u003cp\u003eWhen generating an AWB or making a booking, ensure to use the appropriate city name or code associated with the state in your account.\u003c/p\u003e\n\u003c/li\u003e\n\u003cli\u003e\n\u003cp\u003e\u003cstrong\u003eNote\u003c/strong\u003e: Verify that the provided state code is valid and matches the one required for your account to retrieve accurate city details.\u003c/p\u003e\n\u003c/li\u003e\n\u003c/ul\u003e",
+                                                                         "method":  "POST",
+                                                                         "parameters":  "",
+                                                                         "headers":  "",
+                                                                         "examples":  ""
+                                                                     }
+                                                                 ],
+                                                     "description":  ""
+                                                 },
+                                                 {
+                                                     "name":  "Fetch Currencies",
+                                                     "model":  {
+
+                                                               },
+                                                     "headers":  {
+
+                                                                 },
+                                                     "parameters":  [
+
+                                                                    ],
+                                                     "uriTemplate":  "/connect/client/currency",
+                                                     "actions":  [
+                                                                     {
+                                                                         "name":  "Get Currencies",
+                                                                         "relation":  "",
+                                                                         "uriTemplate":  "",
+                                                                         "description":  "\u003cul\u003e\n\u003cli\u003e\n\u003cp\u003eTo retrieve the list of available currencies, please use the \u003cstrong\u003eGET\u003c/strong\u003e method.\u003c/p\u003e\n\u003c/li\u003e\n\u003cli\u003e\n\u003cp\u003eKindly refer to \u003cstrong\u003e\u0026quot;Get Currencies\u0026quot;\u003c/strong\u003e for more details.\u003c/p\u003e\n\u003c/li\u003e\n\u003cli\u003e\n\u003cp\u003eThe response will include:\u003c/p\u003e\n\u003cul\u003e\n\u003cli\u003e\u003cstrong\u003eCurrency Name\u003c/strong\u003e: The full name of the currency.\u003c/li\u003e\n\u003cli\u003e\u003cstrong\u003eCurrency Code\u003c/strong\u003e: The corresponding currency code.\u003c/li\u003e\n\u003c/ul\u003e\n\u003c/li\u003e\n\u003cli\u003e\n\u003cp\u003eWhen generating an AWB or making a booking, ensure to use the appropriate currency code for your account.\u003c/p\u003e\n\u003c/li\u003e\n\u003cli\u003e\n\u003cp\u003e\u003cstrong\u003eNote\u003c/strong\u003e: Always confirm that the selected currency is supported by your account for accurate transactions and data mapping.\u003c/p\u003e\n\u003c/li\u003e\n\u003c/ul\u003e",
+                                                                         "method":  "GET",
+                                                                         "parameters":  "",
+                                                                         "headers":  "",
+                                                                         "examples":  ""
+                                                                     }
+                                                                 ],
+                                                     "description":  ""
+                                                 }
+                                             ]
+                           }
+                       ]
+}
