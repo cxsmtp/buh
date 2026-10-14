@@ -233,7 +233,7 @@ export interface SmsGatewaySettings {
     baseUrl: string;
     fromSender: string;
   };
-  unifonic: {
+  unifonic?: {
     appSid: string;
     senderId: string;
   };

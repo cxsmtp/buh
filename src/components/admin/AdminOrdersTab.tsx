@@ -92,6 +92,15 @@ export const AdminOrdersTab: React.FC<AdminOrdersTabProps> = ({
 
   const handleConfirmAndDispatch = async () => {
     if (!selectedOrderForConfirm) return;
+    const o = selectedOrderForConfirm;
+    if (
+      o.paymentMethod === 'bank_transfer' &&
+      o.paymentStatus !== 'verified' &&
+      o.paymentStatus !== 'paid' &&
+      !window.confirm(`The bank transfer for ${o.id} (AED ${o.total}) is not marked as received yet. Book the courier anyway?`)
+    ) {
+      return;
+    }
     setIsDispatching(true);
 
     // The server reads the order and the courier keys itself; only the booking details go up.
@@ -335,7 +344,14 @@ export const AdminOrdersTab: React.FC<AdminOrdersTabProps> = ({
                       type="button"
                       disabled={busyOrderId === order.id}
                       onClick={() =>
-                        patchOrder(order, { status: 'cancelled' }, `Cancel order ${order.id}? Its items go back into stock. This cannot be undone.`)
+                        patchOrder(
+                          order,
+                          { status: 'cancelled' },
+                          `Cancel order ${order.id}? Its items go back into stock. This cannot be undone.` +
+                            (order.courier.awbNumber && !order.courier.simulated
+                              ? `\n\nIt is booked with the courier (AWB ${order.courier.awbNumber}): cancel that booking in the carrier's portal too.`
+                              : '')
+                        )
                       }
                       className="px-2 py-1 rounded-lg font-semibold border border-red-200 bg-white text-red-700 hover:bg-red-50 disabled:opacity-50 ml-auto"
                     >
@@ -379,12 +395,12 @@ export const AdminOrdersTab: React.FC<AdminOrdersTabProps> = ({
                       <CheckCircle2 className="w-4 h-4 text-amber-300" />
                       <span>Confirm & Assign Courier</span>
                     </button>
-                  ) : (
+                  ) : order.status === 'confirmed' ? (
                     <span className="text-[11px] text-emerald-600 font-semibold flex items-center gap-1">
                       <CheckCircle2 className="w-3.5 h-3.5" />
                       Ready for Dispatch
                     </span>
-                  )}
+                  ) : null}
                 </div>
               </div>
             );

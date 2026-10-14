@@ -1,5 +1,6 @@
 'use client';
 
+import { shrinkPhoto } from '@/lib/shrinkPhoto';
 import React, { useState } from 'react';
 import { Product, BedProfileMeasurement, BedSizeProfileId } from '@/types';
 import { DEFAULT_BED_PROFILES, ALL_BED_PROFILES_LIST } from '@/data/bedProfiles';
@@ -155,30 +156,30 @@ export const AdminInventoryTab: React.FC<AdminInventoryTabProps> = ({
     ...DEFAULT_BED_PROFILES,
   });
 
-  // Handle Photo Capture from Mobile Camera or Upload
-  const handlePhotoUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+  // Handle Photo Capture from Mobile Camera or Upload (shrunk in the browser first).
+  const [photoError, setPhotoError] = useState('');
+  const handlePhotoUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
-    if (file) {
-      const reader = new FileReader();
-      reader.onload = (event) => {
-        const dataUrl = event.target?.result as string;
-        setRawPhotoUrl(dataUrl);
-        // Reset transformed image so user can trigger AI
-        setAiTransformedUrl(null);
-      };
-      reader.readAsDataURL(file);
+    if (!file) return;
+    setPhotoError('');
+    try {
+      setRawPhotoUrl(await shrinkPhoto(file));
+      // Reset transformed image so user can trigger AI
+      setAiTransformedUrl(null);
+    } catch (err) {
+      setPhotoError(err instanceof Error ? err.message : 'Could not read the photo.');
     }
   };
 
   // Handle Custom Transformed Image Upload
-  const handleCustomAiUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+  const handleCustomAiUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
-    if (file) {
-      const reader = new FileReader();
-      reader.onload = (event) => {
-        setAiTransformedUrl(event.target?.result as string);
-      };
-      reader.readAsDataURL(file);
+    if (!file) return;
+    setPhotoError('');
+    try {
+      setAiTransformedUrl(await shrinkPhoto(file));
+    } catch (err) {
+      setPhotoError(err instanceof Error ? err.message : 'Could not read the photo.');
     }
   };
 
@@ -243,8 +244,8 @@ export const AdminInventoryTab: React.FC<AdminInventoryTabProps> = ({
       weave: 'Sateen',
       colors: colorItems.length > 0 ? colorItems : [{ name: 'Standard White', hex: '#FFFFFF' }],
       featuredImage: featuredImg,
-      galleryImages: [featuredImg, rawPhotoUrl || featuredImg].filter(Boolean),
-      rawOriginalImage: rawPhotoUrl || undefined,
+      // Each photo is sent once (the request is size-capped).
+      galleryImages: [...new Set([featuredImg, rawPhotoUrl].filter((x): x is string => Boolean(x)))],
       aiTransformedImage: aiTransformedUrl || undefined,
       isAiEnhanced: Boolean(aiTransformedUrl),
       stockCount,
@@ -370,6 +371,11 @@ export const AdminInventoryTab: React.FC<AdminInventoryTabProps> = ({
                     />
                   </label>
                 </div>
+                {photoError && (
+                  <p role="alert" className="text-xs text-red-700 bg-red-50 border border-red-200 rounded-lg px-3 py-2 font-medium">
+                    {photoError}
+                  </p>
+                )}
               </div>
             ) : (
               <div className="space-y-3">
@@ -636,6 +642,11 @@ export const AdminInventoryTab: React.FC<AdminInventoryTabProps> = ({
               <CheckCircle2 className="w-5 h-5 text-amber-300" />
               <span>{savingProduct ? 'Publishing…' : 'Save & Publish to Customer Storefront'}</span>
             </button>
+            {photoError && rawPhotoUrl && (
+              <p role="alert" className="mt-2 text-xs text-red-700 bg-red-50 border border-red-200 rounded-lg px-3 py-2 font-medium">
+                {photoError}
+              </p>
+            )}
             {saveError && (
               <p role="alert" className="mt-2 text-xs text-red-700 bg-red-50 border border-red-200 rounded-lg px-3 py-2 font-medium">
                 {saveError}

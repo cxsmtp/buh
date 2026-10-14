@@ -122,7 +122,9 @@ test('hidden products cannot be ordered', () => {
   updateProduct(p.id, { active: true });
 });
 
-test('bank transfer with a PDF receipt: stored, and only the admin URL is recorded', () => {
+test('bank transfer with a PDF receipt: stored, and only the admin URL is recorded', async () => {
+  const { updateSettings } = await import('@/lib/server/settings');
+  await updateSettings('bank', { bankName: 'Test Bank', accountName: 'BUH LLC', iban: 'AE070331234567890123456' });
   const pdf = Buffer.concat([Buffer.from('%PDF-1.4\n'), Buffer.alloc(32)]).toString('base64');
   const { order } = orders.placeOrder(body({ paymentMethod: 'bank_transfer', bankTransferRef: 'ENBD-1', receipt: `data:application/pdf;base64,${pdf}` }));
   assert.equal(order.paymentStatus, 'receipt_uploaded');

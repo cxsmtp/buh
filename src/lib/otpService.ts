@@ -160,16 +160,18 @@ export function envGateways(): GatewayConfig {
 export async function gatewaysFromSettings(settings: Partial<SmsGatewaySettings> | undefined): Promise<GatewayConfig> {
   const config: GatewayConfig = {};
   if (!settings || typeof settings !== 'object') return config;
-  const t = settings.twilio;
+  // Only the gateway the admin chose (not whichever keys happen to be saved).
+  const chosen = (p: SmsGatewaySettings['provider']) => !settings.provider || settings.provider === p;
+  const t = chosen('twilio') ? settings.twilio : undefined;
   if (t?.accountSid && t.authToken && t.fromNumber) {
     config.twilio = { accountSid: String(t.accountSid), authToken: String(t.authToken), fromNumber: String(t.fromNumber) };
   }
-  const i = settings.infobip;
+  const i = chosen('infobip') ? settings.infobip : undefined;
   if (i?.apiKey && i.baseUrl) {
     await assertPublicHttpsUrl(String(i.baseUrl), 'Infobip base URL');
     config.infobip = { apiKey: String(i.apiKey), baseUrl: String(i.baseUrl), sender: String(settings.senderId || 'BUHome').slice(0, 11) };
   }
-  const w = settings.customWebhook;
+  const w = chosen('custom_webhook') ? settings.customWebhook : undefined;
   if (w?.endpointUrl) {
     await assertPublicHttpsUrl(String(w.endpointUrl), 'Webhook URL');
     config.webhook = { url: String(w.endpointUrl), bearerToken: w.bearerToken ? String(w.bearerToken) : undefined };

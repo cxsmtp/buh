@@ -25,7 +25,9 @@ export type SettingsKey = keyof SettingsMap;
 
 const DEFAULTS: SettingsMap = {
   brand: INITIAL_BRAND_SETTINGS,
+  // Empty until the owner enters the real account: bank transfer stays hidden until then.
   bank: INITIAL_BANK_DETAILS,
+
   // Never start with the sample keys from the demo data.
   courier: {
     ...INITIAL_COURIER_SETTINGS,
@@ -101,6 +103,19 @@ export async function updateSettings<K extends SettingsKey>(key: K, input: unkno
       sms.customWebhook.bearerToken = '';
     }
   }
+  // Switched on means checkout sends codes through it, so the chosen gateway must be complete.
+  if (key === 'sms') {
+    const sms = next as unknown as SmsGatewaySettings;
+    const missing =
+      sms.provider === 'twilio'
+        ? !(sms.twilio.accountSid && sms.twilio.authToken && sms.twilio.fromNumber)
+        : sms.provider === 'infobip'
+        ? !(sms.infobip.apiKey && sms.infobip.baseUrl)
+        : sms.provider === 'custom_webhook'
+        ? !sms.customWebhook.endpointUrl
+        : true;
+    if (sms.isEnabled && missing) throw new HttpError(400, 'Fill in every field for the chosen SMS gateway before switching it on.');
+  }
   save(key, next as SettingsMap[K]);
 }
 
@@ -161,6 +176,20 @@ export function blankSecretsIn(db: import('better-sqlite3').Database): void {
 
 // ── Validation (allow-lists; strings capped) ────────────────────────────────
 
+/** AE + 21 digits with a correct ISO 13616 (mod-97) check: catches nearly every typo. */
+export function validUaeIban(compact: string): boolean {
+  if (!/^AE\d{21}$/.test(compact)) return false;
+  const rearranged = compact.slice(4) + '1014' + compact.slice(2, 4); // A=10, E=14
+  let rest = 0;
+  for (const d of rearranged) rest = (rest * 10 + Number(d)) % 97;
+  return rest === 1;
+}
+
+/** Bank transfer is offered only once the real account is entered. */
+export function bankTransferReady(bank: BankTransferDetails): boolean {
+  return Boolean(bank.iban && bank.accountName && bank.bankName);
+}
+
 type Obj = Record<string, unknown>;
 const obj = (v: unknown): Obj => (v && typeof v === 'object' && !Array.isArray(v) ? (v as Obj) : {});
 const nonEmpty = (v: unknown) => typeof v === 'string' && v.trim() !== '';
@@ -209,13 +238,14 @@ const VALIDATORS: { [K in SettingsKey]: (input: Obj, current: SettingsMap[K]) =>
   },
 
   async bank(input, current) {
-    const iban = text(input.iban, 'IBAN', 40, current.iban);
-    if (iban && !/^AE\d{2}[ \d]{19,30}$/i.test(iban)) throw new HttpError(400, 'IBAN must be a UAE IBAN (AE followed by 21 digits).');
+    const typed = text(input.iban, 'IBAN', 40, current.iban).replace(/\s+/g, '').toUpperCase();
+    if (typed && !validUaeIban(typed)) throw new HttpError(400, 'Please check the IBAN: a UAE IBAN is AE followed by 21 digits, and this one does not add up.');
+    const iban = typed.replace(/(.{4})/g, '$1 ').trim();
     return {
       bankName: text(input.bankName, 'Bank name', 80, current.bankName),
       accountName: text(input.accountName, 'Account name', 120, current.accountName),
       accountNumber: text(input.accountNumber, 'Account number', 40, current.accountNumber),
-      iban: iban.toUpperCase(),
+      iban,
       swiftCode: text(input.swiftCode, 'SWIFT code', 11, current.swiftCode).toUpperCase(),
       branch: text(input.branch, 'Branch', 120, current.branch),
       instructions: text(input.instructions, 'Instructions', 500, current.instructions),
@@ -258,8 +288,10 @@ const VALIDATORS: { [K in SettingsKey]: (input: Obj, current: SettingsMap[K]) =>
     const t = obj(input.twilio);
     const i = obj(input.infobip);
     const w = obj(input.customWebhook);
-    const providers = ['twilio', 'infobip', 'unifonic', 'custom_webhook'] as const;
-    const providerValue = providers.includes(input.provider as never) ? (input.provider as SmsGatewaySettings['provider']) : current.provider;
+    // Unifonic is not wired to checkout, so it can't be chosen (it would look active and send nothing).
+    const providers = ['twilio', 'infobip', 'custom_webhook'] as const;
+    if (input.provider !== undefined && !providers.includes(input.provider as never)) throw new HttpError(400, 'Choose Twilio, Infobip or a webhook.');
+    const providerValue = (input.provider as SmsGatewaySettings['provider']) ?? (current.provider === 'unifonic' ? 'twilio' : current.provider);
     const senderId = text(input.senderId, 'Sender ID', 11, current.senderId) || 'BUHome';
     if (!/^[A-Za-z0-9 ]{1,11}$/.test(senderId)) throw new HttpError(400, 'Sender ID: up to 11 letters or digits.');
     const accountSid = text(t.accountSid, 'Twilio account SID', 34, current.twilio.accountSid);

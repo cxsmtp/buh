@@ -90,7 +90,7 @@ Every page sends:
 - **Branding, bank details, courier keys and SMS gateway settings** are stored on the server, so every visitor sees the same shop.
 - **Keys are write-only.** The admin hub gets them back blank, with a "saved" flag. A save with a blank key keeps the stored one, and `null` clears it.
 - **A key follows its host:** changing the Infobip or webhook address without a new key drops the old key.
-- **"Test connection" fills blank keys from the saved ones on the server**, so the keys never travel back to a browser.
+- **"Test connection" fills blank keys from the saved ones on the server**, so the keys never travel back to a browser. A saved key is only filled in for the host it was saved for: a test aimed at a new address must bring its own key.
 
 ## Backups
 
@@ -99,11 +99,20 @@ Every 12 hours (see the deployment guide) the shop backs itself up:
 - **A consistent database snapshot**, integrity-checked before it is used.
 - **CSV flat files.** A cell starting with `= + - @` is prefixed with `'`, so Excel never runs it as a formula.
 - **Receipts, photos and the audit log**, with a SHA-256 manifest.
-- **Optional encryption:** AES-256-GCM, with the key derived by scrypt from `BACKUP_PASSPHRASE`.
+- **Encryption (strongly recommended):** AES-256-GCM, with the key derived by scrypt (cost 2^17) from `BACKUP_PASSPHRASE`. The Admin Hub turns amber, and the log warns, while backups are emailed unencrypted or the passphrase is shorter than 12 characters.
+- **Courier and SMS keys are blanked** in the backup's copy of the database (and the copy is vacuumed, so the old values are not left in free pages). Re-enter them after a restore.
+- **A failure is emailed** when it starts, when the error changes and then once a day; the shop retries hourly.
 - **Delivered by email over TLS** (STARTTLS is required, so the SMTP password is never sent in clear).
 - **Kept on the server too:** the newest 14.
-- **Session keys and the admin account are not in backups.**
-- **Restore checks before it writes:** every file against the manifest, and the database's integrity.
+- **Session keys and the admin account are not in backups.** Restore accepts only the known file names, so a crafted backup cannot plant a key or an admin account.
+- **Restore checks before it writes:** every file against the manifest, and the database's integrity. An encrypted backup is also authenticated (GCM); a plain `.tar.gz` can only be checked for damage, not tampering.
+
+## Orders and stock
+
+- **The customer is charged the total they saw.** Checkout sends the total it showed; if a price changed meanwhile, the server refuses the order (nothing taken) and checkout reloads the bag with the new total.
+- **At most 20 of one product per order, and at most 3 unconfirmed orders per phone**, so one verified number cannot tie up the stock.
+- **Stock edits cannot undo a sale:** the Admin Hub sends the stock it showed, and the server refuses the edit (409) if a sale happened in between.
+- **Bank transfer is hidden until the real account is saved.** The IBAN must be a UAE IBAN that passes the mod-97 check.
 
 ## Known limits (next steps)
 

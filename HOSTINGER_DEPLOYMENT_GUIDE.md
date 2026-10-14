@@ -43,7 +43,7 @@ Everything the shop stores lives in one Docker volume and is backed up every 12 
    ```
    - Fill in `DOMAIN`, `ACME_EMAIL`, `NEXT_PUBLIC_APP_URL` and `NEXT_PUBLIC_SUPPORT_EMAIL`.
    - **Fill in the backup email (`SMTP_*`, `BACKUP_EMAIL`).**
-   - Set a `BACKUP_PASSPHRASE`, and store it in your password manager.
+   - Set a `BACKUP_PASSPHRASE` of at least 12 characters, and store it in your password manager. Without it, customer data is emailed unencrypted.
 6. **Start:**
    ```bash
    docker compose up -d --build
@@ -60,7 +60,7 @@ Everything the shop stores lives in one Docker volume and is backed up every 12 
 - [ ] **📱 SMS & Real OTP:** enter your Twilio or Infobip keys, **Send test** to your own mobile, then **Save**.
   - Checkout needs a working SMS gateway: customers cannot order without verifying their number.
   - At start-up, the log warns if none is configured.
-- [ ] **🎨 Logo & Marquee → Bank transfer details:** enter the real IBAN and account name, and check every digit.
+- [ ] **🎨 Logo & Marquee → Bank transfer details:** enter the bank name, account name and real IBAN, and check every digit. Bank transfer is hidden at checkout until they are saved.
 - [ ] **Jeebly & Eco Couriers:**
   - enter the keys;
   - press **Test connection**;
@@ -77,7 +77,7 @@ Everything the shop stores lives in one Docker volume and is backed up every 12 
 
 The shop backs itself up every 12 hours, and straight after a restart if one is due. It emails the backup to `BACKUP_EMAIL` and keeps the newest 14 on the server. Each backup contains:
 
-- **The full database** (`shop.db`): every order, product, setting and booking.
+- **The full database** (`shop.db`): every order, product, setting and booking. Courier and SMS keys are blanked: re-enter them after a restore.
 - **Flat files you can open in Excel:** `orders.csv`, `order_items.csv`, `customers.csv`, `products.csv`.
 - **Bank-transfer receipts and product photos.**
 - **The audit log.**
@@ -103,16 +103,20 @@ On the server (this replaces the live data; the current data is kept aside in `r
    ```bash
    docker compose stop app
    ```
-2. Restore the backup file:
+2. Restore a backup kept on the server (`docker compose run --rm --no-deps app ls /data/backups` lists them):
    ```bash
-   docker compose run --rm --no-deps -v "$PWD/buh-backup-20261014-1200.tar.gz.enc:/restore:ro" app node scripts/restore-backup.mjs /restore /data --replace
+   docker compose run --rm --no-deps app node scripts/restore-backup.mjs /data/backups/buh-backup-20261014-1200.tar.gz.enc /data --replace
+   ```
+   For a backup from your email, first make it readable and copy it in:
+   ```bash
+   chmod 644 buh-backup-….tar.gz.enc && docker compose cp buh-backup-….tar.gz.enc app:/data/backups/
    ```
 3. Start it again:
    ```bash
    docker compose start app
    ```
 
-Then sign in with the new one-time password from `docker compose logs app`. Keys and the admin account are deliberately not in backups.
+Then sign in with the new one-time password from `docker compose logs app`, and re-enter the courier and SMS keys. Keys and the admin account are deliberately not in backups.
 
 To check a backup on your own computer (Node 20+, in a checkout of this repository after `npm ci`):
 

@@ -9,7 +9,7 @@ import { HttpError } from './http';
 import { parseReceiptDataUrl } from './imageInput';
 import { verifyPhoneToken } from './phoneToken';
 import { getProduct, invalidateProducts, listProducts } from './products';
-import { getSettings } from './settings';
+import { bankTransferReady, getSettings } from './settings';
 
 /**
  * Orders, stored on the server. Everything that decides what a customer pays
@@ -173,7 +173,12 @@ export function placeOrder(input: unknown): PlaceOrderResult {
 
   const paymentMethod = text(body.paymentMethod, 'Payment method', 20, { required: true });
   if (paymentMethod !== 'cod' && paymentMethod !== 'bank_transfer') throw new HttpError(400, 'Choose Cash on Delivery or Bank Transfer.');
+  if (paymentMethod === 'bank_transfer' && !bankTransferReady(getSettings('bank'))) {
+    throw new HttpError(400, 'Bank transfer is not available right now. Please choose Cash on Delivery.');
+  }
   const bankRef = text(body.bankTransferRef, 'Transfer reference', 60);
+  const expectedTotalFils =
+    body.expectedTotal === undefined ? null : typeof body.expectedTotal === 'number' && Number.isFinite(body.expectedTotal) ? fils(body.expectedTotal) : -1;
   const receipt = body.receipt ? parseReceiptDataUrl(body.receipt) : null;
 
   if (!Array.isArray(body.items) || body.items.length === 0) throw new HttpError(400, 'Your bag is empty.');
@@ -240,6 +245,10 @@ export function placeOrder(input: unknown): PlaceOrderResult {
     const subtotalFils = items.reduce((s, i) => s + fils(i.totalPrice), 0);
     const codFils = paymentMethod === 'cod' ? fils(COD_FEE) : 0;
     const totalFils = subtotalFils + fils(DELIVERY_FEE) + codFils;
+    // Never charge a total the customer was not shown (a price changed while they were at checkout).
+    if (expectedTotalFils !== null && expectedTotalFils !== totalFils) {
+      throw new HttpError(409, `Prices have changed since you opened checkout: your total is now AED ${aed(totalFils)}. Please check your bag and confirm again.`, {}, { code: 'price_changed', total: aed(totalFils) });
+    }
     const provider = paymentMethod === 'cod' ? courierSettings.autoAssignRules.codCourier : courierSettings.autoAssignRules.prepaidCourier;
 
     let id = newOrderId();

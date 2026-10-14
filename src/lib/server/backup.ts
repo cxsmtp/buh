@@ -1,6 +1,7 @@
 import crypto from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
+import { promisify } from 'node:util';
 import zlib from 'node:zlib';
 import type { Order } from '@/types';
 import { audit } from './audit';
@@ -30,9 +31,12 @@ import { readTar, writeTar, type TarEntry } from './tar';
  * Restore: node scripts/restore-backup.mjs <file> <empty folder>.
  */
 
+const gzip = promisify(zlib.gzip);
+
 export const BACKUP_MAGIC = 'BUHBK1\n';
 const KEEP = 14;
-const EMAIL_LIMIT_BYTES = 20 * 1024 * 1024; // most mail servers accept 25 MB
+// Gmail and most mail servers accept 25 MB per message; base64 adds a third.
+const EMAIL_LIMIT_BYTES = 17 * 1024 * 1024;
 
 export interface BackupState {
   lastAttemptAt?: string;
@@ -43,6 +47,7 @@ export interface BackupState {
   lastError?: string;
   lastEmailedAt?: string;
   lastEmailError?: string;
+  lastFailureEmailAt?: string;
   encrypted?: boolean;
 }
 
@@ -217,7 +222,9 @@ export async function createBackup(now = new Date()): Promise<BackupResult> {
     const manifest = entries.map((e) => `${crypto.createHash('sha256').update(e.data).digest('hex')}  ${e.data.length}  ${e.name}`).join('\n') + '\n';
     entries.push({ name: 'MANIFEST.sha256', data: Buffer.from(manifest) });
 
-    const archive = zlib.gzipSync(writeTar(entries), { level: 9 });
+    // Off the main thread, so checkout keeps answering while a big backup is packed.
+    // Level 6: photos and receipts are already compressed; level 9 only costs time.
+    const archive = await gzip(writeTar(entries), { level: 6 });
     const passphrase = process.env.BACKUP_PASSPHRASE || '';
     const encrypted = passphrase.length > 0;
     const payload = encrypted ? seal(archive, passphrase) : archive;
@@ -287,14 +294,16 @@ function sender(): string {
 async function emailBackup(result: BackupResult) {
   const name = path.basename(result.file);
   const attachments: Array<{ filename: string; content: Buffer }> = [];
-  if (result.size <= EMAIL_LIMIT_BYTES) attachments.push({ filename: name, content: fs.readFileSync(result.file) });
+  const csvBytes = result.encrypted ? 0 : result.csv.reduce((n, c) => n + c.data.length, 0);
+  const fits = result.size + csvBytes <= EMAIL_LIMIT_BYTES;
+  if (fits) attachments.push({ filename: name, content: fs.readFileSync(result.file) });
   // Without encryption the flat files are attached too, readable straight from the email.
   if (!result.encrypted) for (const c of result.csv) attachments.push({ filename: c.name, content: c.data });
 
   const lines = [
     `Backup of Beautiful UAE Home taken ${new Date().toUTCString()}.`,
     `Contents: ${result.summary}.`,
-    result.size <= EMAIL_LIMIT_BYTES
+    fits
       ? `Full backup attached: ${name} (${(result.size / 1024 / 1024).toFixed(1)} MB${result.encrypted ? ', encrypted with your BACKUP_PASSPHRASE' : ''}).`
       : `The full backup (${(result.size / 1024 / 1024).toFixed(1)} MB) is too large to email; it is on the server in the backups folder. ${result.encrypted ? '' : 'The CSV files are attached.'}`,
     result.encrypted ? '' : 'Note: these files contain customer names, phone numbers and addresses. Set BACKUP_PASSPHRASE to receive them encrypted instead.',
@@ -362,10 +371,14 @@ export function runBackup(reason: 'scheduled' | 'manual' | 'startup'): Promise<B
       else logEvent('info', 'backup_done', { file: patch.lastFile, summary: result.summary });
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
-      writeBackupState({ lastAttemptAt: attemptAt, lastError: message });
+      const before = readBackupState();
+      // Email when it starts failing, when the error changes, on "Back up now", and then at most daily.
+      const lastMail = before.lastFailureEmailAt ? Date.parse(before.lastFailureEmailAt) : 0;
+      const mail = reason === 'manual' || !before.lastError || before.lastError !== message || Date.now() - lastMail > 24 * 3600_000;
+      writeBackupState({ lastAttemptAt: attemptAt, lastError: message, ...(mail ? { lastFailureEmailAt: new Date().toISOString() } : {}) });
       audit('backup.failed', { reason, error: message });
       logEvent('error', 'backup_failed', { error: message });
-      await emailFailure(message);
+      if (mail) await emailFailure(message);
     }
     return readBackupState();
   })().finally(() => {
@@ -413,7 +426,10 @@ let timer: NodeJS.Timeout | null = null;
 export function startBackupSchedule() {
   if (timer || process.env.BACKUP_DISABLED === 'true') return;
   const tick = () => {
-    const last = readBackupState().lastSuccessAt;
+    const state = readBackupState();
+    const last = state.lastSuccessAt;
+    // After a failure, retry hourly rather than every 15 minutes.
+    if (state.lastError && state.lastAttemptAt && Date.now() - Date.parse(state.lastAttemptAt) < 3600_000) return;
     if (!last || Date.now() - Date.parse(last) >= intervalHours() * 3600_000) void runBackup(last ? 'scheduled' : 'startup');
   };
   setTimeout(tick, 60_000).unref();

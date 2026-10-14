@@ -3,6 +3,7 @@
 import React, { useState, useEffect } from 'react';
 import { BankTransferDetails, CartItem, Emirate, Order, PaymentMethod } from '@/types';
 import { UAE_EMIRATES, UAE_POPULAR_AREAS } from '@/data/initialData';
+import { cartFils, formatAed } from '@/lib/money';
 import { postJson } from '@/lib/apiClient';
 import { 
   checkJeeblyServiceability, 
@@ -39,6 +40,8 @@ interface CheckoutModalProps {
   bank: BankTransferDetails;
   /** The server stored the order (it is shown confirmed only after that). */
   onOrderPlaced: (order: Order) => void;
+  /** Reload the catalogue and the bag (prices changed on the server). */
+  onPricesChanged: () => Promise<void>;
 }
 
 export const CheckoutModal: React.FC<CheckoutModalProps> = ({
@@ -47,6 +50,7 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
   items,
   bank,
   onOrderPlaced,
+  onPricesChanged,
 }) => {
   // One checkout attempt = one order, even if "Confirm" is sent twice (double tap, retry).
   const [idempotencyKey] = useState(() => crypto.randomUUID());
@@ -90,13 +94,11 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
   const [submitError, setSubmitError] = useState('');
 
   // Financial Calculations
-  const subtotal = items.reduce(
-    (sum, item) => sum + (item.product.price + (item.selectedProfile.priceDelta || 0)) * item.quantity,
-    0
-  );
-  const deliveryFee = 0; // Free Priority Express Delivery Across UAE
-  const codFee = 0; // 0 AED COD fee promotion
-  const grandTotal = subtotal + deliveryFee + (paymentMethod === 'cod' ? codFee : 0);
+  // In fils, like the server. Delivery and COD are free; the server is the source of truth and
+  // refuses the order if its total differs from the one shown here (a price changed meanwhile).
+  const totalFils = cartFils(items);
+  const grandTotal = formatAed(totalFils);
+  const bankReady = Boolean(bank.iban && bank.accountName && bank.bankName);
 
   // Re-verify Jeebly serviceability when Emirate, Area or GPS coordinates update
   useEffect(() => {
@@ -233,6 +235,7 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
         quantity: item.quantity,
       })),
       paymentMethod,
+      expectedTotal: totalFils / 100,
       bankTransferRef: paymentMethod === 'bank_transfer' ? bankRef || undefined : undefined,
       receipt: paymentMethod === 'bank_transfer' ? receiptUrl || undefined : undefined,
     });
@@ -244,6 +247,8 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
         setIsPhoneVerified(false);
         setPhoneToken('');
       }
+      // A price changed since the bag was filled: reload it, so the new total is shown before confirming.
+      if (status === 409 && (data as { code?: string }).code === 'price_changed') await onPricesChanged();
       setSubmitError(data.message || 'We could not place your order. Nothing was charged. Please try again.');
       return;
     }
@@ -713,8 +718,8 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
                 </div>
               </div>
 
-              {/* Option 2: Account / Bank Transfer */}
-              <div
+              {/* Option 2: Account / Bank Transfer (only once the shop's real account is entered) */}
+              {bankReady && <div
                 onClick={() => setPaymentMethod('bank_transfer')}
                 className={`p-3.5 rounded-2xl border cursor-pointer transition-all ${
                   paymentMethod === 'bank_transfer'
@@ -730,21 +735,21 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
                   {paymentMethod === 'bank_transfer' && <Check className="w-4 h-4 text-amber-300" />}
                 </div>
                 <p className={`text-[11px] leading-relaxed ${paymentMethod === 'bank_transfer' ? 'text-stone-300' : 'text-stone-600'}`}>
-                  Transfer directly to our Emirates NBD account with fast receipt verification.
+                  Transfer directly to our {bank.bankName} account with fast receipt verification.
                 </p>
                 <div className="mt-2 text-[10px] text-amber-300 font-medium">
                   Prepaid Express Priority Dispatch
                 </div>
-              </div>
+              </div>}
             </div>
 
             {/* If Bank Transfer Selected: Show UAE Bank Details & Receipt Uploader */}
-            {paymentMethod === 'bank_transfer' && (
+            {paymentMethod === 'bank_transfer' && bankReady && (
               <div className="bg-amber-50/70 rounded-2xl p-4 border border-amber-200/90 space-y-3 animate-in fade-in-50 text-xs">
                 <div className="flex items-center justify-between">
                   <span className="font-bold text-stone-900 flex items-center gap-1.5">
                     <ShieldCheck className="w-4 h-4 text-[#c5a059]" />
-                    <span>Emirates NBD Bank Details</span>
+                    <span>{bank.bankName} Bank Details</span>
                   </span>
                   <button
                     type="button"
@@ -778,6 +783,8 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
                     <strong className="font-mono text-stone-800">{bank.swiftCode}</strong>
                   </div>
                 </div>
+
+                {bank.instructions && <p className="text-[11px] text-stone-700 leading-relaxed">{bank.instructions}</p>}
 
                 {/* Optional Reference or Receipt Upload */}
                 <div className="space-y-2 pt-1">

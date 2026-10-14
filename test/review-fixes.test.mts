@@ -112,3 +112,86 @@ test('restore refuses files that would replace the shop keys or admin account', 
     assert.deepEqual(fs.readdirSync(target), [], `${name}: nothing written`);
   }
 });
+
+test('the order is refused, not charged, when the total differs from the one checkout showed', () => {
+  const p = products.listProducts()[0];
+  const line = { productId: p.id, profileId: p.profiles[0].id, quantity: 1 };
+  const shown = p.price + p.profiles[0].priceDelta;
+  const stockBefore = products.getProduct(p.id)!.stockCount;
+  products.updateProduct(p.id, { price: p.price + 100 }); // the owner changes the price meanwhile
+  try {
+    order('+971503000010', [line], { expectedTotal: shown });
+    assert.fail('should have been refused');
+  } catch (e) {
+    const err = e as { status: number; details: { code: string; total: number } };
+    assert.equal(err.status, 409);
+    assert.equal(err.details.code, 'price_changed');
+    assert.equal(err.details.total, shown + 100);
+  }
+  assert.equal(products.getProduct(p.id)!.stockCount, stockBefore, 'no stock taken');
+  assert.equal(order('+971503000010', [line], { expectedTotal: shown + 100 }).order.total, shown + 100);
+  products.updateProduct(p.id, { price: p.price });
+});
+
+test('bank transfer is only offered once the real account is saved, and the demo account is gone', async () => {
+  assert.equal(settings.getSettings('bank').iban, '', 'no sample IBAN shown to customers');
+  assert.equal(statusOf(() => order('+971503000011', undefined, { paymentMethod: 'bank_transfer' })), 400);
+  await settings.updateSettings('bank', { bankName: 'Test Bank', accountName: 'BUH LLC', iban: 'AE070331234567890123456' });
+  assert.equal(order('+971503000011', undefined, { paymentMethod: 'bank_transfer' }).order.paymentMethod, 'bank_transfer');
+});
+
+test('SMS: Unifonic cannot be chosen, only the chosen gateway is used, and an incomplete one cannot be switched on', async () => {
+  const { gatewaysFromSettings } = await import('@/lib/otpService');
+  await assert.rejects(settings.updateSettings('sms', { provider: 'unifonic', isEnabled: true }), /Twilio, Infobip or a webhook/);
+  await assert.rejects(settings.updateSettings('sms', { provider: 'twilio', isEnabled: true, twilio: { accountSid: '' } }), /every field/);
+  const both = {
+    ...settings.getSettings('sms'),
+    provider: 'twilio' as const,
+    twilio: { accountSid: 'AC' + '0'.repeat(32), authToken: 'tok', fromNumber: '+15550001111', verifyServiceSid: '' },
+  };
+  const g = await gatewaysFromSettings(both);
+  assert.ok(g.twilio);
+  assert.equal(g.webhook, undefined, 'the saved webhook is not used when Twilio is chosen');
+});
+
+test('cart money is summed in fils: no floating-point noise', async () => {
+  const { cartFils, formatAed } = await import('@/lib/money');
+  const item = { product: { price: 99.99 }, selectedProfile: { priceDelta: 0 }, quantity: 3 } as never;
+  assert.equal(formatAed(cartFils([item])), '299.97');
+  assert.equal(formatAed(49000), '490');
+});
+
+test('a failing backup emails once, not every 15 minutes', async () => {
+  const { SMTPServer } = await import('smtp-server');
+  let mails = 0;
+  const server = new SMTPServer({
+    authOptional: true,
+    disabledCommands: ['STARTTLS'],
+    onData(stream, _s, cb) {
+      stream.resume();
+      stream.on('end', () => {
+        mails++;
+        cb();
+      });
+    },
+  });
+  await new Promise<void>((r) => server.listen(0, '127.0.0.1', r));
+  const port = (server.server.address() as { port: number }).port;
+  Object.assign(process.env, { SMTP_HOST: '127.0.0.1', SMTP_PORT: String(port), SMTP_SECURE: 'false', SMTP_REQUIRE_TLS: 'false', BACKUP_EMAIL: 'owner@test' });
+  const dir = path.join(process.env.DATA_DIR!, 'backups');
+  fs.rmSync(dir, { recursive: true, force: true });
+  fs.writeFileSync(dir, 'not a folder'); // every backup now fails
+  try {
+    const first = await backup.runBackup('scheduled');
+    assert.ok(first.lastError);
+    await backup.runBackup('scheduled');
+    await backup.runBackup('scheduled');
+    assert.equal(mails, 1, 'one failure email for the same error');
+    await backup.runBackup('manual');
+    assert.equal(mails, 2, '"Back up now" always reports');
+  } finally {
+    fs.rmSync(dir, { force: true });
+    server.close();
+    for (const k of ['SMTP_HOST', 'SMTP_PORT', 'SMTP_SECURE', 'SMTP_REQUIRE_TLS', 'BACKUP_EMAIL']) delete process.env[k];
+  }
+});

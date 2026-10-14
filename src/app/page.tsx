@@ -575,6 +575,10 @@ export default function HomePage() {
         items={cart}
         bank={bankDetails}
         onOrderPlaced={handleOrderPlaced}
+        onPricesChanged={async () => {
+          const list = await loadCatalog();
+          if (list) setCart(loadCart(list));
+        }}
       />}
 
       {/* Order Tracking Modal */}

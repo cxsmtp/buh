@@ -251,6 +251,8 @@ test('the shop and the admin hub share one store: a customer order reaches the o
   await sp.getByPlaceholder('Street name, road, or community number').fill('Street 5');
   await sp.getByPlaceholder('e.g. Marina Gate 1 or Villa 24').fill('Villa 7');
   await sp.getByPlaceholder('e.g. Apt 1402 or Villa 24').fill('7');
+  // No bank account saved yet: bank transfer is not offered (there is no demo account to pay into).
+  assert.equal(await sp.getByText('Account / Bank Transfer').count(), 0);
   await sp.locator('button[type=submit]').click();
   await sp.getByText('Thank You for Your Order!').waitFor({ timeout: 10_000 });
   const orderId = await confirmedOrderId(sp);
@@ -278,6 +280,8 @@ test('the shop and the admin hub share one store: a customer order reaches the o
 
   // 3. Bank details saved in the admin show at checkout.
   await admin.getByRole('button', { name: /Logo & Marquee/ }).click();
+  await admin.getByPlaceholder('Emirates NBD').fill('Mashreq');
+  await admin.getByPlaceholder('BEAUTIFUL UAE HOME TEXTILES LLC').fill('BUH TEXTILES LLC');
   await admin.getByPlaceholder('AE07 0331 2345 6789 0123 456').fill('AE07 0331 2345 6789 0123 456');
   await admin.getByRole('button', { name: 'Save bank details' }).click();
   await admin.getByText(/checkout shows these details now/).waitFor();
@@ -301,8 +305,59 @@ test('the shop and the admin hub share one store: a customer order reaches the o
   await fresh.getByRole('button', { name: /Proceed to Checkout/ }).click();
   await fresh.getByText('Account / Bank Transfer').click();
   await fresh.getByText('AE07 0331 2345 6789 0123 456').waitFor();
+  await fresh.getByText('Mashreq Bank Details').waitFor();
 
   await fresh.close();
   await ctx.close();
   await sp.close();
+});
+
+test('regression: a price changed during checkout is shown before the customer is charged', { skip }, async () => {
+  // A product still in the shop (an earlier test hides one).
+  const products = (await (await fetch(`${server.base}/api/products`)).json()).products as Array<{ id: string; title: string; price: number }>;
+  const product = products[0];
+  const page = await browser.newPage({ viewport: { width: 375, height: 900 } });
+  await page.goto(server.base, { waitUntil: 'domcontentloaded' });
+  await page.locator('h3, h4').filter({ hasText: product.title }).first().click();
+  await page.getByRole('button', { name: /Add to Bag/ }).click();
+  await page.getByRole('button', { name: /Proceed to Checkout/ }).click();
+  await page.locator('#checkout-phone').waitFor();
+  const submit = page.locator('button[type=submit]');
+  await page.getByPlaceholder('e.g. Fatima Al Mansoori').fill('Price Change Customer');
+  await page.locator('#checkout-phone').fill('056 400 7007');
+  await page.getByRole('button', { name: /Send code/ }).click();
+  await page.getByRole('button', { name: /Test mode/ }).click();
+  await page.getByText('Mobile number verified').waitFor();
+  await page.getByPlaceholder('e.g. Dubai Marina, Saadiyat, JVC').fill('Al Barsha');
+  await page.getByPlaceholder('Street name, road, or community number').fill('Street 5');
+  await page.getByPlaceholder('e.g. Marina Gate 1 or Villa 24').fill('Villa 9');
+  await page.getByPlaceholder('e.g. Apt 1402 or Villa 24').fill('9');
+  const before = (await submit.textContent()) || ''; // "Confirm & Raise Order • AED …"
+  assert.match(before, /AED \d/);
+
+  // The owner raises the price while the customer is at checkout.
+  const headers = { 'content-type': 'application/json', origin: server.base };
+  const login = await fetch(`${server.base}/api/admin/login`, {
+    method: 'POST',
+    headers,
+    body: JSON.stringify({ email: 'admin@beautifuluaehome.com', password: 'Browser-Owner-Pass-1' }),
+  });
+  const cookie = (login.headers.get('set-cookie') || '').split(';')[0];
+  const patch = (price: number) =>
+    fetch(`${server.base}/api/admin/products/${product.id}`, { method: 'PATCH', headers: { ...headers, cookie }, body: JSON.stringify({ product: { price } }) });
+  assert.equal((await patch(product.price + 50)).status, 200);
+  try {
+    await submit.click();
+    await page.getByText(/Prices have changed/).waitFor();
+    await page.waitForFunction((old) => document.querySelector('button[type=submit]')?.textContent !== old, before);
+    assert.notEqual(await submit.textContent(), before, 'the new total is shown');
+    await submit.click();
+    await page.getByText('Thank You for Your Order!').waitFor({ timeout: 10_000 });
+    const id = await confirmedOrderId(page);
+    const placed = await lookup(id, '0564007007');
+    assert.ok(before.endsWith(`AED ${placed.order!.total - 50}`), 'the old total was shown first');
+  } finally {
+    await patch(product.price);
+    await page.close();
+  }
 });

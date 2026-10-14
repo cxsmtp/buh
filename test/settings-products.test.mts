@@ -46,6 +46,10 @@ test('an SMS key follows its host: a new webhook address without a new key drops
 
 test('settings are validated', async () => {
   await assert.rejects(settings.updateSettings('bank', { iban: 'GB33BUKB20201555555555' }), /UAE IBAN/);
+  // AE + 21 digits but the checksum is wrong (one digit mistyped): refused.
+  await assert.rejects(settings.updateSettings('bank', { iban: 'AE070331234567890123457' }), /does not add up/);
+  await settings.updateSettings('bank', { iban: 'ae07 0331 2345 6789 0123 456' });
+  assert.equal(settings.getSettings('bank').iban, 'AE07 0331 2345 6789 0123 456');
   await assert.rejects(settings.updateSettings('brand', { accentColor: 'red; background:url(x)' }));
   await assert.rejects(settings.updateSettings('sms', { twilio: { accountSid: 'not-a-sid' } }));
   await assert.rejects(settings.updateSettings('courier', { jeebly: { pickupEmirate: 'Narnia' } }));

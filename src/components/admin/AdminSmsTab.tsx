@@ -34,7 +34,7 @@ export const AdminSmsTab: React.FC<AdminSmsTabProps> = ({
   onUpdateSmsSettings,
 }) => {
   const [saveError, setSaveError] = useState('');
-  const [provider, setProvider] = useState<SmsProvider>(smsSettings.provider || 'twilio');
+  const [provider, setProvider] = useState<SmsProvider>(smsSettings.provider && smsSettings.provider !== 'unifonic' ? smsSettings.provider : 'twilio');
   const [senderId, setSenderId] = useState(smsSettings.senderId || 'BUHome');
 
   // Twilio
@@ -46,8 +46,6 @@ export const AdminSmsTab: React.FC<AdminSmsTabProps> = ({
   const [infobipApiKey, setInfobipApiKey] = useState(smsSettings.infobip?.apiKey || '');
   const [infobipBaseUrl, setInfobipBaseUrl] = useState(smsSettings.infobip?.baseUrl || 'https://api.infobip.com');
 
-  // Unifonic
-  const [unifonicAppSid, setUnifonicAppSid] = useState(smsSettings.unifonic?.appSid || '');
 
   // Webhook
   const [webhookUrl, setWebhookUrl] = useState(smsSettings.customWebhook?.endpointUrl || '');
@@ -79,10 +77,6 @@ export const AdminSmsTab: React.FC<AdminSmsTabProps> = ({
         apiKey: infobipApiKey.trim(),
         baseUrl: infobipBaseUrl.trim(),
         fromSender: senderId.trim() || 'BUHome',
-      },
-      unifonic: {
-        appSid: unifonicAppSid.trim(),
-        senderId: senderId.trim() || 'BUHome',
       },
       customWebhook: {
         endpointUrl: webhookUrl.trim(),
@@ -123,10 +117,6 @@ export const AdminSmsTab: React.FC<AdminSmsTabProps> = ({
         baseUrl: infobipBaseUrl.trim(),
         fromSender: senderId.trim() || 'BUHome',
       },
-      unifonic: {
-        appSid: unifonicAppSid.trim(),
-        senderId: senderId.trim() || 'BUHome',
-      },
       customWebhook: {
         endpointUrl: webhookUrl.trim(),
         bearerToken: webhookBearer.trim(),
@@ -146,7 +136,6 @@ export const AdminSmsTab: React.FC<AdminSmsTabProps> = ({
   const isConfigured =
     (provider === 'twilio' && twilioAccountSid && (twilioAuthToken || secretsSet['twilio.authToken'])) ||
     (provider === 'infobip' && (infobipApiKey || secretsSet['infobip.apiKey'])) ||
-    (provider === 'unifonic' && (unifonicAppSid || secretsSet['unifonic.appSid'])) ||
     (provider === 'custom_webhook' && webhookUrl);
 
   return (
@@ -243,11 +232,10 @@ export const AdminSmsTab: React.FC<AdminSmsTabProps> = ({
           </div>
 
           {/* Provider Selection Tabs */}
-          <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 text-xs">
+          <div className="grid grid-cols-1 min-[420px]:grid-cols-3 gap-2 text-xs">
             {[
               { id: 'twilio', name: 'Twilio SMS', badge: 'Recommended' },
               { id: 'infobip', name: 'Infobip UAE', badge: 'Direct Etisalat' },
-              { id: 'unifonic', name: 'Unifonic', badge: 'Middle East' },
               { id: 'custom_webhook', name: 'Webhook', badge: 'Custom' },
             ].map((p) => (
               <button
@@ -383,25 +371,6 @@ export const AdminSmsTab: React.FC<AdminSmsTabProps> = ({
                   placeholder="https://xxxx.api.infobip.com"
                   value={infobipBaseUrl}
                   onChange={(e) => setInfobipBaseUrl(e.target.value)}
-                  className="w-full px-3.5 py-2 rounded-xl border border-stone-300 bg-white text-stone-900 font-mono text-xs focus:outline-none focus:ring-1 focus:ring-[#c5a059]"
-                />
-              </div>
-            </div>
-          )}
-
-          {/* UNIFONIC CONFIG */}
-          {provider === 'unifonic' && (
-            <div className="space-y-3 p-3.5 bg-stone-50 rounded-2xl border border-stone-200 text-xs animate-in fade-in-50">
-              <div>
-                <label className="block text-stone-700 font-semibold mb-1">
-                  Unifonic App SID:
-                </label>
-                <input
-                  type="password"
-                  autoComplete="off"
-                  placeholder={secretPlaceholder(secretsSet['unifonic.appSid'])}
-                  value={unifonicAppSid}
-                  onChange={(e) => setUnifonicAppSid(e.target.value)}
                   className="w-full px-3.5 py-2 rounded-xl border border-stone-300 bg-white text-stone-900 font-mono text-xs focus:outline-none focus:ring-1 focus:ring-[#c5a059]"
                 />
               </div>

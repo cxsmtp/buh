@@ -37,7 +37,9 @@ Every change is recorded with who made it and when.
 
 ### Inventory
 
-**Inventory Stock** lists every product. You can change the price and stock right there (**Save**), and **Visible / Hidden** shows or hides a product in the shop. **+ Add Bedding Set** creates a new one; its photos are stored on the server.
+**Inventory Stock** lists every product. You can change the price and stock right there (**Save**), and **Visible / Hidden** shows or hides a product in the shop. **+ Add Bedding Set** creates a new one; phone photos are shrunk to 1600 px before upload and stored on the server.
+
+If a customer buys while you are editing the stock, **Save** says the stock changed and shows the new figure: check it and save again.
 
 ### Customers
 
@@ -45,17 +47,20 @@ Every change is recorded with who made it and when.
 
 ### Bank details
 
-Under **🎨 Logo & Marquee → Bank transfer details**. Customers paying by transfer see exactly these at checkout: check the IBAN before going live.
+Under **🎨 Logo & Marquee → Bank transfer details**. Customers paying by transfer see exactly these at checkout, with your instructions.
+
+- **Bank transfer only appears at checkout once the bank name, account name and IBAN are saved.**
+- The IBAN is checked (AE plus 21 digits, with its check digits), so most typos are caught.
 
 ### Backups
 
 The line at the top of the Admin Hub shows when the last backup ran:
 
 - **green:** recent and emailed;
-- **amber:** taken but not emailed (check the `SMTP_*` settings);
+- **amber:** taken but not emailed (check the `SMTP_*` settings), or emailed without a `BACKUP_PASSPHRASE`;
 - **red:** failed or overdue.
 
-**Back up now** runs one immediately. Backups run every 12 hours on their own. Restoring: see HOSTINGER_DEPLOYMENT_GUIDE.md.
+**Back up now** runs one immediately. Backups run every 12 hours on their own. Courier and SMS keys are not in backups: after a restore, enter them again. Restoring: see HOSTINGER_DEPLOYMENT_GUIDE.md.
 
 ### SMS & Real OTP
 
