@@ -1,31 +1,46 @@
-import { NextResponse } from 'next/server';
-import { Order, CourierSettings } from '@/types';
 import { createJeeblyShipment } from '@/lib/jeebly';
 import { createEchoShipment } from '@/lib/echo';
+import { audit } from '@/lib/server/audit';
+import { parseCourierProvider, parseCourierSettings, parseOrderForDispatch } from '@/lib/server/courierInput';
+import { requireAdmin } from '@/lib/server/guard';
+import { handleRouteError, json, readJsonBody } from '@/lib/server/http';
+
+// One booking per order at a time: a double click must not book twice.
+const inFlight = new Set<string>();
 
 export async function POST(request: Request) {
+  let orderId = '';
   try {
-    const body = await request.json();
-    const { order, provider, settings }: { order: Order; provider: 'jeebly' | 'echo'; settings: CourierSettings } = body;
+    const session = await requireAdmin(request);
+    const body = await readJsonBody(request, 256 * 1024);
+    const provider = parseCourierProvider(body.provider);
+    const order = parseOrderForDispatch(body.order);
+    const settings = parseCourierSettings(body.settings);
 
-    if (!order) {
-      return NextResponse.json({ success: false, message: 'Order data is required' }, { status: 400 });
+    if (inFlight.has(order.id)) {
+      return json({ success: false, message: 'This order is already being booked. Please wait.' }, 409);
     }
+    orderId = order.id;
+    inFlight.add(orderId);
 
-    if (provider === 'jeebly') {
-      const result = await createJeeblyShipment(order, settings.jeebly);
-      return NextResponse.json(result);
-    } else if (provider === 'echo') {
-      const result = await createEchoShipment(order, settings.echo);
-      return NextResponse.json(result);
-    } else {
-      return NextResponse.json({ success: false, message: `Unknown courier provider: ${provider}` }, { status: 400 });
-    }
+    const result = provider === 'jeebly'
+      ? await createJeeblyShipment(order, settings.jeebly)
+      : await createEchoShipment(order, settings.echo);
+
+    audit('courier.dispatch', {
+      by: session.email,
+      orderId: order.id,
+      provider,
+      success: result.success,
+      simulated: result.isSimulated,
+      awb: result.awbNumber,
+    });
+    const { rawResponse: _raw, ...safe } = result as typeof result & { rawResponse?: unknown };
+    void _raw;
+    return json(safe, result.success ? 200 : 502);
   } catch (error) {
-    console.error('Courier dispatch API route error:', error);
-    return NextResponse.json(
-      { success: false, message: (error as Error).message || 'Failed to dispatch shipment' },
-      { status: 500 }
-    );
+    return handleRouteError(error, 'courier/dispatch');
+  } finally {
+    if (orderId) inFlight.delete(orderId);
   }
 }

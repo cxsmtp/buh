@@ -54,11 +54,17 @@ Create your production `.env.production` file:
 cp .env.production.example .env.production
 nano .env.production
 ```
-Fill in your credentials:
-- `TWILIO_ACCOUNT_SID`, `TWILIO_AUTH_TOKEN`, `TWILIO_PHONE_NUMBER` (or `INFOBIP_API_KEY`)
-- `ECO_EXPRESS_API_KEY`, `ECO_EXPRESS_ACCOUNT_ID`
-- `JEEBLY_PARTNER_KEY`
-- `NEXT_PUBLIC_APP_URL=https://yourdomain.ae`
+Fill in your settings:
+- `NEXT_PUBLIC_APP_URL=https://yourdomain.ae` and `NEXT_PUBLIC_SUPPORT_EMAIL` (shown to customers with non-UAE numbers)
+- An SMS gateway for checkout phone verification: `TWILIO_ACCOUNT_SID`, `TWILIO_AUTH_TOKEN`, `TWILIO_FROM_PHONE` (or `INFOBIP_*`, or `SMS_WEBHOOK_URL`)
+- `TRUST_PROXY=1` (nginx sits in front) and `DATA_DIR=/var/lib/buhome`
+
+Courier keys (Jeebly, Eco Express) are entered in the Admin Hub, not here.
+
+Create the private data folder (admin account, session key, audit log):
+```bash
+sudo mkdir -p /var/lib/buhome && sudo chown "$USER" /var/lib/buhome && chmod 700 /var/lib/buhome
+```
 
 *(Press `Ctrl + O` to save, then `Ctrl + X` to exit).*
 
@@ -71,10 +77,14 @@ npm ci
 npm run build
 ```
 
-### Step 6: Start with PM2 Cluster Mode
+### Step 6: Start with PM2
 ```bash
-# Start cluster mode across all CPU cores
+# One instance: phone codes and rate limits live in process memory
 pm2 start ecosystem.config.cjs
+
+# First start only: copy the one-time admin password from the log.
+# You will choose your own password at first sign-in.
+pm2 logs buhome-app --lines 50
 
 # Save PM2 state so it restarts automatically on server reboot
 pm2 save
@@ -161,13 +171,10 @@ This script pulls code, builds the bundle, and executes a zero-downtime hot-relo
 
 ## 🔒 Security Hardening Included
 
-The repository already comes pre-configured with enterprise-grade security:
-1. **Security Headers** (`next.config.ts`):
-   - `X-Frame-Options: DENY` (Anti-Clickjacking)
-   - `X-Content-Type-Options: nosniff` (MIME-sniffing prevention)
-   - `Strict-Transport-Security: max-age=31536000` (Enforced HTTPS)
-   - `Referrer-Policy: origin-when-cross-origin`
-   - `Permissions-Policy: geolocation=(self)`
-2. **API Rate Limiting**:
-   - Protects OTP `/api/otp/send` from SMS abuse (max attempts per UAE mobile number + rate-limit).
-   - Nginx layer limits API requests to 20 req/s with burst smoothing.
+What is built in, and what you must do, is in [docs/security.md](docs/security.md). In short:
+1. **Admin sign-in is checked on the server** (scrypt-hashed password, HttpOnly session cookie, lockout after 5 wrong attempts). The first start prints a one-time password to the log.
+2. **Every admin API route requires that session** and refuses cross-site requests.
+3. **Checkout phone verification** sends 6-digit codes to UAE mobile numbers only, with per-number, per-address and shop-wide limits against SMS-pumping fraud.
+4. **Security headers** on every page: a Content Security Policy, `X-Frame-Options: DENY`, `nosniff`, HSTS, and a tight `Permissions-Policy`.
+5. **nginx** limits API traffic to 20 req/s and sign-in / code requests to 10 per minute per address.
+6. **Docker** runs read-only, as a non-root user, with every Linux capability dropped, bound to 127.0.0.1.

@@ -1,5 +1,3 @@
-version: "3.8"
-
 services:
   buhome-app:
     build:
@@ -7,16 +5,34 @@ services:
       dockerfile: Dockerfile
     container_name: buhome-uae
     restart: always
+    # Only nginx on this host should reach the app; set BIND_ADDRESS=0.0.0.0 to expose it directly.
     ports:
-      - "3000:3000"
+      - "${BIND_ADDRESS:-127.0.0.1}:3000:3000"
     environment:
       - NODE_ENV=production
       - PORT=3000
+      - DATA_DIR=/data
+      # nginx in front sets X-Real-IP; per-IP rate limits use it.
+      - TRUST_PROXY=1
     env_file:
       - .env.production
+    volumes:
+      - buhome-data:/data
+    read_only: true
+    tmpfs:
+      - /tmp
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    pids_limit: 512
+    stop_grace_period: 15s
     healthcheck:
-      test: ["CMD", "wget", "-qO-", "http://localhost:3000/api/courier/serviceability?area=Downtown+Dubai"]
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:3000/api/health"]
       interval: 30s
-      timeout: 10s
+      timeout: 5s
       retries: 3
       start_period: 20s
+
+volumes:
+  buhome-data:
