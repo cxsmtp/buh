@@ -13,16 +13,27 @@ export interface ApiResult<T = Record<string, unknown>> {
  * POST JSON to one of our own routes. Never throws: network errors come back
  * as status 0 with a readable message, so every caller can show something.
  */
-export async function postJson<T = Record<string, unknown>>(url: string, body: unknown): Promise<ApiResult<T>> {
+export function postJson<T = Record<string, unknown>>(url: string, body: unknown): Promise<ApiResult<T>> {
+  return sendJson<T>('POST', url, body);
+}
+
+/** GET one of our own routes. Never throws (see postJson). */
+export function getJson<T = Record<string, unknown>>(url: string): Promise<ApiResult<T>> {
+  return sendJson<T>('GET', url);
+}
+
+export async function sendJson<T = Record<string, unknown>>(method: 'GET' | 'POST' | 'PUT' | 'PATCH', url: string, body?: unknown): Promise<ApiResult<T>> {
   try {
     const res = await fetch(url, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      method,
+      headers: body === undefined ? {} : { 'Content-Type': 'application/json' },
       credentials: 'same-origin',
-      body: JSON.stringify(body),
+      body: body === undefined ? undefined : JSON.stringify(body),
     });
     const data = (await res.json().catch(() => ({}))) as T;
-    if (res.status === 401 && url.startsWith('/api/') && !url.startsWith('/api/admin/login')) {
+    // Only admin calls mean "signed out"; a shopper's 401 (e.g. an expired phone check) must not open the admin login.
+    const adminCall = /^\/api\/(admin\/|courier\/(dispatch|test)|ai-transform)/.test(url) && !url.startsWith('/api/admin/login');
+    if (res.status === 401 && adminCall) {
       window.dispatchEvent(new Event(ADMIN_SIGNED_OUT_EVENT));
     }
     return { ok: res.ok, status: res.status, data };

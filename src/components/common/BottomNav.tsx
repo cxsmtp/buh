@@ -1,7 +1,7 @@
 'use client';
 
 import React from 'react';
-import { Home, Package, ShoppingBag, Truck, Camera, Users, Settings, Store, Sparkles, ClipboardList, Palette } from 'lucide-react';
+import { Home, Package, ShoppingBag, Truck, Camera, Users, Settings, Store, Sparkles, ClipboardList, Palette, MessageSquare } from 'lucide-react';
 
 interface BottomNavProps {
   isAdminMode: boolean;
@@ -30,7 +30,7 @@ export const BottomNav: React.FC<BottomNavProps> = ({
 }) => {
   if (isAdminMode) {
     return (
-      <div className="fixed bottom-0 left-0 right-0 z-40 bg-white/95 backdrop-blur-md border-t border-stone-200 px-1 py-1.5 flex items-center justify-around shadow-lg">
+      <nav aria-label="Admin sections" className="fixed bottom-0 left-0 right-0 z-40 bg-white/95 backdrop-blur-md border-t border-stone-200 px-1 py-1.5 flex items-center justify-around shadow-lg">
         {/* Admin Orders */}
         <button
           onClick={() => onSetAdminTab('orders')}
@@ -105,6 +105,18 @@ export const BottomNav: React.FC<BottomNavProps> = ({
           <span className="text-[9px] mt-0.5">Brand</span>
         </button>
 
+        {/* SMS gateway (phone codes at checkout) */}
+        <button
+          onClick={() => onSetAdminTab('sms')}
+          className={`flex flex-col items-center py-1 px-1.5 rounded-lg text-xs ${
+            adminTab === 'sms' ? 'text-[#c5a059] font-bold' : 'text-stone-500'
+          }`}
+          title="SMS gateway for checkout phone codes"
+        >
+          <MessageSquare className="w-4 h-4" />
+          <span className="text-[9px] mt-0.5">SMS</span>
+        </button>
+
         {/* Return to Shop */}
         <button
           onClick={onToggleAdminMode}
@@ -114,7 +126,7 @@ export const BottomNav: React.FC<BottomNavProps> = ({
           <Store className="w-5 h-5" />
           <span className="text-[10px] mt-0.5">View Shop</span>
         </button>
-      </div>
+      </nav>
     );
   }
 

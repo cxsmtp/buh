@@ -43,6 +43,8 @@ export interface Product {
   aiStagingPrompt?: string;
   isAiEnhanced?: boolean;
   stockCount: number;
+  /** Shown in the shop (false = hidden by the owner). Present on admin reads. */
+  active?: boolean;
   isFeatured: boolean;
   isNewArrival?: boolean;
   rating: number;
@@ -84,6 +86,10 @@ export interface CourierDetails {
   dispatchedAt?: string;
   deliveredAt?: string;
   labelGenerated: boolean;
+  /** Live bookings only: booked with the carrier, or sent without an answer (may exist). */
+  bookingState?: 'booked' | 'uncertain';
+  /** The AWB came from sandbox mode, not a real booking. */
+  simulated?: boolean;
   courierNotes?: string;
   codAmountCollected?: number;
 }
@@ -227,7 +233,7 @@ export interface SmsGatewaySettings {
     baseUrl: string;
     fromSender: string;
   };
-  unifonic: {
+  unifonic?: {
     appSid: string;
     senderId: string;
   };

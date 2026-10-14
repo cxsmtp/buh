@@ -90,36 +90,98 @@ async function adminCookie(): Promise<string> {
   return (res.headers.get('set-cookie') || '').split(';')[0];
 }
 
-const ORDER = {
-  id: 'BUH-2026-1001',
-  createdAt: '2026-10-14T10:00:00Z',
-  customer: { fullName: 'Fatima Al Mansoori', phone: '+971501234567', emirate: 'Dubai', area: 'Dubai Marina', streetAddress: 'Marina Walk', buildingVilla: 'Marina Gate 1', flatVillaNo: '1402' },
-  items: [{ productId: 'p1', title: 'Mughal Garden Set', image: '', profileId: 'king', profileName: 'King', mattressSize: '180x200', fittedSheet: '180x200x40', flatSheet: '260x270', pillowcases: '2', unitPrice: 365, quantity: 1, totalPrice: 365 }],
-  subtotal: 365, deliveryFee: 0, codFee: 0, discount: 0, total: 365,
-  paymentMethod: 'cod', paymentStatus: 'cod_pending', status: 'pending_confirmation',
-  courier: { provider: 'jeebly', pickupDate: '2026-10-15', weightKg: 2.5, pieces: 1 },
-};
+/** A real order, placed the way the shop does it: SMS code (sandbox), verify, then /api/orders. */
+async function placeTestOrder(phone: string, quantity = 1) {
+  const sent = await (await post('/api/otp/send', { phone })).json();
+  const verified = await (await post('/api/otp/verify', { phone, code: sent.devOtpCode })).json();
+  assert.ok(verified.verificationToken, 'phone proof issued');
+  const products = (await (await fetch(`${BASE}/api/products`)).json()).products;
+  const res = await post('/api/orders', {
+    idempotencyKey: crypto.randomUUID(),
+    verificationToken: verified.verificationToken,
+    customer: { fullName: 'Fatima Al Mansoori', emirate: 'Dubai', area: 'Dubai Marina', streetAddress: 'Marina Walk', buildingVilla: 'Marina Gate 1', flatVillaNo: '1402' },
+    items: [{ productId: products[0].id, profileId: products[0].profiles[0].id, quantity }],
+    paymentMethod: 'cod',
+  });
+  assert.equal(res.status, 201);
+  return (await res.json()).order as { id: string; total: number };
+}
 
-test('dispatch: a sandbox booking is labelled simulated; bad input is refused', { skip: !hasBuild }, async () => {
+test('dispatch: books a stored order (sandbox, labelled simulated); bad input is refused', { skip: !hasBuild }, async () => {
   const cookie = await adminCookie();
-  const settings = { jeebly: { isLive: false }, echo: { isLive: false } };
-  const ok = await post('/api/courier/dispatch', { provider: 'jeebly', order: ORDER, settings }, { cookie });
+  const order = await placeTestOrder('0507000001');
+  const ok = await post('/api/courier/dispatch', { orderId: order.id, provider: 'jeebly' }, { cookie });
   assert.equal(ok.status, 200);
   const booked = await ok.json();
   assert.equal(booked.isSimulated, true);
   assert.match(booked.awbNumber, /^GPY-DXB-\d{6}$/);
+  assert.equal(booked.order.status, 'confirmed');
   assert.equal(booked.rawResponse, undefined, 'carrier raw replies stay on the server');
 
-  for (const [label, body] of [
-    ['unknown courier', { provider: 'fedex', order: ORDER, settings }],
-    ['no items', { provider: 'jeebly', order: { ...ORDER, items: [] }, settings }],
-    ['negative total', { provider: 'jeebly', order: { ...ORDER, total: -5 }, settings }],
-    ['bad pickup date', { provider: 'jeebly', order: { ...ORDER, courier: { pickupDate: 'tomorrow' } }, settings }],
+  for (const [label, body, status] of [
+    ['unknown courier', { orderId: order.id, provider: 'fedex' }, 400],
+    ['unknown order', { orderId: 'BUH-000000-NOPE00', provider: 'jeebly' }, 404],
+    ['bad pickup date', { orderId: order.id, provider: 'jeebly', pickupDate: 'tomorrow' }, 400],
+    ['negative weight', { orderId: order.id, provider: 'jeebly', weightKg: -1 }, 400],
   ] as const) {
-    assert.equal((await post('/api/courier/dispatch', body, { cookie })).status, 400, label);
+    assert.equal((await post('/api/courier/dispatch', body, { cookie })).status, status, label);
   }
   const wrongType = await fetch(`${BASE}/api/courier/dispatch`, { method: 'POST', headers: { 'content-type': 'text/plain', origin: BASE, cookie }, body: '{}' });
   assert.equal(wrongType.status, 415);
+});
+
+test('orders: the server sets prices and stock; a forged price is ignored; a retry is one order', { skip: !hasBuild }, async () => {
+  const products = (await (await fetch(`${BASE}/api/products`)).json()).products;
+  const p = products[0];
+  const stockBefore = p.stockCount;
+  const sent = await (await post('/api/otp/send', { phone: '0507000002' })).json();
+  const { verificationToken } = await (await post('/api/otp/verify', { phone: '0507000002', code: sent.devOtpCode })).json();
+  const body = {
+    idempotencyKey: crypto.randomUUID(),
+    verificationToken,
+    customer: { fullName: 'Price Tester', emirate: 'Sharjah', area: 'Al Nahda', streetAddress: 's', buildingVilla: 'b', flatVillaNo: '1' },
+    items: [{ productId: p.id, profileId: p.profiles[0].id, quantity: 2, unitPrice: 1, totalPrice: 2 }],
+    paymentMethod: 'cod',
+    total: 2,
+  };
+  const first = await (await post('/api/orders', body)).json();
+  assert.equal(first.order.total, (p.price + p.profiles[0].priceDelta) * 2, 'price from the catalogue');
+  const retry = await post('/api/orders', body);
+  assert.equal(retry.status, 200);
+  assert.equal((await retry.json()).order.id, first.order.id, 'same order back');
+  const after = (await (await fetch(`${BASE}/api/products`)).json()).products.find((x: { id: string }) => x.id === p.id);
+  assert.equal(after.stockCount, stockBefore - 2, 'stock taken once');
+
+  // No phone proof, or someone else's: refused.
+  assert.equal((await post('/api/orders', { ...body, idempotencyKey: crypto.randomUUID(), verificationToken: 'forged.token' })).status, 401);
+  // More than in stock: refused with how many are left.
+  const tooMany = await post('/api/orders', { ...body, idempotencyKey: crypto.randomUUID(), items: [{ productId: p.id, profileId: p.profiles[0].id, quantity: 20 }] });
+  assert.ok([400, 409].includes(tooMany.status));
+});
+
+test('settings: keys are write-only and never reach the public page', { skip: !hasBuild }, async () => {
+  const cookie = await adminCookie();
+  const put = (key: string, settings: unknown) =>
+    fetch(`${BASE}/api/admin/settings/${key}`, { method: 'PUT', headers: { 'content-type': 'application/json', origin: BASE, cookie }, body: JSON.stringify({ settings }) });
+  const saved = await (await put('courier', { jeebly: { apiKey: 'JB-SECRET-XYZ' }, echo: {} })).json();
+  assert.equal(saved.value.jeebly.apiKey, '');
+  assert.equal(saved.secretsSet['jeebly.apiKey'], true);
+  const all = await (await fetch(`${BASE}/api/admin/settings`, { headers: { cookie } })).text();
+  assert.ok(!all.includes('JB-SECRET-XYZ'));
+  assert.ok(!(await (await fetch(`${BASE}/api/settings/public`)).text()).includes('JB-SECRET'));
+  assert.equal((await put('bank', { iban: 'not an iban' })).status, 400);
+  assert.equal((await put('nope', {})).status, 404);
+  assert.equal((await fetch(`${BASE}/api/admin/settings/courier`, { method: 'PUT', headers: { 'content-type': 'application/json', origin: BASE }, body: '{}' })).status, 401);
+});
+
+test('backups: "Back up now" works for the admin only', { skip: !hasBuild }, async () => {
+  const cookie = await adminCookie();
+  assert.equal((await post('/api/admin/backup', {})).status, 401);
+  const res = await post('/api/admin/backup', {}, { cookie });
+  assert.equal(res.status, 200);
+  const health = await res.json();
+  assert.ok(health.lastSuccessAt);
+  assert.match(health.lastSummary, /orders/);
 });
 
 test('courier connection test masks keys in its reply', { skip: !hasBuild }, async () => {

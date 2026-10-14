@@ -8,6 +8,8 @@ const appVersion = `BUH-${pkg.version.split(".").map((n) => n.padStart(2, "0")).
 
 const nextConfig: NextConfig = {
   output: "standalone",
+  // Loaded at runtime from node_modules (native SQLite driver; mailer with dynamic requires).
+  serverExternalPackages: ["better-sqlite3", "nodemailer"],
   env: { NEXT_PUBLIC_APP_VERSION: appVersion },
   images: {
     unoptimized: true,
@@ -32,7 +34,8 @@ const nextConfig: NextConfig = {
       },
       {
         // API answers are per-request and may carry personal data: never cache them.
-        source: "/api/(.*)",
+        // (Uploaded images, content-addressed and public, set their own long cache.)
+        source: "/api/((?!images/).*)",
         headers: [
           { key: "Cache-Control", value: "no-store" },
           { key: "Content-Security-Policy", value: "default-src 'none'; frame-ancestors 'none'" },

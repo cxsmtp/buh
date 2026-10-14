@@ -2,6 +2,7 @@
 
 import React from 'react';
 import { CartItem } from '@/types';
+import { cartFils, formatAed, lineFils } from '@/lib/money';
 import { X, Trash2, ArrowRight, ShoppingBag, Truck, ShieldCheck } from 'lucide-react';
 
 interface CartDrawerProps {
@@ -23,16 +24,9 @@ export const CartDrawer: React.FC<CartDrawerProps> = ({
 }) => {
   if (!isOpen) return null;
 
-  const subtotal = items.reduce((sum, item) => {
-    const itemPrice = item.product.price + (item.selectedProfile.priceDelta || 0);
-    return sum + itemPrice * item.quantity;
-  }, 0);
-
-  const freeDeliveryThreshold = 200;
-  const progressToFree = Math.min(100, Math.round((subtotal / freeDeliveryThreshold) * 100));
-  const freeDeliveryRemaining = Math.max(0, freeDeliveryThreshold - subtotal);
-  const deliveryFee = subtotal >= freeDeliveryThreshold || items.length === 0 ? 0 : 20;
-  const grandTotal = subtotal + deliveryFee;
+  // Delivery is free across the UAE (the server charges no delivery fee).
+  const subtotal = formatAed(cartFils(items));
+  const grandTotal = subtotal;
 
   return (
     <div className="fixed inset-0 z-50 overflow-hidden">
@@ -61,25 +55,12 @@ export const CartDrawer: React.FC<CartDrawerProps> = ({
             </button>
           </div>
 
-          {/* Free Shipping Progress */}
+          {/* Free delivery */}
           <div className="px-4 py-3 bg-amber-50/70 border-b border-amber-100">
-            <div className="flex items-center justify-between text-xs text-stone-800 mb-1.5">
-              <span className="flex items-center gap-1 font-medium">
-                <Truck className="w-3.5 h-3.5 text-[#c5a059]" />
-                {progressToFree >= 100 ? (
-                  <strong className="text-emerald-700">Congratulations! Free UAE Delivery unlocked</strong>
-                ) : (
-                  <span>Add <strong>AED {freeDeliveryRemaining}</strong> more for <strong>FREE Delivery</strong></span>
-                )}
-              </span>
-              <span className="font-bold text-[#c5a059]">{progressToFree}%</span>
-            </div>
-            <div className="w-full h-1.5 bg-stone-200 rounded-full overflow-hidden">
-              <div
-                className="h-full bg-gradient-to-r from-[#c5a059] to-emerald-500 rounded-full transition-all duration-300"
-                style={{ width: `${progressToFree}%` }}
-              ></div>
-            </div>
+            <span className="flex items-center gap-1 text-xs font-medium text-emerald-700">
+              <Truck className="w-3.5 h-3.5 text-[#c5a059]" />
+              <strong>Free delivery to all 7 Emirates</strong>
+            </span>
           </div>
 
           {/* Cart Items List */}
@@ -100,8 +81,7 @@ export const CartDrawer: React.FC<CartDrawerProps> = ({
               </div>
             ) : (
               items.map((item, idx) => {
-                const itemUnitPrice = item.product.price + (item.selectedProfile.priceDelta || 0);
-                const itemTotalPrice = itemUnitPrice * item.quantity;
+                const itemTotalPrice = formatAed(lineFils(item));
                 return (
                   <div
                     key={`${item.product.id}-${item.selectedProfile.id}-${idx}`}
@@ -190,11 +170,7 @@ export const CartDrawer: React.FC<CartDrawerProps> = ({
                 <div className="flex justify-between">
                   <span>UAE Delivery (All 7 Emirates)</span>
                   <span className="font-semibold text-stone-800">
-                    {deliveryFee === 0 ? (
-                      <span className="text-emerald-600 font-bold">FREE</span>
-                    ) : (
-                      `AED ${deliveryFee}`
-                    )}
+                    <span className="text-emerald-600 font-bold">FREE</span>
                   </span>
                 </div>
                 <div className="flex justify-between text-sm font-bold text-[#0f1c2e] pt-1.5 border-t border-stone-200">

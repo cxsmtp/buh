@@ -6,7 +6,7 @@ import { tempDataDir } from './helpers.mjs';
 
 const dir = tempDataDir();
 const { audit, verifyAuditLog } = await import('@/lib/server/audit');
-const { parseOrderForDispatch, parseCourierProvider } = await import('@/lib/server/courierInput');
+const { parseCourierProvider, parseCourierSettings } = await import('@/lib/server/courierInput');
 
 test('audit log is hash-chained and detects tampering', () => {
   audit('test.one', { a: 1 });
@@ -27,20 +27,11 @@ test('audit log is hash-chained and detects tampering', () => {
   assert.equal(verifyAuditLog(full).ok, false, 'deleting a line breaks the chain');
 });
 
-test('courier input: allow-listed, length-capped, numbers checked', () => {
-  const order = {
-    id: 'BUH-1',
-    customer: { fullName: 'A\u0000B', phone: '+971501234567', emirate: 'Dubai', area: 'Marina', extra: 'dropped' },
-    items: [{ title: 'Sheet', unitPrice: 100, quantity: 2 }],
-    total: 200,
-    paymentMethod: 'cod',
-    __proto__: { polluted: true },
-  };
-  const parsed = parseOrderForDispatch(order);
-  assert.equal(parsed.customer.fullName, 'A B');
-  assert.equal((parsed.customer as Record<string, unknown>).extra, undefined);
-  assert.throws(() => parseOrderForDispatch({ ...order, total: Infinity }));
-  assert.throws(() => parseOrderForDispatch({ ...order, items: [] }));
-  assert.throws(() => parseOrderForDispatch({ ...order, paymentMethod: 'free' }));
+test('courier input: only known couriers and emirates; settings allow-listed', () => {
   assert.throws(() => parseCourierProvider('fedex'));
+  assert.equal(parseCourierProvider('jeebly'), 'jeebly');
+  const settings = parseCourierSettings({ jeebly: { apiKey: 'k', isLive: 'yes', extra: 1 }, echo: {} });
+  assert.equal(settings.jeebly.isLive, false, 'only a real true switches live mode on');
+  assert.equal((settings.jeebly as unknown as Record<string, unknown>).extra, undefined);
+  assert.throws(() => parseCourierSettings({ jeebly: { pickupEmirate: 'Narnia' }, echo: {} }), /seven Emirates/);
 });

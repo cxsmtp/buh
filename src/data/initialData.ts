@@ -21,14 +21,15 @@ export const UAE_POPULAR_AREAS: Record<string, string[]> = {
   'Umm Al Quwain': ['Al Salama', 'Umm Al Quwain Marina'],
 };
 
+// No account until the owner enters the real one (Admin Hub → Logo & Marquee → Bank transfer details).
 export const INITIAL_BANK_DETAILS: BankTransferDetails = {
-  bankName: 'Emirates NBD',
-  accountName: 'BEAUTIFUL UAE HOME TEXTILES LLC',
-  accountNumber: '10182490219401',
-  iban: 'AE29 0260 0010 1824 9021 9401',
-  swiftCode: 'EBILAEADXXX',
-  branch: 'Al Wasl Road Branch, Dubai, UAE',
-  instructions: 'Transfer the order amount to our Emirates NBD account. Please include your Order ID in the transfer remarks and upload your transfer confirmation slip during checkout or via WhatsApp.',
+  bankName: '',
+  accountName: '',
+  accountNumber: '',
+  iban: '',
+  swiftCode: '',
+  branch: '',
+  instructions: 'Please put your order number in the transfer remarks, and upload the transfer slip here or send it on WhatsApp.',
 };
 
 export const INITIAL_COURIER_SETTINGS: CourierSettings = {

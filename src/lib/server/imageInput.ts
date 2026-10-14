@@ -28,3 +28,20 @@ export function parseImageDataUrl(value: unknown, maxBytes = 6 * 1024 * 1024): {
   if (!ok) throw new HttpError(400, 'The file is not a valid PNG, JPEG or WebP image.');
   return { mime, bytes };
 }
+
+/**
+ * A bank-transfer receipt: an image (as above) or a PDF, checked by its first
+ * bytes. Returned with the file extension to store it under.
+ */
+export function parseReceiptDataUrl(value: unknown, maxBytes = 5 * 1024 * 1024): { ext: 'png' | 'jpg' | 'webp' | 'pdf'; bytes: Buffer } {
+  const pdf = typeof value === 'string' ? /^data:application\/pdf;base64,([A-Za-z0-9+/]+={0,2})$/.exec(value) : null;
+  if (pdf) {
+    if (pdf[1].length * 0.75 > maxBytes) throw new HttpError(413, 'The receipt is too large (max 5 MB).');
+    const bytes = Buffer.from(pdf[1], 'base64');
+    if (bytes.length > maxBytes) throw new HttpError(413, 'The receipt is too large (max 5 MB).');
+    if (bytes.subarray(0, 5).toString('latin1') !== '%PDF-') throw new HttpError(400, 'The receipt is not a valid PDF.');
+    return { ext: 'pdf', bytes };
+  }
+  const { mime, bytes } = parseImageDataUrl(value, maxBytes);
+  return { ext: mime === 'image/png' ? 'png' : mime === 'image/webp' ? 'webp' : 'jpg', bytes };
+}

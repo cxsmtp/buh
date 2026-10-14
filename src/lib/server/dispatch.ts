@@ -1,7 +1,9 @@
 import { createJeeblyShipment } from '@/lib/jeebly';
 import { createEchoShipment } from '@/lib/echo';
-import type { CourierSettings, Order } from '@/types';
-import { getBooking, saveBooking } from './bookings';
+import type { Order } from '@/types';
+import { HttpError } from './http';
+import { getOrder, recordBooking } from './orders';
+import { getSettings } from './settings';
 
 export interface DispatchOutcome {
   status: number;
@@ -14,36 +16,47 @@ export interface DispatchOutcome {
 const inFlight = new Set<string>();
 
 /**
- * Book a courier for an order, at most once per order in live mode: a repeat
- * returns the booking already made, and an attempt the carrier never answered
- * must be confirmed (`rebook`) before booking again.
+ * Book a courier for a stored order, using the courier keys stored on the
+ * server. At most once per order in live mode: a repeat returns the booking
+ * already made, and an attempt the carrier never answered must be confirmed
+ * (`rebook`) before booking again. The result is saved on the order.
  */
 export async function dispatchOrder(input: {
+  orderId: string;
   provider: 'jeebly' | 'echo';
-  order: Order;
-  settings: CourierSettings;
+  pickupDate?: string;
+  weightKg?: number;
+  pieces?: number;
+  adminNotes?: string;
   rebook: boolean;
+  actor: string;
 }): Promise<DispatchOutcome> {
-  const { provider, order, settings, rebook } = input;
+  const { orderId, provider, rebook, actor } = input;
+  const order = getOrder(orderId);
+  if (!order) throw new HttpError(404, 'Order not found.');
+  if (order.status === 'cancelled' || order.status === 'delivered') {
+    throw new HttpError(409, `This order is ${order.status} and cannot be booked.`);
+  }
+  const settings = getSettings('courier');
   const live = settings[provider].isLive;
 
   if (inFlight.has(order.id)) {
     return { status: 409, body: { success: false, message: 'This order is already being booked. Please wait.' } };
   }
 
-  const previous = live ? getBooking(order.id) : undefined;
-  if (previous && !rebook) {
-    if (previous.state === 'booked') {
+  const previous = order.courier.bookingState;
+  if (live && previous && !rebook) {
+    if (previous === 'booked') {
       return {
         status: 200,
         body: {
           success: true,
           alreadyBooked: true,
-          awbNumber: previous.awbNumber,
-          trackingNumber: previous.awbNumber,
-          trackingUrl: previous.trackingUrl,
+          order,
+          awbNumber: order.courier.awbNumber,
+          trackingUrl: order.courier.trackingUrl,
           isSimulated: false,
-          message: `Already booked with ${previous.provider === 'jeebly' ? 'Jeebly' : 'Eco Express'} on ${previous.at.slice(0, 16).replace('T', ' ')} UTC (AWB ${previous.awbNumber}). Not booked again.`,
+          message: `Already booked with ${order.courier.provider === 'jeebly' ? 'Jeebly' : 'Eco Express'} (AWB ${order.courier.awbNumber}). Not booked again.`,
         },
       };
     }
@@ -57,23 +70,48 @@ export async function dispatchOrder(input: {
     };
   }
 
+  const toBook: Order = {
+    ...order,
+    adminNotes: input.adminNotes ?? order.adminNotes,
+    courier: {
+      ...order.courier,
+      pickupDate: input.pickupDate ?? order.courier.pickupDate,
+      weightKg: input.weightKg ?? order.courier.weightKg,
+      pieces: input.pieces ?? order.courier.pieces,
+    },
+  };
+
   inFlight.add(order.id);
   try {
     const result = provider === 'jeebly'
-      ? await createJeeblyShipment(order, settings.jeebly)
-      : await createEchoShipment(order, settings.echo);
+      ? await createJeeblyShipment(toBook, settings.jeebly)
+      : await createEchoShipment(toBook, settings.echo);
 
-    if (live && result.success && !result.isSimulated) {
-      saveBooking(order.id, { state: 'booked', provider, awbNumber: result.awbNumber, trackingUrl: result.trackingUrl, at: new Date().toISOString() });
+    let saved = order;
+    if (result.success) {
+      saved = recordBooking(order.id, actor, {
+        provider,
+        awbNumber: result.awbNumber,
+        trackingUrl: result.trackingUrl,
+        status: result.isSimulated ? 'Sandbox booking (simulated AWB)' : 'Booked with the carrier',
+        pickupDate: toBook.courier.pickupDate,
+        weightKg: toBook.courier.weightKg,
+        pieces: toBook.courier.pieces,
+        labelGenerated: true,
+        dispatchedAt: new Date().toISOString(),
+        bookingState: live && !result.isSimulated ? 'booked' : undefined,
+        simulated: result.isSimulated,
+        notes: input.adminNotes,
+      });
     } else if (live && result.uncertain) {
-      saveBooking(order.id, { state: 'uncertain', provider, awbNumber: '', trackingUrl: '', at: new Date().toISOString() });
+      saved = recordBooking(order.id, actor, { provider, bookingState: 'uncertain', status: 'Booking sent – no answer from the carrier' });
     }
 
     const { rawResponse: _raw, ...safe } = result as typeof result & { rawResponse?: unknown };
     void _raw;
     return {
       status: result.success ? 200 : 502,
-      body: safe as Record<string, unknown>,
+      body: { ...(safe as Record<string, unknown>), order: saved },
       attempt: { success: result.success, simulated: result.isSimulated, uncertain: result.uncertain === true, awb: result.awbNumber },
     };
   } finally {

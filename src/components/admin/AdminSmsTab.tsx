@@ -18,17 +18,23 @@ import {
 } from 'lucide-react';
 import { INITIAL_SMS_SETTINGS } from '@/data/initialData';
 import { postJson } from '@/lib/apiClient';
+import { secretPlaceholder } from './AdminCouriersTab';
 
 interface AdminSmsTabProps {
   smsSettings: SmsGatewaySettings;
-  onUpdateSmsSettings: (updated: SmsGatewaySettings) => void;
+  /** Which secret keys are saved on the server (their values never come back). */
+  secretsSet: Record<string, boolean>;
+  /** Saves on the server; resolves to an error message, or null when saved. */
+  onUpdateSmsSettings: (updated: SmsGatewaySettings) => Promise<string | null>;
 }
 
 export const AdminSmsTab: React.FC<AdminSmsTabProps> = ({
   smsSettings,
+  secretsSet,
   onUpdateSmsSettings,
 }) => {
-  const [provider, setProvider] = useState<SmsProvider>(smsSettings.provider || 'twilio');
+  const [saveError, setSaveError] = useState('');
+  const [provider, setProvider] = useState<SmsProvider>(smsSettings.provider && smsSettings.provider !== 'unifonic' ? smsSettings.provider : 'twilio');
   const [senderId, setSenderId] = useState(smsSettings.senderId || 'BUHome');
 
   // Twilio
@@ -40,8 +46,6 @@ export const AdminSmsTab: React.FC<AdminSmsTabProps> = ({
   const [infobipApiKey, setInfobipApiKey] = useState(smsSettings.infobip?.apiKey || '');
   const [infobipBaseUrl, setInfobipBaseUrl] = useState(smsSettings.infobip?.baseUrl || 'https://api.infobip.com');
 
-  // Unifonic
-  const [unifonicAppSid, setUnifonicAppSid] = useState(smsSettings.unifonic?.appSid || '');
 
   // Webhook
   const [webhookUrl, setWebhookUrl] = useState(smsSettings.customWebhook?.endpointUrl || '');
@@ -59,7 +63,7 @@ export const AdminSmsTab: React.FC<AdminSmsTabProps> = ({
 
   const [savedSuccess, setSavedSuccess] = useState(false);
 
-  const handleSave = (e?: React.FormEvent) => {
+  const handleSave = async (e?: React.FormEvent) => {
     if (e) e.preventDefault();
     const updated: SmsGatewaySettings = {
       provider,
@@ -74,10 +78,6 @@ export const AdminSmsTab: React.FC<AdminSmsTabProps> = ({
         baseUrl: infobipBaseUrl.trim(),
         fromSender: senderId.trim() || 'BUHome',
       },
-      unifonic: {
-        appSid: unifonicAppSid.trim(),
-        senderId: senderId.trim() || 'BUHome',
-      },
       customWebhook: {
         endpointUrl: webhookUrl.trim(),
         bearerToken: webhookBearer.trim(),
@@ -85,7 +85,12 @@ export const AdminSmsTab: React.FC<AdminSmsTabProps> = ({
       isEnabled: true,
     };
 
-    onUpdateSmsSettings(updated);
+    setSaveError('');
+    const error = await onUpdateSmsSettings(updated);
+    if (error) {
+      setSaveError(error);
+      return;
+    }
     setSavedSuccess(true);
     setTimeout(() => setSavedSuccess(false), 3000);
   };
@@ -112,10 +117,6 @@ export const AdminSmsTab: React.FC<AdminSmsTabProps> = ({
         baseUrl: infobipBaseUrl.trim(),
         fromSender: senderId.trim() || 'BUHome',
       },
-      unifonic: {
-        appSid: unifonicAppSid.trim(),
-        senderId: senderId.trim() || 'BUHome',
-      },
       customWebhook: {
         endpointUrl: webhookUrl.trim(),
         bearerToken: webhookBearer.trim(),
@@ -131,10 +132,10 @@ export const AdminSmsTab: React.FC<AdminSmsTabProps> = ({
     setIsSendingTest(false);
   };
 
-  const isConfigured = 
-    (provider === 'twilio' && twilioAccountSid && twilioAuthToken) ||
-    (provider === 'infobip' && infobipApiKey) ||
-    (provider === 'unifonic' && unifonicAppSid) ||
+  // A key counts as present when typed now or already saved on the server.
+  const isConfigured =
+    (provider === 'twilio' && twilioAccountSid && (twilioAuthToken || secretsSet['twilio.authToken'])) ||
+    (provider === 'infobip' && (infobipApiKey || secretsSet['infobip.apiKey'])) ||
     (provider === 'custom_webhook' && webhookUrl);
 
   return (
@@ -165,11 +166,17 @@ export const AdminSmsTab: React.FC<AdminSmsTabProps> = ({
         </div>
       </div>
 
+      {saveError && (
+        <div role="alert" className="bg-red-50 text-red-800 border border-red-200 p-3.5 rounded-2xl text-xs font-medium">
+          {saveError}
+        </div>
+      )}
+
       {savedSuccess && (
         <div className="bg-emerald-50 text-emerald-900 border border-emerald-200 p-3.5 rounded-2xl text-xs flex items-center justify-between animate-in fade-in-50">
           <div className="flex items-center gap-2 font-medium">
             <CheckCircle2 className="w-4 h-4 text-emerald-600" />
-            <span>SMS Gateway settings saved successfully! Live OTP dispatch is active.</span>
+            <span>Saved on the server. Checkout now sends codes through this gateway (unless one is set in the server environment).</span>
           </div>
           <span className="text-[10px] bg-emerald-200 text-emerald-900 font-bold px-2 py-0.5 rounded-full">
             Active
@@ -225,11 +232,10 @@ export const AdminSmsTab: React.FC<AdminSmsTabProps> = ({
           </div>
 
           {/* Provider Selection Tabs */}
-          <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 text-xs">
+          <div className="grid grid-cols-1 min-[420px]:grid-cols-3 gap-2 text-xs">
             {[
               { id: 'twilio', name: 'Twilio SMS', badge: 'Recommended' },
               { id: 'infobip', name: 'Infobip UAE', badge: 'Direct Etisalat' },
-              { id: 'unifonic', name: 'Unifonic', badge: 'Middle East' },
               { id: 'custom_webhook', name: 'Webhook', badge: 'Custom' },
             ].map((p) => (
               <button
@@ -303,7 +309,8 @@ export const AdminSmsTab: React.FC<AdminSmsTabProps> = ({
                 </label>
                 <input
                   type="password"
-                  placeholder="••••••••••••••••••••••••••••••••"
+                  autoComplete="off"
+                  placeholder={secretPlaceholder(secretsSet['twilio.authToken'])}
                   value={twilioAuthToken}
                   onChange={(e) => setTwilioAuthToken(e.target.value)}
                   className="w-full px-3.5 py-2 rounded-xl border border-stone-300 bg-white text-stone-900 font-mono text-xs focus:outline-none focus:ring-1 focus:ring-[#c5a059]"
@@ -347,7 +354,8 @@ export const AdminSmsTab: React.FC<AdminSmsTabProps> = ({
                 </label>
                 <input
                   type="password"
-                  placeholder="App xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+                  autoComplete="off"
+                  placeholder={secretPlaceholder(secretsSet['infobip.apiKey'])}
                   value={infobipApiKey}
                   onChange={(e) => setInfobipApiKey(e.target.value)}
                   className="w-full px-3.5 py-2 rounded-xl border border-stone-300 bg-white text-stone-900 font-mono text-xs focus:outline-none focus:ring-1 focus:ring-[#c5a059]"
@@ -363,24 +371,6 @@ export const AdminSmsTab: React.FC<AdminSmsTabProps> = ({
                   placeholder="https://xxxx.api.infobip.com"
                   value={infobipBaseUrl}
                   onChange={(e) => setInfobipBaseUrl(e.target.value)}
-                  className="w-full px-3.5 py-2 rounded-xl border border-stone-300 bg-white text-stone-900 font-mono text-xs focus:outline-none focus:ring-1 focus:ring-[#c5a059]"
-                />
-              </div>
-            </div>
-          )}
-
-          {/* UNIFONIC CONFIG */}
-          {provider === 'unifonic' && (
-            <div className="space-y-3 p-3.5 bg-stone-50 rounded-2xl border border-stone-200 text-xs animate-in fade-in-50">
-              <div>
-                <label className="block text-stone-700 font-semibold mb-1">
-                  Unifonic App SID:
-                </label>
-                <input
-                  type="text"
-                  placeholder="Unifonic App SID"
-                  value={unifonicAppSid}
-                  onChange={(e) => setUnifonicAppSid(e.target.value)}
                   className="w-full px-3.5 py-2 rounded-xl border border-stone-300 bg-white text-stone-900 font-mono text-xs focus:outline-none focus:ring-1 focus:ring-[#c5a059]"
                 />
               </div>
@@ -408,7 +398,8 @@ export const AdminSmsTab: React.FC<AdminSmsTabProps> = ({
                 </label>
                 <input
                   type="password"
-                  placeholder="Bearer token"
+                  autoComplete="off"
+                  placeholder={secretPlaceholder(secretsSet['customWebhook.bearerToken'])}
                   value={webhookBearer}
                   onChange={(e) => setWebhookBearer(e.target.value)}
                   className="w-full px-3.5 py-2 rounded-xl border border-stone-300 bg-white text-stone-900 text-xs focus:outline-none focus:ring-1 focus:ring-[#c5a059]"
@@ -451,7 +442,7 @@ export const AdminSmsTab: React.FC<AdminSmsTabProps> = ({
                   value={testPhone}
                   onChange={(e) => setTestPhone(e.target.value)}
                   placeholder="+971 50 123 4567"
-                  className="flex-1 px-3.5 py-2.5 rounded-xl border border-stone-300 bg-white text-stone-900 text-xs font-semibold focus:outline-none focus:ring-2 focus:ring-[#c5a059]"
+                  className="flex-1 min-w-0 px-3.5 py-2.5 rounded-xl border border-stone-300 bg-white text-stone-900 text-xs font-semibold focus:outline-none focus:ring-2 focus:ring-[#c5a059]"
                 />
                 <button
                   type="button"
