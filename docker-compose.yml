@@ -1,23 +1,32 @@
+# Beautiful UAE Home — production on one VPS (Hostinger KVM with the Docker template).
+#
+#   app    the shop (Next.js), data in the buhome-data volume (database, photos,
+#          receipts, backups, audit log). One instance on purpose.
+#   caddy  HTTPS with automatic Let's Encrypt certificates, in front of the app.
+#
+# Start / update:  docker compose up -d --build
+# Logs:            docker compose logs -f app
 services:
-  buhome-app:
+  app:
     build:
       context: .
       dockerfile: Dockerfile
-    container_name: buhome-uae
-    restart: always
-    # Only nginx on this host should reach the app; set BIND_ADDRESS=0.0.0.0 to expose it directly.
-    ports:
-      - "${BIND_ADDRESS:-127.0.0.1}:3000:3000"
+    image: buhome-app:latest
+    restart: unless-stopped
+    env_file:
+      - .env.production
     environment:
       - NODE_ENV=production
       - PORT=3000
+      - HOSTNAME=0.0.0.0
       - DATA_DIR=/data
-      # nginx in front sets X-Real-IP; per-IP rate limits use it.
+      # Caddy sets X-Real-IP; per-address limits use it.
       - TRUST_PROXY=1
-    env_file:
-      - .env.production
     volumes:
       - buhome-data:/data
+    # Reachable only through Caddy (no port on the host).
+    expose:
+      - "3000"
     read_only: true
     tmpfs:
       - /tmp
@@ -26,13 +35,49 @@ services:
     security_opt:
       - no-new-privileges:true
     pids_limit: 512
-    stop_grace_period: 15s
+    # Let in-flight checkouts finish on update or restart.
+    stop_grace_period: 20s
     healthcheck:
       test: ["CMD", "wget", "-qO-", "http://127.0.0.1:3000/api/health"]
       interval: 30s
       timeout: 5s
       retries: 3
-      start_period: 20s
+      start_period: 30s
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "5"
+
+  caddy:
+    image: caddy:2.8.4-alpine
+    restart: unless-stopped
+    depends_on:
+      app:
+        condition: service_healthy
+    env_file:
+      - .env.production
+    ports:
+      - "80:80"
+      - "443:443"
+      - "443:443/udp"
+    volumes:
+      - ./deploy/Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy-data:/data
+      - caddy-config:/config
+    cap_drop:
+      - ALL
+    cap_add:
+      - NET_BIND_SERVICE
+    security_opt:
+      - no-new-privileges:true
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "5"
 
 volumes:
   buhome-data:
+  caddy-data:
+  caddy-config:

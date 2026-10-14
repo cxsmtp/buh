@@ -43,6 +43,7 @@ export const ShippingLabelModal: React.FC<ShippingLabelModalProps> = ({ order, o
             </button>
             <button
               onClick={onClose}
+              aria-label="Close label"
               className="p-1.5 text-stone-400 hover:text-stone-700 rounded-full hover:bg-stone-100"
             >
               <X className="w-5 h-5" />

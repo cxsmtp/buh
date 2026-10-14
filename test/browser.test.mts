@@ -46,6 +46,24 @@ async function openCheckout(width: number) {
   return { page, errors };
 }
 
+/** The order number shown on the confirmation screen. */
+async function confirmedOrderId(page: import('playwright').Page): Promise<string> {
+  const text = (await page.textContent('body')) || '';
+  const id = text.match(/BUH-\d{6}-[A-Z2-9]{6}/)?.[0];
+  assert.ok(id, 'order number on the confirmation screen');
+  return id!;
+}
+
+/** Ask the server (Track Order) about an order: proves it was stored there, not in the browser. */
+async function lookup(orderId: string, phone: string) {
+  const res = await fetch(`${server.base}/api/orders/lookup`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json', origin: server.base },
+    body: JSON.stringify({ orderId, phone }),
+  });
+  return (await res.json()) as { found: boolean; order?: { id: string; status: string; total: number; courier: { awbNumber: string; trackingUrl: string } } };
+}
+
 /** Does the page scroll sideways? (Decorative and scroll-row content clipped by its parent is fine.) */
 async function overflow(page: import('playwright').Page) {
   return page.evaluate(() => {
@@ -85,9 +103,15 @@ for (const [width, phone] of [[375, '050 123 4567'], [1280, '055 765 4321']] as 
     await submit.click();
     await page.getByText('Thank You for Your Order!').waitFor({ timeout: 10_000 });
 
-    const saved = await page.evaluate(() => JSON.parse(localStorage.getItem('buh_orders_v1') || '[]')[0]);
-    assert.equal(saved.customer.phoneVerified, true);
-    assert.match(saved.customer.phone, /^\+9715\d{8}$/, 'stored in E.164');
+    // Stored on the server under the verified number (in any format the customer typed).
+    const id = await confirmedOrderId(page);
+    const found = await lookup(id, phone);
+    assert.equal(found.found, true);
+    assert.equal(found.order!.status, 'pending_confirmation');
+    assert.equal((await lookup(id, '0509999999')).found, false, 'another number cannot see it');
+    // Nothing about the order is kept in the browser any more.
+    const keys = await page.evaluate(() => Object.keys(localStorage));
+    assert.ok(!keys.some((k) => k.startsWith('buh_orders')), keys.join(','));
     assert.deepEqual(errors, []);
     await page.close();
   });
@@ -169,10 +193,10 @@ test('regression: a placed order carries no made-up AWB, and a second order is n
     await page.getByText('Thank You for Your Order!').waitFor({ timeout: 10_000 });
   };
   await placeOrder('052 111 2233');
-  const first = await page.evaluate(() => JSON.parse(localStorage.getItem('buh_orders_v1') || '[]')[0]);
+  const firstId = await confirmedOrderId(page);
+  const first = (await lookup(firstId, '0521112233')).order!;
   assert.equal(first.courier.awbNumber, '', 'no AWB until the courier is booked');
   assert.equal(first.courier.trackingUrl, '');
-  assert.match(first.id, /^BUH-\d{6}-[A-Z2-9]{6}$/);
 
   // Done, then a second order in the same visit.
   await page.getByRole('button', { name: /Done|Continue|Close/ }).first().click();
@@ -182,9 +206,9 @@ test('regression: a placed order carries no made-up AWB, and a second order is n
   await page.locator('#checkout-phone').waitFor();
   assert.equal(await page.getByText('Thank You for Your Order!').count(), 0, 'fresh checkout, not the old confirmation');
   await placeOrder('052 111 2244');
-  const orders = await page.evaluate(() => JSON.parse(localStorage.getItem('buh_orders_v1') || '[]'));
-  assert.equal(orders.length, 2, 'production build: no demo orders, just the two placed');
-  assert.notEqual(orders[0].id, orders[1].id);
+  const secondId = await confirmedOrderId(page);
+  assert.notEqual(secondId, firstId);
+  assert.equal((await lookup(secondId, '0521112244')).found, true);
   await page.close();
 });
 
@@ -212,4 +236,154 @@ test('regression: a new number is not held by the old number\'s resend wait; pas
   const send = page.getByRole('button', { name: /Send code/ });
   assert.equal(await send.isDisabled(), false, 'no wait for a different number');
   await page.close();
+});
+
+test('the shop and the admin hub share one store: a customer order reaches the owner, who books it; bank details and visibility flow back', { skip }, async () => {
+  // 1. A customer orders in their own browser.
+  const shopper = await openCheckout(1280);
+  const sp = shopper.page;
+  await sp.getByPlaceholder('e.g. Fatima Al Mansoori').fill('Owner Loop Customer');
+  await sp.locator('#checkout-phone').fill('056 400 5006');
+  await sp.getByRole('button', { name: /Send code/ }).click();
+  await sp.getByRole('button', { name: /Test mode/ }).click();
+  await sp.getByText('Mobile number verified').waitFor();
+  await sp.getByPlaceholder('e.g. Dubai Marina, Saadiyat, JVC').fill('Al Barsha');
+  await sp.getByPlaceholder('Street name, road, or community number').fill('Street 5');
+  await sp.getByPlaceholder('e.g. Marina Gate 1 or Villa 24').fill('Villa 7');
+  await sp.getByPlaceholder('e.g. Apt 1402 or Villa 24').fill('7');
+  // No bank account saved yet: bank transfer is not offered (there is no demo account to pay into).
+  assert.equal(await sp.getByText('Account / Bank Transfer').count(), 0);
+  await sp.locator('button[type=submit]').click();
+  await sp.getByText('Thank You for Your Order!').waitFor({ timeout: 10_000 });
+  const orderId = await confirmedOrderId(sp);
+
+  // 2. The owner, in a different browser, sees it and books the courier.
+  const ctx = await browser.newContext({ viewport: { width: 1280, height: 900 } });
+  const admin = await ctx.newPage();
+  await admin.goto(server.base, { waitUntil: 'domcontentloaded' });
+  await admin.locator('header button:has-text("Admin Hub")').click();
+  await admin.locator('input[type=email]').fill('admin@beautifuluaehome.com');
+  await admin.locator('input[autocomplete=current-password]').fill('Browser-Owner-Pass-1');
+  await admin.getByRole('button', { name: /Unlock Admin Portal/ }).click();
+  await admin.getByText(/Orders & Dispatches/).first().waitFor();
+  const card = admin.locator('div.rounded-2xl', { hasText: orderId }).last();
+  await card.waitFor();
+  await card.getByRole('button', { name: /Confirm & Assign Courier/ }).click();
+  await admin.getByRole('button', { name: /Confirm Order & Dispatch/ }).click();
+  await admin.getByRole('button', { name: 'Close label' }).click();
+  await card.getByRole('button', { name: 'Mark dispatched' }).click();
+  await card.getByText(/^dispatched$/i).waitFor();
+  assert.equal((await lookup(orderId, '0564005006')).order!.status, 'dispatched', 'saved on the server');
+
+  // Backups are visible to the owner.
+  await admin.getByRole('status').filter({ hasText: /Backup/ }).waitFor();
+
+  // 3. Bank details saved in the admin show at checkout.
+  await admin.getByRole('button', { name: /Logo & Marquee/ }).click();
+  await admin.getByPlaceholder('Emirates NBD').fill('Mashreq');
+  await admin.getByPlaceholder('BEAUTIFUL UAE HOME TEXTILES LLC').fill('BUH TEXTILES LLC');
+  await admin.getByPlaceholder('AE07 0331 2345 6789 0123 456').fill('AE07 0331 2345 6789 0123 456');
+  await admin.getByRole('button', { name: 'Save bank details' }).click();
+  await admin.getByText(/checkout shows these details now/).waitFor();
+
+  // 4. Hiding a product removes it from the shop.
+  await admin.getByRole('button', { name: /Inventory Stock/ }).click();
+  const jaipur = admin.locator('div', { hasText: /^Jaipur/ }).first();
+  void jaipur;
+  await admin.getByTitle('Shown in the shop: click to hide').first().click();
+  await admin.getByTitle('Hidden from the shop: click to show').first().waitFor();
+
+  const fresh = await browser.newPage({ viewport: { width: 1280, height: 900 } });
+  await fresh.goto(server.base, { waitUntil: 'domcontentloaded' });
+  await fresh.locator('h3, h4').first().waitFor();
+  const titles = await fresh.locator('h3, h4').allTextContents();
+  const hiddenCount = (await (await fetch(`${server.base}/api/products`)).json()).products.length;
+  assert.equal(hiddenCount, 3, 'one product hidden from the public catalogue');
+  assert.ok(titles.length > 0);
+  await fresh.locator('h3, h4').filter({ hasText: /Jaipur|Heritage|Artisans/ }).first().click();
+  await fresh.getByRole('button', { name: /Add to Bag/ }).click();
+  await fresh.getByRole('button', { name: /Proceed to Checkout/ }).click();
+  await fresh.getByText('Account / Bank Transfer').click();
+  await fresh.getByText('AE07 0331 2345 6789 0123 456').waitFor();
+  await fresh.getByText('Mashreq Bank Details').waitFor();
+
+  await fresh.close();
+  await ctx.close();
+  await sp.close();
+});
+
+test('regression: a price changed during checkout is shown before the customer is charged', { skip }, async () => {
+  // A product still in the shop (an earlier test hides one).
+  const products = (await (await fetch(`${server.base}/api/products`)).json()).products as Array<{ id: string; title: string; price: number }>;
+  const product = products[0];
+  const page = await browser.newPage({ viewport: { width: 375, height: 900 } });
+  await page.goto(server.base, { waitUntil: 'domcontentloaded' });
+  await page.locator('h3, h4').filter({ hasText: product.title }).first().click();
+  await page.getByRole('button', { name: /Add to Bag/ }).click();
+  await page.getByRole('button', { name: /Proceed to Checkout/ }).click();
+  await page.locator('#checkout-phone').waitFor();
+  const submit = page.locator('button[type=submit]');
+  await page.getByPlaceholder('e.g. Fatima Al Mansoori').fill('Price Change Customer');
+  await page.locator('#checkout-phone').fill('056 400 7007');
+  await page.getByRole('button', { name: /Send code/ }).click();
+  await page.getByRole('button', { name: /Test mode/ }).click();
+  await page.getByText('Mobile number verified').waitFor();
+  await page.getByPlaceholder('e.g. Dubai Marina, Saadiyat, JVC').fill('Al Barsha');
+  await page.getByPlaceholder('Street name, road, or community number').fill('Street 5');
+  await page.getByPlaceholder('e.g. Marina Gate 1 or Villa 24').fill('Villa 9');
+  await page.getByPlaceholder('e.g. Apt 1402 or Villa 24').fill('9');
+  const before = (await submit.textContent()) || ''; // "Confirm & Raise Order • AED …"
+  assert.match(before, /AED \d/);
+
+  // The owner raises the price while the customer is at checkout.
+  const headers = { 'content-type': 'application/json', origin: server.base };
+  const login = await fetch(`${server.base}/api/admin/login`, {
+    method: 'POST',
+    headers,
+    body: JSON.stringify({ email: 'admin@beautifuluaehome.com', password: 'Browser-Owner-Pass-1' }),
+  });
+  const cookie = (login.headers.get('set-cookie') || '').split(';')[0];
+  const patch = (price: number) =>
+    fetch(`${server.base}/api/admin/products/${product.id}`, { method: 'PATCH', headers: { ...headers, cookie }, body: JSON.stringify({ product: { price } }) });
+  assert.equal((await patch(product.price + 50)).status, 200);
+  try {
+    await submit.click();
+    await page.getByText(/Prices have changed/).waitFor();
+    await page.waitForFunction((old) => document.querySelector('button[type=submit]')?.textContent !== old, before);
+    assert.notEqual(await submit.textContent(), before, 'the new total is shown');
+    await submit.click();
+    await page.getByText('Thank You for Your Order!').waitFor({ timeout: 10_000 });
+    const id = await confirmedOrderId(page);
+    const placed = await lookup(id, '0564007007');
+    assert.ok(before.endsWith(`AED ${placed.order!.total - 50}`), 'the old total was shown first');
+  } finally {
+    await patch(product.price);
+    await page.close();
+  }
+});
+
+test('regression: every admin tab fits a 375 px phone, SMS settings included', { skip }, async () => {
+  const login = await fetch(`${server.base}/api/admin/login`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json', origin: server.base },
+    body: JSON.stringify({ email: 'admin@beautifuluaehome.com', password: 'Browser-Owner-Pass-1' }),
+  });
+  const [name, value] = (login.headers.get('set-cookie') || '').split(';')[0].split('=');
+  const ctx = await browser.newContext({ viewport: { width: 375, height: 900 } });
+  await ctx.addCookies([{ name, value, url: server.base }]);
+  const page = await ctx.newPage();
+  await page.goto(server.base, { waitUntil: 'networkidle' }); // the session check has answered
+  await page.locator('header button:has-text("Admin Hub")').click();
+  await page.getByRole('status').filter({ hasText: /Backup/ }).waitFor(); // admin data loaded
+  const nav = page.getByRole('navigation', { name: 'Admin sections' });
+  for (const tab of ['Orders', 'Stock', 'CRM', 'Couriers', 'Brand', 'SMS']) {
+    // A real tap at the button's centre (the bar is fixed to the bottom of the screen).
+    const box = (await nav.locator('button', { hasText: new RegExp(`^${tab}`) }).boundingBox())!;
+    await page.mouse.click(box.x + box.width / 2, box.y + box.height / 2);
+    await nav.locator('button.font-bold', { hasText: new RegExp(`^${tab}`) }).waitFor();
+    await page.waitForTimeout(200);
+    assert.deepEqual(await overflow(page), [], `${tab} tab`);
+  }
+  await page.getByText('Choose SMS Gateway Provider').waitFor();
+  await ctx.close();
 });

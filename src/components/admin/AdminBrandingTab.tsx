@@ -1,7 +1,8 @@
 'use client';
 
 import React, { useState } from 'react';
-import { BrandSettings } from '@/types';
+import { BankTransferDetails, BrandSettings } from '@/types';
+import { BankDetailsCard } from './BankDetailsCard';
 import { 
   Palette, 
   Sparkles, 
@@ -22,13 +23,19 @@ import { INITIAL_BRAND_SETTINGS } from '@/data/initialData';
 
 interface AdminBrandingTabProps {
   brandSettings: BrandSettings;
-  onUpdateBrandSettings: (updated: BrandSettings) => void;
+  /** Saves on the server; resolves to an error message, or null when saved. */
+  onUpdateBrandSettings: (updated: BrandSettings) => Promise<string | null>;
+  bank: BankTransferDetails;
+  onUpdateBank: (bank: BankTransferDetails) => Promise<string | null>;
 }
 
 export const AdminBrandingTab: React.FC<AdminBrandingTabProps> = ({
   brandSettings,
   onUpdateBrandSettings,
+  bank,
+  onUpdateBank,
 }) => {
+  const [saveError, setSaveError] = useState('');
   // Local editable state
   const [storeName, setStoreName] = useState(brandSettings.storeName);
   const [tagline, setTagline] = useState(brandSettings.tagline);
@@ -101,7 +108,7 @@ export const AdminBrandingTab: React.FC<AdminBrandingTabProps> = ({
   };
 
   // Save all settings
-  const handleSave = (e?: React.FormEvent) => {
+  const handleSave = async (e?: React.FormEvent) => {
     if (e) e.preventDefault();
     const updated: BrandSettings = {
       storeName: storeName.trim() || 'BEAUTIFUL UAE HOME',
@@ -118,7 +125,12 @@ export const AdminBrandingTab: React.FC<AdminBrandingTabProps> = ({
       },
     };
 
-    onUpdateBrandSettings(updated);
+    setSaveError('');
+    const error = await onUpdateBrandSettings(updated);
+    if (error) {
+      setSaveError(error);
+      return;
+    }
     setSavedSuccess(true);
     setTimeout(() => setSavedSuccess(false), 3000);
   };
@@ -136,9 +148,13 @@ export const AdminBrandingTab: React.FC<AdminBrandingTabProps> = ({
       setMarqueeEnabled(INITIAL_BRAND_SETTINGS.marquee.enabled);
       setMarqueeSpeed(INITIAL_BRAND_SETTINGS.marquee.speedSeconds);
       setMessages([...INITIAL_BRAND_SETTINGS.marquee.messages]);
-      onUpdateBrandSettings(INITIAL_BRAND_SETTINGS);
-      setSavedSuccess(true);
-      setTimeout(() => setSavedSuccess(false), 3000);
+      void onUpdateBrandSettings(INITIAL_BRAND_SETTINGS).then((error) => {
+        if (error) setSaveError(error);
+        else {
+          setSavedSuccess(true);
+          setTimeout(() => setSavedSuccess(false), 3000);
+        }
+      });
     }
   };
 
@@ -604,7 +620,12 @@ export const AdminBrandingTab: React.FC<AdminBrandingTabProps> = ({
           </div>
 
           {/* Bottom Save Action */}
-          <div className="pt-2 border-t border-stone-100">
+          <div className="pt-2 border-t border-stone-100 space-y-2">
+            {saveError && (
+              <p role="alert" className="text-red-700 bg-red-50 border border-red-200 rounded-lg px-3 py-2 text-xs font-medium">
+                {saveError}
+              </p>
+            )}
             <button
               type="button"
               onClick={handleSave}
@@ -617,6 +638,8 @@ export const AdminBrandingTab: React.FC<AdminBrandingTabProps> = ({
         </div>
 
       </div>
+
+      <BankDetailsCard bank={bank} onSave={onUpdateBank} />
     </div>
   );
 };

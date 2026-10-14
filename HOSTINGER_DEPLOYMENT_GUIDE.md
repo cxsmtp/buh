@@ -1,180 +1,191 @@
-# 🚀 Hostinger Deployment Guide: Beautiful UAE Home (BUHome)
+# Hostinger Deployment Guide: Beautiful UAE Home
 
-This guide covers deploying the **Beautiful UAE Home** Next.js platform to **Hostinger** with maximum performance, high security headers, and support for high concurrent traffic (3,000+ requests).
+**Recommended model: one Hostinger KVM VPS running Docker Compose.** Two containers run on it:
 
----
+- the shop;
+- Caddy, which gets and renews the free HTTPS certificate.
 
-## 📋 Recommended Deployment Options
+Everything the shop stores lives in one Docker volume and is backed up every 12 hours, by email.
 
-| Deployment Method | Best For | Specs Required | Uptime & Concurrency |
-| :--- | :--- | :--- | :--- |
-| **Option 1: Hostinger KVM VPS + PM2** *(Recommended)* | Production Store, High Traffic (3,000 reqs), Real-time Courier & OTP | KVM 1 or KVM 2 (1–2 vCPU, 4–8GB RAM) | 99.99% / Up to 4,500 RPS |
-| **Option 2: Hostinger VPS with Docker** | Containerized workflow, 1-Click Rollback | KVM 1 or KVM 2 | 99.99% / Up to 4,000 RPS |
-| **Option 3: Hostinger Cloud Hosting (hPanel)** | Simple cPanel/hPanel Node.js Selector | Cloud Startup / Cloud Professional | 99.9% / Up to 1,000 RPS |
+| Option | Use it? | Why |
+| --- | --- | --- |
+| **KVM VPS + Docker Compose** (this guide) | ✅ Recommended | One command to start or update. HTTPS is automatic. The database, photos and receipts persist in a volume. Backups run on their own. Rollback means starting the previous version. The containers run read-only, as non-root, with no extra privileges. |
+| KVM VPS + PM2 + nginx | Possible | It works (see the end of this guide), but you look after Node, nginx, certbot and the data folder yourself. |
+| Shared / Cloud hosting (hPanel Node.js) | ❌ Not for this shop | The shop needs a persistent data folder for its database, a native SQLite module, and a process that keeps running for the 12-hourly backups. hPanel Node.js hosting is not built for that. |
 
----
+**Size:** KVM 2 (2 vCPU, 8 GB) is comfortable. KVM 1 is enough to start. Choose the data centre region closest to the UAE that Hostinger offers.
 
-## 🌟 Option 1: Hostinger KVM VPS + PM2 Cluster (Recommended)
-
-### Step 1: Connect to your Hostinger VPS via SSH
-Open your terminal (PowerShell, Terminal, or PuTTY):
-```bash
-ssh root@<YOUR_HOSTINGER_SERVER_IP>
-```
-
-### Step 2: Install Node.js 20 LTS & PM2
-Run the following commands on the server:
-```bash
-# Update Ubuntu package lists
-sudo apt update && sudo apt upgrade -y
-
-# Install Node.js 20 LTS via NodeSource
-curl -fsSL https://deb.nodesource.com/setup_20.x | sudo -E bash -
-sudo apt install -y nodejs git nginx
-
-# Install PM2 Process Manager globally
-sudo npm install -g pm2
-```
-
-### Step 3: Clone or Upload Your Repository
-```bash
-# Navigate to web root
-cd /var/www
-
-# Clone from GitHub/GitLab
-git clone <YOUR_REPO_URL> buhome
-cd buhome
-
-# Or if uploading via SFTP / SCP, copy the files to /var/www/buhome
-```
-
-### Step 4: Configure Production Environment Variables
-Create your production `.env.production` file:
-```bash
-cp .env.production.example .env.production
-nano .env.production
-```
-Fill in your settings:
-- `NEXT_PUBLIC_APP_URL=https://yourdomain.ae` and `NEXT_PUBLIC_SUPPORT_EMAIL` (shown to customers with non-UAE numbers)
-- An SMS gateway for checkout phone verification: `TWILIO_ACCOUNT_SID`, `TWILIO_AUTH_TOKEN`, `TWILIO_FROM_PHONE` (or `INFOBIP_*`, or `SMS_WEBHOOK_URL`)
-- `TRUST_PROXY=1` (nginx sits in front) and `DATA_DIR=/var/lib/buhome`
-
-Courier keys (Jeebly, Eco Express) are entered in the Admin Hub, not here.
-
-Create the private data folder (admin account, session key, audit log):
-```bash
-sudo mkdir -p /var/lib/buhome && sudo chown "$USER" /var/lib/buhome && chmod 700 /var/lib/buhome
-```
-
-*(Press `Ctrl + O` to save, then `Ctrl + X` to exit).*
-
-### Step 5: Build the Application
-```bash
-# Install dependencies
-npm ci
-
-# Build the Next.js production bundle
-npm run build
-```
-
-### Step 6: Start with PM2
-```bash
-# One instance: phone codes and rate limits live in process memory
-pm2 start ecosystem.config.cjs
-
-# First start only: copy the one-time admin password from the log.
-# You will choose your own password at first sign-in.
-pm2 logs buhome-app --lines 50
-
-# Save PM2 state so it restarts automatically on server reboot
-pm2 save
-pm2 startup
-```
-
-### Step 7: Configure Nginx & Free SSL (Let's Encrypt)
-1. Copy the provided Nginx configuration:
-```bash
-sudo cp deploy/nginx-buhome.conf /etc/nginx/sites-available/buhome
-sudo nano /etc/nginx/sites-available/buhome
-```
-*(Replace `yourdomain.ae` with your actual domain name).*
-
-2. Enable the site and restart Nginx:
-```bash
-sudo ln -s /etc/nginx/sites-available/buhome /etc/nginx/sites-enabled/
-sudo rm -f /etc/nginx/sites-enabled/default
-sudo nginx -t
-sudo systemctl restart nginx
-```
-
-3. Issue free SSL with Let's Encrypt:
-```bash
-sudo apt install -y certbot python3-certbot-nginx
-sudo certbot --nginx -d yourdomain.ae -d www.yourdomain.ae
-```
-Certbot will automatically install the SSL certificates and configure auto-renewal.
+**Run one copy of the shop only.** Phone codes and limits are kept in that one process's memory, and the database is a single file. Don't put a second copy behind a load balancer.
 
 ---
 
-## 🐳 Option 2: 1-Click Docker Deployment on Hostinger VPS
+## 1. One-time setup (about 20 minutes)
 
-If your Hostinger VPS was set up with the **Ubuntu Docker** template:
+1. **Create the VPS.**
+   - In hPanel, go to **VPS → choose the Ubuntu 24.04 with Docker template**.
+   - Note the server's IP address.
+   - Turn on **automatic weekly backups (snapshots)** in hPanel as an extra layer.
+2. **Point your domain at it.** At your DNS provider, add an `A` record for `yourdomain.ae` and one for `www`, both pointing to the VPS IP.
+3. **Connect and lock down the firewall:**
+   ```bash
+   ssh root@<VPS_IP>
+   ```
+   ```bash
+   ufw allow 22/tcp && ufw allow 80/tcp && ufw allow 443/tcp && ufw allow 443/udp && ufw --force enable
+   ```
+4. **Get the code:**
+   ```bash
+   git clone https://github.com/cxsmtp/buh.git /opt/buhome && cd /opt/buhome
+   ```
+5. **Settings:**
+   ```bash
+   cp .env.production.example .env.production && nano .env.production
+   ```
+   - Fill in `DOMAIN`, `ACME_EMAIL`, `NEXT_PUBLIC_APP_URL` and `NEXT_PUBLIC_SUPPORT_EMAIL`.
+   - **Fill in the backup email (`SMTP_*`, `BACKUP_EMAIL`).**
+   - Set a `BACKUP_PASSPHRASE` of at least 12 characters, and store it in your password manager. Without it, customer data is emailed unencrypted.
+6. **Start:**
+   ```bash
+   docker compose up -d --build
+   ```
+   The first build takes a few minutes. Then <https://yourdomain.ae> shows the shop with a valid certificate.
+7. **First admin sign-in.** The one-time password is in the log:
+   ```bash
+   docker compose logs app | grep -A3 "first admin"
+   ```
+   Open the shop and click **Admin Hub**. Sign in with that email and password, then choose your own password.
 
-1. Clone your repo:
+## 2. Go-live checklist (in the Admin Hub)
+
+- [ ] **📱 SMS & Real OTP:** enter your Twilio or Infobip keys, **Send test** to your own mobile, then **Save**.
+  - Checkout needs a working SMS gateway: customers cannot order without verifying their number.
+  - At start-up, the log warns if none is configured.
+- [ ] **🎨 Logo & Marquee → Bank transfer details:** enter the bank name, account name and real IBAN, and check every digit. Bank transfer is hidden at checkout until they are saved.
+- [ ] **Jeebly & Eco Couriers:**
+  - enter the keys;
+  - press **Test connection**;
+  - switch to **live mode** only when you are ready to book real pickups.
+- [ ] **Inventory Stock:** set real prices and stock, and hide any sample products you don't sell.
+- [ ] **Backups:** press **Back up now** at the top of the Admin Hub.
+  - Check that the email arrives (with `BACKUP_PASSPHRASE`, one encrypted `.tar.gz.enc` file; without it, the CSV files and the `.tar.gz`).
+  - The status line should be green.
+- [ ] **Restore drill:** restore that backup on your computer (section 4), so you know it works before you need it.
+- [ ] **A real test order:** place it from your phone, then confirm, book and cancel it in the Admin Hub.
+- [ ] **Uptime monitor:** use a free service (e.g. UptimeRobot) on `https://yourdomain.ae/api/health`.
+
+## 3. Backups (automatic, every 12 hours)
+
+The shop backs itself up every 12 hours, and straight after a restart if one is due. It emails the backup to `BACKUP_EMAIL` and keeps the newest 14 on the server. Each backup contains:
+
+- **The full database** (`shop.db`): every order, product, setting and booking. Courier and SMS keys are blanked: re-enter them after a restore.
+- **Flat files you can open in Excel:** `orders.csv`, `order_items.csv`, `customers.csv`, `products.csv`.
+- **Bank-transfer receipts and product photos.**
+- **The audit log.**
+- **A checksum manifest:** a damaged file is detected.
+
+**Encryption:** with `BACKUP_PASSPHRASE` set, the email carries one AES-256 encrypted file instead of plain customer data. That is recommended, because email is not a safe place for customers' addresses and phone numbers.
+
+**If something is wrong**, the status line at the top of the Admin Hub turns amber (taken but not emailed) or red (failed or overdue), and a failure is also emailed. **Back up now** runs one immediately.
+
+Before an update, press **Back up now**.
+
+Copy the server's backups to your computer:
+
 ```bash
-cd /opt
-git clone <YOUR_REPO_URL> buhome
-cd buhome
+docker compose cp app:/data/backups ./backups
 ```
 
-2. Create `.env.production`:
+## 4. Restore
+
+On the server (this replaces the live data; the current data is kept aside in `replaced-<time>/`):
+
+1. Stop the shop:
+   ```bash
+   docker compose stop app
+   ```
+2. Restore a backup kept on the server (`docker compose run --rm --no-deps app ls /data/backups` lists them):
+   ```bash
+   docker compose run --rm --no-deps app node scripts/restore-backup.mjs /data/backups/buh-backup-20261014-1200.tar.gz.enc /data --replace
+   ```
+   For a backup from your email, first make it readable and copy it in:
+   ```bash
+   chmod 644 buh-backup-….tar.gz.enc && docker compose cp buh-backup-….tar.gz.enc app:/data/backups/
+   ```
+3. Start it again:
+   ```bash
+   docker compose start app
+   ```
+
+Then sign in with the new one-time password from `docker compose logs app`, and re-enter the courier and SMS keys. Keys and the admin account are deliberately not in backups.
+
+To check a backup on your own computer (Node 20+, in a checkout of this repository after `npm ci`):
+
 ```bash
-cp .env.production.example .env.production
-nano .env.production
+BACKUP_PASSPHRASE='your passphrase' node scripts/restore-backup.mjs buh-backup-….tar.gz.enc ./restored
 ```
 
-3. Launch containers:
+Plain `.tar.gz` backups also open with any archive tool (`tar -xzf`).
+
+## 5. Updates and rollback
+
+1. Press **Back up now**.
+2. Update:
+   ```bash
+   cd /opt/buhome && git pull && docker compose up -d --build
+   ```
+
+The shop stops for a few seconds while the new version starts. In-flight requests get up to 20 seconds to finish. The version (`BUH-xx.xx.xx`) shows next to the Admin Hub title.
+
+**Roll back:**
+
 ```bash
-docker compose up -d --build
+git checkout <previous version tag or commit> && docker compose up -d --build
 ```
-Your app is now live and will automatically restart if the server reboots!
+
+If a release changed the database, restore the backup taken before the update.
+
+## 6. Logs and health
+
+- Logs:
+  ```bash
+  docker compose logs -f app
+  ```
+  Errors are logged with secrets redacted, and phone numbers and emails masked.
+- State:
+  ```bash
+  docker compose ps
+  ```
+  The app shows `healthy` when `/api/health` answers.
+- Audit log: `docker compose exec app ls /data` lists the `audit-YYYY-MM.jsonl` files (one line per sign-in, order change, booking, setting change and backup).
 
 ---
 
-## ☁️ Option 3: Hostinger Cloud Hosting (hPanel Node.js)
+## Alternative: PM2 + nginx without Docker
 
-If you are using Hostinger Cloud or Web Hosting with hPanel:
+Only if you cannot use Docker.
 
-1. In **hPanel**, go to **Websites** -> **Manage** -> **Node.js**.
-2. Click **Create Application**:
-   - **Node.js version**: `20.x`
-   - **Application root**: `public_html` or `/buhome`
-   - **Application startup file**: `server.js` or `node_modules/next/dist/bin/next`
-   - **Application mode**: `Production`
-3. Upload files via Git integration or File Manager (ensure `package.json`, `.next`, `public`, `next.config.ts` are uploaded).
-4. Run `npm ci` and `npm run build` from the hPanel terminal.
-5. In **Environment Variables**, paste the keys from `.env.production.example`.
-6. Click **Restart Application**.
+1. Install Node 20 and the build tools for the SQLite module:
+   ```bash
+   apt install -y build-essential python3
+   ```
+2. Clone to `/var/www/buhome` and copy `.env.production.example` to `.env.production`.
+3. Create the data folder:
+   ```bash
+   mkdir -p /var/lib/buhome && chmod 700 /var/lib/buhome
+   ```
+4. Run `bash deploy/deploy.sh`. It builds and starts one PM2 process, with `DATA_DIR=/var/lib/buhome` and `TRUST_PROXY=1` from `ecosystem.config.cjs`.
+5. Put nginx in front using `deploy/nginx-buhome.conf`, and get a certificate with certbot.
 
----
-
-## 🔄 Zero-Downtime Deployments
-
-Whenever you make updates to the codebase, simply run the included automated script on your server:
-
-```bash
-bash deploy/deploy.sh
-```
-This script pulls code, builds the bundle, and executes a zero-downtime hot-reload (`pm2 reload`).
+Back up `/var/lib/buhome`: the built-in 12-hour email backups run the same way.
 
 ---
 
-## 🔒 Security Hardening Included
+## Security
 
 What is built in, and what you must do, is in [docs/security.md](docs/security.md). In short:
-1. **Admin sign-in is checked on the server** (scrypt-hashed password, HttpOnly session cookie, sign-in paused after 5 wrong attempts from one address). The first start prints a one-time password to the log.
-2. **Every admin API route requires that session** and refuses cross-site requests.
-3. **Checkout phone verification** sends 6-digit codes to UAE mobile numbers only, with per-number, per-address and shop-wide limits against SMS-pumping fraud.
-4. **Security headers** on every page: a Content Security Policy, `X-Frame-Options: DENY`, `nosniff`, HSTS, and a tight `Permissions-Policy`.
-5. **nginx** limits API traffic to 20 req/s and sign-in / code requests to 10 per minute per address.
-6. **Docker** runs read-only, as a non-root user, with every Linux capability dropped, bound to 127.0.0.1.
+
+1. **Admin sign-in is checked on the server.** Passwords are scrypt-hashed, the session cookie is HttpOnly, and sign-in pauses after 5 wrong attempts from one address. The first start prints a one-time password to the log.
+2. **Prices, stock and totals are computed on the server** from the catalogue. Every order carries a phone number proven by an SMS code.
+3. **Every admin action is checked on the server** and audited. Courier and SMS keys are write-only: they never reach a browser.
+4. **Security headers on every page:** a Content Security Policy, `X-Frame-Options: DENY`, `nosniff`, HSTS and a tight `Permissions-Policy`.
+5. **Containers** run read-only, as non-root, with every Linux capability dropped. Only Caddy is reachable from outside.

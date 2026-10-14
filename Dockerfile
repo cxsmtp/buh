@@ -3,7 +3,8 @@ FROM node:20-alpine AS base
 
 # Step 1: Install dependencies
 FROM base AS deps
-RUN apk add --no-cache libc6-compat
+# Build tools only for the native SQLite driver, if no prebuilt binary matches.
+RUN apk add --no-cache libc6-compat python3 make g++
 WORKDIR /app
 
 COPY package.json package-lock.json* ./
@@ -44,6 +45,8 @@ RUN addgroup --system --gid 1001 nodejs \
 COPY --from=builder /app/public ./public
 COPY --from=builder /app/.next/standalone ./
 COPY --from=builder /app/.next/static ./.next/static
+# Restore tool (node scripts/restore-backup.mjs) inside the container.
+COPY --from=builder /app/scripts/restore-backup.mjs ./scripts/restore-backup.mjs
 
 USER nextjs
 

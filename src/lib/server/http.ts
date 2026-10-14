@@ -10,7 +10,9 @@ export class HttpError extends Error {
   constructor(
     public readonly status: number,
     message: string,
-    public readonly headers: Record<string, string> = {}
+    public readonly headers: Record<string, string> = {},
+    /** Extra safe fields for the client, e.g. { code: 'price_changed' }. */
+    public readonly details: Record<string, unknown> = {}
   ) {
     super(message);
     this.name = 'HttpError';
@@ -25,7 +27,7 @@ export function json(body: unknown, status = 200, headers: Record<string, string
 
 export function handleRouteError(err: unknown, route: string, shape: Record<string, unknown> = { success: false }) {
   if (err instanceof HttpError) {
-    return json({ ...shape, message: err.message }, err.status, err.headers);
+    return json({ ...shape, ...err.details, message: err.message }, err.status, err.headers);
   }
   logEvent('error', 'route_error', { route, error: err instanceof Error ? err.message : String(err) });
   return json({ ...shape, message: 'Something went wrong. Please try again.' }, 500);

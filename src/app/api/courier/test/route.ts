@@ -3,6 +3,7 @@ import { parseCourierProvider, parseCourierSettings } from '@/lib/server/courier
 import { requireAdmin } from '@/lib/server/guard';
 import { handleRouteError, json, readJsonBody } from '@/lib/server/http';
 import { safeFetch } from '@/lib/server/outbound';
+import { withStoredSecrets } from '@/lib/server/settings';
 
 function masked(secret: string) {
   return secret ? `••••${secret.slice(-4)}` : '(not set)';
@@ -14,7 +15,7 @@ export async function POST(request: Request) {
     const session = await requireAdmin(request);
     const body = await readJsonBody(request, 16 * 1024);
     const provider = parseCourierProvider(body.provider);
-    const settings = parseCourierSettings(body.settings);
+    const settings = parseCourierSettings(withStoredSecrets('courier', body.settings));
 
     // Endpoints are fixed here, never taken from the request.
     const endpoint = provider === 'jeebly'

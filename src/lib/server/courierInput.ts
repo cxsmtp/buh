@@ -47,68 +47,6 @@ export function parseCourierProvider(value: unknown): 'jeebly' | 'echo' {
   throw new HttpError(400, 'Unknown courier provider.');
 }
 
-export function parseOrderForDispatch(value: unknown): Order {
-  const o = obj(value, 'Order');
-  const c = obj(o.customer, 'Customer');
-  const courier = o.courier ? obj(o.courier, 'Courier details') : {};
-  const rawItems = o.items;
-  if (!Array.isArray(rawItems) || rawItems.length === 0 || rawItems.length > 100) {
-    throw new HttpError(400, 'Order items are missing.');
-  }
-  const paymentMethod = text(o.paymentMethod, 'Payment method', 20);
-  if (!PAYMENT.has(paymentMethod)) throw new HttpError(400, 'Unknown payment method.');
-
-  const pickupDate = text(courier.pickupDate, 'Pickup date', 10, false);
-  if (pickupDate && !/^\d{4}-\d{2}-\d{2}$/.test(pickupDate)) throw new HttpError(400, 'Pickup date must be YYYY-MM-DD.');
-
-  return {
-    id: text(o.id, 'Order id', 40),
-    createdAt: text(o.createdAt, 'Created at', 40, false),
-    customer: {
-      fullName: text(c.fullName, 'Customer name', 120),
-      phone: text(c.phone, 'Customer phone', 32),
-      email: text(c.email, 'Customer email', 254, false) || undefined,
-      emirate: emirate(c.emirate, 'Emirate') as Order['customer']['emirate'],
-      area: text(c.area, 'Area', 120),
-      streetAddress: text(c.streetAddress, 'Street address', 200, false),
-      buildingVilla: text(c.buildingVilla, 'Building / villa', 120, false),
-      flatVillaNo: text(c.flatVillaNo, 'Flat / villa number', 40, false),
-      landmark: text(c.landmark, 'Landmark', 200, false) || undefined,
-    },
-    items: rawItems.map((raw, i) => {
-      const item = obj(raw, `Item ${i + 1}`);
-      return {
-        productId: text(item.productId, 'Product id', 80, false),
-        title: text(item.title, 'Item title', 200),
-        image: '',
-        profileId: text(item.profileId, 'Bed profile', 60, false) as Order['items'][number]['profileId'],
-        profileName: text(item.profileName, 'Bed profile name', 120, false),
-        mattressSize: text(item.mattressSize, 'Mattress size', 80, false),
-        fittedSheet: text(item.fittedSheet, 'Fitted sheet', 80, false),
-        flatSheet: text(item.flatSheet, 'Flat sheet', 80, false),
-        pillowcases: text(item.pillowcases, 'Pillowcases', 80, false),
-        unitPrice: num(item.unitPrice, 'Unit price', 0, 1_000_000),
-        quantity: Math.round(num(item.quantity, 'Quantity', 1, 1000)),
-        totalPrice: num(item.totalPrice ?? 0, 'Item total', 0, 100_000_000),
-      };
-    }),
-    subtotal: num(o.subtotal ?? 0, 'Subtotal', 0, 100_000_000),
-    deliveryFee: num(o.deliveryFee ?? 0, 'Delivery fee', 0, 100_000),
-    codFee: num(o.codFee ?? 0, 'COD fee', 0, 100_000),
-    discount: num(o.discount ?? 0, 'Discount', 0, 100_000_000),
-    total: num(o.total, 'Order total', 0, 100_000_000),
-    paymentMethod: paymentMethod as Order['paymentMethod'],
-    paymentStatus: 'pending',
-    status: 'pending_confirmation' as Order['status'],
-    adminNotes: text(o.adminNotes, 'Admin notes', 500, false) || undefined,
-    courier: {
-      pickupDate: pickupDate || undefined,
-      weightKg: courier.weightKg === undefined ? undefined : num(courier.weightKg, 'Weight', 0.1, 500),
-      pieces: courier.pieces === undefined ? undefined : Math.round(num(courier.pieces, 'Pieces', 1, 500)),
-    },
-  } as Order;
-}
-
 export function parseCourierSettings(value: unknown): CourierSettings {
   const s = obj(value, 'Courier settings');
   const j = obj(s.jeebly ?? {}, 'Jeebly settings');

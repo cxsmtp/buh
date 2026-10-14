@@ -7,13 +7,24 @@ import { postJson } from '@/lib/apiClient';
 
 interface AdminCouriersTabProps {
   settings: CourierSettings;
-  onUpdateSettings: (newSettings: CourierSettings) => void;
+  /** Which secret keys are saved on the server (their values never come back). */
+  secretsSet: Record<string, boolean>;
+  /** Saves on the server; resolves to an error message, or null when saved. */
+  onUpdateSettings: (newSettings: CourierSettings) => Promise<string | null>;
+}
+
+/** Placeholder for a write-only key field. */
+export function secretPlaceholder(saved: boolean | undefined) {
+  return saved ? '•••• saved — leave blank to keep' : 'Not set';
 }
 
 export const AdminCouriersTab: React.FC<AdminCouriersTabProps> = ({
   settings,
+  secretsSet,
   onUpdateSettings,
 }) => {
+  const [saveError, setSaveError] = useState('');
+  const [saving, setSaving] = useState(false);
   const [activeCarrier, setActiveCarrier] = useState<'jeebly' | 'echo'>('jeebly');
   const [testResult, setTestResult] = useState<Record<string, unknown> | null>(null);
   const [testing, setTesting] = useState(false);
@@ -31,9 +42,16 @@ export const AdminCouriersTab: React.FC<AdminCouriersTabProps> = ({
     setTesting(false);
   };
 
-  const handleSave = (e: React.FormEvent) => {
+  const handleSave = async (e: React.FormEvent) => {
     e.preventDefault();
-    onUpdateSettings(formData);
+    setSaving(true);
+    setSaveError('');
+    const error = await onUpdateSettings(formData);
+    setSaving(false);
+    if (error) {
+      setSaveError(error);
+      return;
+    }
     setSavedSuccess(true);
     setTimeout(() => setSavedSuccess(false), 2500);
   };
@@ -127,20 +145,20 @@ export const AdminCouriersTab: React.FC<AdminCouriersTabProps> = ({
 
       {/* CARRIER TABS: JEEBLY VS ECO EXPRESS */}
       <div className="space-y-3">
-        <div className="flex gap-2 border-b border-stone-200 pb-2">
+        <div className="grid grid-cols-2 gap-2 border-b border-stone-200 pb-2">
           <button
             onClick={() => {
               setActiveCarrier('jeebly');
               setTestResult(null);
             }}
-            className={`flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-bold transition-all ${
+            className={`flex items-center justify-center gap-2 px-3 py-2 rounded-xl text-xs font-bold transition-all min-w-0 ${
               activeCarrier === 'jeebly'
                 ? 'bg-[#0f1c2e] text-white shadow-sm'
                 : 'bg-white text-stone-700 hover:bg-stone-100 border border-stone-200'
             }`}
           >
             <span>Jeebly Logistics (UAE)</span>
-            <span className="text-[10px] px-1.5 py-0.2 rounded-full bg-amber-400 text-stone-900 font-bold">
+            <span className="hidden md:inline text-[10px] px-1.5 py-0.2 rounded-full bg-amber-400 text-stone-900 font-bold">
               integration.jeebly.com
             </span>
           </button>
@@ -150,14 +168,14 @@ export const AdminCouriersTab: React.FC<AdminCouriersTabProps> = ({
               setActiveCarrier('echo');
               setTestResult(null);
             }}
-            className={`flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-bold transition-all ${
+            className={`flex items-center justify-center gap-2 px-3 py-2 rounded-xl text-xs font-bold transition-all min-w-0 ${
               activeCarrier === 'echo'
                 ? 'bg-[#0f1c2e] text-white shadow-sm'
                 : 'bg-white text-stone-700 hover:bg-stone-100 border border-stone-200'
             }`}
           >
             <span>Eco Express Courier</span>
-            <span className="text-[10px] px-1.5 py-0.2 rounded-full bg-blue-400 text-white font-bold">
+            <span className="hidden md:inline text-[10px] px-1.5 py-0.2 rounded-full bg-blue-400 text-white font-bold">
               Apiary / ecofreight.ae
             </span>
           </button>
@@ -190,7 +208,9 @@ export const AdminCouriersTab: React.FC<AdminCouriersTabProps> = ({
                   XApiKey Header:
                 </label>
                 <input
-                  type="text"
+                  type="password"
+                  autoComplete="off"
+                  placeholder={secretPlaceholder(secretsSet['jeebly.apiKey'])}
                   value={formData.jeebly.apiKey}
                   onChange={(e) =>
                     setFormData({
@@ -207,7 +227,9 @@ export const AdminCouriersTab: React.FC<AdminCouriersTabProps> = ({
                   ClientKey Header:
                 </label>
                 <input
-                  type="text"
+                  type="password"
+                  autoComplete="off"
+                  placeholder={secretPlaceholder(secretsSet['jeebly.clientKey'])}
                   value={formData.jeebly.clientKey}
                   onChange={(e) =>
                     setFormData({
@@ -285,7 +307,9 @@ export const AdminCouriersTab: React.FC<AdminCouriersTabProps> = ({
                   Authorization Bearer Token:
                 </label>
                 <input
-                  type="text"
+                  type="password"
+                  autoComplete="off"
+                  placeholder={secretPlaceholder(secretsSet['echo.apiKey'])}
                   value={formData.echo.apiKey}
                   onChange={(e) =>
                     setFormData({
@@ -372,15 +396,22 @@ export const AdminCouriersTab: React.FC<AdminCouriersTabProps> = ({
           {savedSuccess && (
             <span className="text-emerald-600 font-bold text-xs flex items-center gap-1">
               <CheckCircle2 className="w-4 h-4" />
-              Settings & Rules Saved Successfully!
+              Saved on the server.
+            </span>
+          )}
+          {saveError && (
+            <span role="alert" className="text-red-700 font-semibold text-xs flex items-center gap-1">
+              <AlertCircle className="w-4 h-4" />
+              {saveError}
             </span>
           )}
           <button
             type="button"
             onClick={handleSave}
-            className="ml-auto bg-[#0f1c2e] hover:bg-stone-800 text-white font-bold text-xs px-5 py-2.5 rounded-xl shadow transition-all"
+            disabled={saving}
+            className="ml-auto bg-[#0f1c2e] hover:bg-stone-800 disabled:opacity-60 text-white font-bold text-xs px-5 py-2.5 rounded-xl shadow transition-all"
           >
-            Save Carrier Settings
+            {saving ? 'Saving…' : 'Save Carrier Settings'}
           </button>
         </div>
       </div>
