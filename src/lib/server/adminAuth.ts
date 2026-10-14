@@ -3,6 +3,7 @@ import fs from 'node:fs';
 import { dataFile, writePrivateFile } from './dataDir';
 import { HttpError } from './http';
 import { logEvent } from './log';
+import { _resetServerSecret, serverSecret } from './secrets';
 import { dummyPasswordHash, generatePassword, hashPassword, verifyPassword } from './password';
 
 /**
@@ -44,7 +45,6 @@ interface AdminAccount {
 }
 
 let cached: AdminAccount | null = null;
-let secret: Buffer | null = null;
 
 const ACCOUNT_FILE = () => dataFile('admin.json');
 const SESSION_STATE_FILE = () => dataFile('session-state.json');
@@ -143,31 +143,8 @@ function hashFingerprint(passwordHash: string): string {
   return crypto.createHash('sha256').update(passwordHash).digest('base64url').slice(0, 16);
 }
 
-function sessionSecret(): Buffer {
-  if (secret) return secret;
-  const fromEnv = process.env.SESSION_SECRET;
-  if (fromEnv) {
-    if (fromEnv.length < 32) throw new Error('SESSION_SECRET must be at least 32 characters.');
-    secret = Buffer.from(fromEnv, 'utf8');
-    return secret;
-  }
-  const file = dataFile('session.key');
-  try {
-    secret = Buffer.from(fs.readFileSync(file, 'utf8').trim(), 'base64url');
-  } catch {
-    const fresh = crypto.randomBytes(32);
-    try {
-      fs.writeFileSync(file, fresh.toString('base64url'), { mode: 0o600, flag: 'wx' });
-      secret = fresh;
-    } catch {
-      secret = Buffer.from(fs.readFileSync(file, 'utf8').trim(), 'base64url');
-    }
-  }
-  return secret;
-}
-
 function sign(body: string): string {
-  return crypto.createHmac('sha256', sessionSecret()).update(`session\n${body}`).digest('base64url');
+  return crypto.createHmac('sha256', serverSecret()).update(`session\n${body}`).digest('base64url');
 }
 
 interface SessionPayload {
@@ -341,6 +318,6 @@ export async function changePassword(currentPassword: string, newPassword: strin
 /** Test hook: forget cached account/secret/failures so a new DATA_DIR is picked up. */
 export function _resetAdminAuthState() {
   cached = null;
-  secret = null;
+  _resetServerSecret();
   failStates.clear();
 }

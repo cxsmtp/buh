@@ -2,40 +2,55 @@
 
 import React, { useState } from 'react';
 import { Order } from '@/types';
-import { X, Search, Truck, CheckCircle2, Clock, ExternalLink, MapPin } from 'lucide-react';
-import { safeHref } from '@/lib/apiClient';
+import { X, Search, Truck, ExternalLink, MapPin } from 'lucide-react';
+import { postJson, safeHref } from '@/lib/apiClient';
 
 interface OrderTrackerModalProps {
   isOpen: boolean;
   onClose: () => void;
-  orders: Order[];
+  /** The order number of this visitor's latest order, to pre-fill. */
+  lastOrderId?: string;
+}
+
+/** What Track Order shows: status and delivery, never the address, email or full name. */
+interface TrackedOrder {
+  id: string;
+  createdAt: string;
+  status: Order['status'];
+  total: number;
+  firstName: string;
+  emirate: string;
+  area: string;
+  items: Array<{ title: string; profileName: string; quantity: number; totalPrice: number }>;
+  courier: { awbNumber: string; trackingUrl: string; status: string };
 }
 
 export const OrderTrackerModal: React.FC<OrderTrackerModalProps> = ({
   isOpen,
   onClose,
-  orders,
+  lastOrderId,
 }) => {
-  const [query, setQuery] = useState('');
-  const [searchResult, setSearchResult] = useState<Order | null>(null);
+  const [orderId, setOrderId] = useState(lastOrderId || '');
+  const [phone, setPhone] = useState('');
+  const [searchResult, setSearchResult] = useState<TrackedOrder | null>(null);
   const [hasSearched, setHasSearched] = useState(false);
+  const [message, setMessage] = useState('');
+  const [searching, setSearching] = useState(false);
 
   if (!isOpen) return null;
 
-  const handleSearch = (e: React.FormEvent) => {
+  // Both the order number and the phone on the order are needed, so nobody can look up someone else's order.
+  const handleSearch = async (e: React.FormEvent) => {
     e.preventDefault();
-    const clean = query.trim().toLowerCase();
-    const digits = clean.replace(/\D/g, '').replace(/^(00)?971/, '').replace(/^0/, '');
-    // Exact matches only: a partial phone number must not open someone else's order.
-    const found = clean
-      ? orders.find(
-          (o) =>
-            o.id.toLowerCase() === clean ||
-            (digits.length >= 9 && o.customer.phone.replace(/\D/g, '').endsWith(digits)) ||
-            (o.courier.awbNumber && o.courier.awbNumber.toLowerCase() === clean)
-        )
-      : undefined;
-    setSearchResult(found || null);
+    if (!orderId.trim() || !phone.trim()) return;
+    setSearching(true);
+    const { data } = await postJson<{ found?: boolean; order?: TrackedOrder; message?: string }>('/api/orders/lookup', {
+      orderId: orderId.trim(),
+      phone: phone.trim(),
+    });
+    setSearching(false);
+    setSearchResult(data.found && data.order ? data.order : null);
+    setMessage(data.found ? '' : data.message || 'No order matches that order number and phone number.');
     setHasSearched(true);
   };
 
@@ -59,22 +74,34 @@ export const OrderTrackerModal: React.FC<OrderTrackerModalProps> = ({
         </div>
 
         {/* Search Input */}
-        <form onSubmit={handleSearch} className="flex gap-2">
-          <div className="relative flex-1">
-            <input
-              type="text"
-              placeholder="Enter Order # (e.g. BUH-2026-1094) or Mobile"
-              value={query}
-              onChange={(e) => setQuery(e.target.value)}
-              className="w-full px-3.5 py-2.5 rounded-xl border border-stone-300 text-xs focus:outline-none focus:ring-2 focus:ring-[#c5a059]"
-            />
-          </div>
+        <form onSubmit={handleSearch} className="grid grid-cols-1 min-[420px]:grid-cols-[1fr_1fr_auto] gap-2">
+          <input
+            type="text"
+            required
+            aria-label="Order number"
+            placeholder="Order number (BUH-…)"
+            value={orderId}
+            maxLength={40}
+            onChange={(e) => setOrderId(e.target.value)}
+            className="w-full px-3.5 py-2.5 rounded-xl border border-stone-300 text-xs font-mono uppercase focus:outline-none focus:ring-2 focus:ring-[#c5a059]"
+          />
+          <input
+            type="tel"
+            required
+            aria-label="Mobile number on the order"
+            placeholder="Mobile on the order"
+            value={phone}
+            maxLength={20}
+            onChange={(e) => setPhone(e.target.value)}
+            className="w-full px-3.5 py-2.5 rounded-xl border border-stone-300 text-xs focus:outline-none focus:ring-2 focus:ring-[#c5a059]"
+          />
           <button
             type="submit"
-            className="bg-[#0f1c2e] hover:bg-stone-800 text-white px-4 py-2.5 rounded-xl text-xs font-semibold flex items-center gap-1.5 transition-colors"
+            disabled={searching}
+            className="bg-[#0f1c2e] hover:bg-stone-800 disabled:opacity-60 text-white px-4 py-2.5 rounded-xl text-xs font-semibold flex items-center justify-center gap-1.5 transition-colors"
           >
             <Search className="w-4 h-4" />
-            <span>Track</span>
+            <span>{searching ? 'Finding…' : 'Track'}</span>
           </button>
         </form>
 
@@ -101,7 +128,7 @@ export const OrderTrackerModal: React.FC<OrderTrackerModalProps> = ({
                         : 'bg-amber-100 text-amber-800'
                     }`}
                   >
-                    {searchResult.status.replace('_', ' ')}
+                    {searchResult.status.replace(/_/g, ' ')}
                   </span>
                 </div>
 
@@ -160,13 +187,13 @@ export const OrderTrackerModal: React.FC<OrderTrackerModalProps> = ({
                 <div className="flex items-center gap-1.5 text-stone-500 text-[11px] pt-1">
                   <MapPin className="w-3.5 h-3.5 text-[#c5a059]" />
                   <span>
-                    Delivering to {searchResult.customer.buildingVilla}, {searchResult.customer.area}, {searchResult.customer.emirate}
+                    Delivering to {searchResult.firstName} in {searchResult.area}, {searchResult.emirate}
                   </span>
                 </div>
               </div>
             ) : (
               <div className="text-center py-6 text-stone-500 text-xs bg-stone-50 rounded-2xl border border-stone-200">
-                No active order found matching &quot;{query}&quot;. Please verify the order number or mobile phone number.
+                {message}
               </div>
             )}
           </div>

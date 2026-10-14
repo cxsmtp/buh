@@ -8,7 +8,9 @@
    - After 5 wrong tries the code stops working; request a new one.
    - **Outside the UAE?** As soon as a non-UAE number is typed, checkout shows **Email orders@…**, which opens an email with the bag already listed.
    - **SMS not arriving?** If the shop's SMS service is down, checkout says so and offers the shop's email.
-3. Fill in the delivery address (or **Use My GPS**), choose Cash on Delivery or bank transfer, and **Confirm & Raise Order**. The button stays locked until the phone is verified.
+3. Fill in the delivery address (or **Use My GPS**), choose Cash on Delivery or bank transfer (with an optional receipt screenshot or PDF), and **Confirm & Raise Order**. The button stays locked until the phone is verified.
+4. **Track Order:** enter the order number (shown on the confirmation and pre-filled on the same phone) and the mobile number used for the order.
+- The bag is kept if the page is reloaded. Prices and stock are always checked by the shop when the order is placed.
 
 ## For the owner: the Admin Hub
 
@@ -20,13 +22,48 @@
 - 5 wrong passwords from one place pause sign-in there for 15 minutes; try again later or from another network. **Sign out** signs you out on every device.
 - The build version (BUH-xx.xx.xx) shows next to the hub's title.
 
+### Orders
+
+New orders appear under **Orders & Dispatches** (the list refreshes every minute). For each order:
+
+- **Confirm & Assign Courier** books Jeebly or Eco Express and prints the label.
+- **Mark dispatched**, then **Out for delivery** or **Mark delivered**, as the parcel moves.
+- **Bank transfers:**
+  - **View receipt** opens what the customer uploaded.
+  - **Mark payment received** once the money is in the account.
+- **Cancel order** returns the items to stock. It cannot be undone.
+
+Every change is recorded with who made it and when.
+
+### Inventory
+
+**Inventory Stock** lists every product. You can change the price and stock right there (**Save**), and **Visible / Hidden** shows or hides a product in the shop. **+ Add Bedding Set** creates a new one; its photos are stored on the server.
+
+### Customers
+
+**Customers & CRM** is built from the orders: one line per phone number, with the number of orders and the total spent.
+
+### Bank details
+
+Under **🎨 Logo & Marquee → Bank transfer details**. Customers paying by transfer see exactly these at checkout: check the IBAN before going live.
+
+### Backups
+
+The line at the top of the Admin Hub shows when the last backup ran:
+
+- **green:** recent and emailed;
+- **amber:** taken but not emailed (check the `SMTP_*` settings);
+- **red:** failed or overdue.
+
+**Back up now** runs one immediately. Backups run every 12 hours on their own. Restoring: see HOSTINGER_DEPLOYMENT_GUIDE.md.
+
 ### SMS & Real OTP
 
-The live checkout uses the gateway in the server's environment (`.env.production`). The SMS tab is for trying a gateway: enter its details and tap **Send test**. Webhook and Infobip URLs must be public https addresses.
+Enter the gateway's details, tap **Send test** to try it on your own mobile, then **Save Gateway Credentials**. Checkout then sends codes through it (a gateway set in `.env.production` takes priority). Keys are kept on the server and never shown again: leave a key field blank to keep the saved one. Webhook and Infobip URLs must be public https addresses.
 
 ### Couriers
 
-Enter the Jeebly and Eco Express keys and use **Test connection**.
+Enter the Jeebly and Eco Express keys and use **Test connection**. Keys are kept on the server and never shown again: leave a key field blank to keep the saved one.
 
 - **Sandbox mode** gives simulated AWBs, labelled as such.
 - **Live mode** books with the carrier. If the carrier refuses, you see why, and the order stays unbooked.

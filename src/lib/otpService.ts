@@ -126,7 +126,20 @@ export interface GatewayConfig {
   webhook?: { url: string; bearerToken?: string };
 }
 
-/** Gateways from the server environment — the only ones the public endpoint uses. */
+/**
+ * The gateways live checkout uses: the server environment first, then the SMS
+ * settings saved in the admin hub (when switched on). Never from a request.
+ */
+export async function liveGateways(): Promise<GatewayConfig> {
+  const env = envGateways();
+  if (env.twilio || env.infobip || env.webhook) return env;
+  const { getSettings } = await import('@/lib/server/settings');
+  const saved = getSettings('sms');
+  if (!saved.isEnabled) return {};
+  return gatewaysFromSettings(saved).catch(() => ({}));
+}
+
+/** Gateways from the server environment. */
 export function envGateways(): GatewayConfig {
   const env = process.env;
   const config: GatewayConfig = {};

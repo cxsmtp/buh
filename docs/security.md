@@ -41,7 +41,7 @@ Carrier endpoints are fixed in code.
 ## Couriers
 
 - Live bookings use the carrier's own AWB. If the carrier is down or refuses, the booking fails visibly. Older builds invented a random AWB and marked the order booked, and checkout gave every new order a made-up AWB and tracking link.
-- **Never booked twice:** live bookings are kept by order number in `DATA_DIR/bookings.json`. A repeat request returns the AWB already issued. If the carrier never answered an attempt, it may or may not exist: the owner must check the carrier portal and confirm before booking again.
+- **Never booked twice:** each live booking is recorded on the order in the database. A repeat request returns the AWB already issued. If the carrier never answered an attempt, it may or may not exist: the owner must check the carrier portal and confirm before booking again.
 - Sandbox AWBs are labelled simulated.
 - One booking per order at a time.
 - Inputs are allow-listed and length-capped.
@@ -72,11 +72,40 @@ Every page sends:
 - **Docker:** non-root, `read_only`, `tmpfs /tmp`, `cap_drop: ALL`, `no-new-privileges`, bound to `127.0.0.1`, data in a volume, healthcheck on `/api/health`.
 - **PM2:** one instance. Codes and limits live in process memory; move them to Redis before running more.
 - **`TRUST_PROXY=1`** only behind nginx, which sets `X-Real-IP`. Without a trusted proxy, per-address limits are skipped (not shared by everyone); the per-number, per-account and shop-wide limits still apply.
-- **Back up `DATA_DIR`.** It holds the admin account, session key, booking record and audit log, with owner-only permissions (an existing folder is tightened to 700 at start).
+- **Back up `DATA_DIR`.** It holds the database, uploaded photos, receipts, backups, the admin account, session key and audit log, with owner-only permissions (an existing folder is tightened to 700 at start).
+
+## Orders, prices and stock
+
+- **Orders are stored on the server**, in a SQLite database in `DATA_DIR/shop.db`. It runs in WAL mode with full sync on commit, so a confirmed order survives a power cut.
+- **The server works out what the customer pays.** It takes each line's product, bed size and quantity and computes the unit prices, totals and fees from the catalogue. A forged price in the request is ignored.
+- **Stock is reserved in the same transaction** (`UPDATE … WHERE stock >= qty`), so two customers can never both buy the last set. Cancelling an order puts its stock back.
+- **Every order needs proof of the phone number:** a signed, 30-minute token issued by `/api/otp/verify`. A number that was not verified by SMS cannot be put on an order.
+- **One checkout attempt = one order.** The browser sends a random checkout reference, and a double tap or network retry gets the same order back.
+- **Status changes follow allowed steps.** For example, a confirmed order cannot jump to delivered, and cancelled or delivered orders are final. Each change is recorded per order and in the audit log.
+- **Track Order needs the order number and the phone number on it**, and shows status and delivery only (no address, email or full name). Lookups are limited per address and per order number.
+- **Bank-transfer receipts** (PNG, JPEG, WebP or PDF, checked by their first bytes, max 5 MB) are stored on the server and shown only to the admin, sandboxed.
+
+## Settings and keys
+
+- **Branding, bank details, courier keys and SMS gateway settings** are stored on the server, so every visitor sees the same shop.
+- **Keys are write-only.** The admin hub gets them back blank, with a "saved" flag. A save with a blank key keeps the stored one, and `null` clears it.
+- **A key follows its host:** changing the Infobip or webhook address without a new key drops the old key.
+- **"Test connection" fills blank keys from the saved ones on the server**, so the keys never travel back to a browser.
+
+## Backups
+
+Every 12 hours (see the deployment guide) the shop backs itself up:
+
+- **A consistent database snapshot**, integrity-checked before it is used.
+- **CSV flat files.** A cell starting with `= + - @` is prefixed with `'`, so Excel never runs it as a formula.
+- **Receipts, photos and the audit log**, with a SHA-256 manifest.
+- **Optional encryption:** AES-256-GCM, with the key derived by scrypt from `BACKUP_PASSPHRASE`.
+- **Delivered by email over TLS** (STARTTLS is required, so the SMTP password is never sent in clear).
+- **Kept on the server too:** the newest 14.
+- **Session keys and the admin account are not in backups.**
+- **Restore checks before it writes:** every file against the manifest, and the database's integrity.
 
 ## Known limits (next steps)
 
-- **Demo orders and customers ship only in development builds** (or with `NEXT_PUBLIC_DEMO_DATA=true`).
-- **Orders, products and customers are still stored in each browser's localStorage.** A customer's order is not seen by the admin on another device, and the phone-verified gate runs in the customer's browser. Moving orders to a server-side store (with server-side price checks and the OTP result bound to the order) is the most important next change.
-- **Courier and SMS keys entered in the admin hub are kept in the admin's browser** and sent to the server for each call. Server-side, write-only settings would be better.
-- **One admin account; no roles yet.**
+- **One admin account; no staff roles yet.**
+- **One server process.** Phone codes and limits live in memory. Run a single instance (the provided setups do).

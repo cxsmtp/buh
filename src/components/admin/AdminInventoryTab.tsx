@@ -23,14 +23,89 @@ import {
 
 interface AdminInventoryTabProps {
   products: Product[];
-  onAddProduct: (product: Product) => void;
-  onUpdateProduct: (product: Product) => void;
+  /** Save on the server; resolve to an error message, or null when saved. */
+  onAddProduct: (product: Product) => Promise<string | null>;
+  onUpdateProduct: (id: string, changes: Partial<Product>) => Promise<string | null>;
+}
+
+/** Price, stock and visibility, editable straight from the list. */
+function ProductQuickEdit({ product, onSave }: { product: Product; onSave: (changes: Partial<Product>) => Promise<string | null> }) {
+  const [price, setPrice] = useState(String(product.price));
+  const [stock, setStock] = useState(String(product.stockCount));
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState('');
+  const visible = product.active !== false;
+  const dirty = price !== String(product.price) || stock !== String(product.stockCount);
+
+  const save = async (changes: Partial<Product>) => {
+    setSaving(true);
+    setError('');
+    const problem = await onSave(changes);
+    setSaving(false);
+    if (problem) setError(problem);
+  };
+
+  return (
+    <div className="pt-1 border-t border-stone-100 mt-1 space-y-1">
+      <div className="flex items-center gap-1.5 flex-wrap">
+        <label className="flex items-center gap-1 text-[10px] text-stone-500">
+          AED
+          <input
+            type="number"
+            min={1}
+            step="0.01"
+            value={price}
+            onChange={(e) => setPrice(e.target.value)}
+            aria-label={`Price of ${product.title}`}
+            className="w-16 px-1.5 py-0.5 rounded-md border border-stone-300 text-xs font-bold text-[#0f1c2e]"
+          />
+        </label>
+        <label className="flex items-center gap-1 text-[10px] text-stone-500">
+          Stock
+          <input
+            type="number"
+            min={0}
+            step={1}
+            value={stock}
+            onChange={(e) => setStock(e.target.value)}
+            aria-label={`Stock of ${product.title}`}
+            className={`w-14 px-1.5 py-0.5 rounded-md border text-xs font-bold ${Number(stock) > 10 ? 'border-stone-300' : 'border-red-300 text-red-700'}`}
+          />
+        </label>
+        {dirty && (
+          <button
+            type="button"
+            disabled={saving}
+            onClick={() => save({ price: Number(price), stockCount: Number(stock) })}
+            className="text-[10px] font-bold px-2 py-0.5 rounded-md bg-[#0f1c2e] text-white disabled:opacity-50"
+          >
+            {saving ? 'Saving…' : 'Save'}
+          </button>
+        )}
+        <button
+          type="button"
+          disabled={saving}
+          onClick={() => save({ active: !visible })}
+          className={`ml-auto text-[10px] font-bold px-2 py-0.5 rounded-md border disabled:opacity-50 ${
+            visible ? 'border-emerald-300 bg-emerald-50 text-emerald-800' : 'border-stone-300 bg-stone-100 text-stone-600'
+          }`}
+          title={visible ? 'Shown in the shop: click to hide' : 'Hidden from the shop: click to show'}
+        >
+          {visible ? 'Visible' : 'Hidden'}
+        </button>
+      </div>
+      {error && <p role="alert" className="text-[10px] text-red-700">{error}</p>}
+    </div>
+  );
 }
 
 export const AdminInventoryTab: React.FC<AdminInventoryTabProps> = ({
   products,
   onAddProduct,
+  onUpdateProduct,
 }) => {
+  const [saveError, setSaveError] = useState('');
+  const [savingProduct, setSavingProduct] = useState(false);
   const [isAdding, setIsAdding] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
 
@@ -122,7 +197,7 @@ export const AdminInventoryTab: React.FC<AdminInventoryTabProps> = ({
   };
 
   // Save Product to Inventory
-  const handleSaveProduct = (e: React.FormEvent) => {
+  const handleSaveProduct = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!title) {
       alert('Please provide a title for the bedding set.');
@@ -166,7 +241,14 @@ export const AdminInventoryTab: React.FC<AdminInventoryTabProps> = ({
       createdAt: new Date().toISOString(),
     };
 
-    onAddProduct(newProd);
+    setSavingProduct(true);
+    setSaveError('');
+    const problem = await onAddProduct(newProd);
+    setSavingProduct(false);
+    if (problem) {
+      setSaveError(problem);
+      return;
+    }
     setIsAdding(false);
     
     // Reset Form
@@ -532,11 +614,17 @@ export const AdminInventoryTab: React.FC<AdminInventoryTabProps> = ({
           <div className="pt-2">
             <button
               type="submit"
-              className="w-full bg-[#0f1c2e] hover:bg-stone-800 text-white font-bold text-sm py-4 rounded-xl shadow-xl flex items-center justify-center gap-2 transition-all active:scale-95"
+              disabled={savingProduct}
+              className="w-full bg-[#0f1c2e] hover:bg-stone-800 disabled:opacity-60 text-white font-bold text-sm py-4 rounded-xl shadow-xl flex items-center justify-center gap-2 transition-all active:scale-95"
             >
               <CheckCircle2 className="w-5 h-5 text-amber-300" />
-              <span>Save & Publish to Customer Storefront</span>
+              <span>{savingProduct ? 'Publishing…' : 'Save & Publish to Customer Storefront'}</span>
             </button>
+            {saveError && (
+              <p role="alert" className="mt-2 text-xs text-red-700 bg-red-50 border border-red-200 rounded-lg px-3 py-2 font-medium">
+                {saveError}
+              </p>
+            )}
           </div>
         </form>
       )}
@@ -584,14 +672,11 @@ export const AdminInventoryTab: React.FC<AdminInventoryTabProps> = ({
                 </div>
               </div>
 
-              <div className="flex items-center justify-between pt-1 border-t border-stone-100 mt-1">
-                <span className="text-xs font-bold text-[#0f1c2e]">AED {p.price}</span>
-                <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${
-                  p.stockCount > 10 ? 'bg-emerald-100 text-emerald-800' : 'bg-red-100 text-red-800'
-                }`}>
-                  {p.stockCount} in stock
-                </span>
-              </div>
+              <ProductQuickEdit
+                key={`${p.id}-${p.price}-${p.stockCount}-${p.active}`}
+                product={p}
+                onSave={(changes) => onUpdateProduct(p.id, changes)}
+              />
             </div>
           </div>
         ))}

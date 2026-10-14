@@ -16,21 +16,27 @@
   "dependencies": {
     "@tailwindcss/postcss": "^4.3.3",
     "@types/canvas-confetti": "^1.9.0",
+    "better-sqlite3": "^12.11.1",
     "canvas-confetti": "^1.9.4",
     "lucide-react": "^1.57.0",
     "next": "16.4.0",
+    "nodemailer": "^7.0.13",
     "postcss": "^8.5.30",
     "react": "19.3.0",
     "react-dom": "19.3.0"
   },
   "devDependencies": {
     "@tailwindcss/turbopack": "^4",
+    "@types/better-sqlite3": "^9.6.0",
     "@types/node": "^20",
+    "@types/nodemailer": "^8.0.2",
     "@types/react": "^19",
     "@types/react-dom": "^19",
+    "@types/smtp-server": "^3.5.13",
     "eslint": "^9",
     "eslint-config-next": "16.4.0",
     "playwright": "1.56.1",
+    "smtp-server": "^3.19.22",
     "tailwindcss": "^4",
     "tsx": "^4.23.15",
     "typescript": "^5"

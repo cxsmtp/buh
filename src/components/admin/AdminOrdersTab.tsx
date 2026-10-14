@@ -19,19 +19,41 @@ import {
   Building2,
   Banknote
 } from 'lucide-react';
-import { postJson } from '@/lib/apiClient';
+import { postJson, sendJson } from '@/lib/apiClient';
 
 interface AdminOrdersTabProps {
   orders: Order[];
-  onUpdateOrder: (orderId: string, updates: Partial<Order>) => void;
+  /** An order changed on the server (status, payment, courier): replace it in the list. */
+  onOrderChanged: (order: Order) => void;
   courierSettings: CourierSettings;
 }
 
+/** Status moves the server allows (src/lib/server/orders.ts), with their button labels. */
+const NEXT_ACTIONS: Partial<Record<Order['status'], Array<{ to: Order['status']; label: string }>>> = {
+  confirmed: [{ to: 'dispatched', label: 'Mark dispatched' }],
+  dispatched: [
+    { to: 'out_for_delivery', label: 'Out for delivery' },
+    { to: 'delivered', label: 'Mark delivered' },
+  ],
+  out_for_delivery: [{ to: 'delivered', label: 'Mark delivered' }],
+};
+
 export const AdminOrdersTab: React.FC<AdminOrdersTabProps> = ({
   orders,
-  onUpdateOrder,
+  onOrderChanged,
   courierSettings,
 }) => {
+  const [busyOrderId, setBusyOrderId] = useState('');
+
+  const patchOrder = async (order: Order, changes: Partial<Pick<Order, 'status' | 'paymentStatus' | 'adminNotes'>>, confirmText?: string) => {
+    if (confirmText && !window.confirm(confirmText)) return;
+    setBusyOrderId(order.id);
+    const { ok, data } = await sendJson<{ order?: Order; message?: string }>('PATCH', `/api/admin/orders/${encodeURIComponent(order.id)}`, changes);
+    setBusyOrderId('');
+    if (ok && data.order) onOrderChanged(data.order);
+    else alert(data.message || 'The order could not be updated.');
+  };
+
   const [filter, setFilter] = useState<'all' | 'pending' | 'confirmed' | 'dispatched'>('all');
   const [selectedOrderForConfirm, setSelectedOrderForConfirm] = useState<Order | null>(null);
   const [labelOrder, setLabelOrder] = useState<Order | null>(null);
@@ -72,20 +94,16 @@ export const AdminOrdersTab: React.FC<AdminOrdersTabProps> = ({
     if (!selectedOrderForConfirm) return;
     setIsDispatching(true);
 
-    // Only what the carrier needs: receipts and product photos can be megabytes of base64.
-    const { paymentReceiptUrl: _receipt, ...orderForCarrier } = selectedOrderForConfirm;
-    void _receipt;
+    // The server reads the order and the courier keys itself; only the booking details go up.
     const request = {
-      order: {
-        ...orderForCarrier,
-        items: orderForCarrier.items.map((item) => ({ ...item, image: '' })),
-        courier: { ...orderForCarrier.courier, pickupDate, weightKg, pieces },
-        adminNotes,
-      },
+      orderId: selectedOrderForConfirm.id,
       provider: chosenCourier,
-      settings: courierSettings,
+      pickupDate,
+      weightKg,
+      pieces,
+      adminNotes,
     };
-    type DispatchReply = { success?: boolean; message?: string; awbNumber?: string; trackingUrl?: string; isSimulated?: boolean; needsConfirm?: boolean; alreadyBooked?: boolean };
+    type DispatchReply = { success?: boolean; message?: string; awbNumber?: string; isSimulated?: boolean; needsConfirm?: boolean; alreadyBooked?: boolean; order?: Order };
     let { ok, status, data } = await postJson<DispatchReply>('/api/courier/dispatch', request);
     // The last attempt got no answer from the carrier: only re-book once the owner has checked the portal.
     if (status === 409 && data.needsConfirm) {
@@ -96,37 +114,16 @@ export const AdminOrdersTab: React.FC<AdminOrdersTabProps> = ({
       ({ ok, status, data } = await postJson<DispatchReply>('/api/courier/dispatch', { ...request, rebook: true }));
     }
     setIsDispatching(false);
+    if (data.order) onOrderChanged(data.order);
     if (data.alreadyBooked) alert(data.message);
 
-    // Never mark an order booked without a real AWB from the server.
-    if (!ok || !data.success || !data.awbNumber) {
+    // Never treat an order as booked without a real AWB from the server.
+    if (!ok || !data.success || !data.awbNumber || !data.order) {
       alert(`Courier booking failed: ${data.message || 'please check the courier settings and try again.'}`);
       return;
     }
-
-    const updatedOrderUpdates: Partial<Order> = {
-      status: 'confirmed',
-      adminNotes,
-      courier: {
-        ...selectedOrderForConfirm.courier,
-        provider: chosenCourier,
-        awbNumber: data.awbNumber,
-        trackingUrl: data.trackingUrl || '',
-        status: data.isSimulated ? 'Sandbox booking (simulated AWB)' : 'Confirmed & Booked with Carrier',
-        pickupDate,
-        weightKg,
-        pieces,
-        labelGenerated: true,
-        dispatchedAt: new Date().toISOString(),
-      },
-    };
-
-    onUpdateOrder(selectedOrderForConfirm.id, updatedOrderUpdates);
-
-    // Update local reference to show label
-    const updatedOrder = { ...selectedOrderForConfirm, ...updatedOrderUpdates };
     setSelectedOrderForConfirm(null);
-    setLabelOrder(updatedOrder as Order);
+    setLabelOrder(data.order);
   };
 
   const sendWhatsAppUpdate = (order: Order) => {
@@ -284,6 +281,67 @@ export const AdminOrdersTab: React.FC<AdminOrdersTabProps> = ({
                   <div className="text-[11px] text-stone-500">
                     Pickup: <strong>{order.courier.pickupDate || 'Tomorrow'}</strong>
                   </div>
+                </div>
+
+                {/* Payment & progress */}
+                <div className="flex flex-wrap items-center gap-2 text-[11px]">
+                  {!isCod && (
+                    <>
+                      <span
+                        className={`px-2 py-1 rounded-lg font-semibold border ${
+                          order.paymentStatus === 'verified' || order.paymentStatus === 'paid'
+                            ? 'bg-emerald-50 text-emerald-800 border-emerald-200'
+                            : 'bg-amber-50 text-amber-900 border-amber-200'
+                        }`}
+                      >
+                        Payment: {order.paymentStatus.replace(/_/g, ' ')}
+                        {order.bankTransferRef ? ` • Ref ${order.bankTransferRef}` : ''}
+                      </span>
+                      {order.paymentReceiptUrl && (
+                        <a
+                          href={order.paymentReceiptUrl}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="px-2 py-1 rounded-lg font-semibold border border-stone-300 bg-white text-stone-800 hover:bg-stone-100"
+                        >
+                          View receipt
+                        </a>
+                      )}
+                      {order.paymentStatus !== 'verified' && order.paymentStatus !== 'paid' && order.status !== 'cancelled' && (
+                        <button
+                          type="button"
+                          disabled={busyOrderId === order.id}
+                          onClick={() => patchOrder(order, { paymentStatus: 'verified' }, `Confirm that AED ${order.total} for ${order.id} has arrived in the bank account?`)}
+                          className="px-2 py-1 rounded-lg font-semibold border border-emerald-300 bg-emerald-50 text-emerald-800 hover:bg-emerald-100 disabled:opacity-50"
+                        >
+                          Mark payment received
+                        </button>
+                      )}
+                    </>
+                  )}
+                  {(NEXT_ACTIONS[order.status] || []).map((action) => (
+                    <button
+                      key={action.to}
+                      type="button"
+                      disabled={busyOrderId === order.id}
+                      onClick={() => patchOrder(order, { status: action.to })}
+                      className="px-2 py-1 rounded-lg font-semibold border border-blue-200 bg-blue-50 text-blue-900 hover:bg-blue-100 disabled:opacity-50"
+                    >
+                      {action.label}
+                    </button>
+                  ))}
+                  {order.status !== 'cancelled' && order.status !== 'delivered' && (
+                    <button
+                      type="button"
+                      disabled={busyOrderId === order.id}
+                      onClick={() =>
+                        patchOrder(order, { status: 'cancelled' }, `Cancel order ${order.id}? Its items go back into stock. This cannot be undone.`)
+                      }
+                      className="px-2 py-1 rounded-lg font-semibold border border-red-200 bg-white text-red-700 hover:bg-red-50 disabled:opacity-50 ml-auto"
+                    >
+                      Cancel order
+                    </button>
+                  )}
                 </div>
 
                 {/* Action Buttons */}

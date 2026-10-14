@@ -1,9 +1,9 @@
 'use client';
 
 import React, { useState, useEffect } from 'react';
-import { CartItem, Emirate, Order, PaymentMethod } from '@/types';
-import { UAE_EMIRATES, UAE_POPULAR_AREAS, INITIAL_BANK_DETAILS } from '@/data/initialData';
-import { getDefaultCourierForOrder } from '@/lib/storage';
+import { BankTransferDetails, CartItem, Emirate, Order, PaymentMethod } from '@/types';
+import { UAE_EMIRATES, UAE_POPULAR_AREAS } from '@/data/initialData';
+import { postJson } from '@/lib/apiClient';
 import { 
   checkJeeblyServiceability, 
   findClosestUAELocation, 
@@ -35,16 +35,23 @@ interface CheckoutModalProps {
   isOpen: boolean;
   onClose: () => void;
   items: CartItem[];
-  /** Returns false when the order could not be saved. */
-  onOrderPlaced: (order: Order) => boolean;
+  /** The shop's bank details for transfers (from the server). */
+  bank: BankTransferDetails;
+  /** The server stored the order (it is shown confirmed only after that). */
+  onOrderPlaced: (order: Order) => void;
 }
 
 export const CheckoutModal: React.FC<CheckoutModalProps> = ({
   isOpen,
   onClose,
   items,
+  bank,
   onOrderPlaced,
 }) => {
+  // One checkout attempt = one order, even if "Confirm" is sent twice (double tap, retry).
+  const [idempotencyKey] = useState(() => crypto.randomUUID());
+  // Proof from the server that the phone passed SMS verification.
+  const [phoneToken, setPhoneToken] = useState('');
   // Form State
   const [fullName, setFullName] = useState('');
   const [phone, setPhone] = useState('');
@@ -166,13 +173,18 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
 
   // Copy IBAN
   const handleCopyIban = () => {
-    navigator.clipboard.writeText(INITIAL_BANK_DETAILS.iban);
+    navigator.clipboard.writeText(bank.iban.replace(/\s+/g, ''));
     setCopiedIban(true);
     setTimeout(() => setCopiedIban(false), 2500);
   };
 
   const handleReceiptUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
+    if (file && file.size > 5 * 1024 * 1024) {
+      alert('That file is larger than 5 MB. Please upload a smaller screenshot or PDF.');
+      e.target.value = '';
+      return;
+    }
     if (file) {
       const reader = new FileReader();
       reader.onload = (event) => {
@@ -182,16 +194,17 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
     }
   };
 
-  // Submit Order
-  const handleSubmitOrder = (e: React.FormEvent) => {
+  // Submit Order: the server checks the phone proof, prices, stock and totals.
+  const handleSubmitOrder = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (isSubmitting) return;
     if (!fullName || !phone || !area || !streetAddress || !buildingVilla || !flatVillaNo) {
       alert('Please fill in all mandatory delivery address fields.');
       return;
     }
 
     // Orders are only taken from a verified UAE mobile number.
-    if (!isPhoneVerified) {
+    if (!isPhoneVerified || !phoneToken) {
       document.getElementById('checkout-phone')?.focus();
       alert('Please verify your UAE mobile number with the SMS code before placing your order.');
       return;
@@ -199,21 +212,11 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
 
     setSubmitError('');
     setIsSubmitting(true);
-
-    // Date + 6 random characters: unique without a server, and not guessable
-    // (the order number is what customers type into Track Order).
-    const alphabet = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
-    const random = Array.from(crypto.getRandomValues(new Uint8Array(6)), (b) => alphabet[b % alphabet.length]).join('');
-    const orderId = `BUH-${new Date().toISOString().slice(2, 10).replace(/-/g, '')}-${random}`;
-
-    const defaultCourierProvider = getDefaultCourierForOrder(paymentMethod);
-
-    const newOrder: Order = {
-      id: orderId,
-      createdAt: new Date().toISOString(),
+    const { ok, status, data } = await postJson<{ order?: Order; message?: string }>('/api/orders', {
+      idempotencyKey,
+      verificationToken: phoneToken,
       customer: {
         fullName,
-        phone: classifyPhone(phone).e164 || phone,
         email: email || undefined,
         emirate,
         area,
@@ -221,84 +224,41 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
         buildingVilla,
         flatVillaNo,
         landmark: landmark || undefined,
-        gpsCoordinates: gpsCoordinates || { lat: 25.1972, lng: 55.2744 },
-        phoneVerified: true,
+        gpsCoordinates: gpsCoordinates || undefined,
       },
       items: items.map((item) => ({
         productId: item.product.id,
-        title: item.product.title,
-        image: item.product.featuredImage,
         profileId: item.selectedProfile.id,
-        profileName: item.selectedProfile.name,
-        mattressSize: item.selectedProfile.mattressSize,
-        fittedSheet: item.selectedProfile.fittedSheet,
-        flatSheet: item.selectedProfile.flatSheet,
-        pillowcases: item.selectedProfile.pillowcases,
         color: item.selectedColor,
-        unitPrice: item.product.price + (item.selectedProfile.priceDelta || 0),
         quantity: item.quantity,
-        totalPrice: (item.product.price + (item.selectedProfile.priceDelta || 0)) * item.quantity,
       })),
-      subtotal,
-      deliveryFee,
-      codFee,
-      discount: 0,
-      total: grandTotal,
       paymentMethod,
-      paymentStatus: paymentMethod === 'cod' 
-        ? 'cod_pending' 
-        : receiptUrl 
-          ? 'receipt_uploaded' 
-          : 'pending',
-      paymentReceiptUrl: receiptUrl || undefined,
-      bankTransferRef: bankRef || undefined,
-      status: 'pending_confirmation',
-      courier: {
-        provider: defaultCourierProvider,
-        serviceType: 'Scheduled',
-        // Filled in only when the shop books the courier: never a made-up number.
-        awbNumber: '',
-        trackingUrl: '',
-        status: 'Order Placed - Pending Dispatch Confirmation',
-        pickupDate: new Date(Date.now() + 86400000).toISOString().split('T')[0],
-        weightKg: 2.5 * items.length,
-        pieces: items.reduce((sum, item) => sum + item.quantity, 0),
-        labelGenerated: false,
-        codAmountCollected: paymentMethod === 'cod' ? grandTotal : 0,
-        serviceability: {
-          verified: serviceability.serviceable,
-          hub: serviceability.hub,
-          deliverySpeed: serviceability.deliverySpeed,
-          zone: serviceability.zone,
-          checkedAt: new Date().toISOString(),
-        },
-      },
-      adminNotes: paymentMethod === 'cod'
-        ? `Cash on Delivery. Serviceable by ${serviceability.hub}. Ready for Jeebly fulfillment.`
-        : `Bank Transfer via ${INITIAL_BANK_DETAILS.bankName}. Ref: ${bankRef || 'Receipt attached'}. Ready for Echo fulfillment.`,
-    };
+      bankTransferRef: paymentMethod === 'bank_transfer' ? bankRef || undefined : undefined,
+      receipt: paymentMethod === 'bank_transfer' ? receiptUrl || undefined : undefined,
+    });
+    setIsSubmitting(false);
 
-    setTimeout(() => {
-      setIsSubmitting(false);
-      if (!onOrderPlaced(newOrder)) {
-        setSubmitError(
-          'We could not save your order on this device (browser storage is full or blocked). Nothing was charged. Please try a smaller receipt image, or contact us on WhatsApp.'
-        );
-        return;
+    if (!ok || !data.order) {
+      if (status === 401) {
+        // The phone check expired (30 minutes): verify again.
+        setIsPhoneVerified(false);
+        setPhoneToken('');
       }
-      setConfirmedOrder(newOrder);
-
-      try {
-        confetti({
-          particleCount: 80,
-          spread: 70,
-          origin: { y: 0.6 },
-          colors: ['#c5a059', '#dfc082', '#0f1c2e', '#10b981'],
-        });
-      } catch {
-        // ignore
-      }
-    }, 600);
+      setSubmitError(data.message || 'We could not place your order. Nothing was charged. Please try again.');
+      return;
+    }
+    setConfirmedOrder(data.order);
+    onOrderPlaced(data.order);
+    try {
+      confetti({
+        particleCount: 80,
+        spread: 70,
+        origin: { y: 0.6 },
+        colors: ['#c5a059', '#dfc082', '#0f1c2e', '#10b981'],
+      });
+    } catch {
+      // ignore
+    }
   };
 
   // SUCCESS CONFIRMATION SCREEN
@@ -478,7 +438,10 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
                 phone={phone}
                 onPhoneChange={setPhone}
                 verified={isPhoneVerified}
-                onVerifiedChange={setIsPhoneVerified}
+                onVerifiedChange={(verified, token) => {
+                  setIsPhoneVerified(verified);
+                  setPhoneToken(verified ? token || '' : '');
+                }}
                 orderSummary={items
                   .map((i) => `- ${i.quantity} x ${i.product.title} (${i.selectedProfile.name}, ${i.selectedColor})`)
                   .join('\n')}
@@ -796,23 +759,23 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 bg-white p-3 rounded-xl border border-amber-200 text-[11px]">
                   <div>
                     <span className="text-stone-400 block">Bank Name</span>
-                    <strong className="text-stone-800">{INITIAL_BANK_DETAILS.bankName}</strong>
+                    <strong className="text-stone-800">{bank.bankName}</strong>
                   </div>
                   <div>
                     <span className="text-stone-400 block">Account Name</span>
-                    <strong className="text-stone-800">{INITIAL_BANK_DETAILS.accountName}</strong>
+                    <strong className="text-stone-800">{bank.accountName}</strong>
                   </div>
                   <div className="sm:col-span-2">
                     <span className="text-stone-400 block">IBAN Number</span>
-                    <strong className="font-mono text-stone-900 text-xs">{INITIAL_BANK_DETAILS.iban}</strong>
+                    <strong className="font-mono text-stone-900 text-xs">{bank.iban}</strong>
                   </div>
                   <div>
                     <span className="text-stone-400 block">Account Number</span>
-                    <strong className="font-mono text-stone-800">{INITIAL_BANK_DETAILS.accountNumber}</strong>
+                    <strong className="font-mono text-stone-800">{bank.accountNumber}</strong>
                   </div>
                   <div>
                     <span className="text-stone-400 block">SWIFT Code</span>
-                    <strong className="font-mono text-stone-800">{INITIAL_BANK_DETAILS.swiftCode}</strong>
+                    <strong className="font-mono text-stone-800">{bank.swiftCode}</strong>
                   </div>
                 </div>
 
@@ -841,7 +804,7 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
                         <span>Upload Screenshot</span>
                         <input
                           type="file"
-                          accept="image/*"
+                          accept="image/png,image/jpeg,image/webp,application/pdf"
                           onChange={handleReceiptUpload}
                           className="hidden"
                         />

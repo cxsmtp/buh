@@ -53,7 +53,8 @@ interface PhoneVerificationProps {
   phone: string;
   onPhoneChange: (phone: string) => void;
   verified: boolean;
-  onVerifiedChange: (verified: boolean) => void;
+  /** On success, `token` is the server's signed proof, sent with the order. */
+  onVerifiedChange: (verified: boolean, token?: string) => void;
   /** Used to pre-fill the email for international customers. */
   orderSummary: string;
 }
@@ -139,11 +140,11 @@ export const PhoneVerification: React.FC<PhoneVerificationProps> = ({
     verifying.current = true;
     setChecking(true);
     setError('');
-    const { data } = await postJson<{ valid?: boolean; message?: string }>('/api/otp/verify', { phone: info.e164, code });
+    const { data } = await postJson<{ valid?: boolean; message?: string; verificationToken?: string }>('/api/otp/verify', { phone: info.e164, code });
     verifying.current = false;
     setChecking(false);
     if (data.valid) {
-      onVerifiedChange(true);
+      onVerifiedChange(true, data.verificationToken);
       setNotice('');
       setSandboxCode('');
     } else {
