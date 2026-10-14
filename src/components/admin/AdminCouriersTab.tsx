@@ -3,6 +3,7 @@
 import React, { useState } from 'react';
 import { CourierSettings, CourierProvider } from '@/types';
 import { Truck, ShieldCheck, CheckCircle2, AlertCircle, RefreshCw, ExternalLink, Settings, Key, Globe, Layers } from 'lucide-react';
+import { postJson } from '@/lib/apiClient';
 
 interface AdminCouriersTabProps {
   settings: CourierSettings;
@@ -25,19 +26,9 @@ export const AdminCouriersTab: React.FC<AdminCouriersTabProps> = ({
     setTesting(true);
     setTestResult(null);
 
-    try {
-      const response = await fetch('/api/courier/test', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ provider, settings: formData }),
-      });
-      const data = await response.json();
-      setTestResult(data);
-    } catch (err) {
-      setTestResult({ success: false, message: (err as Error).message });
-    } finally {
-      setTesting(false);
-    }
+    const { data } = await postJson('/api/courier/test', { provider, settings: formData });
+    setTestResult(data);
+    setTesting(false);
   };
 
   const handleSave = (e: React.FormEvent) => {

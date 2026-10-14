@@ -10,25 +10,65 @@ const COURIER_SETTINGS_KEY = 'buh_courier_settings_v1';
 const BANK_DETAILS_KEY = 'buh_bank_details_v1';
 const BRAND_SETTINGS_KEY = 'buh_brand_settings_v1';
 const SMS_SETTINGS_KEY = 'buh_sms_settings_v1';
-const CART_KEY = 'buh_cart_v1';
 
-export function getStoredProducts(): Product[] {
-  if (typeof window === 'undefined') return INITIAL_PRODUCTS;
+/**
+ * Demo orders and customers (with sample names and phone numbers) are for
+ * development and demos only. A production build starts empty, so a real
+ * shopper never sees, or finds in Track Order, someone else's sample order.
+ */
+const DEMO_DATA = process.env.NODE_ENV !== 'production' || process.env.NEXT_PUBLIC_DEMO_DATA === 'true';
+const SEED_ORDERS: Order[] = DEMO_DATA ? INITIAL_ORDERS : [];
+const SEED_CUSTOMERS: Customer[] = DEMO_DATA ? INITIAL_CUSTOMERS : [];
+
+/**
+ * Read a JSON list from localStorage, falling back to (and restoring) the
+ * defaults when it is missing, unreadable or not the expected shape, so one
+ * corrupted entry cannot break the whole storefront.
+ */
+function readList<T>(key: string, fallback: T[]): T[] {
+  if (typeof window === 'undefined') return fallback;
   try {
-    const raw = localStorage.getItem(PRODUCTS_KEY);
-    if (!raw) {
-      localStorage.setItem(PRODUCTS_KEY, JSON.stringify(INITIAL_PRODUCTS));
-      return INITIAL_PRODUCTS;
-    }
-    return JSON.parse(raw);
+    const raw = localStorage.getItem(key);
+    const parsed = raw ? JSON.parse(raw) : null;
+    if (Array.isArray(parsed)) return parsed.filter((x) => x && typeof x === 'object') as T[];
+    localStorage.setItem(key, JSON.stringify(fallback));
   } catch {
-    return INITIAL_PRODUCTS;
+    // unreadable or storage blocked: use the defaults
+  }
+  return fallback;
+}
+
+function readObject<T extends object>(key: string, fallback: T): T {
+  if (typeof window === 'undefined') return fallback;
+  try {
+    const raw = localStorage.getItem(key);
+    const parsed = raw ? JSON.parse(raw) : null;
+    if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) return parsed as T;
+    localStorage.setItem(key, JSON.stringify(fallback));
+  } catch {
+    // unreadable or storage blocked: use the defaults
+  }
+  return fallback;
+}
+
+/** localStorage writes can throw (quota full, private mode); never let that crash a page. */
+function write(key: string, value: unknown): boolean {
+  if (typeof window === 'undefined') return false;
+  try {
+    localStorage.setItem(key, JSON.stringify(value));
+    return true;
+  } catch (err) {
+    console.warn(`Could not save ${key}:`, err);
+    return false;
   }
 }
 
+export function getStoredProducts(): Product[] {
+  return readList(PRODUCTS_KEY, INITIAL_PRODUCTS);
+}
+
 export function saveStoredProducts(products: Product[]): void {
-  if (typeof window === 'undefined') return;
-  localStorage.setItem(PRODUCTS_KEY, JSON.stringify(products));
+  write(PRODUCTS_KEY, products);
 }
 
 export function addProduct(product: Product): Product[] {
@@ -38,28 +78,20 @@ export function addProduct(product: Product): Product[] {
 }
 
 export function getStoredOrders(): Order[] {
-  if (typeof window === 'undefined') return INITIAL_ORDERS;
-  try {
-    const raw = localStorage.getItem(ORDERS_KEY);
-    if (!raw) {
-      localStorage.setItem(ORDERS_KEY, JSON.stringify(INITIAL_ORDERS));
-      return INITIAL_ORDERS;
-    }
-    return JSON.parse(raw);
-  } catch {
-    return INITIAL_ORDERS;
-  }
+  return readList(ORDERS_KEY, SEED_ORDERS);
 }
 
-export function saveStoredOrders(orders: Order[]): void {
-  if (typeof window === 'undefined') return;
-  localStorage.setItem(ORDERS_KEY, JSON.stringify(orders));
+export function saveStoredOrders(orders: Order[]): boolean {
+  return write(ORDERS_KEY, orders);
 }
 
+/** Save a new order. Throws if the browser could not store it, so checkout never confirms an order it lost. */
 export function addOrder(order: Order): Order[] {
   const currentOrders = getStoredOrders();
   const updatedOrders = [order, ...currentOrders];
-  saveStoredOrders(updatedOrders);
+  if (!saveStoredOrders(updatedOrders)) {
+    throw new Error('The order could not be saved in this browser (storage is full or blocked).');
+  }
   
   // Also update or add to CRM Customers
   syncCustomerFromOrder(order);
@@ -79,22 +111,11 @@ export function updateOrder(orderId: string, updates: Partial<Order>): Order[] {
 }
 
 export function getStoredCustomers(): Customer[] {
-  if (typeof window === 'undefined') return INITIAL_CUSTOMERS;
-  try {
-    const raw = localStorage.getItem(CUSTOMERS_KEY);
-    if (!raw) {
-      localStorage.setItem(CUSTOMERS_KEY, JSON.stringify(INITIAL_CUSTOMERS));
-      return INITIAL_CUSTOMERS;
-    }
-    return JSON.parse(raw);
-  } catch {
-    return INITIAL_CUSTOMERS;
-  }
+  return readList(CUSTOMERS_KEY, SEED_CUSTOMERS);
 }
 
 export function saveStoredCustomers(customers: Customer[]): void {
-  if (typeof window === 'undefined') return;
-  localStorage.setItem(CUSTOMERS_KEY, JSON.stringify(customers));
+  write(CUSTOMERS_KEY, customers);
 }
 
 function syncCustomerFromOrder(order: Order) {
@@ -130,107 +151,63 @@ function syncCustomerFromOrder(order: Order) {
 }
 
 export function getCourierSettings(): CourierSettings {
-  if (typeof window === 'undefined') return INITIAL_COURIER_SETTINGS;
-  try {
-    const raw = localStorage.getItem(COURIER_SETTINGS_KEY);
-    if (!raw) {
-      localStorage.setItem(COURIER_SETTINGS_KEY, JSON.stringify(INITIAL_COURIER_SETTINGS));
-      return INITIAL_COURIER_SETTINGS;
-    }
-    return JSON.parse(raw);
-  } catch {
-    return INITIAL_COURIER_SETTINGS;
-  }
+  return readObject(COURIER_SETTINGS_KEY, INITIAL_COURIER_SETTINGS);
 }
 
 export function saveCourierSettings(settings: CourierSettings): void {
-  if (typeof window === 'undefined') return;
-  localStorage.setItem(COURIER_SETTINGS_KEY, JSON.stringify(settings));
+  write(COURIER_SETTINGS_KEY, settings);
 }
 
 export function getBankDetails(): BankTransferDetails {
-  if (typeof window === 'undefined') return INITIAL_BANK_DETAILS;
-  try {
-    const raw = localStorage.getItem(BANK_DETAILS_KEY);
-    if (!raw) {
-      localStorage.setItem(BANK_DETAILS_KEY, JSON.stringify(INITIAL_BANK_DETAILS));
-      return INITIAL_BANK_DETAILS;
-    }
-    return JSON.parse(raw);
-  } catch {
-    return INITIAL_BANK_DETAILS;
-  }
+  return readObject(BANK_DETAILS_KEY, INITIAL_BANK_DETAILS);
 }
 
 export function saveBankDetails(details: BankTransferDetails): void {
-  if (typeof window === 'undefined') return;
-  localStorage.setItem(BANK_DETAILS_KEY, JSON.stringify(details));
+  write(BANK_DETAILS_KEY, details);
 }
 
 export function getBrandSettings(): BrandSettings {
-  if (typeof window === 'undefined') return INITIAL_BRAND_SETTINGS;
-  try {
-    const raw = localStorage.getItem(BRAND_SETTINGS_KEY);
-    if (!raw) {
-      localStorage.setItem(BRAND_SETTINGS_KEY, JSON.stringify(INITIAL_BRAND_SETTINGS));
-      return INITIAL_BRAND_SETTINGS;
-    }
-    const parsed = JSON.parse(raw);
-    return {
-      ...INITIAL_BRAND_SETTINGS,
-      ...parsed,
-      marquee: {
-        ...INITIAL_BRAND_SETTINGS.marquee,
-        ...(parsed.marquee || {}),
-      },
-    };
-  } catch {
-    return INITIAL_BRAND_SETTINGS;
-  }
+  const parsed = readObject<Partial<BrandSettings>>(BRAND_SETTINGS_KEY, INITIAL_BRAND_SETTINGS);
+  return {
+    ...INITIAL_BRAND_SETTINGS,
+    ...parsed,
+    marquee: {
+      ...INITIAL_BRAND_SETTINGS.marquee,
+      ...(parsed.marquee || {}),
+    },
+  };
 }
 
 export function saveBrandSettings(settings: BrandSettings): void {
-  if (typeof window === 'undefined') return;
-  localStorage.setItem(BRAND_SETTINGS_KEY, JSON.stringify(settings));
+  write(BRAND_SETTINGS_KEY, settings);
 }
 
 export function getSmsSettings(): SmsGatewaySettings {
-  if (typeof window === 'undefined') return INITIAL_SMS_SETTINGS;
-  try {
-    const raw = localStorage.getItem(SMS_SETTINGS_KEY);
-    if (!raw) {
-      localStorage.setItem(SMS_SETTINGS_KEY, JSON.stringify(INITIAL_SMS_SETTINGS));
-      return INITIAL_SMS_SETTINGS;
-    }
-    const parsed = JSON.parse(raw);
-    return {
-      ...INITIAL_SMS_SETTINGS,
-      ...parsed,
-      twilio: {
-        ...INITIAL_SMS_SETTINGS.twilio,
-        ...(parsed.twilio || {}),
-      },
-      infobip: {
-        ...INITIAL_SMS_SETTINGS.infobip,
-        ...(parsed.infobip || {}),
-      },
-      unifonic: {
-        ...INITIAL_SMS_SETTINGS.unifonic,
-        ...(parsed.unifonic || {}),
-      },
-      customWebhook: {
-        ...INITIAL_SMS_SETTINGS.customWebhook,
-        ...(parsed.customWebhook || {}),
-      },
-    };
-  } catch {
-    return INITIAL_SMS_SETTINGS;
-  }
+  const parsed = readObject<Partial<SmsGatewaySettings>>(SMS_SETTINGS_KEY, INITIAL_SMS_SETTINGS);
+  return {
+    ...INITIAL_SMS_SETTINGS,
+    ...parsed,
+    twilio: {
+      ...INITIAL_SMS_SETTINGS.twilio,
+      ...(parsed.twilio || {}),
+    },
+    infobip: {
+      ...INITIAL_SMS_SETTINGS.infobip,
+      ...(parsed.infobip || {}),
+    },
+    unifonic: {
+      ...INITIAL_SMS_SETTINGS.unifonic,
+      ...(parsed.unifonic || {}),
+    },
+    customWebhook: {
+      ...INITIAL_SMS_SETTINGS.customWebhook,
+      ...(parsed.customWebhook || {}),
+    },
+  };
 }
 
 export function saveSmsSettings(settings: SmsGatewaySettings): void {
-  if (typeof window === 'undefined') return;
-  localStorage.setItem(SMS_SETTINGS_KEY, JSON.stringify(settings));
+  write(SMS_SETTINGS_KEY, settings);
 }
 
 /**

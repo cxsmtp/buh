@@ -61,8 +61,7 @@ export async function transformProductImage(
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           image: rawImageDataUrl,
-          prompt: preset.prompt,
-          apiKey: geminiApiKey,
+          presetId: preset.id,
         }),
       });
       if (response.ok) {

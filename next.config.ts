@@ -1,40 +1,41 @@
 import type { NextConfig } from "next";
 import path from "path";
+import { contentSecurityPolicy } from "./src/lib/csp";
+import pkg from "./package.json";
+
+// Shown in the admin hub as BUH-xx.xx.xx, so "which build is this?" has one answer.
+const appVersion = `BUH-${pkg.version.split(".").map((n) => n.padStart(2, "0")).join(".")}`;
 
 const nextConfig: NextConfig = {
   output: "standalone",
+  env: { NEXT_PUBLIC_APP_VERSION: appVersion },
   images: {
     unoptimized: true,
   },
+  poweredByHeader: false,
   async headers() {
     return [
       {
         source: "/(.*)",
         headers: [
-          {
-            key: "X-Frame-Options",
-            value: "DENY",
-          },
-          {
-            key: "X-Content-Type-Options",
-            value: "nosniff",
-          },
-          {
-            key: "Referrer-Policy",
-            value: "origin-when-cross-origin",
-          },
-          {
-            key: "Permissions-Policy",
-            value: "camera=(), microphone=(), geolocation=(self)",
-          },
-          {
-            key: "X-DNS-Prefetch-Control",
-            value: "on",
-          },
-          {
-            key: "Strict-Transport-Security",
-            value: "max-age=31536000; includeSubDomains; preload",
-          },
+          { key: "X-Frame-Options", value: "DENY" },
+          { key: "X-Content-Type-Options", value: "nosniff" },
+          { key: "Referrer-Policy", value: "strict-origin-when-cross-origin" },
+          { key: "Cross-Origin-Opener-Policy", value: "same-origin" },
+          // Checkout uses the browser's location to fill the address; nothing else is needed.
+          { key: "Permissions-Policy", value: "camera=(), microphone=(), geolocation=(self), payment=(), usb=()" },
+          // Only meaningful over HTTPS; browsers ignore it on plain http. No `preload`:
+          // that is a one-way commitment the site owner should opt into deliberately.
+          { key: "Strict-Transport-Security", value: "max-age=31536000; includeSubDomains" },
+          { key: "Content-Security-Policy", value: contentSecurityPolicy() },
+        ],
+      },
+      {
+        // API answers are per-request and may carry personal data: never cache them.
+        source: "/api/(.*)",
+        headers: [
+          { key: "Cache-Control", value: "no-store" },
+          { key: "Content-Security-Policy", value: "default-src 'none'; frame-ancestors 'none'" },
         ],
       },
     ];
