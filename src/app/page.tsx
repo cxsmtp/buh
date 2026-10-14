@@ -17,6 +17,7 @@ import {
   getSmsSettings,
   saveSmsSettings
 } from '@/lib/storage';
+import { ADMIN_SIGNED_OUT_EVENT, postJson } from '@/lib/apiClient';
 
 // Store Components
 import { Header } from '@/components/common/Header';
@@ -94,12 +95,32 @@ export default function HomePage() {
     setBrandSettings(getBrandSettings());
     setSmsSettings(getSmsSettings());
 
-    if (typeof window !== 'undefined') {
-      const auth = localStorage.getItem('buh_admin_auth');
-      if (auth === 'authenticated') {
-        setIsAdminAuthenticated(true);
-      }
+    // Admin sign-in lives in an HttpOnly cookie the server checks; ask it.
+    // (Old builds kept a forgeable flag and plain-text credentials here.)
+    try {
+      localStorage.removeItem('buh_admin_auth');
+      localStorage.removeItem('buh_admin_creds');
+    } catch {
+      // storage unavailable (private mode): nothing to clean up
     }
+    let cancelled = false;
+    fetch('/api/admin/session', { credentials: 'same-origin' })
+      .then((res) => res.json())
+      .then((data) => {
+        if (!cancelled) setIsAdminAuthenticated(data.authenticated === true && !data.mustChangePassword);
+      })
+      .catch(() => {});
+
+    const onSignedOut = () => {
+      setIsAdminAuthenticated(false);
+      setIsAdminMode(false);
+      setIsAdminLoginOpen(true);
+    };
+    window.addEventListener(ADMIN_SIGNED_OUT_EVENT, onSignedOut);
+    return () => {
+      cancelled = true;
+      window.removeEventListener(ADMIN_SIGNED_OUT_EVENT, onSignedOut);
+    };
   }, []);
 
   const handleUpdateBrandSettings = (newSettings: BrandSettings) => {
@@ -125,9 +146,7 @@ export default function HomePage() {
   };
 
   const handleLogoutAdmin = () => {
-    if (typeof window !== 'undefined') {
-      localStorage.removeItem('buh_admin_auth');
-    }
+    void postJson('/api/admin/logout', {});
     setIsAdminAuthenticated(false);
     setIsAdminMode(false);
   };
@@ -165,11 +184,17 @@ export default function HomePage() {
   };
 
   // Order Handlers
-  const handleOrderPlaced = (newOrder: Order) => {
-    const updated = addOrder(newOrder);
-    setOrders(updated);
+  /** Returns false when the order could not be saved, so checkout can say so instead of confirming. */
+  const handleOrderPlaced = (newOrder: Order): boolean => {
+    try {
+      setOrders(addOrder(newOrder));
+    } catch (err) {
+      console.error(err);
+      return false;
+    }
     setCustomers(getStoredCustomers());
     setCart([]);
+    return true;
   };
 
   const handleUpdateOrder = (orderId: string, updates: Partial<Order>) => {
@@ -420,12 +445,13 @@ export default function HomePage() {
       />
 
       {/* Checkout Modal */}
-      <CheckoutModal
+      {/* Mounted only while open, so every checkout starts fresh (a second order is not stuck on the first's confirmation). */}
+      {isCheckoutOpen && <CheckoutModal
         isOpen={isCheckoutOpen}
         onClose={() => setIsCheckoutOpen(false)}
         items={cart}
         onOrderPlaced={handleOrderPlaced}
-      />
+      />}
 
       {/* Order Tracking Modal */}
       <OrderTrackerModal

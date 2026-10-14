@@ -24,18 +24,19 @@ import {
   MapPin, 
   Navigation, 
   Crosshair, 
-  Smartphone, 
   Sparkles, 
   AlertCircle,
   Truck
 } from 'lucide-react';
 import confetti from 'canvas-confetti';
+import { classifyPhone, PhoneVerification } from './PhoneVerification';
 
 interface CheckoutModalProps {
   isOpen: boolean;
   onClose: () => void;
   items: CartItem[];
-  onOrderPlaced: (order: Order) => void;
+  /** Returns false when the order could not be saved. */
+  onOrderPlaced: (order: Order) => boolean;
 }
 
 export const CheckoutModal: React.FC<CheckoutModalProps> = ({
@@ -46,7 +47,7 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
 }) => {
   // Form State
   const [fullName, setFullName] = useState('');
-  const [phone, setPhone] = useState('+971 5');
+  const [phone, setPhone] = useState('');
   const [email, setEmail] = useState('');
   const [emirate, setEmirate] = useState<Emirate>('Dubai');
   const [area, setArea] = useState('');
@@ -62,12 +63,7 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
   const [showMapPicker, setShowMapPicker] = useState(false);
 
   // Customer Mobile OTP State
-  const [otpSent, setOtpSent] = useState(false);
-  const [generatedOtp, setGeneratedOtp] = useState('');
-  const [inputOtp, setInputOtp] = useState('');
   const [isPhoneVerified, setIsPhoneVerified] = useState(false);
-  const [otpNotification, setOtpNotification] = useState<string | null>(null);
-  const [otpError, setOtpError] = useState('');
 
   // Jeebly Serviceability State
   const [serviceability, setServiceability] = useState<ServiceabilityResult>(() =>
@@ -84,6 +80,7 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
   // Submission State
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [confirmedOrder, setConfirmedOrder] = useState<Order | null>(null);
+  const [submitError, setSubmitError] = useState('');
 
   // Financial Calculations
   const subtotal = items.reduce(
@@ -110,84 +107,19 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
     return () => clearTimeout(timer);
   }, [emirate, area, gpsCoordinates]);
 
+
+  // Escape closes checkout (not while an order is being saved).
+  useEffect(() => {
+    if (!isOpen) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape' && !isSubmitting) onClose();
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [isOpen, isSubmitting, onClose]);
+
+  // Every hook must run on every render, so the early return comes after them all.
   if (!isOpen) return null;
-
-  const [isSendingOtp, setIsSendingOtp] = useState(false);
-  const [isVerifyingOtp, setIsVerifyingOtp] = useState(false);
-
-  // Handler: Customer Mobile OTP Generation & Real SMS Gateway Dispatch
-  const handleSendOtp = async () => {
-    if (phone.length < 8) {
-      alert('Please enter a valid UAE mobile number (e.g. +971 50 123 4567)');
-      return;
-    }
-    setIsSendingOtp(true);
-    setOtpError('');
-    setOtpNotification(null);
-
-    try {
-      const response = await fetch('/api/otp/send', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ phone }),
-      });
-
-      const data = await response.json();
-
-      if (data.success) {
-        setOtpSent(true);
-        if (data.devOtpCode) {
-          setGeneratedOtp(data.devOtpCode);
-          setOtpNotification(data.message + ` [ Code: ${data.devOtpCode} ]`);
-        } else {
-          setOtpNotification(data.message || `Carrier SMS OTP dispatched to ${phone}. Please check your phone messages.`);
-        }
-      } else {
-        setOtpError(data.message || 'Unable to dispatch SMS OTP. Please try again.');
-      }
-    } catch {
-      setOtpError('Failed to connect to SMS dispatch server. Please try again.');
-    } finally {
-      setIsSendingOtp(false);
-    }
-  };
-
-  const handleVerifyOtp = async () => {
-    if (!inputOtp || inputOtp.trim().length < 4) {
-      setOtpError('Please enter the 4-digit verification code.');
-      return;
-    }
-    setIsVerifyingOtp(true);
-    setOtpError('');
-
-    try {
-      const response = await fetch('/api/otp/verify', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ phone, code: inputOtp.trim() }),
-      });
-
-      const data = await response.json();
-
-      if (data.valid) {
-        setIsPhoneVerified(true);
-        setOtpError('');
-        setOtpNotification(null);
-      } else {
-        setOtpError(data.message || 'Incorrect verification code. Please check your SMS and try again.');
-      }
-    } catch {
-      setOtpError('Failed to verify OTP code. Please check connection.');
-    } finally {
-      setIsVerifyingOtp(false);
-    }
-  };
-
-  const handleAutoFillOtp = () => {
-    if (generatedOtp) {
-      setInputOtp(generatedOtp);
-    }
-  };
 
   // Handler: GPS Current Location using Browser Geolocation
   const handleUseCurrentLocation = () => {
@@ -258,24 +190,30 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
       return;
     }
 
-    // Auto-verify phone if customer hasn't verified OTP yet
-    const verifiedStatus = isPhoneVerified || true;
+    // Orders are only taken from a verified UAE mobile number.
+    if (!isPhoneVerified) {
+      document.getElementById('checkout-phone')?.focus();
+      alert('Please verify your UAE mobile number with the SMS code before placing your order.');
+      return;
+    }
 
+    setSubmitError('');
     setIsSubmitting(true);
 
-    const randomNum = Math.floor(1000 + Math.random() * 9000);
-    const orderId = `BUH-2026-${randomNum}`;
+    // Date + 6 random characters: unique without a server, and not guessable
+    // (the order number is what customers type into Track Order).
+    const alphabet = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
+    const random = Array.from(crypto.getRandomValues(new Uint8Array(6)), (b) => alphabet[b % alphabet.length]).join('');
+    const orderId = `BUH-${new Date().toISOString().slice(2, 10).replace(/-/g, '')}-${random}`;
 
     const defaultCourierProvider = getDefaultCourierForOrder(paymentMethod);
-    const courierPrefix = defaultCourierProvider === 'jeebly' ? 'GPY-DXB' : 'ECH-DXB';
-    const awbNumber = `${courierPrefix}-${Math.floor(100000 + Math.random() * 900000)}`;
 
     const newOrder: Order = {
       id: orderId,
       createdAt: new Date().toISOString(),
       customer: {
         fullName,
-        phone,
+        phone: classifyPhone(phone).e164 || phone,
         email: email || undefined,
         emirate,
         area,
@@ -284,7 +222,7 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
         flatVillaNo,
         landmark: landmark || undefined,
         gpsCoordinates: gpsCoordinates || { lat: 25.1972, lng: 55.2744 },
-        phoneVerified: verifiedStatus,
+        phoneVerified: true,
       },
       items: items.map((item) => ({
         productId: item.product.id,
@@ -318,10 +256,9 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
       courier: {
         provider: defaultCourierProvider,
         serviceType: 'Scheduled',
-        awbNumber,
-        trackingUrl: defaultCourierProvider === 'jeebly' 
-          ? `https://jeebly.com/track/${awbNumber}` 
-          : `https://ecoexpress.ae/tracking?awb=${awbNumber}`,
+        // Filled in only when the shop books the courier: never a made-up number.
+        awbNumber: '',
+        trackingUrl: '',
         status: 'Order Placed - Pending Dispatch Confirmation',
         pickupDate: new Date(Date.now() + 86400000).toISOString().split('T')[0],
         weightKg: 2.5 * items.length,
@@ -343,8 +280,13 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
 
     setTimeout(() => {
       setIsSubmitting(false);
+      if (!onOrderPlaced(newOrder)) {
+        setSubmitError(
+          'We could not save your order on this device (browser storage is full or blocked). Nothing was charged. Please try a smaller receipt image, or contact us on WhatsApp.'
+        );
+        return;
+      }
       setConfirmedOrder(newOrder);
-      onOrderPlaced(newOrder);
 
       try {
         confetti({
@@ -463,23 +405,6 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
     <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center bg-black/75 backdrop-blur-md p-0 sm:p-4 overflow-y-auto">
       <div className="bg-white text-stone-900 w-full max-w-xl sm:rounded-3xl max-h-[92vh] flex flex-col overflow-hidden shadow-2xl border border-stone-200">
         
-        {/* SMS Notification Banner (Simulated OTP Delivery) */}
-        {otpNotification && (
-          <div className="bg-emerald-600 text-white text-xs px-4 py-2.5 flex items-center justify-between animate-in slide-in-from-top duration-200 shadow-md">
-            <div className="flex items-center gap-2 font-medium">
-              <Smartphone className="w-4 h-4 text-emerald-200" />
-              <span>{otpNotification}</span>
-            </div>
-            <button
-              type="button"
-              onClick={handleAutoFillOtp}
-              className="bg-white text-emerald-800 px-2 py-0.5 rounded-lg text-[10px] font-bold hover:bg-emerald-100 transition-colors shrink-0 ml-2"
-            >
-              Auto-Fill
-            </button>
-          </div>
-        )}
-
         {/* Header */}
         <div className="px-4 py-3.5 border-b border-stone-200 flex items-center justify-between bg-stone-50">
           <div>
@@ -491,7 +416,9 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
             </p>
           </div>
           <button
+            type="button"
             onClick={onClose}
+            aria-label="Close checkout"
             className="p-1.5 text-stone-500 hover:text-stone-800 rounded-full hover:bg-stone-200 transition-colors"
           >
             <X className="w-5 h-5" />
@@ -547,71 +474,15 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
                 />
               </div>
 
-              <div>
-                <label className="block text-stone-800 font-semibold mb-1">
-                  UAE Mobile Number <span className="text-red-500">*</span>
-                </label>
-                <div className="flex gap-2">
-                  <input
-                    type="tel"
-                    required
-                    placeholder="+971 50 123 4567"
-                    value={phone}
-                    onChange={(e) => {
-                      setPhone(e.target.value);
-                      setIsPhoneVerified(false);
-                    }}
-                    className="flex-1 px-3.5 py-2.5 rounded-xl border border-stone-300 bg-white text-stone-900 placeholder:text-stone-400 font-medium focus:outline-none focus:ring-2 focus:ring-[#c5a059] focus:bg-white text-xs"
-                  />
-                  {!isPhoneVerified && (
-                    <button
-                      type="button"
-                      onClick={handleSendOtp}
-                      className="px-3 py-2 bg-stone-900 hover:bg-stone-800 text-white rounded-xl text-[11px] font-bold shrink-0 transition-colors"
-                    >
-                      {otpSent ? 'Resend' : 'Send OTP'}
-                    </button>
-                  )}
-                </div>
-              </div>
-
-              {/* OTP Input Field when OTP is sent */}
-              {otpSent && !isPhoneVerified && (
-                <div className="sm:col-span-2 bg-amber-50/70 p-3 rounded-2xl border border-amber-200 text-xs space-y-2 animate-in fade-in-50">
-                  <div className="flex items-center justify-between">
-                    <span className="font-bold text-amber-950 flex items-center gap-1.5">
-                      <Smartphone className="w-3.5 h-3.5 text-amber-700" />
-                      <span>Enter 4-Digit Verification Code</span>
-                    </span>
-                    <button
-                      type="button"
-                      onClick={handleAutoFillOtp}
-                      className="text-[11px] text-amber-800 hover:text-amber-950 font-bold underline"
-                    >
-                      Auto-Fill Code ({generatedOtp})
-                    </button>
-                  </div>
-
-                  <div className="flex items-center gap-2">
-                    <input
-                      type="text"
-                      maxLength={4}
-                      placeholder="e.g. 4829"
-                      value={inputOtp}
-                      onChange={(e) => setInputOtp(e.target.value)}
-                      className="w-32 px-3 py-2 rounded-xl border border-amber-300 bg-white text-stone-900 text-center font-mono font-bold tracking-widest text-sm focus:outline-none focus:ring-2 focus:ring-[#c5a059]"
-                    />
-                    <button
-                      type="button"
-                      onClick={handleVerifyOtp}
-                      className="px-4 py-2 bg-[#0f1c2e] hover:bg-stone-800 text-white rounded-xl font-bold text-xs transition-colors"
-                    >
-                      Verify OTP
-                    </button>
-                  </div>
-                  {otpError && <p className="text-red-600 text-[11px] font-medium">{otpError}</p>}
-                </div>
-              )}
+              <PhoneVerification
+                phone={phone}
+                onPhoneChange={setPhone}
+                verified={isPhoneVerified}
+                onVerifiedChange={setIsPhoneVerified}
+                orderSummary={items
+                  .map((i) => `- ${i.quantity} x ${i.product.title} (${i.selectedProfile.name}, ${i.selectedColor})`)
+                  .join('\n')}
+              />
 
               <div className="sm:col-span-2">
                 <label className="block text-stone-800 font-semibold mb-1">
@@ -989,14 +860,24 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
           </div>
 
           {/* Sticky Checkout Button */}
-          <div className="pt-2">
+          <div className="pt-2 space-y-2">
+            {submitError && (
+              <p role="alert" className="text-[11px] text-red-700 bg-red-50 border border-red-200 rounded-lg px-2.5 py-1.5 font-medium">
+                {submitError}
+              </p>
+            )}
             <button
               type="submit"
-              disabled={isSubmitting || !serviceability.serviceable}
+              disabled={isSubmitting || !serviceability.serviceable || !isPhoneVerified}
               className="w-full bg-[#0f1c2e] hover:bg-stone-800 active:scale-95 text-white font-bold text-sm py-4 rounded-xl shadow-xl flex items-center justify-center gap-2 transition-all disabled:opacity-50"
             >
               {isSubmitting ? (
                 <span>Generating Order Requisition...</span>
+              ) : !isPhoneVerified ? (
+                <>
+                  <ShieldCheck className="w-4 h-4 text-amber-300" />
+                  <span>Verify your UAE mobile to place order</span>
+                </>
               ) : (
                 <>
                   <span>

@@ -1,36 +1,46 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# Beautiful UAE Home
 
-## Getting Started
+**Hand-block and machine-printed bed linen, sold online across all seven Emirates.** A storefront with exact UAE mattress sizing, Cash on Delivery and bank transfer, plus an Admin Hub for orders, Jeebly and Eco Express couriers, inventory, customers and branding.
 
-First, run the development server:
+| You get | How |
+| --- | --- |
+| **Verified orders only** | Customers confirm their UAE mobile with a 6-digit SMS code before they can order. Other countries are invited to email the shop instead. |
+| **An admin hub only you can open** | Server-checked sign-in with lockout, a one-time first password you replace at first sign-in, and an audit log of every sign-in and courier booking. |
+| **Real courier bookings** | Jeebly and Eco Express AWBs come from the carrier. A failed booking says so; it never invents a tracking number. |
+| **Safe by default** | Security headers on every page, size-capped and validated API input, limits against SMS-pumping fraud, and no secrets in the browser or the logs ([security](docs/security.md)). |
+| **Fast** | The storefront serves ~800 requests/s on 4 vCPU ([status](docs/status.md)). |
 
-```bash
-npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
+## Run it
+
+Node 20+:
+
+```
+npm ci && npm run dev
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+Open <http://localhost:3000>. The terminal prints the first admin password once; sign in from **Admin Hub** and choose your own. Without an SMS gateway, checkout runs in test mode and shows the code on screen.
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+Production on a VPS (PM2 + nginx) or Docker: [HOSTINGER_DEPLOYMENT_GUIDE.md](HOSTINGER_DEPLOYMENT_GUIDE.md).
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+```
+docker compose up -d --build
+```
 
-## Learn More
+## Configure
 
-To learn more about Next.js, take a look at the following resources:
+Copy `.env.production.example` to `.env.production`. The settings that matter most:
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+- **SMS gateway** for phone codes: Twilio, Infobip or your own https webhook.
+- **`NEXT_PUBLIC_SUPPORT_EMAIL`:** shown to customers with non-UAE numbers.
+- **`DATA_DIR`:** the admin account, session key and audit log. Back it up.
+- **`TRUST_PROXY=1`:** only behind nginx.
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
+Everything an owner does in the shop: [docs/user-guide.md](docs/user-guide.md).
 
-## Deploy on Vercel
+## Develop
 
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
+```
+npm test
+```
 
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+Runs unit and end-to-end tests; the end-to-end ones need `npm run build` first. Also: `npm run lint`, `npm run typecheck`, `npm run test:load` (benchmark), and `npm run hash-password` (makes `ADMIN_PASSWORD_HASH`). Working rules: [CLAUDE.md](CLAUDE.md). Changes: [CHANGELOG.md](CHANGELOG.md).

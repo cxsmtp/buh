@@ -3,6 +3,7 @@
 import React, { useState } from 'react';
 import { Order } from '@/types';
 import { X, Search, Truck, CheckCircle2, Clock, ExternalLink, MapPin } from 'lucide-react';
+import { safeHref } from '@/lib/apiClient';
 
 interface OrderTrackerModalProps {
   isOpen: boolean;
@@ -24,12 +25,16 @@ export const OrderTrackerModal: React.FC<OrderTrackerModalProps> = ({
   const handleSearch = (e: React.FormEvent) => {
     e.preventDefault();
     const clean = query.trim().toLowerCase();
-    const found = orders.find(
-      (o) =>
-        o.id.toLowerCase() === clean ||
-        o.customer.phone.replace(/\s+/g, '').includes(clean) ||
-        o.courier.awbNumber.toLowerCase() === clean
-    );
+    const digits = clean.replace(/\D/g, '').replace(/^(00)?971/, '').replace(/^0/, '');
+    // Exact matches only: a partial phone number must not open someone else's order.
+    const found = clean
+      ? orders.find(
+          (o) =>
+            o.id.toLowerCase() === clean ||
+            (digits.length >= 9 && o.customer.phone.replace(/\D/g, '').endsWith(digits)) ||
+            (o.courier.awbNumber && o.courier.awbNumber.toLowerCase() === clean)
+        )
+      : undefined;
     setSearchResult(found || null);
     setHasSearched(true);
   };
@@ -112,7 +117,7 @@ export const OrderTrackerModal: React.FC<OrderTrackerModalProps> = ({
                   <div className="flex justify-between items-center">
                     <span className="text-stone-500 font-medium">Airway Bill (AWB):</span>
                     <span className="font-mono font-bold text-amber-700">
-                      {searchResult.courier.awbNumber}
+                      {searchResult.courier.awbNumber || 'Assigned when your order is dispatched'}
                     </span>
                   </div>
 
@@ -123,9 +128,9 @@ export const OrderTrackerModal: React.FC<OrderTrackerModalProps> = ({
                     </span>
                   </div>
 
-                  {searchResult.courier.trackingUrl && (
+                  {safeHref(searchResult.courier.trackingUrl) && (
                     <a
-                      href={searchResult.courier.trackingUrl}
+                      href={safeHref(searchResult.courier.trackingUrl)}
                       target="_blank"
                       rel="noopener noreferrer"
                       className="mt-1 flex items-center justify-center gap-1.5 w-full bg-[#c5a059]/15 hover:bg-[#c5a059]/25 text-amber-900 font-semibold py-2 rounded-lg transition-colors text-xs"

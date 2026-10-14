@@ -1,4 +1,10 @@
+import crypto from 'node:crypto';
 import { Order, CourierSettings } from '@/types';
+
+/** `uncertain`: no answer from the carrier, so the shipment may or may not exist. */
+function liveFailure(message: string, httpStatus?: number, uncertain = false): EchoApiResponse {
+  return { success: false, awbNumber: '', trackingNumber: '', trackingUrl: '', message, isSimulated: false, httpStatus, uncertain };
+}
 
 export interface EcoExpressCreateShipmentPayload {
   account_No: string;
@@ -56,6 +62,7 @@ export interface EchoApiResponse {
   httpStatus?: number;
   rawPayload?: Record<string, unknown>;
   rawResponse?: Record<string, unknown>;
+  uncertain?: boolean;
 }
 
 export async function createEchoShipment(
@@ -122,30 +129,46 @@ export async function createEchoShipment(
         'Authorization': `Bearer ${settings.apiKey || 'test_token'}`,
       },
       body: JSON.stringify(payload),
+      redirect: 'manual',
+      signal: AbortSignal.timeout(15_000),
     });
 
     const data = await response.json().catch(() => null);
 
     if (response.ok && data) {
-      const liveAwb = data.data?.[0]?.awbNo || data.awb || `ECO-${Math.floor(100000 + Math.random() * 900000)}`;
+      const liveAwb = data.data?.[0]?.awbNo || data.awb ? String(data.data?.[0]?.awbNo || data.awb) : '';
+      if (!liveAwb) {
+        if (settings.isLive) return liveFailure('Eco Express accepted the request but returned no AWB number.', response.status);
+      } else {
       return {
         success: true,
         awbNumber: liveAwb,
         trackingNumber: liveAwb,
-        trackingUrl: `https://ecoexpress.ae/tracking?awb=${liveAwb}`,
+        trackingUrl: `https://ecoexpress.ae/tracking?awb=${encodeURIComponent(liveAwb)}`,
         message: 'Shipment created successfully via Eco Express Merchant API.',
         isSimulated: false,
         httpStatus: response.status,
-        rawPayload: payload as unknown as Record<string, unknown>,
         rawResponse: data,
       };
+      }
+    }
+    if (settings.isLive) {
+      // Live mode never invents an AWB the carrier does not know.
+      return liveFailure(`Eco Express did not accept the shipment (HTTP ${response.status}).`, response.status);
     }
   } catch (err) {
-    console.warn('Eco Express API call error:', err);
+    console.warn('Eco Express API call error:', (err as Error).message);
+    if (settings.isLive) {
+      return liveFailure(
+        `No answer from Eco Express (timeout or network), so the shipment may or may not have been created. Check the Eco Express portal for reference ${order.id} before booking again.`,
+        undefined,
+        true
+      );
+    }
   }
 
-  // Fallback AWB
-  const randomSuffix = Math.floor(100000 + Math.random() * 900000);
+  // Sandbox only: a clearly simulated AWB so the flow can be tried end to end.
+  const randomSuffix = crypto.randomInt(100000, 1000000);
   const prefix = order.customer.emirate === 'Abu Dhabi' ? 'ECH-AUH' : 'ECH-DXB';
   const awbNumber = `${prefix}-${randomSuffix}`;
 
@@ -154,8 +177,7 @@ export async function createEchoShipment(
     awbNumber,
     trackingNumber: awbNumber,
     trackingUrl: `https://ecoexpress.ae/tracking?awb=${awbNumber}`,
-    message: 'Shipment requisition generated for Eco Express (Prepaid Priority). AWB ready.',
+    message: 'Sandbox: simulated Eco Express AWB (no live booking was made). Turn on live mode to book with the carrier.',
     isSimulated: true,
-    rawPayload: payload as unknown as Record<string, unknown>,
   };
 }

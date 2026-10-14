@@ -5,3 +5,7 @@ node_modules
 README.md
 .env*.local
 *.log
+.env*
+!.env*.example
+.data
+test

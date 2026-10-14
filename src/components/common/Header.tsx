@@ -32,10 +32,10 @@ export const Header: React.FC<HeaderProps> = ({
       {brandSettings && <MarqueeBar brandSettings={brandSettings} />}
 
       {/* Main Navigation Bar */}
-      <div className="max-w-7xl mx-auto px-4 sm:px-6 py-3.5 flex items-center justify-between gap-4">
+      <div className="max-w-7xl mx-auto px-4 sm:px-6 py-3.5 flex items-center justify-between gap-3 sm:gap-4">
         {/* Brand Logo & Title */}
         <div 
-          className="flex items-center gap-3 cursor-pointer shrink-0" 
+          className="flex items-center gap-3 cursor-pointer min-w-0"
           onClick={() => isAdminMode && onToggleAdminMode()}
           title={isAdminMode ? 'Click to return to Storefront' : brandSettings?.storeName || 'Beautiful UAE Home'}
         >
@@ -43,11 +43,11 @@ export const Header: React.FC<HeaderProps> = ({
             <img
               src={brandSettings.logoImageUrl}
               alt={brandSettings.storeName || 'Logo'}
-              className="w-10 h-10 object-contain rounded-xl border border-stone-200 shadow-xs"
+              className="w-10 h-10 shrink-0 object-contain rounded-xl border border-stone-200 shadow-xs"
             />
           ) : (
             <div 
-              className="w-10 h-10 rounded-xl flex items-center justify-center text-white shadow font-serif text-lg font-bold"
+              className="w-10 h-10 shrink-0 rounded-xl flex items-center justify-center text-white shadow font-serif text-lg font-bold"
               style={{
                 background: `linear-gradient(135deg, ${brandSettings?.accentColor || '#c5a059'}, #dfc082)`,
               }}
@@ -55,16 +55,17 @@ export const Header: React.FC<HeaderProps> = ({
               {brandSettings?.logoText || 'BU'}
             </div>
           )}
-          <div>
-            <div className="font-serif tracking-wide text-lg sm:text-xl font-bold text-[#0f1c2e] leading-tight flex items-center gap-2">
-              <span>{brandSettings?.storeName || 'BEAUTIFUL UAE HOME'}</span>
+          {/* min-w-0 + truncate: on phones the name and tagline shorten instead of pushing the buttons off-screen */}
+          <div className="min-w-0">
+            <div className="font-serif tracking-wide text-base sm:text-xl font-bold text-[#0f1c2e] leading-tight flex items-center gap-2">
+              <span className="truncate">{brandSettings?.storeName || 'BEAUTIFUL UAE HOME'}</span>
               {brandSettings?.badgeText && (
                 <span className="text-[10px] uppercase font-sans font-semibold tracking-wider px-2 py-0.5 rounded-full bg-amber-100 text-amber-900 border border-amber-300 hidden sm:inline-block">
                   {brandSettings.badgeText}
                 </span>
               )}
             </div>
-            <p className="text-[10px] text-stone-600 tracking-wider font-medium">
+            <p className="text-[10px] text-stone-600 tracking-wider font-medium truncate">
               {brandSettings?.tagline || 'HANDPRINTED & MACHINE BLOCK LINENS • DUBAI'}
             </p>
           </div>
