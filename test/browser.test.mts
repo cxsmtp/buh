@@ -361,3 +361,29 @@ test('regression: a price changed during checkout is shown before the customer i
     await page.close();
   }
 });
+
+test('regression: every admin tab fits a 375 px phone, SMS settings included', { skip }, async () => {
+  const login = await fetch(`${server.base}/api/admin/login`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json', origin: server.base },
+    body: JSON.stringify({ email: 'admin@beautifuluaehome.com', password: 'Browser-Owner-Pass-1' }),
+  });
+  const [name, value] = (login.headers.get('set-cookie') || '').split(';')[0].split('=');
+  const ctx = await browser.newContext({ viewport: { width: 375, height: 900 } });
+  await ctx.addCookies([{ name, value, url: server.base }]);
+  const page = await ctx.newPage();
+  await page.goto(server.base, { waitUntil: 'networkidle' }); // the session check has answered
+  await page.locator('header button:has-text("Admin Hub")').click();
+  await page.getByRole('status').filter({ hasText: /Backup/ }).waitFor(); // admin data loaded
+  const nav = page.getByRole('navigation', { name: 'Admin sections' });
+  for (const tab of ['Orders', 'Stock', 'CRM', 'Couriers', 'Brand', 'SMS']) {
+    // A real tap at the button's centre (the bar is fixed to the bottom of the screen).
+    const box = (await nav.locator('button', { hasText: new RegExp(`^${tab}`) }).boundingBox())!;
+    await page.mouse.click(box.x + box.width / 2, box.y + box.height / 2);
+    await nav.locator('button.font-bold', { hasText: new RegExp(`^${tab}`) }).waitFor();
+    await page.waitForTimeout(200);
+    assert.deepEqual(await overflow(page), [], `${tab} tab`);
+  }
+  await page.getByText('Choose SMS Gateway Provider').waitFor();
+  await ctx.close();
+});

@@ -4,7 +4,7 @@ One row per release. Benchmarks run `npm run test:load` on the same 4 vCPU host,
 
 | Version | Date | Storefront req/s (p50 / p95 ms) | Serviceability API req/s (p50 / p95 ms) | Failed requests | Tests | Audit (production) | Security scan |
 | --- | --- | --- | --- | --- | --- | --- | --- |
-| BUH-01.01.00 | 2026-10-14 | branch 753 / 662 / 729; main 769 / 729 / 605 (p50 82–88 vs 79–86 ms; p95 139–148 vs 128–210 ms) | branch 568 / 598 / 525; main 591 / 495 / 490 | 0 on the branch (main has no `/api/products`, so its catalogue runs fail by design) | 117 passed | 0 vulnerabilities | Two reviews (security, correctness); no automated scanner here |
+| BUH-01.01.00 | 2026-10-14 | branch 753 / 662 / 729; main 769 / 729 / 605 (p50 82–88 vs 79–86 ms; p95 139–148 vs 128–210 ms) | branch 568 / 598 / 525; main 591 / 495 / 490 | 0 on the branch (main has no `/api/products`, so its catalogue runs fail by design) | 118 passed | 0 vulnerabilities | Two reviews (security, correctness); no automated scanner here |
 | BUH-01.00.00 | 2026-10-14 | branch 707 / 748 / 757 / 751; main 777 / 746 / 759 / 643 (p50 81–87 ms both; p95 136–170 vs 119–152 ms) | branch 598 / 467 / 501 / 497; main 548 / 547 / 622 / 513 (p50 78–100 vs 74–86 ms) | 0 | 76 passed | 0 vulnerabilities | No new scan (not available here) |
 
 **Notes for BUH-01.01.00**

@@ -442,7 +442,7 @@ export const AdminSmsTab: React.FC<AdminSmsTabProps> = ({
                   value={testPhone}
                   onChange={(e) => setTestPhone(e.target.value)}
                   placeholder="+971 50 123 4567"
-                  className="flex-1 px-3.5 py-2.5 rounded-xl border border-stone-300 bg-white text-stone-900 text-xs font-semibold focus:outline-none focus:ring-2 focus:ring-[#c5a059]"
+                  className="flex-1 min-w-0 px-3.5 py-2.5 rounded-xl border border-stone-300 bg-white text-stone-900 text-xs font-semibold focus:outline-none focus:ring-2 focus:ring-[#c5a059]"
                 />
                 <button
                   type="button"

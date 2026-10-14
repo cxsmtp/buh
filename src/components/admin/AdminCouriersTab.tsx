@@ -145,20 +145,20 @@ export const AdminCouriersTab: React.FC<AdminCouriersTabProps> = ({
 
       {/* CARRIER TABS: JEEBLY VS ECO EXPRESS */}
       <div className="space-y-3">
-        <div className="flex gap-2 border-b border-stone-200 pb-2">
+        <div className="grid grid-cols-2 gap-2 border-b border-stone-200 pb-2">
           <button
             onClick={() => {
               setActiveCarrier('jeebly');
               setTestResult(null);
             }}
-            className={`flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-bold transition-all ${
+            className={`flex items-center justify-center gap-2 px-3 py-2 rounded-xl text-xs font-bold transition-all min-w-0 ${
               activeCarrier === 'jeebly'
                 ? 'bg-[#0f1c2e] text-white shadow-sm'
                 : 'bg-white text-stone-700 hover:bg-stone-100 border border-stone-200'
             }`}
           >
             <span>Jeebly Logistics (UAE)</span>
-            <span className="text-[10px] px-1.5 py-0.2 rounded-full bg-amber-400 text-stone-900 font-bold">
+            <span className="hidden md:inline text-[10px] px-1.5 py-0.2 rounded-full bg-amber-400 text-stone-900 font-bold">
               integration.jeebly.com
             </span>
           </button>
@@ -168,14 +168,14 @@ export const AdminCouriersTab: React.FC<AdminCouriersTabProps> = ({
               setActiveCarrier('echo');
               setTestResult(null);
             }}
-            className={`flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-bold transition-all ${
+            className={`flex items-center justify-center gap-2 px-3 py-2 rounded-xl text-xs font-bold transition-all min-w-0 ${
               activeCarrier === 'echo'
                 ? 'bg-[#0f1c2e] text-white shadow-sm'
                 : 'bg-white text-stone-700 hover:bg-stone-100 border border-stone-200'
             }`}
           >
             <span>Eco Express Courier</span>
-            <span className="text-[10px] px-1.5 py-0.2 rounded-full bg-blue-400 text-white font-bold">
+            <span className="hidden md:inline text-[10px] px-1.5 py-0.2 rounded-full bg-blue-400 text-white font-bold">
               Apiary / ecofreight.ae
             </span>
           </button>
