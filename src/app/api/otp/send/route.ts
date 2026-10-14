@@ -1,28 +1,16 @@
-import { NextRequest, NextResponse } from 'next/server';
-import { sendRealSmsOtp, normalizePhoneNumber } from '@/lib/otpService';
+import { NextRequest } from 'next/server';
+import { envGateways, sendRealSmsOtp } from '@/lib/otpService';
+import { assertSameOrigin, clientIp, handleRouteError, json, readJsonBody } from '@/lib/server/http';
 
 export async function POST(req: NextRequest) {
   try {
-    const body = await req.json();
-    const { phone, settings } = body;
-
-    if (!phone || typeof phone !== 'string' || phone.trim().length < 8) {
-      return NextResponse.json(
-        { success: false, message: 'Please provide a valid phone number (e.g. +971 50 123 4567)' },
-        { status: 400 }
-      );
-    }
-
-    const result = await sendRealSmsOtp(phone, settings);
-    return NextResponse.json(result);
+    assertSameOrigin(req);
+    const body = await readJsonBody(req, 2 * 1024);
+    // Gateway settings in the body are ignored: the public endpoint only uses
+    // the server's own configuration, so callers cannot pick where codes go.
+    const result = await sendRealSmsOtp(String(body.phone ?? ''), { gateways: envGateways(), ip: clientIp(req) });
+    return json(result, result.success ? 200 : 503);
   } catch (error) {
-    console.error('Error in /api/otp/send:', error);
-    return NextResponse.json(
-      {
-        success: false,
-        message: 'Failed to dispatch OTP: ' + (error instanceof Error ? error.message : 'Internal server error'),
-      },
-      { status: 500 }
-    );
+    return handleRouteError(error, 'otp/send', { success: false });
   }
 }

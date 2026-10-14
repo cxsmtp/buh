@@ -1,6 +1,6 @@
 {
   "name": "buhome-uae",
-  "version": "0.1.0",
+  "version": "1.0.0",
   "private": true,
   "scripts": {
     "dev": "next dev",
@@ -8,7 +8,10 @@
     "start": "next start",
     "start:standalone": "node .next/standalone/server.js",
     "test:load": "node scripts/load-test.mjs",
-    "lint": "eslint"
+    "lint": "eslint",
+    "test": "node --import tsx --test test/*.test.mts",
+    "hash-password": "node scripts/hash-password.mjs",
+    "typecheck": "tsc --noEmit"
   },
   "dependencies": {
     "@tailwindcss/postcss": "^4.3.3",
@@ -28,6 +31,7 @@
     "eslint": "^9",
     "eslint-config-next": "16.4.0",
     "tailwindcss": "^4",
+    "tsx": "^4.23.15",
     "typescript": "^5"
   }
 }

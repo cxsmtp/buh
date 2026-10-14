@@ -19,6 +19,7 @@ import {
   Building2,
   Banknote
 } from 'lucide-react';
+import { postJson } from '@/lib/apiClient';
 
 interface AdminOrdersTabProps {
   orders: Order[];
@@ -71,61 +72,53 @@ export const AdminOrdersTab: React.FC<AdminOrdersTabProps> = ({
     if (!selectedOrderForConfirm) return;
     setIsDispatching(true);
 
-    try {
-      const response = await fetch('/api/courier/dispatch', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          order: {
-            ...selectedOrderForConfirm,
-            courier: {
-              ...selectedOrderForConfirm.courier,
-              pickupDate,
-              weightKg,
-              pieces,
-            },
-            adminNotes,
-          },
-          provider: chosenCourier,
-          settings: courierSettings,
-        }),
-      });
-
-      const data = await response.json();
-      const awbNumber = data.awbNumber || `${chosenCourier === 'jeebly' ? 'GPY' : 'ECH'}-DXB-${Math.floor(100000 + Math.random() * 900000)}`;
-      const trackingUrl = data.trackingUrl || (chosenCourier === 'jeebly' 
-        ? `https://jeebly.com/track/${awbNumber}` 
-        : `https://ecoexpress.ae/tracking?awb=${awbNumber}`);
-
-      const updatedOrderUpdates: Partial<Order> = {
-        status: 'confirmed',
-        adminNotes,
-        courier: {
-          ...selectedOrderForConfirm.courier,
-          provider: chosenCourier,
-          awbNumber,
-          trackingUrl,
-          status: 'Confirmed & Booked with Carrier',
-          pickupDate,
-          weightKg,
-          pieces,
-          labelGenerated: true,
-          dispatchedAt: new Date().toISOString(),
+    // Only what the carrier needs: receipts and product photos can be megabytes of base64.
+    const { paymentReceiptUrl: _receipt, ...orderForCarrier } = selectedOrderForConfirm;
+    void _receipt;
+    const { ok, data } = await postJson<{ success?: boolean; message?: string; awbNumber?: string; trackingUrl?: string; isSimulated?: boolean }>(
+      '/api/courier/dispatch',
+      {
+        order: {
+          ...orderForCarrier,
+          items: orderForCarrier.items.map((item) => ({ ...item, image: '' })),
+          courier: { ...orderForCarrier.courier, pickupDate, weightKg, pieces },
+          adminNotes,
         },
-      };
+        provider: chosenCourier,
+        settings: courierSettings,
+      }
+    );
+    setIsDispatching(false);
 
-      onUpdateOrder(selectedOrderForConfirm.id, updatedOrderUpdates);
-      
-      // Update local reference to show label
-      const updatedOrder = { ...selectedOrderForConfirm, ...updatedOrderUpdates };
-      setSelectedOrderForConfirm(null);
-      setLabelOrder(updatedOrder as Order);
-    } catch (err) {
-      console.error('Dispatch error:', err);
-      alert('Courier dispatch failed. Please check network or settings.');
-    } finally {
-      setIsDispatching(false);
+    // Never mark an order booked without a real AWB from the server.
+    if (!ok || !data.success || !data.awbNumber) {
+      alert(`Courier booking failed: ${data.message || 'please check the courier settings and try again.'}`);
+      return;
     }
+
+    const updatedOrderUpdates: Partial<Order> = {
+      status: 'confirmed',
+      adminNotes,
+      courier: {
+        ...selectedOrderForConfirm.courier,
+        provider: chosenCourier,
+        awbNumber: data.awbNumber,
+        trackingUrl: data.trackingUrl || '',
+        status: data.isSimulated ? 'Sandbox booking (simulated AWB)' : 'Confirmed & Booked with Carrier',
+        pickupDate,
+        weightKg,
+        pieces,
+        labelGenerated: true,
+        dispatchedAt: new Date().toISOString(),
+      },
+    };
+
+    onUpdateOrder(selectedOrderForConfirm.id, updatedOrderUpdates);
+
+    // Update local reference to show label
+    const updatedOrder = { ...selectedOrderForConfirm, ...updatedOrderUpdates };
+    setSelectedOrderForConfirm(null);
+    setLabelOrder(updatedOrder as Order);
   };
 
   const sendWhatsAppUpdate = (order: Order) => {

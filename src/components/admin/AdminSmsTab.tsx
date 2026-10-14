@@ -17,6 +17,7 @@ import {
   RefreshCw
 } from 'lucide-react';
 import { INITIAL_SMS_SETTINGS } from '@/data/initialData';
+import { postJson } from '@/lib/apiClient';
 
 interface AdminSmsTabProps {
   smsSettings: SmsGatewaySettings;
@@ -122,26 +123,12 @@ export const AdminSmsTab: React.FC<AdminSmsTabProps> = ({
       isEnabled: true,
     };
 
-    try {
-      const response = await fetch('/api/otp/send', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          phone: testPhone,
-          settings: currentConfig,
-        }),
-      });
-
-      const data = await response.json();
-      setTestResult(data);
-    } catch (err) {
-      setTestResult({
-        success: false,
-        message: 'Network error communicating with OTP endpoint: ' + (err instanceof Error ? err.message : 'Unknown'),
-      });
-    } finally {
-      setIsSendingTest(false);
-    }
+    const { data } = await postJson<{ success: boolean; message: string; provider?: string; devOtpCode?: string }>(
+      '/api/admin/sms-test',
+      { phone: testPhone, settings: currentConfig }
+    );
+    setTestResult({ success: Boolean(data.success), message: data.message || 'Test failed.', provider: data.provider, devOtpCode: data.devOtpCode });
+    setIsSendingTest(false);
   };
 
   const isConfigured = 

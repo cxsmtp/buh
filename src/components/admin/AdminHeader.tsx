@@ -57,6 +57,9 @@ export const AdminHeader: React.FC<AdminHeaderProps> = ({
               </div>
               <p className="text-[10px] text-stone-300">
                 Logistics, AI Inventory, CRM & Live Marquee
+                <span className="ml-2 font-mono font-bold text-amber-300/90" title="Version of this build">
+                  {process.env.NEXT_PUBLIC_APP_VERSION}
+                </span>
               </p>
             </div>
           </div>

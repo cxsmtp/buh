@@ -1,4 +1,9 @@
+import crypto from 'node:crypto';
 import { Order, CourierSettings } from '@/types';
+
+function liveFailure(message: string, httpStatus?: number): JeeblyApiResponse {
+  return { success: false, awbNumber: '', trackingNumber: '', trackingUrl: '', message, isSimulated: false, httpStatus };
+}
 
 export interface JeeblyCreateOrderPayload {
   pickupDate: string; // YYYY-MM-DD
@@ -104,46 +109,39 @@ export async function createJeeblyShipment(
         'ClientKey': settings.clientKey || 'test',
       },
       body: JSON.stringify(payload),
+      redirect: 'manual',
+      signal: AbortSignal.timeout(15_000),
     });
 
     const data = await response.json().catch(() => null);
 
     if (response.ok && data && (data.success === 'true' || data.success === true)) {
-      const awbNumber = data.awbNumber || data.trackingNumber || `JBL-${Math.floor(100000 + Math.random() * 900000)}`;
+      const awbNumber = data.awbNumber || data.trackingNumber ? String(data.awbNumber || data.trackingNumber) : '';
+      if (!awbNumber) return liveFailure('Jeebly accepted the request but returned no AWB number.', response.status);
       return {
         success: true,
         awbNumber,
         trackingNumber: awbNumber,
-        trackingUrl: `https://jeebly.com/track/${awbNumber}`,
-        labelUrl: data.labelUrl || `https://integration.jeebly.com/v1/scheduled/label/${awbNumber}`,
+        trackingUrl: `https://jeebly.com/track/${encodeURIComponent(awbNumber)}`,
+        labelUrl: `https://integration.jeebly.com/v1/scheduled/label/${encodeURIComponent(awbNumber)}`,
         message: 'Order successfully registered with live Jeebly Logistics API.',
         isSimulated: false,
         httpStatus: response.status,
         rawResponse: data,
       };
-    } else if (data && data.message) {
-      // Live server responded with error message (e.g. "Invalid API Token" when using test key)
-      const randomSuffix = Math.floor(100000 + Math.random() * 900000);
-      const prefix = order.customer.emirate === 'Dubai' ? 'GPY-DXB' : 'GPY-UAE';
-      const awbNumber = `${prefix}-${randomSuffix}`;
-      
-      return {
-        success: true,
-        awbNumber,
-        trackingNumber: awbNumber,
-        trackingUrl: `https://jeebly.com/track/${awbNumber}`,
-        message: `Connected to Jeebly (${endpoint}). Notice: ${data.message}. AWB generated for dispatch.`,
-        isSimulated: true,
-        httpStatus: response.status,
-        rawResponse: data,
-      };
+    }
+    if (settings.isLive) {
+      // Live mode never invents an AWB: the customer would get a tracking
+      // number the carrier does not know. Report the failure instead.
+      return liveFailure(`Jeebly did not accept the shipment${data?.message ? `: ${String(data.message).slice(0, 200)}` : ''}.`, response.status);
     }
   } catch (err) {
-    console.warn('Jeebly API connection attempt error, using fallback:', err);
+    console.warn('Jeebly API connection attempt error:', (err as Error).message);
+    if (settings.isLive) return liveFailure('Could not reach Jeebly. Please try again.');
   }
 
-  // Fallback AWB generation
-  const randomSuffix = Math.floor(100000 + Math.random() * 900000);
+  // Sandbox only: a clearly simulated AWB so the flow can be tried end to end.
+  const randomSuffix = crypto.randomInt(100000, 1000000);
   const prefix = order.customer.emirate === 'Dubai' ? 'GPY-DXB' : 'GPY-UAE';
   const awbNumber = `${prefix}-${randomSuffix}`;
 
@@ -152,7 +150,7 @@ export async function createJeeblyShipment(
     awbNumber,
     trackingNumber: awbNumber,
     trackingUrl: `https://jeebly.com/track/${awbNumber}`,
-    message: 'Shipment requisition generated for Jeebly. AWB ready for thermal label printing.',
+    message: 'Sandbox: simulated Jeebly AWB (no live booking was made). Turn on live mode to book with the carrier.',
     isSimulated: true,
   };
 }

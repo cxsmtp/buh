@@ -10,12 +10,18 @@ interface ProductDetailModalProps {
   onAddToCart: (product: Product, profile: BedProfileMeasurement, color: string, quantity: number) => void;
 }
 
-export const ProductDetailModal: React.FC<ProductDetailModalProps> = ({
+export const ProductDetailModal: React.FC<ProductDetailModalProps> = (props) => {
+  // Keyed by product so choices reset when another product opens, and so the
+  // hooks below always run in the same order.
+  if (!props.product) return null;
+  return <ProductDetailContent key={props.product.id} {...props} product={props.product} />;
+};
+
+const ProductDetailContent: React.FC<ProductDetailModalProps & { product: Product }> = ({
   product,
   onClose,
   onAddToCart,
 }) => {
-  if (!product) return null;
 
   // Selected Profile
   const initialProfile = product.profiles.find((p) => p.id === product.defaultProfileId) || product.profiles[0];

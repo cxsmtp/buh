@@ -1,18 +1,14 @@
 'use client';
 
 import React, { useState } from 'react';
-import { Lock, Key, ShieldCheck, ArrowRight, Eye, EyeOff, Sparkles, Check } from 'lucide-react';
+import { Lock, ShieldCheck, ArrowRight, Eye, EyeOff, Check } from 'lucide-react';
+import { postJson } from '@/lib/apiClient';
 
 interface AdminLoginModalProps {
   isOpen: boolean;
   onClose: () => void;
   onLoginSuccess: () => void;
 }
-
-export const FIRST_ADMIN_CREDENTIALS = {
-  email: 'admin@beautifuluaehome.com',
-  password: 'UAEHome2026!#',
-};
 
 export const AdminLoginModal: React.FC<AdminLoginModalProps> = ({
   isOpen,
@@ -23,36 +19,59 @@ export const AdminLoginModal: React.FC<AdminLoginModalProps> = ({
   const [password, setPassword] = useState('');
   const [showPassword, setShowPassword] = useState(false);
   const [error, setError] = useState('');
-  const [showFirstAdminHelper, setShowFirstAdminHelper] = useState(true);
+  const [busy, setBusy] = useState(false);
+  // After a first-run sign-in the server requires a new password before anything else.
+  const [mustChange, setMustChange] = useState(false);
+  const [newPassword, setNewPassword] = useState('');
+  const [confirmPassword, setConfirmPassword] = useState('');
 
   if (!isOpen) return null;
 
-  const handleLogin = (e: React.FormEvent) => {
+  const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
     setError('');
-
-    // Check against default credentials or custom credentials stored in localStorage
-    const storedCredsRaw = typeof window !== 'undefined' ? localStorage.getItem('buh_admin_creds') : null;
-    const validCreds = storedCredsRaw ? JSON.parse(storedCredsRaw) : FIRST_ADMIN_CREDENTIALS;
-
-    if (
-      (email.trim().toLowerCase() === validCreds.email.toLowerCase() || email.trim() === 'admin') &&
-      password === validCreds.password
-    ) {
-      if (typeof window !== 'undefined') {
-        localStorage.setItem('buh_admin_auth', 'authenticated');
-      }
-      onLoginSuccess();
-      onClose();
-    } else {
-      setError('Invalid admin credentials. Please check the email/password or use the First Admin helper below.');
+    setBusy(true);
+    const { ok, data } = await postJson<{ message?: string; mustChangePassword?: boolean }>('/api/admin/login', {
+      email: email.trim(),
+      password,
+    });
+    setBusy(false);
+    if (!ok) {
+      setError(data.message || 'Sign-in failed. Please try again.');
+      return;
     }
+    if (data.mustChangePassword) {
+      setMustChange(true);
+      return;
+    }
+    setPassword('');
+    onLoginSuccess();
+    onClose();
   };
 
-  const handleAutoFillFirstAdmin = () => {
-    setEmail(FIRST_ADMIN_CREDENTIALS.email);
-    setPassword(FIRST_ADMIN_CREDENTIALS.password);
+  const handleChangePassword = async (e: React.FormEvent) => {
+    e.preventDefault();
     setError('');
+    if (newPassword !== confirmPassword) {
+      setError('The new passwords do not match.');
+      return;
+    }
+    setBusy(true);
+    const { ok, data } = await postJson<{ message?: string }>('/api/admin/password', {
+      currentPassword: password,
+      newPassword,
+    });
+    setBusy(false);
+    if (!ok) {
+      setError(data.message || 'Could not change the password.');
+      return;
+    }
+    setPassword('');
+    setNewPassword('');
+    setConfirmPassword('');
+    setMustChange(false);
+    onLoginSuccess();
+    onClose();
   };
 
   return (
@@ -78,15 +97,59 @@ export const AdminLoginModal: React.FC<AdminLoginModalProps> = ({
           </div>
         )}
 
-        {/* Login Form */}
+        {mustChange ? (
+          <form onSubmit={handleChangePassword} className="space-y-3.5 text-xs">
+            <p className="text-stone-600 leading-relaxed">
+              Choose your own admin password to finish signing in: at least 12 characters, with at least 5 different characters.
+            </p>
+            <div>
+              <label htmlFor="admin-new-password" className="block text-stone-800 font-semibold mb-1">New password</label>
+              <input
+                id="admin-new-password"
+                type="password"
+                required
+                minLength={12}
+                maxLength={256}
+                autoComplete="new-password"
+                value={newPassword}
+                onChange={(e) => setNewPassword(e.target.value)}
+                className="w-full px-3.5 py-2.5 rounded-xl border border-stone-300 bg-white text-stone-900 focus:outline-none focus:ring-2 focus:ring-[#c5a059] text-xs"
+              />
+            </div>
+            <div>
+              <label htmlFor="admin-confirm-password" className="block text-stone-800 font-semibold mb-1">Confirm new password</label>
+              <input
+                id="admin-confirm-password"
+                type="password"
+                required
+                minLength={12}
+                maxLength={256}
+                autoComplete="new-password"
+                value={confirmPassword}
+                onChange={(e) => setConfirmPassword(e.target.value)}
+                className="w-full px-3.5 py-2.5 rounded-xl border border-stone-300 bg-white text-stone-900 focus:outline-none focus:ring-2 focus:ring-[#c5a059] text-xs"
+              />
+            </div>
+            <button
+              type="submit"
+              disabled={busy}
+              className="w-full bg-[#0f1c2e] hover:bg-stone-800 disabled:opacity-60 text-white font-bold py-3.5 rounded-xl shadow-lg flex items-center justify-center gap-2 transition-all active:scale-95 text-xs mt-2"
+            >
+              <Check className="w-4 h-4 text-amber-300" />
+              <span>{busy ? 'Saving…' : 'Save Password & Continue'}</span>
+            </button>
+          </form>
+        ) : (
         <form onSubmit={handleLogin} className="space-y-3.5 text-xs">
           <div>
             <label className="block text-stone-800 font-semibold mb-1">
-              Admin Email or Username
+              Admin Email
             </label>
             <input
-              type="text"
+              type="email"
               required
+              maxLength={254}
+              autoComplete="username"
               placeholder="admin@beautifuluaehome.com"
               value={email}
               onChange={(e) => setEmail(e.target.value)}
@@ -102,6 +165,8 @@ export const AdminLoginModal: React.FC<AdminLoginModalProps> = ({
               <input
                 type={showPassword ? 'text' : 'password'}
                 required
+                maxLength={256}
+                autoComplete="current-password"
                 placeholder="••••••••••••"
                 value={password}
                 onChange={(e) => setPassword(e.target.value)}
@@ -110,6 +175,7 @@ export const AdminLoginModal: React.FC<AdminLoginModalProps> = ({
               <button
                 type="button"
                 onClick={() => setShowPassword(!showPassword)}
+                aria-label={showPassword ? 'Hide password' : 'Show password'}
                 className="absolute right-3 top-2.5 text-stone-400 hover:text-stone-600"
               >
                 {showPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
@@ -119,48 +185,21 @@ export const AdminLoginModal: React.FC<AdminLoginModalProps> = ({
 
           <button
             type="submit"
-            className="w-full bg-[#0f1c2e] hover:bg-stone-800 text-white font-bold py-3.5 rounded-xl shadow-lg flex items-center justify-center gap-2 transition-all active:scale-95 text-xs mt-2"
+            disabled={busy}
+            className="w-full bg-[#0f1c2e] hover:bg-stone-800 disabled:opacity-60 text-white font-bold py-3.5 rounded-xl shadow-lg flex items-center justify-center gap-2 transition-all active:scale-95 text-xs mt-2"
           >
-            <span>Unlock Admin Portal</span>
+            <span>{busy ? 'Checking…' : 'Unlock Admin Portal'}</span>
             <ArrowRight className="w-4 h-4 text-amber-300" />
           </button>
         </form>
+        )}
 
-        {/* FIRST ADMIN CREDENTIALS HELPER */}
-        <div className="bg-gradient-to-br from-amber-50 to-stone-50 rounded-2xl p-4 border border-amber-200/90 text-xs space-y-2.5">
-          <div className="flex items-center justify-between">
-            <span className="font-bold text-amber-950 flex items-center gap-1.5">
-              <Key className="w-4 h-4 text-[#c5a059]" />
-              <span>How to Get Access for First Admin</span>
-            </span>
-            <span className="text-[10px] bg-amber-200/80 text-amber-900 font-bold px-2 py-0.5 rounded-full border border-amber-300">
-              Default Owner Key
-            </span>
-          </div>
-
-          <p className="text-[11px] text-stone-600 leading-relaxed">
-            The initial store manager access is pre-configured with secure master credentials below. You can tap the 1-click button to fill them instantly or type them manually:
-          </p>
-
-          <div className="bg-white p-3 rounded-xl border border-amber-200 font-mono text-[11px] space-y-1.5 shadow-xs">
-            <div className="flex justify-between items-center">
-              <span className="text-stone-500 font-sans font-medium">Username / Email:</span>
-              <strong className="text-stone-900 font-bold select-all">admin@beautifuluaehome.com</strong>
-            </div>
-            <div className="flex justify-between items-center pt-1 border-t border-stone-100">
-              <span className="text-stone-500 font-sans font-medium">Master Password:</span>
-              <strong className="text-[#0f1c2e] font-bold select-all bg-amber-50 px-1.5 py-0.5 rounded border border-amber-200">UAEHome2026!#</strong>
-            </div>
-          </div>
-
-          <button
-            type="button"
-            onClick={handleAutoFillFirstAdmin}
-            className="w-full py-2.5 bg-amber-100 hover:bg-amber-200 active:scale-98 text-amber-950 border border-amber-300 rounded-xl font-bold text-xs flex items-center justify-center gap-2 transition-all shadow-xs"
-          >
-            <Sparkles className="w-4 h-4 text-amber-700" />
-            <span>1-Click Auto-Fill First Admin Credentials</span>
-          </button>
+        <div className="bg-stone-50 rounded-2xl p-3 border border-stone-200 text-[11px] text-stone-600 leading-relaxed flex gap-2">
+          <ShieldCheck className="w-4 h-4 text-[#c5a059] shrink-0 mt-0.5" />
+          <span>
+            First time here? The owner account&apos;s one-time password is printed in the server log when the
+            shop first starts. You will choose your own password right after signing in.
+          </span>
         </div>
 
         {/* Cancel button */}
