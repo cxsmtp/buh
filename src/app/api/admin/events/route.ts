@@ -8,7 +8,7 @@ export const dynamic = 'force-dynamic';
 export async function GET(req: Request) {
   try {
     await requireAdmin(req);
-    return eventStream(req, ['catalog', 'settings', 'orders'], `admin:${clientIp(req) ?? 'unknown'}`);
+    return eventStream(req, ['catalog', 'settings', 'orders', 'chats'], `admin:${clientIp(req) ?? 'unknown'}`);
   } catch (err) {
     return handleRouteError(err, 'admin/events');
   }

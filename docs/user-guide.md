@@ -54,6 +54,18 @@ Every change is recorded with who made it and when.
 - Filters: **Low** (at or below your warning level), **Sold out**, **Hidden**, **Removed**, and a search box.
 - If a customer buys while you are editing stock, **Save** says the stock changed and shows the new figure: check it and save again.
 
+### Chats
+
+The **Help** button on the shop opens a chat. The assistant answers by itself from what you taught it (Settings → **Chat assistant**) and from your size presets; it never makes up a price, a discount or a promise. Anything else, or **Talk to a person**, comes to you:
+
+- **Chats** in the Admin Hub (badge: waiting for you). Reply there; the customer sees it within seconds. **WhatsApp** / **Email** open their contact details; **Close** ends the chat, **Back to assistant** lets the assistant answer again.
+- An email to the backup address, with the conversation. **Reply to that email** and your answer appears in the chat (needs the mailbox in Settings → Email & admin account; keep `[Chat #…]` in the subject).
+- If nobody answers within the waiting time (2.5 minutes by default), the customer is told once that we'll get back to them, and asked for a phone number or email if they haven't left one. A reply you write after they've left is emailed to them, when they left an email; for a phone number, use **WhatsApp**.
+
+**Settings → Chat assistant:** switch the chat on or off, its name and greeting, the waiting time, and **What it knows**: each answer has a question, keywords and the answer text. **Try it** shows what it would reply. **Download memory** saves the answers as a file (keep a copy, or edit and **Load from file**).
+
+On each product, customers see **Ask in chat**, **Ask on WhatsApp** and **Ask on Instagram**, only the ones switched on (Settings → Store & contact). Instagram can't pre-fill a message, so the product's link is copied for them to paste.
+
 ### Customers
 
 **Customers & CRM** is built from the orders: one line per phone number, with the number of orders and the total spent.
@@ -62,7 +74,9 @@ Every change is recorded with who made it and when.
 
 **⚙️ Settings** holds every option, in sections:
 
-- **Store & contact:** your WhatsApp number (change it any time; empty hides the WhatsApp buttons), the message a chat opens with, the floating WhatsApp button, the support email, Instagram, TikTok and Facebook, the address, and whether visitors abroad see their own currency.
+- **Store & contact:** your WhatsApp number (change it any time; empty hides the WhatsApp buttons), the message a chat opens with, the floating WhatsApp button, the support email, Instagram, TikTok and Facebook, which of **Ask on WhatsApp / Instagram** show, the address, and whether visitors abroad see their own currency.
+- **Chat assistant:** see Chats above.
+- **Email & admin account:** the mail server, where backups and alerts go, the mailbox for chat replies, and your sign-in email.
 - **Catalogue:** the size presets offered when adding a product (name, measurements, price difference, pieces in the set), the categories shown in the shop, and the **Only N left** level.
 - **Branding & bank:** logo, colours, the scrolling bar, and bank-transfer details.
 - **Festival themes:** see below.

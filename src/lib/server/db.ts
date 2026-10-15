@@ -142,6 +142,46 @@ const MIGRATIONS: Array<(db: DB) => void> = [
       );
     `);
   },
+  // 4: the shop's chat. A customer holds a secret for their own conversation (only its
+  //    hash is kept); reply_key goes in the email subject, so an emailed reply finds it.
+  (db) => {
+    db.exec(`
+      CREATE TABLE chat_threads (
+        id                TEXT PRIMARY KEY,
+        token_hash        TEXT NOT NULL,
+        reply_key         TEXT NOT NULL UNIQUE,
+        status            TEXT NOT NULL DEFAULT 'bot',
+        customer_name     TEXT NOT NULL DEFAULT '',
+        contact           TEXT NOT NULL DEFAULT '',
+        page              TEXT NOT NULL DEFAULT '',
+        ip                TEXT NOT NULL DEFAULT '',
+        created_at        TEXT NOT NULL,
+        updated_at        TEXT NOT NULL,
+        handed_over_at    TEXT,
+        reassured_at      TEXT,
+        emailed_at        TEXT,
+        customer_seen_at  TEXT,
+        admin_seen_id     INTEGER NOT NULL DEFAULT 0
+      );
+      CREATE INDEX chat_threads_by_update ON chat_threads(updated_at);
+      CREATE TABLE chat_messages (
+        id         INTEGER PRIMARY KEY,
+        thread_id  TEXT NOT NULL REFERENCES chat_threads(id),
+        at         TEXT NOT NULL,
+        author     TEXT NOT NULL,
+        body       TEXT NOT NULL,
+        via        TEXT NOT NULL DEFAULT 'web'
+      );
+      CREATE INDEX chat_messages_by_thread ON chat_messages(thread_id, id);
+      -- Emails already turned into chat messages (claimed atomically: two copies of the shop
+      -- may read the mailbox at the same moment during an update).
+      CREATE TABLE chat_mail_seen (
+        message_id  TEXT PRIMARY KEY,
+        at          TEXT NOT NULL
+      );
+      CREATE INDEX chat_threads_by_status ON chat_threads(status, updated_at);
+    `);
+  },
 ];
 
 let db: DB | null = null;

@@ -9,7 +9,7 @@ import { kvBump } from './kv';
  * both running copies during an update.
  */
 
-export type Channel = 'catalog' | 'settings' | 'orders';
+export type Channel = 'catalog' | 'settings' | 'orders' | 'chats';
 
 export function bump(channel: Channel): void {
   try {
@@ -20,8 +20,8 @@ export function bump(channel: Channel): void {
 }
 
 export function versions(): Record<Channel, number> {
-  const rows = getDb().prepare("SELECT key, data FROM kv WHERE key IN ('v:catalog', 'v:settings', 'v:orders')").all() as Array<{ key: string; data: string }>;
-  const out: Record<Channel, number> = { catalog: 0, settings: 0, orders: 0 };
+  const rows = getDb().prepare("SELECT key, data FROM kv WHERE key IN ('v:catalog', 'v:settings', 'v:orders', 'v:chats')").all() as Array<{ key: string; data: string }>;
+  const out: Record<Channel, number> = { catalog: 0, settings: 0, orders: 0, chats: 0 };
   for (const r of rows) out[r.key.slice(2) as Channel] = Number(r.data) || 0;
   return out;
 }

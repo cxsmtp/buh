@@ -20,7 +20,7 @@ import { readTar, writeTar, type TarEntry } from './tar';
  *  - a consistent copy of the database (SQLite online backup, safe mid-sale),
  *    with the courier and SMS keys blanked (re-enter them after a restore);
  *  - flat files anyone can open in Excel: orders.csv, order_items.csv,
- *    customers.csv, products.csv;
+ *    customers.csv, products.csv, chats.csv;
  *  - the bank-transfer receipts, the product photos and the audit log.
  *
  * All packed in one .tar.gz; with BACKUP_PASSPHRASE set it is encrypted
@@ -120,6 +120,15 @@ function csvFiles(): TarEntry[] {
       data: Buffer.from(toCsv(
         ['name', 'phone', 'email', 'emirate', 'area', 'orders', 'total_spent_aed', 'last_order_at'],
         listCustomers().map((c) => [c.fullName, c.phone, c.email ?? '', c.emirate, c.area, c.totalOrders, c.totalSpent, c.lastOrderDate])
+      )),
+    },
+    {
+      name: 'chats.csv',
+      data: Buffer.from(toCsv(
+        ['chat_id', 'at', 'from', 'via', 'customer_name', 'contact', 'status', 'message'],
+        (getDb()
+          .prepare('SELECT m.thread_id, m.at, m.author, m.via, t.customer_name, t.contact, t.status, m.body FROM chat_messages m JOIN chat_threads t ON t.id = m.thread_id ORDER BY m.id')
+          .all() as Array<Record<string, string>>).map((r) => [r.thread_id, r.at, r.author, r.via, r.customer_name, r.contact, r.status, r.body])
       )),
     },
     {

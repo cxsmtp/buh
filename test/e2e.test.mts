@@ -285,3 +285,23 @@ test('exchange rates endpoint answers (empty until the server has fetched them)'
   assert.equal(res.status, 200);
   assert.ok('rates' in (await res.json()));
 });
+
+test('chat API: a stranger can start one, only its secret reads it (in a header, never the address), other sites are refused, the inbox needs sign-in', { skip: !hasBuild }, async () => {
+  assert.equal((await post('/api/chat', { message: 'hi' }, { origin: 'https://evil.example' })).status, 403);
+  const start = await post('/api/chat', { message: 'How do I wash it?', page: '/' });
+  assert.equal(start.status, 200);
+  const c = await start.json();
+  assert.ok(c.id && c.token);
+  assert.match(c.messages.at(-1).body, /wash cold/);
+  const read = (token: string) => fetch(`${BASE}/api/chat/${c.id}?after=0`, { headers: { 'x-chat-token': token } });
+  assert.equal((await read('nope')).status, 404);
+  const ok = await read(c.token);
+  assert.equal(ok.status, 200);
+  assert.equal(ok.headers.get('cache-control'), 'no-store');
+  const sent = await post(`/api/chat/${c.id}`, { token: c.token, action: 'send', message: 'talk to a person' });
+  assert.equal((await sent.json()).status, 'waiting');
+  assert.equal((await post(`/api/chat/${c.id}`, { token: c.token, action: 'contact', contact: 'nonsense' })).status, 400);
+  for (const p of ['/api/admin/chats', `/api/admin/chats/${c.id}`]) assert.equal((await fetch(`${BASE}${p}`)).status, 401, p);
+  assert.equal((await post(`/api/admin/chats/${c.id}`, { message: 'forged reply' })).status, 401);
+  assert.doesNotMatch(log(), new RegExp(c.token), 'the secret never reaches the log');
+});

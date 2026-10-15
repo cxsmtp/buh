@@ -21,10 +21,16 @@ export function GET() {
       supportEmail: contactEmail(),
       festival: festivalView(),
       phoneVerification: phoneVerificationConfig(),
+      chat: chatView(),
     });
   } catch (err) {
     return handleRouteError(err, 'settings/public');
   }
+}
+
+function chatView() {
+  const a = getSettings('assistant');
+  return a.enabled ? { name: a.name, greeting: a.greeting } : null;
 }
 
 /** Today's festival look (or the everyday one), with what the admin wants shown. */
