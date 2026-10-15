@@ -32,7 +32,11 @@ export function visitorCurrency(): string | null {
 
 let ratesPromise: Promise<Record<string, number> | null> | null = null;
 function loadRates() {
-  ratesPromise ??= getJson<{ rates: { rates: Record<string, number> } | null }>('/api/rates').then(({ ok, data }) => (ok && data.rates ? data.rates.rates : null));
+  ratesPromise ??= getJson<{ rates: { rates: Record<string, number> } | null }>('/api/rates').then(({ ok, data }) => {
+    if (ok && data.rates) return data.rates.rates;
+    ratesPromise = null; // none yet (the server fetches them): ask again next time
+    return null;
+  });
   return ratesPromise;
 }
 

@@ -146,9 +146,9 @@ export const AdminInventoryTab: React.FC<AdminInventoryTabProps> = ({ products, 
                     const qty = p.stockBySize[s.id] ?? 0;
                     return (
                       <div key={s.id} className={`flex items-center rounded-lg border text-[11px] ${qty === 0 ? 'border-red-200 bg-red-50' : qty <= low ? 'border-amber-200 bg-amber-50' : 'border-stone-200 bg-stone-50'}`}>
-                        <button type="button" disabled={busy === p.id || qty === 0} onClick={() => void adjust(p, s.id, -1)} className="px-1.5 py-1 disabled:opacity-30" aria-label={`One fewer ${s.name} of ${p.title}`}><Minus className="w-3 h-3" /></button>
+                        <button type="button" disabled={busy === p.id || qty === 0} onClick={() => void adjust(p, s.id, -1)} className="px-2.5 py-2 disabled:opacity-30" aria-label={`One fewer ${s.name} of ${p.title}`}><Minus className="w-3 h-3" /></button>
                         <span className="px-1 font-semibold whitespace-nowrap">{s.badge || s.name}: {qty}</span>
-                        <button type="button" disabled={busy === p.id} onClick={() => void adjust(p, s.id, 1)} className="px-1.5 py-1 disabled:opacity-30" aria-label={`One more ${s.name} of ${p.title}`}><Plus className="w-3 h-3" /></button>
+                        <button type="button" disabled={busy === p.id} onClick={() => void adjust(p, s.id, 1)} className="px-2.5 py-2 disabled:opacity-30" aria-label={`One more ${s.name} of ${p.title}`}><Plus className="w-3 h-3" /></button>
                       </div>
                     );
                   })}

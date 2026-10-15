@@ -49,11 +49,13 @@ export function ThemeSettingsCard({ value, onSave }: { value: ThemeSettings; onS
   }, []);
 
   const save = async (next: ThemeSettings) => {
+    const before = d;
     setD(next);
     setSaving(true);
     setStatus(null);
     const problem = await onSave(next);
     setSaving(false);
+    if (problem) setD(before); // show what is really saved
     setStatus(problem ? { ok: false, text: problem } : { ok: true, text: 'Saved. The shop shows it now.' });
     void load();
   };

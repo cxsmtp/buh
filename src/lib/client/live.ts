@@ -26,8 +26,25 @@ export function useLiveUpdates(
     const ownVersion = process.env.NEXT_PUBLIC_APP_VERSION ?? '';
     let last: Versions | null = null;
     let told = false;
-    const source = new EventSource(url);
-    source.onmessage = (e) => {
+    let source: EventSource;
+    let retry: ReturnType<typeof setTimeout> | undefined;
+    let delay = 5000;
+    let stopped = false;
+    const open = () => {
+      source = new EventSource(url);
+      source.onopen = () => {
+        delay = 5000;
+      };
+      // EventSource gives up for good after an HTTP error (a 502 during a restart, a 429):
+      // open a new one, waiting longer each time (up to 5 minutes).
+      source.onerror = () => {
+        if (source.readyState !== EventSource.CLOSED || stopped) return;
+        retry = setTimeout(open, delay);
+        delay = Math.min(delay * 2, 300_000);
+      };
+      source.onmessage = onMessage;
+    };
+    const onMessage = (e: MessageEvent) => {
       let v: Versions;
       try {
         v = JSON.parse(e.data) as Versions;
@@ -45,6 +62,11 @@ export function useLiveUpdates(
       }
       last = v;
     };
-    return () => source.close();
+    open();
+    return () => {
+      stopped = true;
+      clearTimeout(retry);
+      source.close();
+    };
   }, [url]);
 }

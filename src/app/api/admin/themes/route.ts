@@ -1,6 +1,7 @@
 import { requireAdmin } from '@/lib/server/guard';
 import { handleRouteError, json } from '@/lib/server/http';
-import { currentFestivalTheme } from '@/lib/server/festivalDates';
+import { festivalEventsAround } from '@/lib/server/festivalDates';
+import { upcomingFestivals } from '@/lib/festivals/select';
 import { getSettings } from '@/lib/server/settings';
 import { lastFestivalRefresh, storefrontTheme } from '@/lib/server/theme';
 
@@ -10,8 +11,8 @@ export async function GET(req: Request) {
     await requireAdmin(req);
     const s = getSettings('theme');
     const now = storefrontTheme();
-    // Upcoming festivals regardless of the override, so the admin sees what auto mode would do.
-    const all = currentFestivalTheme({ mode: 'auto' }, new Date());
+    // The next 12 months of festivals regardless of the override, so the admin sees (and can switch off) any of them.
+    const all = { upcoming: upcomingFestivals(now.today, festivalEventsAround(now.today), 60).filter((u) => u.daysToStart <= 366) };
     const refresh = lastFestivalRefresh();
     return json({
       today: now.today,

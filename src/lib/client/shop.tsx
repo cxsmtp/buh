@@ -52,11 +52,16 @@ export function whatsappLink(store: StoreSettings, message: string): string | nu
  * (shown as sold out) so the customer sees what happened instead of a line vanishing.
  */
 export function refreshCart(cart: CartItem[], products: Product[]): CartItem[] {
+  // Pieces already given to earlier lines of the same product and size (different colours).
+  const used = new Map<string, number>();
   return cart.flatMap((item) => {
     const product = products.find((p) => p.id === item.product.id);
     const profile = product?.profiles.find((p) => p.id === item.selectedProfile.id);
     if (!product || !profile) return [];
-    const left = piecesLeft(product, profile.id);
-    return [{ ...item, product, selectedProfile: profile, quantity: left > 0 ? Math.min(item.quantity, left) : item.quantity }];
+    const key = `${product.id}|${profile.id}`;
+    const left = piecesLeft(product, profile.id) - (used.get(key) ?? 0);
+    const quantity = left > 0 ? Math.min(item.quantity, left) : item.quantity;
+    used.set(key, (used.get(key) ?? 0) + Math.max(0, Math.min(quantity, left)));
+    return [{ ...item, product, selectedProfile: profile, quantity }];
   });
 }

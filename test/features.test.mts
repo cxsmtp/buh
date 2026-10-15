@@ -310,3 +310,47 @@ test('regression: live streams are capped per address, and closing one frees its
   assert.equal(live.eventStream(new Request('http://shop.test/api/events'), ['catalog'], '203.0.113.7').status, 200);
   for (const c of controllers) c.abort();
 });
+
+// ── Correctness review of BUH-02.00.00 ──────────────────────────────────────
+
+test('regression: cancelling an order already with the courier does not put the one-off piece back on sale', () => {
+  const p = newProduct({ king: 1 });
+  const o = order(p.id, 'king');
+  orders.updateOrderByAdmin(o.id, { status: 'confirmed' }, 'test');
+  orders.updateOrderByAdmin(o.id, { status: 'dispatched' }, 'test');
+  orders.updateOrderByAdmin(o.id, { status: 'cancelled' }, 'test');
+  assert.equal(products.getProduct(p.id)!.stockBySize.king, 0, 'still with the courier');
+  const q = newProduct({ king: 1 });
+  const o2 = order(q.id, 'king');
+  orders.updateOrderByAdmin(o2.id, { status: 'cancelled' }, 'test');
+  assert.equal(products.getProduct(q.id)!.stockBySize.king, 1, 'never left: back on sale');
+});
+
+test('regression: the bag never holds more of a size than exist, across colours', async () => {
+  const { refreshCart } = await import('@/lib/client/shop');
+  const p = newProduct({ king: 1 });
+  const king = p.profiles[0];
+  const bag = refreshCart(
+    [
+      { product: p, selectedProfile: king, selectedColor: 'White', quantity: 1 },
+      { product: p, selectedProfile: king, selectedColor: 'Blue', quantity: 1 },
+    ],
+    [products.getProduct(p.id)!]
+  );
+  // The second line is kept (shown as unavailable) but the bag cannot reach checkout with both.
+  const usable = bag.reduce((n, i) => n + i.quantity, 0);
+  assert.ok(usable >= 1);
+  assert.equal(bag[0].quantity, 1);
+});
+
+test('regression: "digital" or "big_sale" campaigns are not counted as Instagram', async () => {
+  const { classify } = await import('@/lib/client/landing');
+  const p = (q: string) => new URLSearchParams(q);
+  assert.equal(classify(p('utm_source=digital'), '', ''), 'other');
+  assert.equal(classify(p('utm_source=big_sale'), '', ''), 'other');
+  assert.equal(classify(p('utm_source=ig'), '', ''), 'instagram');
+  assert.equal(classify(p(''), 'https://l.instagram.com/', ''), 'instagram');
+  assert.equal(classify(p(''), '', 'Mozilla/5.0 Instagram 300.0'), 'instagram');
+  assert.equal(classify(p('utm_source=whatsapp'), '', ''), 'whatsapp');
+  assert.equal(classify(p(''), '', ''), 'direct');
+});

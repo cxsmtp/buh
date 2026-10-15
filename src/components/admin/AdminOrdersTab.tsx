@@ -352,7 +352,9 @@ export const AdminOrdersTab: React.FC<AdminOrdersTabProps> = ({
                         patchOrder(
                           order,
                           { status: 'cancelled' },
-                          `Cancel order ${order.id}? Its items go back into stock. This cannot be undone.` +
+                          (['dispatched', 'out_for_delivery'].includes(order.status)
+                            ? `Cancel order ${order.id}? It has left with the courier, so its pieces are NOT put back on sale: add them back in Inventory (+) when the parcel returns. This cannot be undone.`
+                            : `Cancel order ${order.id}? Its items go back into stock. This cannot be undone.`) +
                             (order.courier.awbNumber && !order.courier.simulated
                               ? `\n\nIt is booked with the courier (AWB ${order.courier.awbNumber}): cancel that booking in the carrier's portal too.`
                               : '')

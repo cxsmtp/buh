@@ -1,10 +1,9 @@
 import { validatePhone } from '@/lib/otpService';
-import { supportEmail } from './runtimeConfig';
 import { FirebaseTokenError, verifyFirebaseIdToken, type FetchCerts } from './firebaseAuth';
 import { HttpError } from './http';
 import { logEvent, maskPhone } from './log';
 import { issuePhoneToken } from './phoneToken';
-import { phoneVerificationConfig } from './settings';
+import { contactEmail as supportEmail, phoneVerificationConfig } from './settings';
 
 /**
  * The logic behind POST /api/otp/firebase: a Firebase ID token for *this*

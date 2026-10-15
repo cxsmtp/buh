@@ -227,7 +227,7 @@ export function ShopApp({ initialProductId }: { initialProductId?: string } = {}
       for (const line of fromLink) {
         if (!merged.some((m) => m.product.id === line.product.id && m.selectedProfile.id === line.selectedProfile.id && m.selectedColor === line.selectedColor)) merged.push(line);
       }
-      setCart(merged);
+      setCart(refreshCart(merged, list));
       if (fromLink.length) setIsCartOpen(true);
       // A product link (/p/<id> or ?p=<id>) opens that product.
       const wanted = initialProductId || params.get('p');
@@ -312,12 +312,15 @@ export function ShopApp({ initialProductId }: { initialProductId?: string } = {}
   // background (the bag is saved), never in the middle of a checkout.
   useEffect(() => {
     if (!updateReady) return;
+    // Only a shopper's page with nothing open: never the admin hub (unsaved edits) or an open product or bag.
+    const busy = isAdminMode || isCheckoutOpen || isCartOpen || isTrackerOpen || selectedProduct !== null;
+    if (busy) return;
     const onHide = () => {
-      if (document.visibilityState === 'hidden' && !isCheckoutOpen) window.location.reload();
+      if (document.visibilityState === 'hidden') window.location.reload();
     };
     document.addEventListener('visibilitychange', onHide);
     return () => document.removeEventListener('visibilitychange', onHide);
-  }, [updateReady, isCheckoutOpen]);
+  }, [updateReady, isAdminMode, isCheckoutOpen, isCartOpen, isTrackerOpen, selectedProduct]);
 
   useEffect(() => {
     if (!isAdminAuthenticated) return;
@@ -725,7 +728,7 @@ export function ShopApp({ initialProductId }: { initialProductId?: string } = {}
 
       {/* Product Detail Modal */}
       <ProductDetailModal
-        product={selectedProduct}
+        product={selectedProduct ? products.find((p) => p.id === selectedProduct.id) ?? selectedProduct : null}
         onClose={() => setSelectedProduct(null)}
         onAddToCart={handleAddToCart}
       />
@@ -753,7 +756,7 @@ export function ShopApp({ initialProductId }: { initialProductId?: string } = {}
         onOrderPlaced={handleOrderPlaced}
         onPricesChanged={async () => {
           const list = await loadCatalog();
-          if (list) setCart(loadCart(list));
+          if (list) setCart(refreshCart(loadCart(list), list));
         }}
       />}
 

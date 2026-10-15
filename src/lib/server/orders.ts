@@ -355,7 +355,9 @@ export function updateOrderByAdmin(id: string, patch: unknown, actor: string): O
       if (!NEXT[order.status].includes(status)) {
         throw new HttpError(409, `An order that is ${order.status.replace(/_/g, ' ')} cannot become ${status.replace(/_/g, ' ')}.`);
       }
-      if (status === 'cancelled') {
+      // Pieces go back on sale only if they never left: once dispatched, the piece is with the
+      // courier (most designs are one of a kind), so the owner adds it back with + when it returns.
+      if (status === 'cancelled' && (order.status === 'pending_confirmation' || order.status === 'pending_payment' || order.status === 'confirmed')) {
         // Put the reserved pieces back, size by size (the row is recreated if the size was removed meanwhile).
         for (const item of order.items) {
           getDb()

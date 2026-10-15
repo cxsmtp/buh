@@ -4,6 +4,7 @@ import React, { useState, useEffect } from 'react';
 import { BankTransferDetails, CartItem, Emirate, Order, PaymentMethod, PhoneVerificationConfig } from '@/types';
 import { UAE_EMIRATES, UAE_POPULAR_AREAS } from '@/data/initialData';
 import { cartFils, formatAed } from '@/lib/money';
+import { useShop } from '@/lib/client/shop';
 import { postJson } from '@/lib/apiClient';
 import { 
   checkJeeblyServiceability, 
@@ -126,13 +127,13 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
   const [hasSavedDetails, setHasSavedDetails] = useState(Object.keys(draft).length > 0);
   useEffect(() => {
     const t = setTimeout(() => {
-      const saved = writeDraft({ fullName, phone, email, emirate, area, streetAddress, buildingVilla, flatVillaNo, landmark });
-      if (saved) setHasSavedDetails(true);
+      writeDraft({ fullName, phone, email, emirate, area, streetAddress, buildingVilla, flatVillaNo, landmark });
     }, 300);
     return () => clearTimeout(t);
   }, [fullName, phone, email, emirate, area, streetAddress, buildingVilla, flatVillaNo, landmark]);
   const forgetDetails = () => {
     clearDraft();
+    setEmirate('Dubai');
     setFullName('');
     setPhone('');
     setEmail('');
@@ -176,6 +177,7 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
   const totalFils = cartFils(items);
   const grandTotal = formatAed(totalFils);
   const bankReady = Boolean(bank.iban && bank.accountName && bank.bankName);
+  const shopWhatsApp = useShop().store.whatsappNumber.replace(/\D/g, '');
 
   // Re-verify Jeebly serviceability when Emirate, Area or GPS coordinates update
   useEffect(() => {
@@ -422,15 +424,18 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
 
           {/* WhatsApp Direct Notification */}
           <div className="pt-2 flex flex-col sm:flex-row gap-2">
-            <a
-              href={`https://wa.me/971508294110?text=${whatsappMessage}`}
-              target="_blank"
-              rel="noopener noreferrer"
-              className="flex-1 bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs py-3 px-4 rounded-xl flex items-center justify-center gap-2 transition-all shadow"
-            >
-              <MessageCircle className="w-4 h-4" />
-              <span>Send WhatsApp Order Update</span>
-            </a>
+            {/* The shop's WhatsApp number from Settings → Store & contact (hidden when none is set). */}
+            {shopWhatsApp && (
+              <a
+                href={`https://wa.me/${shopWhatsApp}?text=${whatsappMessage}`}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="flex-1 bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs py-3 px-4 rounded-xl flex items-center justify-center gap-2 transition-all shadow"
+              >
+                <MessageCircle className="w-4 h-4" />
+                <span>Send WhatsApp Order Update</span>
+              </a>
+            )}
 
             <button
               onClick={onClose}

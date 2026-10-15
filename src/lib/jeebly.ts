@@ -67,7 +67,7 @@ export async function createJeeblyShipment(
     consignmentType: 'FORWARD',
     sender: {
       name: settings.pickupLocationName || 'Beautiful UAE Home Central Warehouse',
-      phone: settings.pickupPhone || '+971508294110',
+      phone: settings.pickupPhone,
       email: 'logistics@beautifuluaehome.com',
       address: settings.pickupAddress || 'Warehouse 14, Al Quoz Industrial Area 3',
       buildingName: 'Al Quoz Logistics Park',

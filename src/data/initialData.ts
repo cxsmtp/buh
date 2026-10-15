@@ -43,7 +43,7 @@ export const INITIAL_COURIER_SETTINGS: CourierSettings = {
     serviceType: 'Scheduled',
     isLive: false,
     pickupLocationName: 'Beautiful UAE Home Artisan Studio',
-    pickupPhone: '+971508294110',
+    pickupPhone: '',
     pickupAddress: 'Studio 08, Alserkal Avenue Creative Zone, Al Quoz 1',
     pickupEmirate: 'Dubai',
   },

@@ -3,7 +3,7 @@
 import React, { useMemo, useState } from 'react';
 import { ArrowLeft, ArrowRight, Loader2, Minus, Plus, Sparkles, Star, Trash2, Upload, X } from 'lucide-react';
 import type { BedProfileMeasurement, CatalogSettings, Product } from '@/types';
-import { postJson, sendJson } from '@/lib/apiClient';
+import { getJson, postJson, sendJson } from '@/lib/apiClient';
 import { shrinkPhoto } from '@/lib/shrinkPhoto';
 import { AI_STAGING_PRESETS, transformProductImage } from '@/lib/aiImageTransform';
 
@@ -60,7 +60,8 @@ function draftFrom(product: Product | null, catalog: CatalogSettings): Draft {
       isNewArrival: true,
     };
   }
-  const photos = [product.featuredImage, ...product.galleryImages, product.aiTransformedImage]
+  // The shop shows the styled photo first when there is one, so it stays the main photo here.
+  const photos = [product.aiTransformedImage, product.featuredImage, ...product.galleryImages]
     .filter((x): x is string => Boolean(x))
     .filter((x, i, all) => all.indexOf(x) === i)
     .slice(0, MAX_PHOTOS);
@@ -101,7 +102,7 @@ export function ProductEditor({
   onSaved: (product: Product) => void;
 }) {
   const [draft, setDraft] = useState<Draft>(() => draftFrom(product, catalog));
-  const [seenStock] = useState<Record<string, number>>(() => ({ ...(product?.stockBySize ?? {}) }));
+  const [seenStock, setSeenStock] = useState<Record<string, number>>(() => ({ ...(product?.stockBySize ?? {}) }));
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
   const [photoBusy, setPhotoBusy] = useState(false);
@@ -224,6 +225,16 @@ export function ProductEditor({
       ? await sendJson<{ product?: Product; message?: string }>('PATCH', `/api/admin/products/${encodeURIComponent(product.id)}`, { product: body })
       : await postJson<{ product?: Product; message?: string }>('/api/admin/products', { product: body });
     setSaving(false);
+    if (res.status === 409 && product) {
+      // A sale happened meanwhile: show today's figures (the owner's other edits stay) and let them save again.
+      const fresh = await getJson<{ products: Product[] }>('/api/admin/products');
+      const now = fresh.ok ? fresh.data.products.find((x) => x.id === product.id) : undefined;
+      if (now) {
+        setSeenStock({ ...now.stockBySize });
+        setDraft((d) => ({ ...d, stock: { ...d.stock, ...Object.fromEntries(Object.entries(now.stockBySize).filter(([size]) => (d.stock[size] ?? 0) === (seenStock[size] ?? 0))) } }));
+      }
+      return setError(`${res.data.message || 'Stock changed meanwhile.'} The current figures are shown; check them and press Save again.`);
+    }
     if (!res.ok || !res.data.product) return setError(res.data.message || 'Could not save the product.');
     onSaved(res.data.product);
   };

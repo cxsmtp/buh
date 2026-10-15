@@ -23,13 +23,13 @@ export interface Landing {
 const KEY = 'buh_source';
 const KEEP_MS = 30 * 86_400_000;
 
-function classify(params: URLSearchParams, referrer: string, ua: string): Source {
+export function classify(params: URLSearchParams, referrer: string, ua: string): Source {
   const utm = (params.get('utm_source') || '').toLowerCase();
   const ref = referrer.toLowerCase();
   const hit = (...words: string[]) => words.some((w) => utm.includes(w) || ref.includes(w));
-  if (params.has('igshid') || /instagram/i.test(ua) || hit('instagram', 'ig')) return 'instagram';
-  if (/whatsapp/i.test(ua) || hit('whatsapp', 'wa.me')) return 'whatsapp';
-  if (params.has('fbclid') || /FBAN|FBAV/.test(ua) || hit('facebook', 'fb.')) return 'facebook';
+  if (params.has('igshid') || /instagram/i.test(ua) || hit('instagram') || utm === 'ig') return 'instagram';
+  if (/whatsapp/i.test(ua) || hit('whatsapp', 'wa.me') || utm === 'wa') return 'whatsapp';
+  if (params.has('fbclid') || /FBAN|FBAV/.test(ua) || hit('facebook', 'fb.com') || utm === 'fb') return 'facebook';
   if (/tiktok|musical_ly|bytedance/i.test(ua) || hit('tiktok')) return 'tiktok';
   if (params.has('gclid') || hit('google')) return 'google';
   if (hit('email', 'newsletter', 'mail')) return 'email';
