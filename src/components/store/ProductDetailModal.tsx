@@ -214,7 +214,7 @@ const ProductDetailContent: React.FC<ProductDetailModalProps & { product: Produc
                     <Ruler className="w-4 h-4 text-[#c5a059]" />
                     <span>1. Select Bed Profile & Size:</span>
                   </label>
-                  <span className="text-[11px] text-[#c5a059] font-medium">
+                  <span className="text-[11px] text-[#8a6a2c] font-medium">
                     {selectedProfile.name}
                   </span>
                 </div>

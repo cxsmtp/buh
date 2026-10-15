@@ -96,6 +96,12 @@ export function getSettings<K extends SettingsKey>(key: K): SettingsMap[K] {
 }
 
 const HISTORY_KEEP = 30;
+/**
+ * Settings save themselves as the owner types (autosave). Changes within this long of the
+ * previous one are one editing session: history keeps the version from before the session,
+ * not every keystroke, so "Undo" and Settings history stay meaningful.
+ */
+const SESSION_MS = 2 * 60 * 1000;
 
 /** The value without its secrets (history never keeps keys). */
 function withoutSecrets(key: SettingsKey, value: unknown): Obj {
@@ -104,11 +110,16 @@ function withoutSecrets(key: SettingsKey, value: unknown): Obj {
   return copy;
 }
 
-function save<K extends SettingsKey>(key: K, value: SettingsMap[K]) {
+function save<K extends SettingsKey>(key: K, value: SettingsMap[K], { keepHistory = false }: { keepHistory?: boolean } = {}) {
   // Keep the version being replaced, so it can be restored (Settings → System → History).
   const db = getDb();
   const before = db.prepare('SELECT data, updated_at FROM settings WHERE key = ?').get(key) as { data: string; updated_at: string } | undefined;
-  if (before) {
+  const sameSession =
+    !keepHistory &&
+    before &&
+    Date.now() - Date.parse(before.updated_at) < SESSION_MS &&
+    Boolean(db.prepare('SELECT 1 FROM settings_history WHERE key = ? AND saved_at <= ? ORDER BY id DESC LIMIT 1').get(key, before.updated_at));
+  if (before && !sameSession) {
     db.prepare('INSERT INTO settings_history (key, data, saved_at) VALUES (?, ?, ?)').run(key, JSON.stringify(withoutSecrets(key, JSON.parse(before.data))), before.updated_at);
     db.prepare('DELETE FROM settings_history WHERE key = ? AND id NOT IN (SELECT id FROM settings_history WHERE key = ? ORDER BY id DESC LIMIT ?)').run(key, key, HISTORY_KEEP);
   }
@@ -117,6 +128,12 @@ function save<K extends SettingsKey>(key: K, value: SettingsMap[K]) {
     .run(key, JSON.stringify(value), new Date().toISOString());
   cache.set(key, value);
   bump('settings');
+}
+
+/** The version "Undo" goes back to: the newest one kept for this group (before the current editing session). */
+export function undoVersionId(key: SettingsKey): number | null {
+  const row = getDb().prepare('SELECT id FROM settings_history WHERE key = ? ORDER BY id DESC LIMIT 1').get(key) as { id: number } | undefined;
+  return row?.id ?? null;
 }
 
 export interface SettingsVersion {
@@ -144,7 +161,8 @@ export async function restoreSettingsVersion(id: number): Promise<SettingsKey> {
   // today's address is not sent to an older one). Blank keys mean "keep the saved key".
   const restored = deepMerge(DEFAULTS[key], JSON.parse(row.data)) as Obj;
   for (const p of SECRETS[key]) setPath(restored, p, '');
-  await updateSettings(key, restored);
+  // A restore is always kept in history (it can itself be undone), even mid-session.
+  await updateSettings(key, restored, { keepHistory: true });
   return key;
 }
 
@@ -159,7 +177,13 @@ export function adminView<K extends SettingsKey>(key: K): { value: SettingsMap[K
   return { value: value as unknown as SettingsMap[K], secretsSet };
 }
 
-export async function updateSettings<K extends SettingsKey>(key: K, input: unknown): Promise<void> {
+export interface UpdateOptions<K extends SettingsKey> {
+  keepHistory?: boolean;
+  /** Runs on the complete new settings (keys included) before they are stored; throwing keeps the current ones. */
+  beforeSave?: (next: SettingsMap[K], current: SettingsMap[K]) => Promise<void>;
+}
+
+export async function updateSettings<K extends SettingsKey>(key: K, input: unknown, options: UpdateOptions<K> = {}): Promise<void> {
   if (!input || typeof input !== 'object' || Array.isArray(input)) throw new HttpError(400, 'Settings must be an object.');
   const current = getSettings(key);
   const next = await VALIDATORS[key](input as Record<string, unknown>, current as never);
@@ -203,7 +227,8 @@ export async function updateSettings<K extends SettingsKey>(key: K, input: unkno
         : true;
     if (sms.isEnabled && missing) throw new HttpError(400, 'Fill in every field for the chosen SMS gateway before switching it on.');
   }
-  save(key, next as SettingsMap[K]);
+  if (options.beforeSave) await options.beforeSave(next as SettingsMap[K], current);
+  save(key, next as SettingsMap[K], { keepHistory: options.keepHistory });
 }
 
 /**

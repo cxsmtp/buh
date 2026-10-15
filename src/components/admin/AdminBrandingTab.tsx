@@ -19,6 +19,7 @@ import {
   Eye,
   Megaphone
 } from 'lucide-react';
+import { useAutoSave, type AutoSaveHooks } from './settings/useAutoSave';
 import { INITIAL_BRAND_SETTINGS } from '@/data/initialData';
 
 interface AdminBrandingTabProps {
@@ -27,6 +28,8 @@ interface AdminBrandingTabProps {
   onUpdateBrandSettings: (updated: BrandSettings) => Promise<string | null>;
   bank: BankTransferDetails;
   onUpdateBank: (bank: BankTransferDetails) => Promise<string | null>;
+  /** Autosave (Admin Hub): branding and bank details save themselves as you type. */
+  auto?: AutoSaveHooks;
 }
 
 export const AdminBrandingTab: React.FC<AdminBrandingTabProps> = ({
@@ -34,6 +37,7 @@ export const AdminBrandingTab: React.FC<AdminBrandingTabProps> = ({
   onUpdateBrandSettings,
   bank,
   onUpdateBank,
+  auto,
 }) => {
   const [saveError, setSaveError] = useState('');
   // Local editable state
@@ -107,10 +111,7 @@ export const AdminBrandingTab: React.FC<AdminBrandingTabProps> = ({
     });
   };
 
-  // Save all settings
-  const handleSave = async (e?: React.FormEvent) => {
-    if (e) e.preventDefault();
-    const updated: BrandSettings = {
+  const draft = (): BrandSettings => ({
       storeName: storeName.trim() || 'BEAUTIFUL UAE HOME',
       tagline: tagline.trim() || 'HANDPRINTED & MACHINE BLOCK LINENS • DUBAI',
       badgeText: badgeText.trim() || 'UAE ATELIER',
@@ -123,8 +124,13 @@ export const AdminBrandingTab: React.FC<AdminBrandingTabProps> = ({
         speedSeconds: Number(marqueeSpeed) || 26,
         messages: messages.filter((m) => m.trim().length > 0),
       },
-    };
+    });
+  const autosave = useAutoSave({ settingsKey: 'brand', value: draft(), enabled: Boolean(auto), ...auto });
 
+  // Save all settings
+  const handleSave = async (e?: React.FormEvent) => {
+    if (e) e.preventDefault();
+    const updated = draft();
     setSaveError('');
     const error = await onUpdateBrandSettings(updated);
     if (error) {
@@ -634,12 +640,13 @@ export const AdminBrandingTab: React.FC<AdminBrandingTabProps> = ({
               <Check className="w-4 h-4 text-amber-300" />
               <span>Apply & Save Store Branding & Marquee</span>
             </button>
+          {auto && autosave.bar}
           </div>
         </div>
 
       </div>
 
-      <BankDetailsCard bank={bank} onSave={onUpdateBank} />
+      <BankDetailsCard bank={bank} onSave={onUpdateBank} auto={auto} />
     </div>
   );
 };

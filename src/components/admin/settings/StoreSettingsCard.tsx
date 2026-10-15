@@ -2,6 +2,7 @@
 
 import React, { useState } from 'react';
 import { Loader2, MessageCircle } from 'lucide-react';
+import { useAutoSave, type AutoSaveHooks } from './useAutoSave';
 import type { StoreSettings } from '@/types';
 
 /**
@@ -14,8 +15,9 @@ import type { StoreSettings } from '@/types';
 const field = 'w-full px-3 py-2 rounded-xl border border-stone-300 bg-white text-stone-900 text-sm focus:outline-none focus:ring-2 focus:ring-[#c5a059]';
 const label = 'block text-xs font-semibold text-stone-700 mb-1';
 
-export function StoreSettingsCard({ value, onSave }: { value: StoreSettings; onSave: (v: StoreSettings) => Promise<string | null> }) {
+export function StoreSettingsCard({ value, onSave, auto }: { value: StoreSettings; onSave: (v: StoreSettings) => Promise<string | null>; auto?: AutoSaveHooks }) {
   const [d, setD] = useState<StoreSettings>(value);
+  const autosave = useAutoSave({ settingsKey: 'store', value: d, enabled: Boolean(auto), ...auto });
   const [saving, setSaving] = useState(false);
   const [status, setStatus] = useState<{ ok: boolean; text: string } | null>(null);
   const set = <K extends keyof StoreSettings>(k: K, v: StoreSettings[K]) => setD((x) => ({ ...x, [k]: v }));
@@ -105,6 +107,7 @@ export function StoreSettingsCard({ value, onSave }: { value: StoreSettings; onS
         <button type="button" onClick={() => void save()} disabled={saving} className="px-4 py-2 rounded-xl bg-[#0f1c2e] text-white font-bold text-xs disabled:opacity-50 flex items-center gap-1.5">
           {saving && <Loader2 className="w-3.5 h-3.5 animate-spin" />} Save store settings
         </button>
+        {auto && autosave.bar}
         {status && <span role="status" className={`text-xs font-semibold ${status.ok ? 'text-emerald-700' : 'text-red-700'}`}>{status.text}</span>}
       </div>
     </div>

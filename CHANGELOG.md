@@ -1,5 +1,17 @@
 # Changelog
 
+## BUH-02.03.00 — DATE UTC · [#NN](https://github.com/cxsmtp/buh/pull/NN)
+
+- **Fixed: text you couldn't read.** On a phone or laptop set to dark mode, labels on the white cards (for example in Settings → Store & contact) turned almost white; the shop now has one look on every device. Every screen (shop, product, bag, checkout, chat, sign-in, every Admin Hub tab and settings section) is measured in light and dark mode at phone and desktop width, and faint gold and grey text was darkened until all of it reads clearly.
+- **Settings save themselves.** Each settings section saves about a second and a half after you stop typing, and shows "Saved automatically · Undo"; the Save button is still there. Undo puts back the settings from before your current round of changes.
+- **The shop always runs on the last good settings.** Anything invalid is refused and never replaces what works; new mail settings are tried against the mail server first, and if they can't connect while the current ones work, the current ones stay and you're told why. Passwords and keys are only sent when you press Save, so a half-typed one never replaces a working one.
+- **Festival themes:** Hanukkah is no longer included (32 festivals).
+- **Status.**
+  - **Benchmark:** BENCH
+  - **Tests:** TESTS
+  - **Dependency audit:** production 0 vulnerabilities; no new packages.
+  - **Security scan:** SCAN
+
 ## BUH-02.02.00 — 2026-10-15 11:06 UTC · [#6](https://github.com/cxsmtp/buh/pull/6)
 
 - **Fixed: customers whose device reports a far-away location can order again.** Laptops (and phones on a VPN) often report a network location, e.g. in the USA; checkout turned that into "Corniche, Abu Dhabi", called it accurate, and refused the order as outside the UAE. Delivery is now decided by the address the customer chooses; a location outside the UAE is ignored with a plain message, and inside the UAE it only suggests the nearest area.

@@ -3,6 +3,7 @@ import { enforceIpLimit, requireAdmin } from '@/lib/server/guard';
 import { handleRouteError, HttpError, json } from '@/lib/server/http';
 import { logEvent } from '@/lib/server/log';
 import { mailConfig, sender, transport } from '@/lib/server/mail';
+import { markWorking } from '@/lib/server/settingsGuard';
 
 /** "Send a test email" with the saved settings, to the Send-to address(es). */
 export async function POST(req: Request) {
@@ -25,6 +26,8 @@ export async function POST(req: Request) {
       // The mail server's own answer helps (wrong password, blocked port); it holds no secrets of ours.
       throw new HttpError(502, `The mail server refused: ${message.slice(0, 200)}`);
     }
+    // These settings demonstrably work: a later failing change won't replace them.
+    markWorking('email');
     audit('settings.email_tested', { by: session.email });
     return json({ success: true, message: `Test email sent to ${config.to}.` });
   } catch (err) {

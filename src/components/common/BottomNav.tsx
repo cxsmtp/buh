@@ -38,7 +38,7 @@ export const BottomNav: React.FC<BottomNavProps> = ({
         <button
           onClick={() => onSetAdminTab('orders')}
           className={`flex flex-col items-center py-1 px-1.5 rounded-lg text-xs relative ${
-            adminTab === 'orders' ? 'text-[#c5a059] font-bold' : 'text-stone-500'
+            adminTab === 'orders' ? 'text-[#8a6a2c] font-bold' : 'text-stone-500'
           }`}
         >
           <ClipboardList className="w-4 h-4" />
@@ -54,7 +54,7 @@ export const BottomNav: React.FC<BottomNavProps> = ({
         <button
           onClick={() => onSetAdminTab('chats')}
           className={`flex flex-col items-center py-1 px-1.5 rounded-lg text-xs relative ${
-            adminTab === 'chats' ? 'text-[#c5a059] font-bold' : 'text-stone-500'
+            adminTab === 'chats' ? 'text-[#8a6a2c] font-bold' : 'text-stone-500'
           }`}
         >
           <MessagesSquare className="w-4 h-4" />
@@ -70,7 +70,7 @@ export const BottomNav: React.FC<BottomNavProps> = ({
         <button
           onClick={() => onSetAdminTab('add-product')}
           className={`flex flex-col items-center py-1 px-1.5 rounded-lg text-xs relative ${
-            adminTab === 'add-product' ? 'text-[#c5a059] font-bold' : 'text-stone-500'
+            adminTab === 'add-product' ? 'text-[#8a6a2c] font-bold' : 'text-stone-500'
           }`}
         >
           <div className="w-7 h-7 rounded-full bg-gradient-to-tr from-[#c5a059] to-[#dfc082] text-white flex items-center justify-center shadow-md -mt-2.5 ring-2 ring-white">
@@ -83,7 +83,7 @@ export const BottomNav: React.FC<BottomNavProps> = ({
         <button
           onClick={() => onSetAdminTab('inventory')}
           className={`flex flex-col items-center py-1 px-1.5 rounded-lg text-xs ${
-            adminTab === 'inventory' ? 'text-[#c5a059] font-bold' : 'text-stone-500'
+            adminTab === 'inventory' ? 'text-[#8a6a2c] font-bold' : 'text-stone-500'
           }`}
         >
           <Package className="w-4 h-4" />
@@ -94,7 +94,7 @@ export const BottomNav: React.FC<BottomNavProps> = ({
         <button
           onClick={() => onSetAdminTab('crm')}
           className={`flex flex-col items-center py-1 px-1.5 rounded-lg text-xs ${
-            adminTab === 'crm' ? 'text-[#c5a059] font-bold' : 'text-stone-500'
+            adminTab === 'crm' ? 'text-[#8a6a2c] font-bold' : 'text-stone-500'
           }`}
         >
           <Users className="w-4 h-4" />
@@ -105,7 +105,7 @@ export const BottomNav: React.FC<BottomNavProps> = ({
         <button
           onClick={() => onSetAdminTab('settings')}
           className={`flex flex-col items-center py-1 px-1.5 rounded-lg text-xs ${
-            adminTab === 'settings' ? 'text-[#c5a059] font-bold' : 'text-stone-500'
+            adminTab === 'settings' ? 'text-[#8a6a2c] font-bold' : 'text-stone-500'
           }`}
         >
           <Settings className="w-4 h-4" />
@@ -131,7 +131,7 @@ export const BottomNav: React.FC<BottomNavProps> = ({
       <button
         onClick={() => onSetStoreTab('home')}
         className={`flex flex-col items-center py-1 px-3 text-xs ${
-          storeTab === 'home' ? 'text-[#c5a059] font-bold' : 'text-stone-500'
+          storeTab === 'home' ? 'text-[#8a6a2c] font-bold' : 'text-stone-500'
         }`}
       >
         <Home className="w-5 h-5" />
@@ -142,7 +142,7 @@ export const BottomNav: React.FC<BottomNavProps> = ({
       <button
         onClick={() => onSetStoreTab('catalog')}
         className={`flex flex-col items-center py-1 px-3 text-xs ${
-          storeTab === 'catalog' ? 'text-[#c5a059] font-bold' : 'text-stone-500'
+          storeTab === 'catalog' ? 'text-[#8a6a2c] font-bold' : 'text-stone-500'
         }`}
       >
         <Package className="w-5 h-5" />

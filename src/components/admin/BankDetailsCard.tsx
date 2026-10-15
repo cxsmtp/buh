@@ -2,12 +2,14 @@
 
 import React, { useState } from 'react';
 import { BankTransferDetails } from '@/types';
+import { useAutoSave, type AutoSaveHooks } from './settings/useAutoSave';
 import { AlertCircle, Building2, CheckCircle2 } from 'lucide-react';
 
 interface BankDetailsCardProps {
   bank: BankTransferDetails;
   /** Saves on the server; resolves to an error message, or null when saved. */
   onSave: (bank: BankTransferDetails) => Promise<string | null>;
+  auto?: AutoSaveHooks;
 }
 
 const FIELDS: Array<{ key: keyof BankTransferDetails; label: string; placeholder: string; mono?: boolean; long?: boolean }> = [
@@ -21,8 +23,9 @@ const FIELDS: Array<{ key: keyof BankTransferDetails; label: string; placeholder
 ];
 
 /** The bank account customers pay into by transfer. Shown at checkout, so it must be right before going live. */
-export const BankDetailsCard: React.FC<BankDetailsCardProps> = ({ bank, onSave }) => {
+export const BankDetailsCard: React.FC<BankDetailsCardProps> = ({ bank, onSave, auto }) => {
   const [form, setForm] = useState<BankTransferDetails>(bank);
+  const autosave = useAutoSave({ settingsKey: 'bank', value: form, enabled: Boolean(auto), ...auto });
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
   const [saved, setSaved] = useState(false);
@@ -92,6 +95,7 @@ export const BankDetailsCard: React.FC<BankDetailsCardProps> = ({ bank, onSave }
         >
           {saving ? 'Saving…' : 'Save bank details'}
         </button>
+          {auto && autosave.bar}
       </div>
     </div>
   );

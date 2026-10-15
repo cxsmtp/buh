@@ -14,20 +14,13 @@
   --border-color: #e8e1d5;
 }
 
-@media (prefers-color-scheme: dark) {
-  :root {
-    --bg-main: #0c1017;
-    --bg-card: #151b24;
-    --bg-secondary: #1c2430;
-    --text-main: #f5f2eb;
-    --text-muted: #9e978e;
-    --primary-gold: #dfc082;
-    --primary-gold-dark: #c5a059;
-    --artisan-navy: #090e17;
-    --artisan-terracotta: #cf7156;
-    --artisan-indigo: #2c3f56;
-    --border-color: #273142;
-  }
+/*
+ * One look on every device. The shop is designed light (white cards, dark text); a phone or
+ * laptop in dark mode used to turn the page text light while the cards stayed white, so labels
+ * vanished. color-scheme keeps the browser's own controls (checkboxes, scrollbars) light too.
+ */
+:root {
+  color-scheme: light;
 }
 
 body {
@@ -105,4 +98,13 @@ input::placeholder, textarea::placeholder {
     margin: 0;
     padding: 10px;
   }
+}
+
+/*
+ * Readable small print: Tailwind's stone-400 (2.6:1 on white) is too faint for text, so text set
+ * in it uses stone-500 (4.6:1). Unlayered, so it wins over the utility; borders and icons on
+ * dark backgrounds are not affected (they use other classes).
+ */
+.text-stone-400 {
+  color: var(--color-stone-500);
 }

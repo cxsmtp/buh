@@ -3,6 +3,7 @@
 import React, { useMemo, useState } from 'react';
 import { Bot, Download, Loader2, Plus, Trash2, Upload } from 'lucide-react';
 import type { AssistantEntry, AssistantSettings, BedProfileMeasurement } from '@/types';
+import { useAutoSave, type AutoSaveHooks } from './useAutoSave';
 import { reply } from '@/lib/assistant';
 
 /**
@@ -22,8 +23,11 @@ const newId = (entries: AssistantEntry[]) => {
   return `answer-${n}`;
 };
 
-export function AssistantSettingsCard({ value, sizes, onSave }: { value: AssistantSettings; sizes: BedProfileMeasurement[]; onSave: (v: AssistantSettings) => Promise<string | null> }) {
+export function AssistantSettingsCard({ value, sizes, onSave, auto }: { value: AssistantSettings; sizes: BedProfileMeasurement[]; onSave: (v: AssistantSettings) => Promise<string | null>; auto?: AutoSaveHooks }) {
   const [d, setD] = useState<AssistantSettings>(value);
+  // Answers being written (question or answer still empty) wait until they're complete.
+  const complete = { ...d, entries: d.entries.filter((e) => e.question.trim() && e.answer.trim()) };
+  const autosave = useAutoSave({ settingsKey: 'assistant', value: complete, enabled: Boolean(auto), ...auto });
   const [saving, setSaving] = useState(false);
   const [status, setStatus] = useState<{ ok: boolean; text: string } | null>(null);
   const [trial, setTrial] = useState('');
@@ -155,6 +159,7 @@ export function AssistantSettingsCard({ value, sizes, onSave }: { value: Assista
         <button type="button" onClick={() => void save()} disabled={saving} className="px-4 py-2 rounded-xl bg-[#0f1c2e] text-white text-xs font-bold flex items-center gap-1.5 disabled:opacity-60">
           {saving && <Loader2 className="w-3.5 h-3.5 animate-spin" />} Save chat assistant
         </button>
+        {auto && autosave.bar}
         {status && <p role="status" className={`text-xs font-semibold ${status.ok ? 'text-emerald-700' : 'text-red-700'}`}>{status.text}</p>}
       </div>
     </div>

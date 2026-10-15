@@ -80,7 +80,7 @@ export const CartDrawer: React.FC<CartDrawerProps> = ({
                 </p>
                 <button
                   onClick={onClose}
-                  className="mt-2 inline-flex items-center gap-1 text-xs font-bold text-[#c5a059] hover:underline"
+                  className="mt-2 inline-flex items-center gap-1 text-xs font-bold text-[#8a6a2c] hover:underline"
                 >
                   Explore Bed Sheet Sets →
                 </button>
@@ -110,11 +110,11 @@ export const CartDrawer: React.FC<CartDrawerProps> = ({
                         <h4 className="font-serif font-bold text-xs text-stone-900 truncate">
                           {item.product.title}
                         </h4>
-                        <div className="flex items-center gap-1 text-[11px] text-[#c5a059] font-semibold mt-0.5">
+                        <div className="flex items-center gap-1 text-[11px] text-[#8a6a2c] font-semibold mt-0.5">
                           <span>{item.selectedProfile.name}</span>
                           {item.selectedColor && (
                             <>
-                              <span className="text-stone-300">•</span>
+                              <span className="text-stone-300" aria-hidden="true">•</span>
                               <span className="text-stone-500 font-normal">{item.selectedColor}</span>
                             </>
                           )}

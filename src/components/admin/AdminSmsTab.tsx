@@ -18,6 +18,7 @@ import {
 } from 'lucide-react';
 import { INITIAL_SMS_SETTINGS } from '@/data/initialData';
 import { postJson } from '@/lib/apiClient';
+import { useAutoSave, type AutoSaveHooks } from './settings/useAutoSave';
 import { secretPlaceholder } from './AdminCouriersTab';
 
 interface AdminSmsTabProps {
@@ -26,12 +27,14 @@ interface AdminSmsTabProps {
   secretsSet: Record<string, boolean>;
   /** Saves on the server; resolves to an error message, or null when saved. */
   onUpdateSmsSettings: (updated: SmsGatewaySettings) => Promise<string | null>;
+  auto?: AutoSaveHooks;
 }
 
 export const AdminSmsTab: React.FC<AdminSmsTabProps> = ({
   smsSettings,
   secretsSet,
   onUpdateSmsSettings,
+  auto,
 }) => {
   const [saveError, setSaveError] = useState('');
   const [provider, setProvider] = useState<SmsProvider>(smsSettings.provider && smsSettings.provider !== 'unifonic' ? smsSettings.provider : 'twilio');
@@ -70,9 +73,7 @@ export const AdminSmsTab: React.FC<AdminSmsTabProps> = ({
 
   const [savedSuccess, setSavedSuccess] = useState(false);
 
-  const handleSave = async (e?: React.FormEvent) => {
-    if (e) e.preventDefault();
-    const updated: SmsGatewaySettings = {
+  const draft = (): SmsGatewaySettings => ({
       provider,
       senderId: senderId.trim() || 'BUHome',
       twilio: {
@@ -91,8 +92,19 @@ export const AdminSmsTab: React.FC<AdminSmsTabProps> = ({
       },
       firebase: firebaseConfig,
       isEnabled: true,
-    };
+    });
+  // Keys and tokens are never autosaved (half-typed ones would replace working ones): Save sends them.
+  const withoutKeys = (s: SmsGatewaySettings): SmsGatewaySettings => ({
+    ...s,
+    twilio: { ...s.twilio, authToken: '' },
+    infobip: { ...s.infobip, apiKey: '' },
+    customWebhook: { ...s.customWebhook, bearerToken: '' },
+  });
+  const autosave = useAutoSave({ settingsKey: 'sms', value: withoutKeys(draft()), enabled: Boolean(auto), ...auto });
 
+  const handleSave = async (e?: React.FormEvent) => {
+    if (e) e.preventDefault();
+    const updated = draft();
     setSaveError('');
     const error = await onUpdateSmsSettings(updated);
     if (error) {
@@ -293,7 +305,7 @@ export const AdminSmsTab: React.FC<AdminSmsTabProps> = ({
                   href="https://console.firebase.google.com/"
                   target="_blank"
                   rel="noopener noreferrer"
-                  className="text-[11px] text-[#c5a059] hover:underline flex items-center gap-1 font-semibold"
+                  className="text-[11px] text-[#8a6a2c] hover:underline flex items-center gap-1 font-semibold"
                 >
                   <span>Firebase console</span>
                   <ExternalLink className="w-3 h-3" />
@@ -354,7 +366,7 @@ export const AdminSmsTab: React.FC<AdminSmsTabProps> = ({
                   href="https://www.twilio.com/try-twilio"
                   target="_blank"
                   rel="noopener noreferrer"
-                  className="text-[11px] text-[#c5a059] hover:underline flex items-center gap-1 font-semibold"
+                  className="text-[11px] text-[#8a6a2c] hover:underline flex items-center gap-1 font-semibold"
                 >
                   <span>Get Free Twilio Trial</span>
                   <ExternalLink className="w-3 h-3" />
@@ -412,7 +424,7 @@ export const AdminSmsTab: React.FC<AdminSmsTabProps> = ({
                   href="https://portal.infobip.com"
                   target="_blank"
                   rel="noopener noreferrer"
-                  className="text-[11px] text-[#c5a059] hover:underline flex items-center gap-1 font-semibold"
+                  className="text-[11px] text-[#8a6a2c] hover:underline flex items-center gap-1 font-semibold"
                 >
                   <span>Infobip Portal</span>
                   <ExternalLink className="w-3 h-3" />
@@ -487,6 +499,7 @@ export const AdminSmsTab: React.FC<AdminSmsTabProps> = ({
             <Check className="w-4 h-4 text-amber-300" />
             <span>Save SMS Gateway Configuration</span>
           </button>
+          {auto && autosave.bar}
         </div>
 
         {/* ================= COLUMN 2: LIVE TEST SMS DISPATCHER ================= */}
@@ -584,7 +597,7 @@ export const AdminSmsTab: React.FC<AdminSmsTabProps> = ({
 
               <ol className="list-decimal list-inside space-y-1 text-stone-600 text-[11px] leading-relaxed">
                 <li>
-                  Sign up for a free Twilio account at <a href="https://www.twilio.com/try-twilio" target="_blank" rel="noopener noreferrer" className="text-[#c5a059] underline font-medium">twilio.com/try-twilio</a> (includes trial balance).
+                  Sign up for a free Twilio account at <a href="https://www.twilio.com/try-twilio" target="_blank" rel="noopener noreferrer" className="text-[#8a6a2c] underline font-medium">twilio.com/try-twilio</a> (includes trial balance).
                 </li>
                 <li>
                   Copy your <strong>Account SID</strong> and <strong>Auth Token</strong> from the Twilio Console.
