@@ -2,14 +2,28 @@
 
 import React from 'react';
 import { Palette, Truck, ShieldCheck, ArrowRight } from 'lucide-react';
+import { useShop } from '@/lib/client/shop';
 
 interface HeroBannerProps {
   onExploreClick: () => void;
 }
 
 export const HeroBanner: React.FC<HeroBannerProps> = ({ onExploreClick }) => {
+  const { festival } = useShop();
+  // A festival's look (3 weeks before to 1 week after it, or as the admin chose).
+  const f = festival?.festivalId && festival.showBanner ? festival : null;
   return (
-    <div className="relative overflow-hidden bg-gradient-to-r from-[#0f1c2e] via-[#16253c] to-[#0f1c2e] text-white py-3.5 sm:py-4 px-3 sm:px-5 rounded-2xl mx-1 sm:mx-2 my-2 shadow-md border border-stone-800">
+    <div
+      className="relative overflow-hidden bg-gradient-to-r from-[#0f1c2e] via-[#16253c] to-[#0f1c2e] text-white py-3.5 sm:py-4 px-3 sm:px-5 rounded-2xl mx-1 sm:mx-2 my-2 shadow-md border border-stone-800"
+      style={f ? { backgroundImage: `linear-gradient(110deg, ${f.theme.gradient[0]}, ${f.theme.gradient[1]})` } : undefined}
+    >
+      {f && (
+        <div className="relative mb-1.5 flex flex-wrap items-center gap-x-2 gap-y-0.5 max-w-7xl mx-auto" role="note">
+          {f.theme.ornament && <span aria-hidden="true" className="text-sm">{f.theme.ornament}</span>}
+          <strong className="text-xs sm:text-sm font-bold tracking-wide">{f.theme.greeting}</strong>
+          {f.theme.headline && <span className="text-[11px] sm:text-xs text-white/85">{f.theme.headline}</span>}
+        </div>
+      )}
       {/* Background Subtle Glow */}
       <div className="absolute -top-20 -right-20 w-52 h-52 rounded-full bg-[#c5a059]/10 blur-2xl pointer-events-none"></div>
 

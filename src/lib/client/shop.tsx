@@ -2,6 +2,18 @@
 
 import React, { createContext, useContext } from 'react';
 import type { CartItem, Product, StoreSettings } from '@/types';
+import type { FestivalTheme } from '@/lib/festivals/catalog';
+
+/** Today's festival look, from /api/settings/public (null: the everyday look). */
+export interface FestivalView {
+  themeId: string;
+  festivalId: string | null;
+  phase: 'upcoming' | 'during' | 'after' | 'none';
+  daysToStart: number | null;
+  theme: FestivalTheme;
+  showBanner: boolean;
+  showMarquee: boolean;
+}
 import { DEFAULT_CATALOG, DEFAULT_STORE } from '@/data/catalogDefaults';
 
 /** Shop-wide public settings for storefront components (from /api/settings/public). */
@@ -9,12 +21,14 @@ export interface ShopInfo {
   store: StoreSettings;
   lowStockThreshold: number;
   supportEmail: string;
+  festival: FestivalView | null;
 }
 
 const ShopContext = createContext<ShopInfo>({
   store: DEFAULT_STORE,
   lowStockThreshold: DEFAULT_CATALOG.lowStockThreshold,
   supportEmail: 'orders@beautifuluaehome.com',
+  festival: null,
 });
 
 export const ShopProvider = ShopContext.Provider;

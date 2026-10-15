@@ -218,6 +218,11 @@ export const AdminOrdersTab: React.FC<AdminOrdersTabProps> = ({
                     </div>
                     <div className="text-[11px] text-stone-500 mt-0.5">
                       {new Date(order.createdAt).toLocaleString()} • {order.customer.fullName}
+                      {order.source && order.source.source !== 'direct' && (
+                        <span className="ml-1.5 px-1.5 py-0.5 rounded-full bg-stone-100 text-stone-600 text-[10px] font-semibold capitalize" title={order.source.campaign ? `Campaign: ${order.source.campaign}` : 'Where the customer came from'}>
+                          via {order.source.source}
+                        </span>
+                      )}
                     </div>
                   </div>
 

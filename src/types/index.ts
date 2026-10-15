@@ -153,6 +153,8 @@ export interface Order {
     };
   };
   adminNotes?: string;
+  /** Where the customer came from (first visit in the last 30 days). */
+  source?: { source: string; campaign?: string };
 }
 
 export interface Customer {
@@ -232,6 +234,19 @@ export interface StoreSettings {
   storeAddress: string;
   /** Show an approximate price in the visitor's own currency next to AED (outside the UAE). */
   showLocalCurrency: boolean;
+}
+
+/** Settings → Themes: festival looks, picked automatically or by the admin. */
+export interface ThemeSettings {
+  /** auto: by the festival calendar; manual: always themeId; off: the everyday look. */
+  mode: 'auto' | 'manual' | 'off';
+  themeId: string;
+  /** Festivals that should never take over the theme (e.g. ones the shop does not mark). */
+  disabledFestivals: string[];
+  /** Festival greeting in the banner at the top of the shop. */
+  showBanner: boolean;
+  /** Festival lines added to the scrolling bar. */
+  showMarquee: boolean;
 }
 
 export interface BrandSettings {

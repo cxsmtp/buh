@@ -4,6 +4,7 @@ import { INITIAL_PRODUCTS } from '@/data/initialData';
 import { getDb, inTransaction } from './db';
 import { HttpError } from './http';
 import { acceptImageRef } from './images';
+import { bump } from './live';
 import { getSettings } from './settings';
 
 /**
@@ -99,13 +100,7 @@ export function getProduct(id: string): StoredProduct | undefined {
 
 export function invalidateProducts() {
   cache = null;
-  onCatalogueChange?.();
-}
-
-/** Set by the live-updates module: tells open pages the catalogue changed. */
-let onCatalogueChange: (() => void) | undefined;
-export function setCatalogueChangeListener(fn: () => void) {
-  onCatalogueChange = fn;
+  bump('catalog'); // open pages reload the catalogue
 }
 
 /** Stock for the sizes given in the input: stockBySize, or (older callers) stockCount for the default size. */

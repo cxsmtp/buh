@@ -4,6 +4,7 @@ import React, { useState } from 'react';
 import { Product } from '@/types';
 import { Star, Sparkles, Layers, ArrowRight } from 'lucide-react';
 import { useShop } from '@/lib/client/shop';
+import { LocalPrice } from '@/lib/client/currency';
 
 interface ProductCardProps {
   product: Product;
@@ -107,6 +108,7 @@ export const ProductCard: React.FC<ProductCardProps> = ({ product, onSelect }) =
                 AED {product.price}
               </span>
             </div>
+            <LocalPrice aed={product.price} className="text-[10px] block" />
             <span className="text-[9px] text-emerald-600 font-medium hidden sm:block">
               Express Delivery
             </span>

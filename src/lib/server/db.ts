@@ -94,6 +94,31 @@ const MIGRATIONS: Array<(db: DB) => void> = [
       insert.run(r.id, size, r.stock);
     }
   },
+  // 3: small shared state every running copy of the shop sees (during an
+  //    update two copies run for a moment): change counters for live updates,
+  //    cached exchange rates, festival dates and the like.
+  (db) => {
+    db.exec(`
+      CREATE TABLE kv (
+        key         TEXT PRIMARY KEY,
+        data        TEXT NOT NULL,
+        updated_at  TEXT NOT NULL
+      );
+      -- Festival dates fetched from the internet (they replace the offline ones), and the last refresh.
+      CREATE TABLE IF NOT EXISTS festival_dates (
+        festival_id TEXT,
+        year        INTEGER,
+        start       TEXT,
+        end         TEXT,
+        source      TEXT,
+        PRIMARY KEY (festival_id, year)
+      );
+      CREATE TABLE IF NOT EXISTS festival_meta (
+        key    TEXT PRIMARY KEY,
+        value  TEXT NOT NULL
+      );
+    `);
+  },
 ];
 
 let db: DB | null = null;

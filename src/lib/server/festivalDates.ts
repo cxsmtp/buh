@@ -19,9 +19,8 @@ import { logEvent } from './log';
  *     ±15 days of it, which catches a wrong keyword match. UAE official dates
  *     are applied last, so they win for the Islamic festivals.
  *
- * Storage: two small tables created by ensureFestivalTable (not yet a
- * numbered migration; to be moved into MIGRATIONS when integrated). They live
- * in shop.db, so createBackup already includes them.
+ * Storage: two small tables (migration 3 in db.ts) in shop.db, so backups
+ * include them.
  */
 
 type DB = Database.Database;
@@ -547,8 +546,8 @@ function offlineStart(id: string, year: number): string | undefined {
 const ready = new WeakSet<DB>();
 
 /**
- * Create the festival tables if they are missing. Not a numbered migration
- * yet: to be moved into MIGRATIONS in db.ts when this module is integrated.
+ * The festival tables come from migration 3 in db.ts; this also creates them
+ * on a database handed in directly (tests), and is a no-op otherwise.
  */
 export function ensureFestivalTable(db: DB = getDb()): DB {
   if (ready.has(db)) return db;
@@ -768,11 +767,12 @@ export function festivalEventsAround(today: string): FestivalEvent[] {
 }
 
 /** The theme for the storefront right now, with the admin's override applied. */
-export function currentFestivalTheme(override?: ThemeOverride, now: Date = new Date()): CurrentFestivalTheme {
+export function currentFestivalTheme(override?: ThemeOverride, now: Date = new Date(), disabled: string[] = []): CurrentFestivalTheme {
   const today = dubaiDate(now);
   let events: FestivalEvent[] = [];
   try {
-    events = festivalEventsAround(today);
+    // Festivals the admin switched off never take over the theme.
+    events = festivalEventsAround(today).filter((e) => !disabled.includes(e.id));
   } catch (err) {
     logEvent('error', 'festival_calendar_failed', { error: errorText(err) });
   }

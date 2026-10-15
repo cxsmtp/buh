@@ -4,6 +4,8 @@ import React from 'react';
 import { CartItem } from '@/types';
 import { cartFils, formatAed, lineFils } from '@/lib/money';
 import { piecesLeft, useShop } from '@/lib/client/shop';
+import { LocalPrice } from '@/lib/client/currency';
+import { encodeBag, inAppBrowser } from '@/lib/client/landing';
 import { X, Trash2, ArrowRight, ShoppingBag, Truck, ShieldCheck } from 'lucide-react';
 
 interface CartDrawerProps {
@@ -190,7 +192,10 @@ export const CartDrawer: React.FC<CartDrawerProps> = ({
                 </div>
                 <div className="flex justify-between text-sm font-bold text-[#0f1c2e] pt-1.5 border-t border-stone-200">
                   <span>Total Amount</span>
-                  <span>AED {grandTotal}</span>
+                  <span className="text-right">
+                    AED {grandTotal}
+                    <LocalPrice aed={Number(grandTotal)} className="text-[10px] block" />
+                  </span>
                 </div>
               </div>
 
@@ -207,6 +212,8 @@ export const CartDrawer: React.FC<CartDrawerProps> = ({
                 <ArrowRight className="w-4 h-4 text-amber-300" />
               </button>
 
+              <BagLinkButton items={items} />
+
               <div className="flex items-center justify-center gap-3 text-[10px] text-stone-600 text-center">
                 <span className="flex items-center gap-1">
                   <ShieldCheck className="w-3.5 h-3.5 text-emerald-600" />
@@ -222,3 +229,34 @@ export const CartDrawer: React.FC<CartDrawerProps> = ({
     </div>
   );
 };
+
+/**
+ * "Save my bag as a link": shoppers coming from Instagram or WhatsApp often
+ * browse inside the app's own browser, whose bag is separate from Safari's or
+ * Chrome's. The link carries the bag to any browser or device.
+ */
+function BagLinkButton({ items }: { items: CartItem[] }) {
+  const [done, setDone] = React.useState('');
+  const [inApp] = React.useState(() => typeof navigator !== 'undefined' && inAppBrowser());
+  const share = async () => {
+    const url = `${window.location.origin}/?bag=${encodeBag(items.map((i) => ({ productId: i.product.id, profileId: i.selectedProfile.id, color: i.selectedColor, quantity: i.quantity })))}`;
+    try {
+      if (navigator.share && !inApp) {
+        await navigator.share({ title: 'My bag', url });
+        return;
+      }
+      await navigator.clipboard.writeText(url);
+      setDone(inApp ? 'Link copied: paste it into Safari or Chrome to continue there.' : 'Link copied.');
+    } catch {
+      setDone('');
+    }
+  };
+  return (
+    <div className="text-center">
+      <button type="button" onClick={() => void share()} className="text-[11px] font-semibold text-[#0f1c2e] underline">
+        {inApp ? 'Continue in your browser (copy a link to this bag)' : 'Save or send this bag as a link'}
+      </button>
+      {done && <p role="status" className="text-[10px] text-emerald-700 mt-0.5">{done}</p>}
+    </div>
+  );
+}

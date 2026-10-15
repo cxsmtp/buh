@@ -13,6 +13,7 @@ export async function GET(req: Request) {
       sms: adminView('sms'),
       catalog: adminView('catalog'),
       store: adminView('store'),
+      theme: adminView('theme'),
     });
   } catch (err) {
     return handleRouteError(err, 'admin/settings');

@@ -95,6 +95,7 @@ function csvFiles(): TarEntry[] {
     x.customer.fullName, x.customer.phone, x.customer.email ?? '', x.customer.emirate, x.customer.area, x.customer.streetAddress,
     x.customer.buildingVilla, x.customer.flatVillaNo, x.customer.landmark ?? '', x.bankTransferRef ?? '',
     x.courier.provider, x.courier.awbNumber, x.courier.simulated ? 'yes' : '', x.courier.status, x.adminNotes ?? '',
+    x.source?.source ?? '', x.source?.campaign ?? '',
   ];
   return [
     {
@@ -102,7 +103,7 @@ function csvFiles(): TarEntry[] {
       data: Buffer.from(toCsv(
         ['order_id', 'created_at', 'status', 'payment_method', 'payment_status', 'subtotal_aed', 'delivery_fee_aed', 'cod_fee_aed', 'discount_aed', 'total_aed',
           'customer_name', 'phone', 'email', 'emirate', 'area', 'street', 'building_villa', 'flat_villa_no', 'landmark', 'bank_transfer_ref',
-          'courier', 'awb', 'awb_simulated', 'courier_status', 'admin_notes'],
+          'courier', 'awb', 'awb_simulated', 'courier_status', 'admin_notes', 'source', 'campaign'],
         orders.map(o)
       )),
     },
@@ -123,8 +124,13 @@ function csvFiles(): TarEntry[] {
     {
       name: 'products.csv',
       data: Buffer.from(toCsv(
-        ['product_id', 'title', 'category', 'price_aed', 'stock', 'visible', 'sizes'],
-        listProducts({ includeHidden: true }).map((p) => [p.id, p.title, p.category, p.price, p.stockCount, p.active ? 'yes' : 'no', p.profiles.map((x) => `${x.name} (+${x.priceDelta})`).join('; ')])
+        ['product_id', 'title', 'category', 'price_aed', 'stock_total', 'stock_by_size', 'visible', 'removed', 'sizes'],
+        listProducts({ includeHidden: true, includeArchived: true }).map((p) => [
+          p.id, p.title, p.category, p.price, p.stockCount,
+          p.profiles.map((x) => `${x.id}=${p.stockBySize[x.id] ?? 0}`).join('; '),
+          p.active ? 'yes' : 'no', p.archived ? 'yes' : '',
+          p.profiles.map((x) => `${x.name} (+${x.priceDelta})`).join('; '),
+        ])
       )),
     },
   ];

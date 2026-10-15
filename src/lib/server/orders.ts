@@ -9,6 +9,7 @@ import { HttpError } from './http';
 import { parseReceiptDataUrl } from './imageInput';
 import { verifyPhoneToken } from './phoneToken';
 import { getProduct, invalidateProducts, listProducts } from './products';
+import { bump } from './live';
 import { bankTransferReady, getSettings } from './settings';
 
 /**
@@ -27,6 +28,7 @@ const MAX_QTY = 20;
 /** Orders still waiting for confirmation, per phone. */
 export const MAX_OPEN_PER_PHONE = 3;
 
+const ORDER_SOURCES = ['instagram', 'whatsapp', 'facebook', 'tiktok', 'google', 'email', 'direct', 'other'];
 const EMIRATES: Emirate[] = ['Dubai', 'Abu Dhabi', 'Sharjah', 'Ajman', 'Ras Al Khaimah', 'Fujairah', 'Umm Al Quwain'];
 export const ORDER_STATUSES: OrderStatus[] = ['pending_payment', 'pending_confirmation', 'confirmed', 'dispatched', 'out_for_delivery', 'delivered', 'cancelled'];
 const PAYMENT_STATUSES: Order['paymentStatus'][] = ['pending', 'receipt_uploaded', 'verified', 'cod_pending', 'paid'];
@@ -106,6 +108,7 @@ function writeOrder(order: Order, idempotencyKey?: string) {
       key: idempotencyKey ?? null,
       data: JSON.stringify(order),
     });
+  bump('orders'); // the admin hub shows it straight away
 }
 
 function logEvent(orderId: string, actor: string, event: string, detail?: unknown) {
@@ -177,6 +180,12 @@ export function placeOrder(input: unknown): PlaceOrderResult {
     throw new HttpError(400, 'Bank transfer is not available right now. Please choose Cash on Delivery.');
   }
   const bankRef = text(body.bankTransferRef, 'Transfer reference', 60);
+  // Where the customer came from: an allow-listed label only (for the owner's records).
+  const src = body.source && typeof body.source === 'object' ? (body.source as Obj) : null;
+  const source =
+    src && typeof src.source === 'string' && ORDER_SOURCES.includes(src.source)
+      ? { source: src.source, ...(typeof src.campaign === 'string' && src.campaign ? { campaign: src.campaign.replace(/[^\w -]/g, '').slice(0, 60) } : {}) }
+      : undefined;
   const expectedTotalFils =
     body.expectedTotal === undefined ? null : typeof body.expectedTotal === 'number' && Number.isFinite(body.expectedTotal) ? fils(body.expectedTotal) : -1;
   const receipt = body.receipt ? parseReceiptDataUrl(body.receipt) : null;
@@ -291,6 +300,7 @@ export function placeOrder(input: unknown): PlaceOrderResult {
         },
       } as Order['courier'],
       adminNotes: undefined,
+      ...(source ? { source } : {}),
     };
     writeOrder(created, idempotencyKey);
     logEvent(id, 'customer', 'created', { total: created.total, paymentMethod });

@@ -1,7 +1,9 @@
-import type { BankTransferDetails, BedProfileMeasurement, BrandSettings, CatalogSettings, CourierSettings, SmsGatewaySettings, StoreSettings } from '@/types';
-import { DEFAULT_CATALOG, DEFAULT_STORE } from '@/data/catalogDefaults';
+import type { BankTransferDetails, BedProfileMeasurement, BrandSettings, CatalogSettings, CourierSettings, SmsGatewaySettings, StoreSettings, ThemeSettings } from '@/types';
+import { FESTIVALS } from '@/lib/festivals/catalog';
+import { DEFAULT_CATALOG, DEFAULT_STORE, DEFAULT_THEME_SETTINGS } from '@/data/catalogDefaults';
 import { INITIAL_BANK_DETAILS, INITIAL_BRAND_SETTINGS, INITIAL_COURIER_SETTINGS, INITIAL_SMS_SETTINGS } from '@/data/initialData';
 import { getDb } from './db';
+import { bump } from './live';
 import { HttpError } from './http';
 import { acceptImageRef } from './images';
 import { assertPublicHttpsUrl } from './outbound';
@@ -24,6 +26,7 @@ export interface SettingsMap {
   sms: SmsGatewaySettings;
   catalog: CatalogSettings;
   store: StoreSettings;
+  theme: ThemeSettings;
 }
 export type SettingsKey = keyof SettingsMap;
 
@@ -48,6 +51,7 @@ const DEFAULTS: SettingsMap = {
   },
   catalog: DEFAULT_CATALOG,
   store: DEFAULT_STORE,
+  theme: DEFAULT_THEME_SETTINGS,
 };
 
 /** Where customers are asked to email: Settings → Store first, then NEXT_PUBLIC_SUPPORT_EMAIL. */
@@ -63,6 +67,7 @@ const SECRETS: Record<SettingsKey, string[]> = {
   sms: ['twilio.authToken', 'infobip.apiKey', 'customWebhook.bearerToken', 'unifonic.appSid'],
   catalog: [],
   store: [],
+  theme: [],
 };
 
 const cache = new Map<SettingsKey, unknown>();
@@ -81,6 +86,7 @@ function save<K extends SettingsKey>(key: K, value: SettingsMap[K]) {
     .prepare('INSERT INTO settings (key, data, updated_at) VALUES (?, ?, ?) ON CONFLICT(key) DO UPDATE SET data = excluded.data, updated_at = excluded.updated_at')
     .run(key, JSON.stringify(value), new Date().toISOString());
   cache.set(key, value);
+  bump('settings');
 }
 
 /** What the admin hub may see: secrets blanked, with which ones are saved. */
@@ -164,6 +170,7 @@ const SECRET_HOSTS: Record<SettingsKey, Record<string, string>> = {
   sms: { 'infobip.apiKey': 'infobip.baseUrl', 'customWebhook.bearerToken': 'customWebhook.endpointUrl' },
   catalog: {},
   store: {},
+  theme: {},
 };
 
 /**
@@ -373,7 +380,26 @@ const VALIDATORS: { [K in SettingsKey]: (input: Obj, current: SettingsMap[K]) =>
       showLocalCurrency: bool(input.showLocalCurrency, current.showLocalCurrency),
     };
   },
+
+  async theme(input, current) {
+    const mode = input.mode === undefined ? current.mode : input.mode;
+    if (mode !== 'auto' && mode !== 'manual' && mode !== 'off') throw new HttpError(400, 'Theme mode must be auto, manual or off.');
+    const themeId = input.themeId === undefined ? current.themeId : text(input.themeId, 'Theme', 40);
+    if (themeId !== 'default' && !FESTIVAL_ID_SET.has(themeId)) throw new HttpError(400, 'Unknown theme.');
+    const disabledIn = input.disabledFestivals === undefined ? current.disabledFestivals : input.disabledFestivals;
+    if (!Array.isArray(disabledIn) || disabledIn.length > 100) throw new HttpError(400, 'Switched-off festivals must be a list.');
+    const disabledFestivals = [...new Set(disabledIn.filter((id): id is string => typeof id === 'string' && FESTIVAL_ID_SET.has(id)))];
+    return {
+      mode,
+      themeId,
+      disabledFestivals,
+      showBanner: bool(input.showBanner, current.showBanner),
+      showMarquee: bool(input.showMarquee, current.showMarquee),
+    };
+  },
 };
+
+const FESTIVAL_ID_SET = new Set(FESTIVALS.map((f) => f.id));
 
 function validateSizePreset(v: unknown, i: number): BedProfileMeasurement {
   const o = obj(v);

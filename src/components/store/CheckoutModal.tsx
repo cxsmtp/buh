@@ -44,6 +44,55 @@ interface CheckoutModalProps {
   onPricesChanged: () => Promise<void>;
   /** Where international customers email (from the server's settings). */
   supportEmail?: string;
+  /** Where the customer came from (Instagram, WhatsApp…), recorded on the order. */
+  landing?: { source: string; campaign?: string } | null;
+}
+
+/** The customer's details from last time (this browser only; never the phone check). */
+interface Draft {
+  fullName?: string;
+  phone?: string;
+  email?: string;
+  emirate?: Emirate;
+  area?: string;
+  streetAddress?: string;
+  buildingVilla?: string;
+  flatVillaNo?: string;
+  landmark?: string;
+}
+const DRAFT_KEY = 'buh_checkout_details';
+
+function readDraft(): Draft {
+  try {
+    const d = JSON.parse(localStorage.getItem(DRAFT_KEY) || '{}') as Record<string, unknown>;
+    const out: Draft = {};
+    for (const k of ['fullName', 'phone', 'email', 'area', 'streetAddress', 'buildingVilla', 'flatVillaNo', 'landmark'] as const) {
+      if (typeof d[k] === 'string' && (d[k] as string).length <= 200) out[k] = d[k] as string;
+    }
+    if (typeof d.emirate === 'string' && (UAE_EMIRATES as readonly string[]).includes(d.emirate)) out.emirate = d.emirate as Emirate;
+    return out;
+  } catch {
+    return {};
+  }
+}
+
+/** Saves non-empty details; returns whether anything was saved. */
+function writeDraft(d: Draft): boolean {
+  const filled = Object.fromEntries(Object.entries(d).filter(([k, v]) => v && !(k === 'emirate' && v === 'Dubai' && !d.area)));
+  try {
+    if (Object.keys(filled).length) localStorage.setItem(DRAFT_KEY, JSON.stringify(filled));
+    return Object.keys(filled).length > 0;
+  } catch {
+    return false;
+  }
+}
+
+function clearDraft() {
+  try {
+    localStorage.removeItem(DRAFT_KEY);
+  } catch {
+    // nothing saved
+  }
 }
 
 export const CheckoutModal: React.FC<CheckoutModalProps> = ({
@@ -54,21 +103,43 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
   onOrderPlaced,
   onPricesChanged,
   supportEmail,
+  landing,
 }) => {
   // One checkout attempt = one order, even if "Confirm" is sent twice (double tap, retry).
   const [idempotencyKey] = useState(() => crypto.randomUUID());
   // Proof from the server that the phone passed SMS verification.
   const [phoneToken, setPhoneToken] = useState('');
-  // Form State
-  const [fullName, setFullName] = useState('');
-  const [phone, setPhone] = useState('');
-  const [email, setEmail] = useState('');
-  const [emirate, setEmirate] = useState<Emirate>('Dubai');
-  const [area, setArea] = useState('');
-  const [streetAddress, setStreetAddress] = useState('');
-  const [buildingVilla, setBuildingVilla] = useState('');
-  const [flatVillaNo, setFlatVillaNo] = useState('');
-  const [landmark, setLandmark] = useState('');
+  // Form State: what the customer typed last time is filled back in, so they carry on where they left off.
+  const [draft] = useState(readDraft);
+  const [fullName, setFullName] = useState(draft.fullName ?? '');
+  const [phone, setPhone] = useState(draft.phone ?? '');
+  const [email, setEmail] = useState(draft.email ?? '');
+  const [emirate, setEmirate] = useState<Emirate>(draft.emirate ?? 'Dubai');
+  const [area, setArea] = useState(draft.area ?? '');
+  const [streetAddress, setStreetAddress] = useState(draft.streetAddress ?? '');
+  const [buildingVilla, setBuildingVilla] = useState(draft.buildingVilla ?? '');
+  const [flatVillaNo, setFlatVillaNo] = useState(draft.flatVillaNo ?? '');
+  const [landmark, setLandmark] = useState(draft.landmark ?? '');
+  const [hasSavedDetails, setHasSavedDetails] = useState(Object.keys(draft).length > 0);
+  useEffect(() => {
+    const t = setTimeout(() => {
+      const saved = writeDraft({ fullName, phone, email, emirate, area, streetAddress, buildingVilla, flatVillaNo, landmark });
+      if (saved) setHasSavedDetails(true);
+    }, 300);
+    return () => clearTimeout(t);
+  }, [fullName, phone, email, emirate, area, streetAddress, buildingVilla, flatVillaNo, landmark]);
+  const forgetDetails = () => {
+    clearDraft();
+    setFullName('');
+    setPhone('');
+    setEmail('');
+    setArea('');
+    setStreetAddress('');
+    setBuildingVilla('');
+    setFlatVillaNo('');
+    setLandmark('');
+    setHasSavedDetails(false);
+  };
 
   // GPS Pin Drop State
   const [gpsCoordinates, setGpsCoordinates] = useState<{ lat: number; lng: number } | null>(null);
@@ -239,6 +310,7 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
       })),
       paymentMethod,
       expectedTotal: totalFils / 100,
+      source: landing ?? undefined,
       bankTransferRef: paymentMethod === 'bank_transfer' ? bankRef || undefined : undefined,
       receipt: paymentMethod === 'bank_transfer' ? receiptUrl || undefined : undefined,
     });
@@ -427,6 +499,14 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
               )}
             </div>
 
+            {hasSavedDetails && (
+              <p className="text-[11px] text-stone-500">
+                Your details from last time are filled in.{' '}
+                <button type="button" className="underline font-semibold" onClick={forgetDetails}>
+                  Not you? Clear them
+                </button>
+              </p>
+            )}
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-xs">
               <div>
                 <label className="block text-stone-800 font-semibold mb-1">

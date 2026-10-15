@@ -4,7 +4,8 @@ import React, { useState } from 'react';
 import { Product, BedProfileMeasurement } from '@/types';
 import { formatAed, toFils } from '@/lib/money';
 import { piecesLeft, useShop, whatsappLink } from '@/lib/client/shop';
-import { X, Sparkles, Check, Truck, ShieldCheck, Ruler, Layers, ChevronRight, MessageCircle } from 'lucide-react';
+import { LocalPrice } from '@/lib/client/currency';
+import { X, Sparkles, Check, Truck, ShieldCheck, Ruler, Layers, ChevronRight, MessageCircle, Share2 } from 'lucide-react';
 
 interface ProductDetailModalProps {
   product: Product | null;
@@ -66,6 +67,19 @@ const ProductDetailContent: React.FC<ProductDetailModalProps & { product: Produc
       ? `Hello! ${product.title} in ${selectedProfile.name} shows as sold out. Will it come back, or is there something similar?`
       : `Hello! I have a question about ${product.title} in ${selectedProfile.name} (AED ${unitPrice}).`
   );
+  // Share this product: the phone's share sheet, or WhatsApp.
+  const share = async () => {
+    const url = `${window.location.origin}/p/${encodeURIComponent(product.id)}`;
+    try {
+      if (navigator.share) {
+        await navigator.share({ title: product.title, text: `${product.title} · AED ${unitPrice}`, url });
+        return;
+      }
+    } catch {
+      return; // the customer closed the share sheet
+    }
+    window.open(`https://wa.me/?text=${encodeURIComponent(`${product.title} · AED ${unitPrice}\n${url}`)}`, '_blank', 'noopener');
+  };
   const emailInquiry = `mailto:${supportEmail}?subject=${encodeURIComponent(`${product.title} (${selectedProfile.name})`)}`;
 
   return (
@@ -349,6 +363,15 @@ const ProductDetailContent: React.FC<ProductDetailModalProps & { product: Produc
                   </div>
                 </div>
 
+                <button
+                  type="button"
+                  onClick={() => void share()}
+                  className="flex items-center gap-1.5 text-xs text-stone-700 bg-white hover:bg-stone-50 border border-stone-300 px-3 py-2 rounded-xl font-medium"
+                >
+                  <Share2 className="w-3.5 h-3.5" />
+                  <span>Share</span>
+                </button>
+
                 {/* WhatsApp Quick Ask (the shop's number from Settings), else email */}
                 <a
                   href={inquiry ?? emailInquiry}
@@ -379,6 +402,7 @@ const ProductDetailContent: React.FC<ProductDetailModalProps & { product: Produc
               <div>
                 <div className="text-[10px] text-stone-500 uppercase font-semibold">Total Price</div>
                 <div className="text-2xl font-bold text-[#0f1c2e]">AED {totalPrice}</div>
+                <LocalPrice aed={Number(totalPrice)} className="text-xs block" />
                 <div className="text-[10px] text-emerald-600 font-semibold">Complimentary UAE Delivery</div>
               </div>
 

@@ -1,4 +1,4 @@
-import type { CatalogSettings, StoreSettings } from '@/types';
+import type { CatalogSettings, StoreSettings, ThemeSettings } from '@/types';
 import { ALL_BED_PROFILES_LIST } from './bedProfiles';
 
 /** Settings → Catalogue before the owner changes anything. */
@@ -25,4 +25,13 @@ export const DEFAULT_STORE: StoreSettings = {
   tiktokHandle: '',
   storeAddress: '',
   showLocalCurrency: true,
+};
+
+/** Settings → Themes before the owner changes anything: festivals picked automatically. */
+export const DEFAULT_THEME_SETTINGS: ThemeSettings = {
+  mode: 'auto',
+  themeId: 'default',
+  disabledFestivals: [],
+  showBanner: true,
+  showMarquee: true,
 };
