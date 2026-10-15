@@ -363,7 +363,8 @@ test('Settings → Versions: the daemon takes a "rollback X.Y.Z" request, switch
     await until(() => !fs.existsSync(path.join(control, 'request')) && status()?.updatedAt !== before);
     assert.equal(statusOf(e, 'green'), 'running', 'not switched');
     assert.equal(status().lastRequest.request, '(not understood)');
-    assert.deepEqual(fs.readdirSync(control).filter((f) => f.startsWith('.taken')), [], 'nothing left behind');
+    // (waited for: the request can be gone a moment before its folder is removed)
+    await until(() => fs.readdirSync(control).filter((f) => f.startsWith('.taken')).length === 0);
 
     // Not a version: ignored, nothing switched.
     fs.writeFileSync(path.join(control, 'request'), 'rollback 2.0.0; rm -rf /\n');
@@ -409,10 +410,13 @@ const exists = (e: Env, name: string) => fs.existsSync(path.join(e.fake, 'c', na
 function runningSingle(e: Env) {
   tag(e, LATEST, OLD);
   shopContainer(e, SHOP, OLD);
-  const r = runSingle(e, ['heal']);
+  // Set up the way scripts/podman-autoupdate.bat does it (the hand-started one is kept as -previous; dropped here).
+  const r = runSingle(e, ['adopt']);
   assert.equal(r.code, 0, r.out);
   assert.equal(read(path.join(e.state, 'last-good')).trim(), OLD);
+  fs.rmSync(path.join(e.fake, 'c', PREV), { recursive: true, force: true });
   fs.rmSync(path.join(e.fake, 'events'), { force: true });
+  fs.rmSync(path.join(e.alerts, 'alerts.log'), { force: true });
 }
 
 test('single: a good new image is tried without a port first, then replaces the shop on its port; the old one is kept as -previous', () => {
@@ -596,9 +600,10 @@ test("single: adopt re-creates the owner's container with the full definition (s
   assert.match(again.out, /already runs with these settings/);
   assert.deepEqual(events(e), []);
 
-  // Different settings (another port): re-created again.
-  assert.equal(runSingle(e, ['adopt'], { ...env, SHOP_PORT: '8443' }).code, 0);
-  assert.ok(events(e).includes(`run ${SHOP} ${OLD} port=8443`), events(e).join('\n'));
+  // Different settings: re-created again.
+  assert.equal(runSingle(e, ['adopt'], { SHOP_ENV: `${env.SHOP_ENV} SHOP_LABEL=x` }).code, 0);
+  assert.ok(events(e).includes(`run ${SHOP} ${OLD} port=443`), events(e).join('\n'));
+  assert.match(fileOf(e, SHOP, 'args'), /-e SHOP_LABEL=x/);
 
   // A new shop (no container, no volume): started from the published image on a new volume.
   const f = setup();
@@ -606,6 +611,169 @@ test("single: adopt re-creates the owner's container with the full definition (s
   const n = runSingle(f, ['adopt']);
   assert.equal(n.code, 0, n.out);
   assert.deepEqual(events(f), [`pull ${LATEST}`, `run ${SHOP} ${OLD} port=443`, `tag buh:last-good ${OLD}`]);
+});
+
+const IMAGE_ENV = ['PATH=/usr/local/bin:/usr/bin:/bin', 'NODE_ENV=production', 'PORT=3000', 'HOSTNAME=0.0.0.0', 'DATA_DIR=/data'];
+const SECRET = `s3cr3t with spaces $&"'|;\\ and =`;
+/** The owner's container, started by hand with its own settings (secrets among them). */
+function ownersContainer(e: Env, name = SHOP, extra: { env?: string[]; bindings?: string[]; mounts?: string[] } = {}) {
+  shopContainer(e, name, OLD);
+  const d = path.join(e.fake, 'c', name);
+  const env = [...IMAGE_ENV.filter((l) => !l.startsWith('HOSTNAME=')), 'HOSTNAME=4f2a9c', `SESSION_SECRET=${SECRET}`, 'SMTP_PASS=p@ss=word', 'TRUST_PROXY=1', 'TZ=Europe/London', ...(extra.env ?? [])];
+  fs.writeFileSync(path.join(d, 'env'), env.join('\n') + '\n');
+  fs.writeFileSync(path.join(d, 'bindings'), (extra.bindings ?? ['3000/tcp|0.0.0.0|8443', '3000/tcp|::|8443']).join('\n') + '\n');
+  fs.writeFileSync(path.join(d, 'mounts'), [`volume|${SHOP}-data||/data`, ...(extra.mounts ?? [])].join('\n') + '\n');
+}
+const envOf = (e: Env, name: string) => fileOf(e, name, 'env').split('\n');
+
+test("regression: adopt keeps the owner's own settings (secrets via a root-only env file, never logged) and port", () => {
+  const e = setup();
+  tag(e, LATEST, OLD);
+  ownersContainer(e);
+  // SHOP_PORT says 443, but the container the owner runs is on 8443: that is kept.
+  const r = runSingle(e, ['adopt'], { SHOP_ENV: 'TZ=Asia/Dubai INSECURE_COOKIES=1' });
+  assert.equal(r.code, 0, r.out);
+  assert.ok(events(e).includes(`run ${SHOP} ${OLD} port=8443`), events(e).join('\n'));
+  assert.equal(fileOf(e, SHOP, 'bindings'), '3000/tcp||8443', 'one binding (0.0.0.0 and :: are the same port)');
+  for (const name of [SHOP]) {
+    const env = envOf(e, name);
+    assert.ok(env.includes(`SESSION_SECRET=${SECRET}`), env.join('\n'));
+    assert.ok(env.includes('SMTP_PASS=p@ss=word'));
+    assert.ok(env.includes('TRUST_PROXY=1'));
+    assert.ok(env.includes('INSECURE_COOKIES=1'));
+    assert.ok(env.includes('TZ=Asia/Dubai') && !env.includes('TZ=Europe/London'), 'SHOP_ENV wins');
+  }
+  // The env file: only what the owner added (not the image's, not the engine's, not SHOP_ENV's), root-only.
+  const file = path.join(e.state, 'shop', 'env');
+  assert.deepEqual(read(file).trim().split('\n'), [`SESSION_SECRET=${SECRET}`, 'SMTP_PASS=p@ss=word', 'TRUST_PROXY=1']);
+  assert.equal(fs.statSync(file).mode & 0o777, 0o600);
+  assert.equal(fs.statSync(path.dirname(file)).mode & 0o777, 0o700);
+  assert.match(fileOf(e, SHOP, 'args'), /--env-file \S+\/shop\/env/);
+  // Keys are logged, values never (also not in alerts).
+  const logged = r.out + read(path.join(e.state, 'updater.log')) + read(path.join(e.alerts, 'alerts.log'));
+  assert.match(logged, /SESSION_SECRET SMTP_PASS TRUST_PROXY/);
+  assert.ok(!logged.includes('s3cr3t') && !logged.includes('p@ss'), 'no secret in the logs');
+
+  // Once set up: nothing to change, the heal leaves it alone, and the next switch keeps it all.
+  fs.rmSync(path.join(e.fake, 'events'));
+  assert.match(runSingle(e, ['adopt'], { SHOP_ENV: 'TZ=Asia/Dubai INSECURE_COOKIES=1' }).out, /nothing to change/);
+  assert.equal(runSingle(e, ['heal'], { SHOP_ENV: 'TZ=Asia/Dubai INSECURE_COOKIES=1' }).code, 0);
+  assert.deepEqual(events(e), []);
+  publish(e, NEW);
+  assert.equal(runSingle(e, ['once'], { SHOP_ENV: 'TZ=Asia/Dubai INSECURE_COOKIES=1' }).code, 0);
+  assert.equal(fileOf(e, SHOP, 'image'), NEW);
+  assert.ok(events(e).includes(`run ${SHOP} ${NEW} port=8443`));
+  assert.ok(envOf(e, SHOP).includes(`SESSION_SECRET=${SECRET}`));
+  // A heal that re-creates the shop keeps them too.
+  fs.rmSync(path.join(e.fake, 'c', SHOP), { recursive: true });
+  assert.equal(runSingle(e, ['heal'], { SHOP_ENV: 'TZ=Asia/Dubai INSECURE_COOKIES=1' }).code, 0);
+  assert.ok(envOf(e, SHOP).includes(`SESSION_SECRET=${SECRET}`));
+  assert.equal(fileOf(e, SHOP, 'port'), '8443');
+});
+
+test('regression: adopt refuses (exit 2, a plain list, nothing changed) what it cannot carry', () => {
+  const e = setup();
+  tag(e, LATEST, OLD);
+  ownersContainer(e, SHOP, { bindings: ['3000/tcp||443', '9229/tcp||9229'], mounts: ['bind||/srv/receipts|/backups'], env: ['PORT=8080'] });
+  // A value with a line break shows as more lines than entries.
+  fs.writeFileSync(path.join(e.fake, 'c', SHOP, 'envcount'), String(envOf(e, SHOP).length - 1));
+  const r = runSingle(e, ['adopt']);
+  assert.equal(r.code, 2, r.out);
+  assert.match(r.out, /- the bind \/srv\/receipts at \/backups/);
+  assert.match(r.out, /- the port 9229 -> 9229\/tcp/);
+  assert.match(r.out, /- the setting PORT/);
+  assert.match(r.out, /line break/);
+  assert.ok(!r.out.includes('s3cr3t'));
+  assert.deepEqual(events(e), []);
+  assert.equal(fs.existsSync(path.join(e.state, 'shop', 'env')), false);
+  assert.deepEqual(fs.readdirSync(e.state).filter((f) => f.startsWith('.carry')), [], 'nothing left behind');
+});
+
+test('regression: never a second shop on the same data volume', () => {
+  // Another container (the shop under another name) runs on the volume: nothing is started.
+  const e = setup();
+  tag(e, LATEST, OLD);
+  shopContainer(e, 'my-shop', OLD);
+  const r = runSingle(e, ['adopt']);
+  assert.equal(r.code, 2, r.out);
+  assert.match(alerts(e).at(-1).message, /another running container uses the data volume beautifuluaehome-data: my-shop/);
+  assert.ok(!events(e).some((l) => l.startsWith('run ')), events(e).join('\n'));
+  const h = runSingle(e, ['heal']);
+  assert.equal(h.code, 1, h.out);
+  assert.ok(!events(e).some((l) => l.startsWith('run ')), events(e).join('\n'));
+
+  // Nor is a switch started while one runs beside the shop.
+  const f = setup();
+  runningSingle(f);
+  shopContainer(f, 'stray', OLD);
+  publish(f, NEW);
+  assert.equal(runSingle(f, ['once']).code, 2);
+  assert.ok(!events(f).some((l) => l.startsWith('run ') || l.startsWith('stop ')), events(f).join('\n'));
+  // A stopped one does not block (it serves nobody).
+  fs.writeFileSync(path.join(f.fake, 'c', 'stray', 'status'), 'exited\n');
+  assert.equal(runSingle(f, ['once']).code, 0);
+  assert.equal(fileOf(f, SHOP, 'image'), NEW);
+});
+
+test('regression: a shop container started by hand while the updater runs is set up again, once', () => {
+  const e = setup();
+  runningSingle(e);
+  // The old routine: podman pull / stop / rm / run (no request and status volumes, no label).
+  fs.rmSync(path.join(e.fake, 'c', SHOP), { recursive: true });
+  ownersContainer(e);
+  const r = runSingle(e, ['heal']);
+  assert.equal(r.code, 0, r.out);
+  assert.match(r.out, /was not started by the updater/);
+  assert.ok(events(e).includes(`run ${SHOP} ${OLD} port=8443`), events(e).join('\n'));
+  assert.match(fileOf(e, SHOP, 'args'), /beautifuluaehome-updater-control:\/updater-control/);
+  assert.ok(envOf(e, SHOP).includes(`SESSION_SECRET=${SECRET}`));
+  fs.rmSync(path.join(e.fake, 'events'));
+  runSingle(e, ['heal']);
+  assert.deepEqual(events(e), [], 'set up now: left alone');
+
+  // One that cannot be carried: an alert, once; it keeps running as it is.
+  fs.rmSync(path.join(e.fake, 'c', SHOP), { recursive: true });
+  ownersContainer(e, SHOP, { mounts: ['bind||/srv/x|/x'] });
+  fs.rmSync(path.join(e.alerts, 'alerts.log'), { force: true });
+  runSingle(e, ['heal']);
+  runSingle(e, ['heal']);
+  assert.equal(alerts(e).filter((a) => /started by hand/.test(a.message)).length, 1);
+  assert.equal(statusOf(e, SHOP), 'running');
+  assert.ok(!events(e).some((l) => l.startsWith('run ')));
+});
+
+test('single: a version without the snapshot tool (before 2.0.0) is not switched away from, with a clear reason', () => {
+  const e = setup();
+  runningSingle(e);
+  publish(e, NEW);
+  fs.writeFileSync(path.join(e.fake, 'no-backup-script'), '');
+  assert.equal(runSingle(e, ['once']).code, 2);
+  assert.match(alerts(e).at(-1).message, /older than BUH-02\.00\.00/);
+  assert.ok(!events(e).some((l) => l.startsWith('run ')));
+});
+
+test('single: stopping the updater during a trial ends the switch safely (the shop never stops)', async () => {
+  const e = setup();
+  runningSingle(e);
+  publish(e, NEW);
+  fs.writeFileSync(path.join(e.fake, 'hold-candidate'), '');
+  fs.writeFileSync(path.join(e.state, 'update-now'), '');
+  const child: ChildProcess = spawn('sh', [path.join(root, 'deploy/updater/updater.sh'), 'daemon'], {
+    env: { PATH: `${e.bin}:${process.env.PATH}`, NODE_ENV: 'test', FAKE_DOCKER_DIR: e.fake, UPDATER_MODE: 'single', STATE_DIR: e.state, ALERT_DIR: e.alerts, PROJECT_DIR: e.project, HEALTH_TIMEOUT: '30', HEAL_CHECK_SECONDS: '1', UPDATE_CHECK_MINUTES: '0' },
+  });
+  let out = '';
+  child.stdout?.on('data', (d: Buffer) => (out += d));
+  for (let i = 0; i < 100 && !events(e).includes(`run ${CAND} ${NEW}`); i++) await new Promise((r) => setTimeout(r, 100));
+  assert.ok(events(e).includes(`run ${CAND} ${NEW}`), out);
+  const exited = new Promise((r) => child.on('exit', r));
+  child.kill('SIGTERM'); // a new set-up, or podman stop
+  fs.rmSync(path.join(e.fake, 'hold-candidate')); // the trial now passes
+  assert.equal(await exited, 0);
+  assert.match(out, /the updater is stopping, so the switch ends here/);
+  assert.ok(!events(e).includes(`stop ${SHOP}`), events(e).join('\n'));
+  assert.equal(fileOf(e, SHOP, 'image'), OLD);
+  assert.equal(statusOf(e, SHOP), 'running');
+  assert.equal(exists(e, CAND), false);
 });
 
 test('single: invalid SHOP_* settings are refused before Docker is touched', () => {

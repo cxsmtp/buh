@@ -59,8 +59,11 @@
 # Health is asked of the app itself (node inside the container), not of the engine's
 # healthcheck, which Podman runs only where systemd timers are available.
 # `adopt` (run once by scripts/podman-autoupdate.bat) re-creates an existing shop container
-# with this definition, keeping its data volume and its image; it refuses a container whose
-# data lives anywhere but SHOP_VOLUME.
+# with this definition, keeping its image, data volume, port bindings and its own settings
+# (env, carried in a root-only env file); it refuses a container whose data lives anywhere
+# but SHOP_VOLUME, or that has anything it cannot carry (another mount, another port). The
+# self-healing check does the same for a shop container started by hand while it runs.
+# Nothing is started while another running container uses SHOP_VOLUME.
 set -u
 # Character ranges in patterns mean ASCII only.
 LC_ALL=C
@@ -94,6 +97,13 @@ STATUS_VOLUME=${STATUS_VOLUME:-beautifuluaehome-updater-status}
 CANDIDATE=$SHOP_NAME-candidate
 PREVIOUS_NAME=$SHOP_NAME-previous
 SHOP_SPEC=
+# What `adopt` carried over from the owner's container: its own settings (env file, given to
+# `docker run --env-file`, values never logged) and its port bindings. Only root in the
+# updater can read this folder (the updater's own volume).
+CARRIED_DIR=$STATE_DIR/shop
+SHOP_ENV_FILE=$CARRIED_DIR/env
+SHOP_PORTS_FILE=$CARRIED_DIR/ports
+SHOP_PORTS=$SHOP_PORT
 
 # ── Small helpers ────────────────────────────────────────────────────────────
 
@@ -422,6 +432,10 @@ last_good_ref() {
 backup_in() {
   if docker exec "$1" test -f scripts/backup-now.mjs; then
     docker exec "$1" node scripts/backup-now.mjs 2>&1
+  elif is_single; then
+    # No checkout to borrow the script from: switching away from such a version is refused.
+    echo "this version has no database snapshot tool (it is older than BUH-02.00.00), so the updater does not switch away from it; update it once by hand (deployment guide, Podman on Windows)"
+    return 1
   else
     # A version from before backup-now.mjs: run this checkout's copy inside it.
     docker exec -i "$1" node --input-type=module - < "$PROJECT_DIR/scripts/backup-now.mjs" 2>&1
@@ -591,9 +605,47 @@ check_single_settings() {
   set +f
   [ "$cs_count" -le 32 ] || bad_setting "SHOP_ENV: at most 32 entries"
   [ "$cs_ok" = 0 ] || return 1
-  # Changes when the definition changes, so `adopt` knows whether to re-create the container.
-  SHOP_SPEC=$(printf 'v1 %s %s %s %s %s' "$SHOP_PORT" "$SHOP_VOLUME" "$CONTROL_VOLUME" "$STATUS_VOLUME" \
-    "$(printf '%s' "$SHOP_ENV" | tr -s '[:space:]' ' ')" | cksum | cut -d' ' -f1)
+  load_carried
+}
+
+# A host port binding: PORT or IPv4:PORT.
+valid_binding() {
+  vb_port=${1##*:}
+  case $vb_port in '' | *[!0-9]* | 0*) return 1 ;; esac
+  [ "${#vb_port}" -le 5 ] && [ "$vb_port" -le 65535 ] || return 1
+  case $1 in
+    *:*) printf '%s' "${1%:*}" | grep -Eqx '[0-9]{1,3}(\.[0-9]{1,3}){3}' ;;
+    *) return 0 ;;
+  esac
+}
+
+# spec_for PORTS ENV_FILE: changes whenever the definition changes, so a container started
+# any other way (or with other settings) is noticed. The env file counts by its checksum.
+spec_for() {
+  sf_env=none
+  if [ -n "$2" ] && [ -f "$2" ]; then sf_env=$(cksum < "$2" | cut -d' ' -f1); fi
+  printf 'v2 %s %s %s %s %s %s' "$1" "$SHOP_VOLUME" "$CONTROL_VOLUME" "$STATUS_VOLUME" \
+    "$(printf '%s' "$SHOP_ENV" | tr -s '[:space:]' ' ')" "$sf_env" | cksum | cut -d' ' -f1
+}
+
+# The port bindings and env file carried over by `adopt`, if any, and the resulting spec.
+load_carried() {
+  SHOP_PORTS=$SHOP_PORT
+  if [ -f "$SHOP_PORTS_FILE" ] && [ ! -L "$SHOP_PORTS_FILE" ]; then
+    lc_ports=''
+    while IFS= read -r lc_line; do
+      if ! valid_binding "$lc_line"; then
+        log "ignoring $SHOP_PORTS_FILE: it does not hold port bindings"
+        lc_ports=''
+        break
+      fi
+      lc_ports="${lc_ports:+$lc_ports }$lc_line"
+    done < "$SHOP_PORTS_FILE"
+    [ -z "$lc_ports" ] || SHOP_PORTS=$lc_ports
+  fi
+  lc_env=''
+  if [ -f "$SHOP_ENV_FILE" ] && [ ! -L "$SHOP_ENV_FILE" ]; then lc_env=$SHOP_ENV_FILE; fi
+  SHOP_SPEC=$(spec_for "$SHOP_PORTS" "$lc_env")
 }
 
 # run_shop CONTAINER IMAGE port|noport: start the shop from the one fixed definition.
@@ -606,9 +658,16 @@ run_shop() {
   set -f
   set -- run -d --name "$rs_name" --label "buh.updater.spec=$SHOP_SPEC"
   if [ "$rs_port" = port ]; then
-    set -- "$@" --restart unless-stopped -p "$SHOP_PORT:3000"
+    set -- "$@" --restart unless-stopped
+    for rs_bind in $SHOP_PORTS; do
+      set -- "$@" -p "$rs_bind:3000"
+    done
   fi
   set -- "$@" -v "$SHOP_VOLUME:/data" -v "$CONTROL_VOLUME:/updater-control" -v "$STATUS_VOLUME:/updater-status:ro"
+  # The owner's own settings (secrets among them): read by the docker CLI here, never logged.
+  if [ -f "$SHOP_ENV_FILE" ] && [ ! -L "$SHOP_ENV_FILE" ]; then
+    set -- "$@" --env-file "$SHOP_ENV_FILE"
+  fi
   for rs_pair in $SHOP_ENV; do
     set -- "$@" -e "$rs_pair"
   done
@@ -617,7 +676,7 @@ run_shop() {
   # docker CLI as a limit of 0 on some hosts, and the shop could not start a process.
   set -- "$@" --read-only --tmpfs /tmp --cap-drop ALL --security-opt no-new-privileges:true --pids-limit 512 "$rs_image"
   if [ "$rs_port" = port ]; then
-    log "starting $rs_name from $rs_ref on port $SHOP_PORT"
+    log "starting $rs_name from $rs_ref on port $SHOP_PORTS"
   else
     log "starting $rs_name from $rs_ref (no port)"
   fi
@@ -635,8 +694,30 @@ log_tail() {
 # SHOP_VOLUME would start the shop on other (or no) data.
 single_guard() {
   sg_vol=$(data_volume_of "$1")
-  [ "$sg_vol" = "$SHOP_VOLUME" ] && return 0
-  alert critical "$1 keeps its data in ${sg_vol:-a host folder (or nowhere)}, not in the volume $SHOP_VOLUME, so the updater leaves it alone. Set SHOP_VOLUME to the volume it uses (scripts/podman-autoupdate.bat does)."
+  if [ "$sg_vol" != "$SHOP_VOLUME" ]; then
+    alert critical "$1 keeps its data in ${sg_vol:-a host folder (or nowhere)}, not in the volume $SHOP_VOLUME, so the updater leaves it alone. Set SHOP_VOLUME to the volume it uses (scripts/podman-autoupdate.bat does)."
+    return 1
+  fi
+  volume_free
+}
+
+# Running containers other than ours (SHOP_NAME, -candidate, -previous) on SHOP_VOLUME.
+others_on_volume() {
+  for ov_id in $(docker ps -q 2> /dev/null); do
+    ov_line=$(docker inspect -f '{{.Name}}|{{range .Mounts}}{{.Name}};{{end}}' "$ov_id" 2> /dev/null) || continue
+    ov_name=${ov_line%%|*}
+    ov_name=${ov_name#/}
+    case $ov_name in "$SHOP_NAME" | "$CANDIDATE" | "$PREVIOUS_NAME") continue ;; esac
+    case ";${ov_line#*|}" in *";$SHOP_VOLUME;"*) printf '%s ' "$ov_name" ;; esac
+  done
+}
+
+# Two shops on one database (and one port) must never run: nothing is started while
+# another running container uses SHOP_VOLUME.
+volume_free() {
+  vf_others=$(others_on_volume)
+  [ -z "$vf_others" ] && return 0
+  alert critical "another running container uses the data volume $SHOP_VOLUME: ${vf_others% }. Two shops must never share it, so the updater starts nothing. Stop that container, or if it is the shop, set the updater up with its name (scripts\\podman-autoupdate.bat ${vf_others%% *} …)."
   return 1
 }
 
@@ -661,11 +742,11 @@ single_takeover() {
     return 2
   fi
   if ! run_shop "$SHOP_NAME" "$tk_ref" port; then
-    tk_problem="it could not be started on port $SHOP_PORT"
+    tk_problem="it could not be started on port $SHOP_PORTS"
   elif ! same_image "$(container_image "$SHOP_NAME")" "$tk_new"; then
     tk_problem="it started $(short "$(container_image "$SHOP_NAME")") instead of the expected image"
   elif ! wait_ready "$SHOP_NAME" 0; then
-    tk_problem="it did not become healthy on port $SHOP_PORT"
+    tk_problem="it did not become healthy on port $SHOP_PORTS"
   elif ! probe_page "$SHOP_NAME"; then
     tk_problem='its home page did not load'
   fi
@@ -705,6 +786,11 @@ single_switch() {
     return 2
   fi
   log "  $ss_out"
+  # Stopping (a new set-up, a restart): no switch is started; one under way is finished.
+  if [ "$stop_requested" = 1 ]; then
+    log "the updater is stopping, so the switch is not started"
+    return 2
+  fi
 
   log "step 2/4: try it as $CANDIDATE (same data, no port) while $SHOP_NAME keeps serving; up to ${HEALTH_TIMEOUT}s"
   docker rm -f "$CANDIDATE" > /dev/null 2>&1 || true
@@ -727,7 +813,11 @@ single_switch() {
     return 1
   fi
 
-  log "step 3/4: it works; stopping $SHOP_NAME (kept as $PREVIOUS_NAME) and starting the new version on port $SHOP_PORT"
+  if [ "$stop_requested" = 1 ]; then
+    log "the updater is stopping, so the switch ends here; $SHOP_NAME keeps serving $(describe "$ss_old")"
+    return 2
+  fi
+  log "step 3/4: it works; stopping $SHOP_NAME (kept as $PREVIOUS_NAME) and starting the new version on port $SHOP_PORTS"
   ss_rc=0
   single_takeover "$ss_ref" "$ss_new" || ss_rc=$?
   if [ "$ss_rc" = 2 ]; then
@@ -737,7 +827,7 @@ single_switch() {
   if [ "$ss_rc" != 0 ]; then
     same_image "$ss_new" "$ss_old" || remember_bad "$ss_new"
     if [ "$tk_restored" = 1 ]; then
-      alert error "$ss_why: $(describe "$ss_new") passed its trial but failed as $SHOP_NAME ($tk_problem). Rolled back: the previous container is back on port $SHOP_PORT and serves $(describe "$ss_old"). This image is not tried again; a newer one will be."
+      alert error "$ss_why: $(describe "$ss_new") passed its trial but failed as $SHOP_NAME ($tk_problem). Rolled back: the previous container is back on port $SHOP_PORTS and serves $(describe "$ss_old"). This image is not tried again; a newer one will be."
     else
       alert critical "$ss_why: $(describe "$ss_new") failed as $SHOP_NAME ($tk_problem), and the previous container did not answer again either; the self-healing check now starts $(last_good_ref). See: podman logs $SHOP_NAME"
     fi
@@ -764,6 +854,7 @@ single_recreate() {
     alert critical "the data volume $SHOP_VOLUME does not exist, so no shop is started on empty data. Check the name (podman volume ls) and SHOP_VOLUME."
     return 1
   fi
+  volume_free || return 1
   docker rm -f "$SHOP_NAME" > /dev/null 2>&1 || true
   if run_shop "$SHOP_NAME" "$sr_ref" port && wait_ready "$SHOP_NAME" 0 && probe_page "$SHOP_NAME"; then
     return 0
@@ -789,6 +880,8 @@ single_heal() {
         remember_good "$sh_img"
         log "recorded $(describe "$sh_img") as $LAST_GOOD"
       fi
+      # Started some other way (by hand: no request/status volumes): set it up again.
+      if [ "$(spec_of "$SHOP_NAME")" != "$SHOP_SPEC" ]; then reapply_spec; fi
       return 0
     fi
     sh_count=$(cat "$STATE_DIR/unhealthy-count" 2> /dev/null || echo 0)
@@ -823,12 +916,118 @@ single_heal() {
   return 1
 }
 
+drop_last_empty() {
+  awk 'NR > 1 { print prev } { prev = $0 } END { if (NR > 0 && prev != "") print prev }'
+}
+
+# carry_settings CONTAINER: what the owner's container has beyond the image, into a new
+# root-only folder (printed): env (its own settings, minus the image's), ports (host port
+# bindings of 3000). Anything that cannot be carried is listed (keys only, never values);
+# then status 1 and nothing is kept.
+carry_settings() {
+  cr_c=$1
+  cr_dir=$(umask 077 && mktemp -d "$STATE_DIR/.carry.XXXXXX") || return 1
+  cr_problems=''
+  cr_img=$(container_image "$cr_c")
+  # One entry a line (the CLI adds one more line break at the end: dropped). A value with a
+  # line break shows as more lines than entries, or as an empty line.
+  docker inspect -f '{{range .Config.Env}}{{println .}}{{end}}' "$cr_c" 2> /dev/null | drop_last_empty > "$cr_dir/all"
+  docker image inspect -f '{{range .Config.Env}}{{println .}}{{end}}' "${cr_img#sha256:}" 2> /dev/null | drop_last_empty > "$cr_dir/image"
+  cr_count=$(docker inspect -f '{{len .Config.Env}}' "$cr_c" 2> /dev/null || echo 0)
+  if [ "$(grep -c '' < "$cr_dir/all")" != "$cr_count" ] || grep -q '^$' "$cr_dir/all"; then
+    cr_problems="$cr_problems
+  - a setting whose value has a line break (set it again on one line)"
+  fi
+  (umask 077 && : > "$cr_dir/env")
+  while IFS= read -r cr_line; do
+    grep -Fxq -e "$cr_line" "$cr_dir/image" && continue
+    cr_key=${cr_line%%=*}
+    case $cr_key in
+      HOSTNAME | HOME | TERM | container) continue ;; # set by the engine, not by the owner
+      '' | [!A-Za-z_]* | *[!A-Za-z0-9_]*)
+        cr_problems="$cr_problems
+  - a setting with a name that is not letters, digits and _"
+        continue
+        ;;
+      DATA_DIR | PORT | NODE_ENV | UPDATER_STATUS_DIR | UPDATER_CONTROL_DIR)
+        cr_problems="$cr_problems
+  - the setting $cr_key (the updater fixes it)"
+        continue
+        ;;
+    esac
+    case $cr_line in *=*) ;; *) continue ;; esac
+    # SHOP_ENV gives its own value for this key.
+    case " $(printf '%s' "$SHOP_ENV" | tr -s '[:space:]' ' ') " in *" $cr_key="*) continue ;; esac
+    printf '%s\n' "$cr_line" >> "$cr_dir/env"
+  done < "$cr_dir/all"
+  # In a fixed order, so the same settings always give the same file (engines list env differently).
+  sort -o "$cr_dir/env" "$cr_dir/env"
+
+  docker inspect -f '{{range $p, $b := .HostConfig.PortBindings}}{{range $b}}{{$p}}|{{.HostIp}}|{{.HostPort}}{{println}}{{end}}{{end}}' "$cr_c" > "$cr_dir/bindings" 2> /dev/null
+  : > "$cr_dir/ports"
+  while IFS='|' read -r cr_cport cr_ip cr_hport; do
+    [ -n "$cr_cport" ] || continue
+    if [ "$cr_cport" != 3000/tcp ]; then
+      cr_problems="$cr_problems
+  - the port ${cr_hport:-?} -> $cr_cport (only the shop's port 3000/tcp is carried)"
+      continue
+    fi
+    case $cr_ip in '' | 0.0.0.0 | ::) cr_bind=$cr_hport ;; *) cr_bind=$cr_ip:$cr_hport ;; esac
+    if ! valid_binding "$cr_bind"; then
+      cr_problems="$cr_problems
+  - the port binding ${cr_ip:+$cr_ip }${cr_hport:-(random)} -> 3000"
+      continue
+    fi
+    grep -Fxq -e "$cr_bind" "$cr_dir/ports" || printf '%s\n' "$cr_bind" >> "$cr_dir/ports"
+  done < "$cr_dir/bindings"
+
+  docker inspect -f '{{range .Mounts}}{{.Type}}|{{.Name}}|{{.Source}}|{{.Destination}}{{println}}{{end}}' "$cr_c" > "$cr_dir/mounts" 2> /dev/null
+  while IFS='|' read -r cr_type cr_name cr_src cr_dest; do
+    [ -n "$cr_dest" ] || continue
+    case "$cr_dest|$cr_name" in
+      "/data|$SHOP_VOLUME" | "/updater-control|$CONTROL_VOLUME" | "/updater-status|$STATUS_VOLUME") continue ;;
+    esac
+    cr_problems="$cr_problems
+  - the ${cr_type:-mount} ${cr_name:-$cr_src} at $cr_dest"
+  done < "$cr_dir/mounts"
+
+  if [ -n "$cr_problems" ]; then
+    rm -rf "$cr_dir"
+    log "refusing: $cr_c has settings the updater cannot carry over to the container it starts, so nothing was changed:$cr_problems
+Start the shop without them (or move that data into $SHOP_VOLUME), then run the set-up again." >&2
+    return 1
+  fi
+  printf '%s' "$cr_dir"
+}
+
+# Put carried settings in place (the ones before are kept as .bak until the switch is done).
+install_carried() {
+  mkdir -p "$CARRIED_DIR" && chmod 700 "$CARRIED_DIR"
+  for ic_f in env ports; do
+    rm -f "$CARRIED_DIR/$ic_f.bak"
+    if [ -f "$CARRIED_DIR/$ic_f" ]; then mv "$CARRIED_DIR/$ic_f" "$CARRIED_DIR/$ic_f.bak"; fi
+    if [ -s "$1/$ic_f" ]; then mv "$1/$ic_f" "$CARRIED_DIR/$ic_f" && chmod 600 "$CARRIED_DIR/$ic_f"; fi
+  done
+  rm -rf "$1"
+  load_carried
+}
+
+restore_carried() {
+  for rc_f in env ports; do
+    rm -f "$CARRIED_DIR/$rc_f"
+    if [ -f "$CARRIED_DIR/$rc_f.bak" ]; then mv "$CARRIED_DIR/$rc_f.bak" "$CARRIED_DIR/$rc_f"; fi
+  done
+  load_carried
+}
+
 # Set-up (scripts/podman-autoupdate.bat runs it once): make SHOP_NAME the container this
-# script defines, with the request and status volumes, keeping its image and data volume.
-# 0 done (or nothing to do), 1 the new container failed (the old one is back), 2 refused.
+# script defines, with the request and status volumes, keeping its image, data volume, port
+# bindings and its own settings. 0 done (or nothing to do), 1 the new container failed (the
+# old one is back), 2 refused.
 adopt() {
   ad_state=$(state_of "$SHOP_NAME") || ad_state=''
   if [ -z "$ad_state" ]; then
+    volume_free || return 2
     if docker volume inspect "$SHOP_VOLUME" > /dev/null 2>&1; then
       log "no container $SHOP_NAME yet; starting one on the existing data volume $SHOP_VOLUME"
     else
@@ -841,7 +1040,7 @@ adopt() {
     fi
     if run_shop "$SHOP_NAME" "$IMAGE" port && wait_ready "$SHOP_NAME" 0 && probe_page "$SHOP_NAME"; then
       remember_good "$(image_id "$IMAGE")"
-      log "$SHOP_NAME serves on port $SHOP_PORT"
+      log "$SHOP_NAME serves on port $SHOP_PORTS"
       return 0
     fi
     log "$SHOP_NAME did not come up: $(log_tail "$SHOP_NAME")"
@@ -857,19 +1056,51 @@ adopt() {
     fi
     return 2
   fi
-  if [ "$ad_state" = running ] && [ "$(spec_of "$SHOP_NAME")" = "$SHOP_SPEC" ]; then
+  volume_free || return 2
+  ad_dir=$(carry_settings "$SHOP_NAME") || return 2
+  ad_ports=$(tr '\n' ' ' < "$ad_dir/ports" | sed 's/ *$//')
+  [ -n "$ad_ports" ] || ad_ports=$SHOP_PORT
+  ad_env=''
+  if [ -s "$ad_dir/env" ]; then ad_env=$ad_dir/env; fi
+  if [ "$ad_state" = running ] && [ "$(spec_of "$SHOP_NAME")" = "$(spec_for "$ad_ports" "$ad_env")" ]; then
+    install_carried "$ad_dir"
     log "$SHOP_NAME already runs with these settings; nothing to change"
     return 0
   fi
+  ad_keys=$(cut -d= -f1 < "$ad_dir/env" | tr '\n' ' ' | sed 's/ *$//')
+  install_carried "$ad_dir"
+  log "carrying over from $SHOP_NAME: port $SHOP_PORTS; its own settings: ${ad_keys:-none} (values kept in the updater's volume, not logged)"
   if [ "$ad_state" != running ]; then
     log "$SHOP_NAME is $ad_state; starting it first, for the database snapshot"
     if ! { docker start "$SHOP_NAME" > /dev/null 2>&1 && wait_ready "$SHOP_NAME"; }; then
       log "it does not start: $(log_tail "$SHOP_NAME")"
+      restore_carried
       return 1
     fi
   fi
   # The image it runs, re-created with the full definition: the same checked switch.
-  single_switch "$(container_image "$SHOP_NAME")" "set-up"
+  ad_rc=0
+  single_switch "$(container_image "$SHOP_NAME")" "set-up" || ad_rc=$?
+  if [ "$ad_rc" != 0 ]; then restore_carried; fi
+  return "$ad_rc"
+}
+
+# The shop container runs but was not started from this definition (e.g. by hand, with the
+# old podman pull/stop/rm/run routine: no request and status volumes). It is set up again,
+# keeping what it has, once per container: a container that cannot be carried is not retried.
+reapply_spec() {
+  ra_id=$(docker inspect -f '{{.Id}}' "$SHOP_NAME" 2> /dev/null) || return 0
+  if grep -Fxq -e "$ra_id" "$STATE_DIR/spec-tried" 2> /dev/null; then return 0; fi
+  printf '%s\n' "$ra_id" > "$STATE_DIR/spec-tried"
+  log "$SHOP_NAME was not started by the updater (its settings label differs); setting it up again with the same image"
+  ra_rc=0
+  adopt || ra_rc=$?
+  case $ra_rc in
+    0) ;;
+    2) alert error "$SHOP_NAME was started by hand with settings the updater cannot carry over (see the updater log), so Settings → Versions cannot reach the updater. Stop the updater before updating by hand, or use Update to the latest." ;;
+    *) alert error "$SHOP_NAME was started by hand and could not be set up again; it keeps running as it is (see the updater log)." ;;
+  esac
+  return 0
 }
 
 single_status() {
@@ -1160,7 +1391,7 @@ daemon() {
   fi
   is_number "$HEAL_CHECK_SECONDS" && [ "$HEAL_CHECK_SECONDS" -gt 0 ] || HEAL_CHECK_SECONDS=30
   if is_single; then
-    started_what="one container $SHOP_NAME on port $SHOP_PORT, data in $SHOP_VOLUME"
+    started_what="one container $SHOP_NAME on port $SHOP_PORTS, data in $SHOP_VOLUME"
   else
     started_what="project $PROJECT"
   fi

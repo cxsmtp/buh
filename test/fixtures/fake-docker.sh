@@ -9,11 +9,17 @@
 #                       (container id cid-<colour>); single-mode containers go by name.
 #   c/<name>/status     running | exited | created
 #   c/<name>/health     healthy | unhealthy | starting (overrides the image's behaviour)
-#   c/<name>/data       single mode: the volume at /data; port: the host port; spec: its label;
-#                       args: the whole `docker run` command line
+#   c/<name>/data       single mode: the volume at /data; port: the (first) host port; spec: its
+#                       label; args: the whole `docker run` command line; env: its environment
+#                       (one entry a line; envcount overrides the count, as for a value with a
+#                       line break); envfile: the --env-file it got; bindings: "3000/tcp|IP|PORT"
+#                       lines; mounts: "TYPE|NAME|SOURCE|DEST" lines
+#   image-env           the image's own environment (default: a few lines like the shop image's)
 #   vols/<volume>       a volume that exists
 #   ids                 every image id on the "server"
 #   backup-fails        present: the database snapshot fails
+#   no-backup-script    present: the image has no scripts/backup-now.mjs (older than 2.0.0)
+#   hold-candidate      present: a *-candidate container does not answer its health check yet
 #   port-fails          present: `docker run -p …` cannot start (the container stays "created")
 #   events              one line per action, in order
 # Image ids containing "broken" never become healthy; "crash" exits at once.
@@ -31,6 +37,9 @@ resolve() {
 colour_of() { printf '%s' "$1" | sed 's/^cid-//'; }
 # How a container shows in events: app-<colour> for compose copies, else its name.
 label_of() { case $1 in cid-*) echo "app-${1#cid-}" ;; *) echo "$1" ;; esac; }
+image_env() {
+  if [ -f "$D/image-env" ]; then cat "$D/image-env"; else printf 'PATH=/usr/local/bin:/usr/bin:/bin\nNODE_ENV=production\nPORT=3000\nHOSTNAME=0.0.0.0\nDATA_DIR=/data\n'; fi
+}
 health_for() {
   case $1 in *crash*) echo crash ;; *broken*) echo unhealthy ;; *) echo healthy ;; esac
 }
@@ -48,6 +57,14 @@ case $cmd in
     for a in "$@"; do
       case $a in -aq) all=1 ;; label=com.docker.compose.service=*) service=${a#label=com.docker.compose.service=} ;; esac
     done
+    if [ -z "$service" ]; then
+      # docker ps -q / -aq: every (running) container, by name
+      for d in "$D"/c/*; do
+        [ -f "$d/image" ] || continue
+        if [ "$all" = 1 ] || [ "$(cat "$d/status")" = running ]; then basename "$d"; fi
+      done
+      exit 0
+    fi
     c=${service#app-}
     [ -f "$D/c/$c/image" ] || exit 0
     if [ "$all" = 1 ] || [ "$(cat "$D/c/$c/status")" = running ]; then echo "cid-$c"; fi
@@ -63,8 +80,28 @@ case $cmd in
       '{{.Image}}') cat "$D/c/$c/image" ;;
       '{{.RestartCount}}') echo 0 ;;
       '{{.State.Status}}') echo "$st" ;;
+      '{{.Id}}')
+        # Each container its own id (a hand-made one gets it on first look).
+        [ -f "$D/c/$c/serial" ] || date +%s%N > "$D/c/$c/serial"
+        echo "id-$c-$(cat "$D/c/$c/serial")"
+        ;;
       *RestartCount*) echo "$st 0 $h" ;;
       *Health*) echo "$st $h" ;;
+      '{{len .Config.Env}}') cat "$D/c/$c/envcount" 2> /dev/null || grep -c '' < "$D/c/$c/env" 2> /dev/null || image_env | grep -c '' ;;
+      # println per entry, then one more line break from the CLI, as docker and podman print it
+      *Config.Env*) { cat "$D/c/$c/env" 2> /dev/null || image_env; } && echo ;;
+      *PortBindings*)
+        if [ -f "$D/c/$c/bindings" ]; then cat "$D/c/$c/bindings"
+        elif [ -s "$D/c/$c/port" ]; then echo "3000/tcp||$(cat "$D/c/$c/port")"; fi
+        ;;
+      *.Type*)
+        if [ -f "$D/c/$c/mounts" ]; then cat "$D/c/$c/mounts"
+        elif [ -s "$D/c/$c/data" ]; then echo "volume|$(cat "$D/c/$c/data")||/data"; fi
+        ;;
+      *'.Name}}|'*)
+        if [ -f "$D/c/$c/mounts" ]; then echo "/$c|$(cut -d'|' -f2 "$D/c/$c/mounts" | tr '\n' ';')"
+        else echo "/$c|$(cat "$D/c/$c/data" 2> /dev/null);"; fi
+        ;;
       *Mounts*) cat "$D/c/$c/data" 2> /dev/null || echo ;;
       *buh.updater.spec*) cat "$D/c/$c/spec" 2> /dev/null || echo '<no value>' ;;
       *) exit 1 ;;
@@ -77,6 +114,7 @@ case $cmd in
         id=$(resolve "$4") || exit 1
         case $fmt in
           '{{.Id}}') echo "$id" ;;
+          *Config.Env*) image_env && echo ;;
           *image.version*) cat "$D/versions/$id" 2> /dev/null || echo '<no value>' ;;
           *) echo '<no value>' ;;
         esac
@@ -107,13 +145,15 @@ case $cmd in
     shift
     [ "$(cat "$D/c/$c/status" 2> /dev/null)" = running ] || exit 1
     case "$*" in
-      'test -f scripts/backup-now.mjs') exit 0 ;;
+      'test -f scripts/backup-now.mjs') [ ! -f "$D/no-backup-script" ] ;;
       'node scripts/backup-now.mjs')
         [ -f "$D/backup-fails" ] && { echo "disk full"; exit 1; }
         ev "backup $who"
         echo /data/backups/pre-update-20261015-000000.db
         ;;
       *api/health*)
+        # hold-candidate: a trial container does not answer yet (a slow start).
+        case $c in *-candidate) [ -f "$D/hold-candidate" ] && exit 1 ;; esac
         h=$(cat "$D/c/$c/health" 2> /dev/null || health_for "$(cat "$D/c/$c/image")")
         [ "$h" = healthy ] && echo '{"ok":true}'
         ;;
@@ -135,15 +175,29 @@ case $cmd in
   run)
     # docker run -d --name N [--label k=v] [--restart p -p HOST:3000] -v … -e … … IMAGE
     args="$*"
-    name='' port='' data='' spec='' image=''
+    name='' port='' data='' spec='' image='' envfile='' pairs='' binds='' mounts=''
+    nl='
+'
     while [ $# -gt 0 ]; do
       case $1 in
         -d | --read-only) ;;
         --name) name=$2 && shift ;;
         --label) case $2 in buh.updater.spec=*) spec=${2#*=} ;; esac && shift ;;
-        -p) port=${2%%:*} && shift ;;
-        -v) case $2 in *:/data) data=${2%%:*} ;; esac && shift ;;
-        -e | --restart | --tmpfs | --cap-drop | --security-opt | --pids-limit) shift ;;
+        -p)
+          hp=${2%:3000}
+          [ -n "$port" ] || port=${hp##*:}
+          case $hp in *:*) binds="${binds}3000/tcp|${hp%:*}|${hp##*:}$nl" ;; *) binds="${binds}3000/tcp||$hp$nl" ;; esac
+          shift
+          ;;
+        -v)
+          case $2 in *:/data) data=${2%%:*} ;; esac
+          v=${2%:ro}
+          mounts="${mounts}volume|${v%%:*}||${v#*:}$nl"
+          shift
+          ;;
+        --env-file) envfile=$2 && shift ;;
+        -e) pairs="$pairs$2$nl" && shift ;;
+        --restart | --tmpfs | --cap-drop | --security-opt | --pids-limit) shift ;;
         -*) echo "fake docker: unknown run flag $1" >&2 && exit 125 ;;
         *) image=$1 ;;
       esac
@@ -157,6 +211,17 @@ case $cmd in
     printf '%s\n' "$data" > "$D/c/$name/data"
     printf '%s\n' "$spec" > "$D/c/$name/spec"
     printf '%s\n' "$port" > "$D/c/$name/port"
+    printf '%s' "$binds" > "$D/c/$name/bindings"
+    printf '%s' "$mounts" > "$D/c/$name/mounts"
+    # The engine's environment: the image's, then the env file's, then -e (and a HOSTNAME, as Podman adds).
+    {
+      image_env | grep -v '^HOSTNAME='
+      echo "HOSTNAME=$name"
+      [ -z "$envfile" ] || cat "$envfile"
+      printf '%s' "$pairs"
+    } > "$D/c/$name/env"
+    [ -z "$envfile" ] || cp "$envfile" "$D/c/$name/envfile"
+    date +%s%N > "$D/c/$name/serial"
     [ -z "$data" ] || touch "$D/vols/$data"
     ev "run $name $id${port:+ port=$port}"
     if [ -n "$port" ]; then
