@@ -1,33 +1,15 @@
 # Beautiful UAE Home — Caddy in front of the shop (docker-compose.yml).
 # Free HTTPS certificates from Let's Encrypt, renewed automatically; HTTP → HTTPS.
 # DOMAIN and ACME_EMAIL come from .env.production.
+# The site itself (limits, the two shop copies, headers, logs) is in shop.caddy, which the
+# CI test (deploy/ci/Caddyfile) imports too, so the config tested there is this one.
+# After changing either file: docker compose exec caddy caddy reload --config /etc/caddy/Caddyfile
 {
 	email {$ACME_EMAIL}
 }
 
 {$DOMAIN} {
-	encode zstd gzip
-
-	# Product photos are uploaded through the admin hub (max ~12 MB per request).
-	request_body {
-		max_size 12MB
-	}
-
-	reverse_proxy app:3000 {
-		# The real visitor address, for per-address limits (the app trusts it with TRUST_PROXY=1).
-		# Set here, so a visitor cannot fake it.
-		header_up X-Real-IP {remote_host}
-	}
-
-	header {
-		-Server
-		-X-Powered-By
-	}
-
-	log {
-		output stdout
-		format console
-	}
+	import shop.caddy
 }
 
 www.{$DOMAIN} {

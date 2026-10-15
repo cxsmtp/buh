@@ -2,7 +2,7 @@
 
 import React from 'react';
 import { BrandSettings } from '@/types';
-import { Sparkles, BellRing } from 'lucide-react';
+import { useShop } from '@/lib/client/shop';
 
 interface MarqueeBarProps {
   brandSettings: BrandSettings;
@@ -10,14 +10,18 @@ interface MarqueeBarProps {
 
 export const MarqueeBar: React.FC<MarqueeBarProps> = ({ brandSettings }) => {
   const marquee = brandSettings.marquee;
+  const { festival } = useShop();
+  // Festival lines go first while a festival's look is on.
+  const festivalLines = festival?.festivalId && festival.showMarquee ? festival.theme.marquee : [];
+  const messages = [...festivalLines, ...(marquee?.enabled ? marquee.messages : [])];
 
-  if (!marquee || !marquee.enabled || marquee.messages.length === 0) {
+  if (!marquee || messages.length === 0) {
     return null;
   }
 
   const duration = Math.max(10, marquee.speedSeconds || 26);
   // Repeat the messages to ensure infinite seamless scrolling
-  const repeatedMessages = [...marquee.messages, ...marquee.messages];
+  const repeatedMessages = [...messages, ...messages];
 
   return (
     <aside 

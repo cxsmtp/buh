@@ -154,8 +154,8 @@ test('orders: the server sets prices and stock; a forged price is ignored; a ret
 
   // No phone proof, or someone else's: refused.
   assert.equal((await post('/api/orders', { ...body, idempotencyKey: crypto.randomUUID(), verificationToken: 'forged.token' })).status, 401);
-  // More than in stock: refused with how many are left.
-  const tooMany = await post('/api/orders', { ...body, idempotencyKey: crypto.randomUUID(), items: [{ productId: p.id, profileId: p.profiles[0].id, quantity: 20 }] });
+  // More than one order may hold: refused (the per-size stock limit is covered by the unit tests).
+  const tooMany = await post('/api/orders', { ...body, idempotencyKey: crypto.randomUUID(), items: [{ productId: p.id, profileId: p.profiles[0].id, quantity: 21 }] });
   assert.ok([400, 409].includes(tooMany.status));
 });
 
@@ -233,4 +233,55 @@ test('over HTTP: 5 wrong passwords pause sign-in, and the pause does not reveal 
   assert.equal(right.status, 429, 'same answer for the right password');
   assert.deepEqual(await wrong.json(), await right.json());
   assert.equal(right.headers.get('set-cookie'), null);
+});
+
+test('Instagram/WhatsApp: product links preview with photo and price; feed, sitemap and robots are served', { skip: !hasBuild }, async () => {
+  const p = (await (await fetch(`${BASE}/api/products`)).json()).products[0];
+  const html = await (await fetch(`${BASE}/p/${p.id}`)).text();
+  assert.match(html, /<meta property="og:title" content="[^"]+ · AED \d+/);
+  assert.match(html, /<meta property="og:image" content="https?:\/\/[^"]+/);
+  assert.match(html, new RegExp(`<link rel="canonical" href="[^"]+/p/${p.id}"`));
+  const unknown = await fetch(`${BASE}/p/not-a-product`);
+  assert.equal(unknown.status, 200, 'an unknown product shows the shop');
+
+  const feed = await fetch(`${BASE}/feeds/meta.csv`);
+  assert.match(feed.headers.get('content-type') || '', /text\/csv/);
+  const csv = await feed.text();
+  assert.match(csv, /id,title,description,availability/);
+  assert.match(csv, new RegExp(`${p.id}-[a-z-]+,`));
+  assert.match(csv, /in stock/);
+  assert.match(csv, /\d+\.\d{2} AED/);
+
+  assert.match(await (await fetch(`${BASE}/sitemap.xml`)).text(), new RegExp(`/p/${p.id}`));
+  assert.match(await (await fetch(`${BASE}/robots.txt`)).text(), /Disallow: \/api\//);
+});
+
+test('live updates: the event stream reports a change within seconds; admin events need sign-in', { skip: !hasBuild }, async () => {
+  assert.equal((await fetch(`${BASE}/api/admin/events`)).status, 401);
+  const controller = new AbortController();
+  const res = await fetch(`${BASE}/api/events`, { signal: controller.signal });
+  assert.match(res.headers.get('content-type') || '', /text\/event-stream/);
+  const reader = res.body!.getReader();
+  const decoder = new TextDecoder();
+  let text = '';
+  const readUntil = async (pattern: RegExp, ms: number) => {
+    const end = Date.now() + ms;
+    while (!pattern.test(text) && Date.now() < end) {
+      const chunk = await Promise.race([reader.read(), new Promise<{ value?: undefined; done: true }>((r) => setTimeout(() => r({ done: true }), end - Date.now()))]);
+      if (chunk.value) text += decoder.decode(chunk.value);
+    }
+    return pattern.test(text);
+  };
+  assert.ok(await readUntil(/data: \{"catalog":\d+/, 5000), 'first message');
+  const first = Number(text.match(/"catalog":(\d+)/)![1]);
+  // A sale changes the catalogue (stock): the stream says so.
+  await placeTestOrder('0507000099');
+  assert.ok(await readUntil(new RegExp(`"catalog":(?!${first}\\b)\\d+`), 6000), 'change reported');
+  controller.abort();
+});
+
+test('exchange rates endpoint answers (empty until the server has fetched them)', { skip: !hasBuild }, async () => {
+  const res = await fetch(`${BASE}/api/rates`);
+  assert.equal(res.status, 200);
+  assert.ok('rates' in (await res.json()));
 });

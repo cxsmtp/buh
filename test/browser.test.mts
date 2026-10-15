@@ -131,7 +131,9 @@ test('international numbers are offered email instead of a code', { skip }, asyn
 
 test('admin: one-time password, forced change, then the hub opens with its version', { skip }, async () => {
   const page = await browser.newPage({ viewport: { width: 1280, height: 900 } });
+  const checked = page.waitForResponse((r) => r.url().endsWith('/api/admin/session'));
   await page.goto(server.base, { waitUntil: 'domcontentloaded' });
+  await checked;
   await page.locator('header button:has-text("Admin Hub")').click();
   await page.locator('input[type=email]').fill('admin@beautifuluaehome.com');
   await page.locator('input[autocomplete=current-password]').fill('definitely-wrong');
@@ -260,7 +262,9 @@ test('the shop and the admin hub share one store: a customer order reaches the o
   // 2. The owner, in a different browser, sees it and books the courier.
   const ctx = await browser.newContext({ viewport: { width: 1280, height: 900 } });
   const admin = await ctx.newPage();
+  const adminChecked = admin.waitForResponse((r) => r.url().endsWith('/api/admin/session'));
   await admin.goto(server.base, { waitUntil: 'domcontentloaded' });
+  await adminChecked; // hydrated: the click opens the sign-in
   await admin.locator('header button:has-text("Admin Hub")').click();
   await admin.locator('input[type=email]').fill('admin@beautifuluaehome.com');
   await admin.locator('input[autocomplete=current-password]').fill('Browser-Owner-Pass-1');
@@ -279,7 +283,8 @@ test('the shop and the admin hub share one store: a customer order reaches the o
   await admin.getByRole('status').filter({ hasText: /Backup/ }).waitFor();
 
   // 3. Bank details saved in the admin show at checkout.
-  await admin.getByRole('button', { name: /Logo & Marquee/ }).click();
+  await admin.getByRole('button', { name: /Settings/ }).first().click();
+  await admin.getByRole('button', { name: /Branding & bank/ }).click();
   await admin.getByPlaceholder('Emirates NBD').fill('Mashreq');
   await admin.getByPlaceholder('BEAUTIFUL UAE HOME TEXTILES LLC').fill('BUH TEXTILES LLC');
   await admin.getByPlaceholder('AE07 0331 2345 6789 0123 456').fill('AE07 0331 2345 6789 0123 456');
@@ -362,7 +367,7 @@ test('regression: a price changed during checkout is shown before the customer i
   }
 });
 
-test('regression: every admin tab fits a 375 px phone, SMS settings included', { skip }, async () => {
+test('regression: every admin tab and settings section fits a 375 px phone, SMS settings included', { skip }, async () => {
   const login = await fetch(`${server.base}/api/admin/login`, {
     method: 'POST',
     headers: { 'content-type': 'application/json', origin: server.base },
@@ -372,11 +377,14 @@ test('regression: every admin tab fits a 375 px phone, SMS settings included', {
   const ctx = await browser.newContext({ viewport: { width: 375, height: 900 } });
   await ctx.addCookies([{ name, value, url: server.base }]);
   const page = await ctx.newPage();
-  await page.goto(server.base, { waitUntil: 'networkidle' }); // the session check has answered
+  // Not "networkidle": the live-updates stream stays open. Wait for the admin session check instead.
+  const sessionChecked = page.waitForResponse((r) => r.url().endsWith('/api/admin/session'));
+  await page.goto(server.base, { waitUntil: 'domcontentloaded' });
+  await sessionChecked;
   await page.locator('header button:has-text("Admin Hub")').click();
   await page.getByRole('status').filter({ hasText: /Backup/ }).waitFor(); // admin data loaded
   const nav = page.getByRole('navigation', { name: 'Admin sections' });
-  for (const tab of ['Orders', 'Stock', 'CRM', 'Couriers', 'Brand', 'SMS']) {
+  for (const tab of ['Orders', 'Stock', 'CRM', 'Settings']) {
     // A real tap at the button's centre (the bar is fixed to the bottom of the screen).
     const box = (await nav.locator('button', { hasText: new RegExp(`^${tab}`) }).boundingBox())!;
     await page.mouse.click(box.x + box.width / 2, box.y + box.height / 2);
@@ -384,6 +392,13 @@ test('regression: every admin tab fits a 375 px phone, SMS settings included', {
     await page.waitForTimeout(200);
     assert.deepEqual(await overflow(page), [], `${tab} tab`);
   }
+  // Every settings section fits too, including the SMS gateway.
+  for (const section of ['Store & contact', 'Catalogue', 'Branding & bank', 'Festival themes', 'Phone verification', 'Couriers', 'System & backups']) {
+    await page.getByRole('navigation', { name: 'Settings sections' }).getByRole('button', { name: section }).click();
+    await page.waitForTimeout(200);
+    assert.deepEqual(await overflow(page), [], `${section} settings`);
+  }
+  await page.getByRole('navigation', { name: 'Settings sections' }).getByRole('button', { name: 'Phone verification' }).click();
   await page.getByText('Choose SMS Gateway Provider').waitFor();
   await ctx.close();
 });

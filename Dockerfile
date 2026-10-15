@@ -47,6 +47,8 @@ COPY --from=builder /app/.next/standalone ./
 COPY --from=builder /app/.next/static ./.next/static
 # Restore tool (node scripts/restore-backup.mjs) inside the container.
 COPY --from=builder /app/scripts/restore-backup.mjs ./scripts/restore-backup.mjs
+# Database snapshot the updater takes before switching versions (node scripts/backup-now.mjs).
+COPY --from=builder /app/scripts/backup-now.mjs ./scripts/backup-now.mjs
 
 USER nextjs
 

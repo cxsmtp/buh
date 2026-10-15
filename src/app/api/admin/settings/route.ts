@@ -11,6 +11,10 @@ export async function GET(req: Request) {
       bank: adminView('bank'),
       courier: adminView('courier'),
       sms: adminView('sms'),
+      catalog: adminView('catalog'),
+      store: adminView('store'),
+      theme: adminView('theme'),
+      email: adminView('email'),
     });
   } catch (err) {
     return handleRouteError(err, 'admin/settings');

@@ -2,7 +2,10 @@
 
 import React, { useState } from 'react';
 import { Product, BedProfileMeasurement } from '@/types';
-import { X, Sparkles, Check, Truck, ShieldCheck, Ruler, Layers, ChevronRight, MessageCircle } from 'lucide-react';
+import { formatAed, toFils } from '@/lib/money';
+import { piecesLeft, useShop, whatsappLink } from '@/lib/client/shop';
+import { LocalPrice } from '@/lib/client/currency';
+import { X, Sparkles, Check, Truck, ShieldCheck, Ruler, Layers, ChevronRight, MessageCircle, Share2 } from 'lucide-react';
 
 interface ProductDetailModalProps {
   product: Product | null;
@@ -23,8 +26,14 @@ const ProductDetailContent: React.FC<ProductDetailModalProps & { product: Produc
   onAddToCart,
 }) => {
 
-  // Selected Profile
-  const initialProfile = product.profiles.find((p) => p.id === product.defaultProfileId) || product.profiles[0];
+  const { store, lowStockThreshold, supportEmail } = useShop();
+  // Start on the default size if it is in stock, else the first size that is.
+  const inStock = (id: string) => piecesLeft(product, id) > 0;
+  const initialProfile =
+    product.profiles.find((p) => p.id === product.defaultProfileId && inStock(p.id)) ||
+    product.profiles.find((p) => inStock(p.id)) ||
+    product.profiles.find((p) => p.id === product.defaultProfileId) ||
+    product.profiles[0];
   const [selectedProfile, setSelectedProfile] = useState<BedProfileMeasurement>(initialProfile);
   const [selectedColor, setSelectedColor] = useState<string>(product.colors[0]?.name || 'Standard');
   const [quantity, setQuantity] = useState<number>(1);
@@ -39,20 +48,39 @@ const ProductDetailContent: React.FC<ProductDetailModalProps & { product: Produc
   const currentMainImage = allImages[activeImageIndex] || product.featuredImage;
 
   // Calculate final unit price based on selected size profile
-  const unitPrice = product.price + (selectedProfile.priceDelta || 0);
-  const totalPrice = unitPrice * quantity;
+  const unitFils = toFils(product.price) + toFils(selectedProfile.priceDelta || 0);
+  const unitPrice = formatAed(unitFils);
+  const left = piecesLeft(product, selectedProfile.id);
+  const soldOut = left === 0;
+  const qty = Math.min(quantity, Math.max(1, left));
+  const totalPrice = formatAed(unitFils * qty);
 
   const handleAddToCart = () => {
-    onAddToCart(product, selectedProfile, selectedColor, quantity);
+    if (soldOut) return;
+    onAddToCart(product, selectedProfile, selectedColor, qty);
     onClose();
   };
 
-  const handleWhatsAppInquiry = () => {
-    const text = encodeURIComponent(
-      `Hello Beautiful UAE Home! I have a question about ${product.title} in ${selectedProfile.name} (AED ${unitPrice}). Can you assist me?`
-    );
-    window.open(`https://wa.me/971508294110?text=${text}`, '_blank');
+  const inquiry = whatsappLink(
+    store,
+    soldOut
+      ? `Hello! ${product.title} in ${selectedProfile.name} shows as sold out. Will it come back, or is there something similar?`
+      : `Hello! I have a question about ${product.title} in ${selectedProfile.name} (AED ${unitPrice}).`
+  );
+  // Share this product: the phone's share sheet, or WhatsApp.
+  const share = async () => {
+    const url = `${window.location.origin}/p/${encodeURIComponent(product.id)}`;
+    try {
+      if (navigator.share) {
+        await navigator.share({ title: product.title, text: `${product.title} · AED ${unitPrice}`, url });
+        return;
+      }
+    } catch {
+      return; // the customer closed the share sheet
+    }
+    window.open(`https://wa.me/?text=${encodeURIComponent(`${product.title} · AED ${unitPrice}\n${url}`)}`, '_blank', 'noopener');
   };
+  const emailInquiry = `mailto:${supportEmail}?subject=${encodeURIComponent(`${product.title} (${selectedProfile.name})`)}`;
 
   return (
     <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center bg-black/60 backdrop-blur-sm p-0 sm:p-4 md:p-6 overflow-y-auto">
@@ -183,16 +211,30 @@ const ProductDetailContent: React.FC<ProductDetailModalProps & { product: Produc
                 <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
                   {product.profiles.map((profile) => {
                     const isSelected = selectedProfile.id === profile.id;
+                    const pieces = piecesLeft(product, profile.id);
                     return (
                       <button
                         key={profile.id}
-                        onClick={() => setSelectedProfile(profile)}
+                        type="button"
+                        aria-pressed={isSelected}
+                        aria-label={`${profile.name}${pieces === 0 ? ', sold out' : pieces <= lowStockThreshold ? `, only ${pieces} left` : ''}`}
+                        onClick={() => {
+                          setSelectedProfile(profile);
+                          setQuantity(1);
+                        }}
                         className={`p-2.5 rounded-xl text-left border transition-all relative ${
                           isSelected
                             ? 'border-[#0f1c2e] bg-[#0f1c2e] text-white shadow-md ring-2 ring-[#c5a059]/40'
+                            : pieces === 0
+                            ? 'border-stone-200 bg-stone-50 text-stone-400'
                             : 'border-stone-200 bg-white text-stone-800 hover:border-stone-400'
                         }`}
                       >
+                        {pieces === 0 ? (
+                          <span className="absolute -top-2 right-2 text-[9px] font-bold uppercase bg-stone-500 text-white px-1.5 rounded">Sold out</span>
+                        ) : pieces <= lowStockThreshold ? (
+                          <span className="absolute -top-2 right-2 text-[9px] font-bold uppercase bg-amber-500 text-white px-1.5 rounded">Only {pieces} left</span>
+                        ) : null}
                         <div className="flex items-center justify-between mb-1">
                           <span className="text-xs font-bold">{profile.name.split(' ')[0]}</span>
                           {isSelected ? (
@@ -300,29 +342,46 @@ const ProductDetailContent: React.FC<ProductDetailModalProps & { product: Produc
                   <span className="text-xs text-stone-600 font-medium">Quantity:</span>
                   <div className="flex items-center border border-stone-300 rounded-lg overflow-hidden bg-white">
                     <button
-                      onClick={() => setQuantity(Math.max(1, quantity - 1))}
-                      className="px-3 py-1 text-sm font-bold text-stone-600 hover:bg-stone-100"
+                      type="button"
+                      onClick={() => setQuantity(Math.max(1, qty - 1))}
+                      disabled={qty <= 1}
+                      aria-label="One fewer"
+                      className="px-3 py-1 text-sm font-bold text-stone-600 hover:bg-stone-100 disabled:opacity-30"
                     >
                       -
                     </button>
-                    <span className="px-3.5 py-1 text-xs font-bold text-stone-900">{quantity}</span>
+                    <span className="px-3.5 py-1 text-xs font-bold text-stone-900" aria-live="polite">{soldOut ? 0 : qty}</span>
                     <button
-                      onClick={() => setQuantity(quantity + 1)}
-                      className="px-3 py-1 text-sm font-bold text-stone-600 hover:bg-stone-100"
+                      type="button"
+                      onClick={() => setQuantity(Math.min(left, qty + 1))}
+                      disabled={qty >= left}
+                      aria-label="One more"
+                      className="px-3 py-1 text-sm font-bold text-stone-600 hover:bg-stone-100 disabled:opacity-30"
                     >
                       +
                     </button>
                   </div>
                 </div>
 
-                {/* WhatsApp Quick Ask */}
                 <button
-                  onClick={handleWhatsAppInquiry}
+                  type="button"
+                  onClick={() => void share()}
+                  className="flex items-center gap-1.5 text-xs text-stone-700 bg-white hover:bg-stone-50 border border-stone-300 px-3 py-2 rounded-xl font-medium"
+                >
+                  <Share2 className="w-3.5 h-3.5" />
+                  <span>Share</span>
+                </button>
+
+                {/* WhatsApp Quick Ask (the shop's number from Settings), else email */}
+                <a
+                  href={inquiry ?? emailInquiry}
+                  target="_blank"
+                  rel="noopener noreferrer"
                   className="flex items-center gap-1.5 text-xs text-emerald-700 bg-emerald-50 hover:bg-emerald-100 border border-emerald-300 px-3.5 py-2 rounded-xl transition-colors font-medium"
                 >
                   <MessageCircle className="w-3.5 h-3.5" />
-                  <span>Ask on WhatsApp</span>
-                </button>
+                  <span>{inquiry ? 'Ask on WhatsApp' : 'Ask by email'}</span>
+                </a>
               </div>
 
               {/* Delivery Note */}
@@ -343,16 +402,29 @@ const ProductDetailContent: React.FC<ProductDetailModalProps & { product: Produc
               <div>
                 <div className="text-[10px] text-stone-500 uppercase font-semibold">Total Price</div>
                 <div className="text-2xl font-bold text-[#0f1c2e]">AED {totalPrice}</div>
+                <LocalPrice aed={Number(totalPrice)} className="text-xs block" />
                 <div className="text-[10px] text-emerald-600 font-semibold">Complimentary UAE Delivery</div>
               </div>
 
-              <button
-                onClick={handleAddToCart}
-                className="flex-1 bg-gradient-to-r from-[#c5a059] to-[#dfc082] hover:brightness-105 active:scale-95 text-[#0f1c2e] font-bold text-sm py-3.5 px-6 rounded-xl shadow-lg flex items-center justify-center gap-2 transition-all"
-              >
-                <span>Add to Bag ({selectedProfile.name.split(' ')[0]})</span>
-                <ChevronRight className="w-4 h-4" />
-              </button>
+              {soldOut ? (
+                <a
+                  href={inquiry ?? emailInquiry}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="flex-1 bg-stone-200 text-stone-700 font-bold text-sm py-3.5 px-6 rounded-xl flex items-center justify-center gap-2"
+                >
+                  <span>{selectedProfile.name.split(' ')[0]} sold out · Ask us</span>
+                </a>
+              ) : (
+                <button
+                  type="button"
+                  onClick={handleAddToCart}
+                  className="flex-1 bg-gradient-to-r from-[#c5a059] to-[#dfc082] hover:brightness-105 active:scale-95 text-[#0f1c2e] font-bold text-sm py-3.5 px-6 rounded-xl shadow-lg flex items-center justify-center gap-2 transition-all"
+                >
+                  <span>Add to Bag ({selectedProfile.name.split(' ')[0]})</span>
+                  <ChevronRight className="w-4 h-4" />
+                </button>
+              )}
             </div>
           </div>
         </div>

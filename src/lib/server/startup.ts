@@ -1,6 +1,8 @@
 import { ensureAdminAccount } from './adminAuth';
 import { MIN_PASSPHRASE_LENGTH, emailConfigured, startBackupSchedule } from './backup';
 import { getDb } from './db';
+import { startMonitor } from './monitor';
+import { startFestivalRefresh } from './theme';
 import { logEvent } from './log';
 import { liveGateways } from '@/lib/otpService';
 
@@ -15,11 +17,13 @@ export async function onStartup() {
   try {
     getDb(); // open (and migrate) the database now, not on the first customer's request
     startBackupSchedule();
+    startFestivalRefresh();
+    startMonitor();
   } catch (err) {
     logEvent('error', 'startup_failed', { error: err instanceof Error ? err.message : String(err) });
   }
   if (process.env.NODE_ENV === 'production' && !emailConfigured()) {
-    console.error('!! Backups are not emailed: set SMTP_HOST, SMTP_USER, SMTP_PASS and BACKUP_EMAIL (see HOSTINGER_DEPLOYMENT_GUIDE.md).');
+    console.error('!! Backups are not emailed: set up email in Admin Hub → Settings → Email (or SMTP_HOST, SMTP_USER, SMTP_PASS and BACKUP_EMAIL in .env.production).');
   }
   const passphrase = process.env.BACKUP_PASSPHRASE || '';
   if (process.env.NODE_ENV === 'production' && passphrase.length < MIN_PASSPHRASE_LENGTH) {
@@ -31,7 +35,15 @@ export async function onStartup() {
   }
 
   const gateways = await liveGateways().catch(() => ({}) as Awaited<ReturnType<typeof liveGateways>>);
-  const hasGateway = Boolean(gateways.twilio || gateways.infobip || gateways.webhook);
+  const { phoneVerificationConfig } = await import('./settings');
+  const firebaseOn = (() => {
+    try {
+      return phoneVerificationConfig().method === 'firebase';
+    } catch {
+      return false;
+    }
+  })();
+  const hasGateway = Boolean(gateways.twilio || gateways.infobip || gateways.webhook) || firebaseOn;
   if (process.env.NODE_ENV === 'production' && !hasGateway && process.env.OTP_DEV_MODE !== 'true') {
     console.error(
       [
