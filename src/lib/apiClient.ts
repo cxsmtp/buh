@@ -22,7 +22,7 @@ export function getJson<T = Record<string, unknown>>(url: string): Promise<ApiRe
   return sendJson<T>('GET', url);
 }
 
-export async function sendJson<T = Record<string, unknown>>(method: 'GET' | 'POST' | 'PUT' | 'PATCH', url: string, body?: unknown): Promise<ApiResult<T>> {
+export async function sendJson<T = Record<string, unknown>>(method: 'GET' | 'POST' | 'PUT' | 'PATCH' | 'DELETE', url: string, body?: unknown): Promise<ApiResult<T>> {
   try {
     const res = await fetch(url, {
       method,

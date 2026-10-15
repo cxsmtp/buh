@@ -5,6 +5,9 @@
  * phone width. Skipped without a build or Playwright.
  */
 import assert from 'node:assert/strict';
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
 import zlib from 'node:zlib';
 import { after, before, test } from 'node:test';
 import { hasBuild, startServer, type RunningServer } from './server.mjs';
@@ -17,10 +20,12 @@ let server: RunningServer;
 let browser: import('playwright').Browser;
 let cookie = '';
 const OWNER_PASSWORD = 'Feature-Owner-Pass-1';
+// The updater's status folder (empty: "not running" until a test writes a status).
+const updaterDir = fs.mkdtempSync(path.join(os.tmpdir(), 'buh-updater-status-'));
 
 before(async () => {
   if (skip) return;
-  server = await startServer();
+  server = await startServer({ UPDATER_STATUS_DIR: path.join(updaterDir, 'status'), UPDATER_CONTROL_DIR: path.join(updaterDir, 'control') });
   browser = await pw!.chromium.launch();
   // First admin sign-in: the one-time password from the log, then our own.
   const h = { 'content-type': 'application/json', origin: server.base };
@@ -268,10 +273,37 @@ test('version badge: bottom left for everyone; for the owner it opens Settings â
     await page.getByText('podman pull ghcr.io/cxsmtp/buh:latest', { exact: true }).waitFor();
     assert.equal(await page.getByText(/^podman run --replace .* ghcr\.io\/cxsmtp\/buh:latest$/).count(), 1);
     assert.equal(await page.getByText(/docker compose run/).isVisible(), false, 'the Docker Compose command is folded away');
+    // And the one line that turns on automatic updates for a single Podman container.
+    await page.getByText('scripts\\podman-autoupdate.bat beautifuluaehome 443 beautifuluaehome-data', { exact: true }).waitFor();
     assert.equal(await page.getByText('Running', { exact: true }).count(), 1);
     assert.deepEqual(await overflow(page), [], `no sideways scroll at ${width}px`);
     assert.deepEqual(errors, []);
     await ctx.close();
+  }
+});
+
+test('Settings â†’ Versions with the single-container (Podman) updater: says so, and that a switch pauses the shop for a few seconds', { skip }, async () => {
+  fs.mkdirSync(path.join(updaterDir, 'status'), { recursive: true });
+  fs.mkdirSync(path.join(updaterDir, 'control'), { recursive: true });
+  fs.writeFileSync(
+    path.join(updaterDir, 'status', 'status.json'),
+    JSON.stringify({ updatedAt: new Date().toISOString(), mode: 'single', running: '2.0.0', lastGood: '2.0.0', previous: '', onServer: ['2.0.0'], autoUpdateMinutes: 15, lastRequest: { request: '', result: '', message: '', at: '' } })
+  );
+  try {
+    for (const width of [375, 1280]) {
+      const { ctx, page, errors } = await adminPage(width);
+      await page.getByRole('button', { name: /^BUH-\d{2}\.\d{2}\.\d{2}$/ }).click();
+      await page.getByText(/Automatic updates: Podman \(one container\), checked every 15 minutes; a switch closes the shop for a few seconds/).waitFor();
+      await page.getByRole('button', { name: 'Update to the latest' }).waitFor();
+      // The old hand routine would fight the updater: the page says so.
+      await page.getByText(/not with podman pull\/stop\/rm\/run; to do it by hand, stop the updater first/).waitFor();
+      assert.equal(await page.getByText(/Automatic updates are not running/).count(), 0);
+      assert.deepEqual(await overflow(page), [], `no sideways scroll at ${width}px`);
+      assert.deepEqual(errors, []);
+      await ctx.close();
+    }
+  } finally {
+    fs.rmSync(path.join(updaterDir, 'status', 'status.json'), { force: true });
   }
 });
 

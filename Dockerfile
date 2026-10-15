@@ -49,6 +49,9 @@ COPY --from=builder /app/.next/static ./.next/static
 COPY --from=builder /app/scripts/restore-backup.mjs ./scripts/restore-backup.mjs
 # Database snapshot the updater takes before switching versions (node scripts/backup-now.mjs).
 COPY --from=builder /app/scripts/backup-now.mjs ./scripts/backup-now.mjs
+# The updater script, for scripts/podman-autoupdate.bat to copy into the updater's volume
+# (single-container mode). The shop never runs it: it has no container engine access.
+COPY --from=builder /app/deploy/updater ./updater
 
 USER nextjs
 

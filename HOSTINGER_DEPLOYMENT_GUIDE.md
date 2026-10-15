@@ -42,7 +42,7 @@ Everything the shop stores lives in one Docker volume and is backed up every 12 
    ```bash
    cp .env.production.example .env.production && nano .env.production
    ```
-   - Fill in `DOMAIN`, `ACME_EMAIL`, `NEXT_PUBLIC_APP_URL` and `NEXT_PUBLIC_SUPPORT_EMAIL`.
+   - Fill in `DOMAIN`, `ACME_EMAIL`, `NEXT_PUBLIC_APP_URL` and `NEXT_PUBLIC_SUPPORT_EMAIL`. `NEXT_PUBLIC_APP_URL` must be the `https://` address you open the shop at: Admin Hub passkeys only work there.
    - **Fill in the backup email (`SMTP_*`, `BACKUP_EMAIL`).**
    - Set a `BACKUP_PASSPHRASE` of at least 12 characters, and store it in your password manager. Without it, customer data is emailed unencrypted.
 6. **Start** (pulls the ready-made image `ghcr.io/cxsmtp/buh:latest`):
@@ -58,6 +58,7 @@ Everything the shop stores lives in one Docker volume and is backed up every 12 
 
 ## 2. Go-live checklist (in the Admin Hub)
 
+- [ ] **⚙️ Settings → Passkeys & recovery codes:** add a passkey on your phone, and create recovery codes (Download or Print them, keep them safe). They get you back in if you forget the password, even without email.
 - [ ] **⚙️ Settings → Phone verification:** enter your Twilio or Infobip keys, **Send test** to your own mobile, then **Save**.
   - Or choose **Firebase Phone Auth** (Blaze plan, billed per SMS; see docs/user-guide.md) and test with a checkout on your phone.
   - Checkout needs a working SMS gateway: customers cannot order without verifying their number.
@@ -130,7 +131,7 @@ On the server (this replaces the live data; the current data is kept aside in `r
    docker compose start updater
    ```
 
-Then sign in with the new one-time password from `docker compose logs app-blue`, and re-enter the courier and SMS keys. Keys and the admin account are deliberately not in backups.
+Then sign in with the new one-time password from `docker compose logs app-blue`, and re-enter the courier and SMS keys. Restored passkeys are switched off and old recovery codes no longer work (the backup may be older than a passkey you removed): follow the banner in the Admin Hub to keep your passkeys and create new codes. Keys and the admin account are deliberately not in backups.
 
 To check a backup on your own computer (Node 20+, in a checkout of this repository after `npm ci`):
 
@@ -264,6 +265,61 @@ Once, at a quiet time. The shop keeps serving except for a second or two while C
    ```
 
 The version (`BUH-xx.xx.xx`) shows next to the Admin Hub title.
+
+### Podman on Windows (one container)
+
+A shop that runs as one Podman container (no Caddy, no second copy) gets the same updater in single-container mode: it checks for a new version every 15 minutes, saves the database first, tries the new version beside the shop (same data, no port) and switches only when it answers; Settings → Versions can update or switch versions; a shop that stops is started again. One difference: **at the switch the shop is closed for a few seconds** (the old container stops, the new one takes the port). If the new container does not answer on the port, the old one is put back and an alert is written.
+
+Turn it on once, in the shop folder on that computer, with your container name, port and data volume (`podman ps` shows them; these are the defaults):
+
+```bat
+scripts\podman-autoupdate.bat beautifuluaehome 443 beautifuluaehome-data
+```
+
+For plain-http use on the same computer (test mode), add the settings as a fourth argument:
+
+```bat
+scripts\podman-autoupdate.bat beautifuluaehome 443 beautifuluaehome-data "TZ=Asia/Dubai INSECURE_COOKIES=1 OTP_DEV_MODE=true"
+```
+
+The script finds Podman's socket inside the Podman machine, creates the updater's volumes, re-creates the shop container with two more volumes (requests and status for Settings → Versions), and starts the updater as `beautifuluaehome-updater` with `--restart=always`. The re-created container keeps the image, the data volume, the port and the container's own settings (every `-e`, secrets included: they are kept in a file in the updater's volume that only the updater can read, and never written to its log); the shop pauses for a few seconds. The port argument is used only for a new shop. A fifth argument sets the minutes between checks (`0` = only when you ask). Run it again to change a setting or to get a newer updater.
+
+It changes nothing, and says why, when:
+
+- the container keeps its data in another volume (it prints the one it found: run it again with that name);
+- another container also uses the data volume (two shops must never share one database: pass that container's name if it is the shop, or remove it);
+- the container has something the updater cannot carry over, such as a folder or another volume mounted, or a port other than the shop's (it lists them; start the shop without them first).
+
+**While automatic updates are on, update with "Update to the latest" in Settings → Versions** (or `update-now` below), not with the old `podman pull` / `podman run --replace` commands. If you do start the shop by hand, the updater notices within a minute and sets the container up again (same image and settings, a few seconds' pause), once; to do it all by hand, stop the updater first.
+
+- The updater's log:
+  ```bat
+  podman logs -f beautifuluaehome-updater
+  ```
+- What runs, the last good and previous versions:
+  ```bat
+  podman exec beautifuluaehome-updater updater-status
+  ```
+- Update now:
+  ```bat
+  podman exec beautifuluaehome-updater update-now
+  ```
+- Roll back to the version before (it was kept as the stopped container `beautifuluaehome-previous`):
+  ```bat
+  podman exec beautifuluaehome-updater rollback
+  ```
+- Turn automatic updates off (the shop keeps running):
+  ```bat
+  podman rm -f beautifuluaehome-updater
+  ```
+
+To stop the shop on purpose, stop the updater first (`podman stop beautifuluaehome-updater`), or it starts the shop again. Stopping the updater (or running the script again) lets a switch that is under way finish, up to 10 minutes; a new one is not started.
+
+**After Windows restarts.** The Podman machine does not start with Windows by itself: run `podman machine start` (or let Podman Desktop start it at login). `--restart=always` brings a container back only through `podman-restart.service` inside the machine, so the script turns that on (rootless, the default: `loginctl enable-linger` and the user service; rootful: the system service). If it could not, it says so; then, after a restart, run `podman machine start` and `podman start beautifuluaehome-updater`, and the updater starts the shop.
+
+A shop on a version before BUH-02.00.00 has no database snapshot tool, so the updater does not switch away from it: update it once by hand (the two Podman commands in Settings → Versions). If the image is private, sign in once with `podman login ghcr.io`. The updater controls Podman through its socket; [docs/security.md](docs/security.md) explains the trade-off.
+
+**Not yet tried on a real Windows Podman machine:** the script and this set-up were tested against Docker and Podman 4.9 on Linux (the same steps and checks, through the same Docker-compatible API), not on Windows. In particular, finding the socket path, the `podman machine ssh` step for restarts, and pulling a private image with the machine's `podman login` have not been seen working there.
 
 ## 6. Logs and health
 

@@ -192,7 +192,7 @@ function AdminAccountCard() {
         </p>
       ) : (
         <form onSubmit={(e) => void save(e)} className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-          <p className="sm:col-span-2 text-xs text-stone-500">The email you sign in with. &ldquo;Forgot password?&rdquo; sends the reset link here, so use a mailbox you read.</p>
+          <p className="sm:col-span-2 text-xs text-stone-500">The email you sign in with. &ldquo;Forgot password?&rdquo; sends the reset link here, so use a mailbox you read. For a way in without email, add a passkey or recovery codes in &ldquo;Passkeys &amp; recovery codes&rdquo;.</p>
           <div>
             <label className={label} htmlFor="acct-email">Sign-in email</label>
             <input id="acct-email" className={field} type="email" required autoComplete="username" value={email} maxLength={254} onChange={(e) => setEmail(e.target.value)} />

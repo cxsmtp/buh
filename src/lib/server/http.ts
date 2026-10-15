@@ -134,6 +134,12 @@ export function assertSameOrigin(req: Request): void {
   }
 }
 
+/** Refuse a body carrying any field not on the list (a typo or a probe gets a clear 400, not silence). */
+export function allowFields(body: Record<string, unknown>, allowed: readonly string[]): void {
+  const extra = Object.keys(body).filter((k) => !allowed.includes(k));
+  if (extra.length) throw new HttpError(400, `Unexpected field: ${extra[0].slice(0, 40)}.`);
+}
+
 export function str(value: unknown, field: string, max: number, { required = true, trim = true } = {}): string {
   if (value === undefined || value === null || value === '') {
     if (required) throw new HttpError(400, `${field} is required.`);

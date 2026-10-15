@@ -28,13 +28,13 @@ export async function POST(req: Request) {
     const target = str(body.target, 'Version', 20);
     const line = requestSwitch(target);
     audit('system.version_switch_requested', { by: session.email, request: line, from: process.env.NEXT_PUBLIC_APP_VERSION, ip: clientIp(req) });
-    return json({
-      success: true,
-      message:
-        target === 'latest'
-          ? 'Asked for the latest version. The new copy starts beside this one and takes over when healthy (about a minute); this page then reloads by itself.'
-          : `Asked to switch to ${labelOf(target)}. It starts beside this one and takes over when healthy (about a minute); a database snapshot is taken first.`,
-    });
+    const what = target === 'latest' ? 'Asked for the latest version.' : `Asked to switch to ${labelOf(target)}; a database snapshot is taken first.`;
+    // One container (Podman): the new version is tried beside this one, then replaces it with a short pause.
+    const how =
+      updaterStatus()?.mode === 'single'
+        ? 'It is tried beside this one first (about a minute), then replaces it: the shop is closed for a few seconds. Reload this page afterwards.'
+        : 'The new copy starts beside this one and takes over when healthy (about a minute); this page then reloads by itself.';
+    return json({ success: true, message: `${what} ${how}` });
   } catch (err) {
     return handleRouteError(err, 'admin/versions/switch');
   }

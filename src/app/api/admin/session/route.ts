@@ -10,6 +10,8 @@ export async function GET() {
       authenticated: true,
       email: session.email,
       mustChangePassword: session.mustChangePassword,
+      // Signed in with a recovery code: the next step is choosing a new password.
+      recoveryPending: session.recoveryPending,
       expiresAt: session.expiresAt,
     });
   } catch (err) {
