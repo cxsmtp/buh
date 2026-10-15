@@ -5,6 +5,8 @@ REM
 REM   scripts\podman-autoupdate.bat [NAME] [PORT] [DATA-VOLUME] ["KEY=VALUE KEY=VALUE"] [MINUTES]
 REM
 REM Defaults: beautifuluaehome 443 beautifuluaehome-data "TZ=Asia/Dubai" 15
+REM An existing container keeps its own port and its own settings (-e ..., secrets too: they
+REM are kept in the updater's own volume, readable only by it); PORT is for a new shop.
 REM Plain-http use on this computer (test mode):
 REM   scripts\podman-autoupdate.bat beautifuluaehome 443 beautifuluaehome-data "TZ=Asia/Dubai INSECURE_COOKIES=1 OTP_DEV_MODE=true"
 REM
@@ -14,9 +16,12 @@ REM   2. pulls the shop image and the updater's image (the docker command-line t
 REM   3. checks the data volume: the shop keeps the SAME one, never a new, empty one;
 REM   4. creates the updater's volumes and copies the updater script out of the shop image;
 REM   5. re-creates the shop container with two more volumes (requests from Settings -> Versions,
-REM      and the updater's status): same image, same data. The shop pauses for a few seconds;
-REM      if the new container does not answer, the old one is put back;
-REM   6. starts the updater container (NAME-updater), which restarts with Podman.
+REM      and the updater's status): same image, data, port and settings. The shop pauses for a
+REM      few seconds; if the new container does not answer, the old one is put back. It refuses
+REM      (and changes nothing) if the container has something it cannot carry over, such as
+REM      another folder mounted, and lists it;
+REM   6. starts the updater container (NAME-updater, --restart=always);
+REM   7. asks Podman inside the machine to start it again when the machine starts.
 REM The updater can control Podman through the socket: see docs\security.md.
 
 SET "IMAGE=ghcr.io/cxsmtp/buh:latest"
@@ -88,6 +93,13 @@ if errorlevel 1 (
 )
 
 :volumes
+REM Two shops must never share one database: no other container may use the data volume.
+SET "OTHERS="
+for /f "usebackq delims=" %%C in (`podman ps -a --filter volume^=%VOLUME% --format "{{.Names}}"`) do (
+    if /I not "%%C"=="%NAME%" if /I not "%%C"=="%NAME%-previous" if /I not "%%C"=="%NAME%-candidate" SET "OTHERS=!OTHERS! %%C"
+)
+if not "!OTHERS!"=="" goto :othercontainer
+
 echo.
 echo 4. Creating the updater's volumes and copying the updater script...
 for %%V in (%CONTROL% %STATUS% %STATE% %CODE%) do (
@@ -121,10 +133,30 @@ if errorlevel 1 (
 
 echo.
 echo 6. Starting the updater (%UPDATER%)...
-podman stop -t 180 %UPDATER% >nul 2>&1
+REM Up to 10 minutes: a switch under way is finished first (a new one is not started).
+podman stop -t 600 %UPDATER% >nul 2>&1
 podman rm -f %UPDATER% >nul 2>&1
-podman run -d --name %UPDATER% --restart=always --stop-timeout 180 !UPD! -e "SHOP_ENV=!SHOPENV!" %UPDATER_IMAGE% /updater/updater.sh daemon
+podman run -d --name %UPDATER% --restart=always --stop-timeout 600 !UPD! -e "SHOP_ENV=!SHOPENV!" %UPDATER_IMAGE% /updater/updater.sh daemon
 if errorlevel 1 goto :end
+
+echo.
+echo 7. Starting the updater again whenever the Podman machine starts...
+REM --restart=always alone does not survive a restart of the machine: podman-restart.service
+REM starts such containers at boot. Rootless (the default): a user service, with "linger" so it
+REM runs without a login. Rootful: the system service.
+SET "ROOTLESS="
+for /f "usebackq delims=" %%R in (`podman info --format "{{.Host.Security.Rootless}}"`) do SET "ROOTLESS=%%R"
+if /I "!ROOTLESS!"=="false" (
+    podman machine ssh "sudo systemctl enable podman-restart.service"
+) else (
+    podman machine ssh "loginctl enable-linger && systemctl --user enable podman-restart.service"
+)
+if errorlevel 1 (
+    echo [WARNING] This could not be set up. After Windows restarts, run these two lines:
+    echo    podman machine start
+    echo    podman start %UPDATER%
+    echo The updater then starts the shop by itself.
+)
 
 echo.
 echo Done. Automatic updates are on: checked every %MINUTES% minutes (0 = only when you ask),
@@ -135,6 +167,18 @@ echo   What runs:   podman exec %UPDATER% updater-status
 echo   Update now:  podman exec %UPDATER% update-now
 echo   Roll back:   podman exec %UPDATER% rollback
 echo   Turn off:    podman rm -f %UPDATER%
+echo While it runs, update with "Update to the latest" in Settings - Versions (or the line above),
+echo not with podman pull/stop/rm/run: stop the updater first if you must do it by hand.
+echo The Podman machine itself does not start with Windows: run "podman machine start" after a
+echo restart (or let Podman Desktop start it); the updater and the shop then come back.
+goto :end
+
+:othercontainer
+echo [ERROR] The data volume %VOLUME% is also used by:!OTHERS!
+echo Two shops must never share it, so nothing was changed. If that container IS your shop,
+echo run this again with its name, for example:
+echo    scripts\podman-autoupdate.bat ^<its-name^> %PORT% %VOLUME%
+echo Otherwise remove it first: podman rm ^<its-name^>
 goto :end
 
 :wrongvolume

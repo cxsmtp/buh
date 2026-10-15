@@ -282,7 +282,15 @@ For plain-http use on the same computer (test mode), add the settings as a fourt
 scripts\podman-autoupdate.bat beautifuluaehome 443 beautifuluaehome-data "TZ=Asia/Dubai INSECURE_COOKIES=1 OTP_DEV_MODE=true"
 ```
 
-The script finds Podman's socket inside the Podman machine, creates the updater's volumes, re-creates the shop container with two more volumes (requests and status for Settings → Versions; same image, same data volume, a few seconds' pause), and starts the updater as `beautifuluaehome-updater` with `--restart=always`. It refuses if the container keeps its data in another volume, and prints the one it found. Run it again to change a setting or to get a newer updater. A fifth argument sets the minutes between checks (`0` = only when you ask).
+The script finds Podman's socket inside the Podman machine, creates the updater's volumes, re-creates the shop container with two more volumes (requests and status for Settings → Versions), and starts the updater as `beautifuluaehome-updater` with `--restart=always`. The re-created container keeps the image, the data volume, the port and the container's own settings (every `-e`, secrets included: they are kept in a file in the updater's volume that only the updater can read, and never written to its log); the shop pauses for a few seconds. The port argument is used only for a new shop. A fifth argument sets the minutes between checks (`0` = only when you ask). Run it again to change a setting or to get a newer updater.
+
+It changes nothing, and says why, when:
+
+- the container keeps its data in another volume (it prints the one it found: run it again with that name);
+- another container also uses the data volume (two shops must never share one database: pass that container's name if it is the shop, or remove it);
+- the container has something the updater cannot carry over, such as a folder or another volume mounted, or a port other than the shop's (it lists them; start the shop without them first).
+
+**While automatic updates are on, update with "Update to the latest" in Settings → Versions** (or `update-now` below), not with the old `podman pull` / `podman run --replace` commands. If you do start the shop by hand, the updater notices within a minute and sets the container up again (same image and settings, a few seconds' pause), once; to do it all by hand, stop the updater first.
 
 - The updater's log:
   ```bat
@@ -305,7 +313,13 @@ The script finds Podman's socket inside the Podman machine, creates the updater'
   podman rm -f beautifuluaehome-updater
   ```
 
-To stop the shop on purpose, stop the updater first (`podman stop beautifuluaehome-updater`), or it starts the shop again. After Windows restarts, `podman machine start` brings the updater back, and the updater starts the shop. If the image is private, sign in once with `podman login ghcr.io`. The updater controls Podman through its socket; [docs/security.md](docs/security.md) explains the trade-off.
+To stop the shop on purpose, stop the updater first (`podman stop beautifuluaehome-updater`), or it starts the shop again. Stopping the updater (or running the script again) lets a switch that is under way finish, up to 10 minutes; a new one is not started.
+
+**After Windows restarts.** The Podman machine does not start with Windows by itself: run `podman machine start` (or let Podman Desktop start it at login). `--restart=always` brings a container back only through `podman-restart.service` inside the machine, so the script turns that on (rootless, the default: `loginctl enable-linger` and the user service; rootful: the system service). If it could not, it says so; then, after a restart, run `podman machine start` and `podman start beautifuluaehome-updater`, and the updater starts the shop.
+
+A shop on a version before BUH-02.00.00 has no database snapshot tool, so the updater does not switch away from it: update it once by hand (the two Podman commands in Settings → Versions). If the image is private, sign in once with `podman login ghcr.io`. The updater controls Podman through its socket; [docs/security.md](docs/security.md) explains the trade-off.
+
+**Not yet tried on a real Windows Podman machine:** the script and this set-up were tested against Docker and Podman 4.9 on Linux (the same steps and checks, through the same Docker-compatible API), not on Windows. In particular, finding the socket path, the `podman machine ssh` step for restarts, and pulling a private image with the machine's `podman login` have not been seen working there.
 
 ## 6. Logs and health
 

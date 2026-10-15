@@ -295,6 +295,8 @@ test('Settings → Versions with the single-container (Podman) updater: says so,
       await page.getByRole('button', { name: /^BUH-\d{2}\.\d{2}\.\d{2}$/ }).click();
       await page.getByText(/Automatic updates: Podman \(one container\), checked every 15 minutes; a switch closes the shop for a few seconds/).waitFor();
       await page.getByRole('button', { name: 'Update to the latest' }).waitFor();
+      // The old hand routine would fight the updater: the page says so.
+      await page.getByText(/not with podman pull\/stop\/rm\/run; to do it by hand, stop the updater first/).waitFor();
       assert.equal(await page.getByText(/Automatic updates are not running/).count(), 0);
       assert.deepEqual(await overflow(page), [], `no sideways scroll at ${width}px`);
       assert.deepEqual(errors, []);

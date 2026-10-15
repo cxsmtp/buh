@@ -107,6 +107,12 @@ export function VersionsCard() {
             Automatic updates{info.updater!.mode === 'single' ? ': Podman (one container), ' : ': '}
             {info.updater!.autoUpdateMinutes > 0 ? `checked every ${info.updater!.autoUpdateMinutes} minutes` : 'only when you ask'}
             {info.updater!.mode === 'single' ? '; a switch closes the shop for a few seconds (the new version is tried first, the database saved).' : '.'}
+            {info.updater!.mode === 'single' && (
+              <>
+                {' '}
+                Update with <strong>Update to the latest</strong>, not with podman pull/stop/rm/run; to do it by hand, stop the updater first (<code>podman stop beautifuluaehome-updater</code>).
+              </>
+            )}
             {info.pending && <strong className="text-amber-700"> A switch is waiting to start (within a minute).</strong>}
             {info.updater!.lastRequest.at && !info.pending && (
               <span className={info.updater!.lastRequest.result === 'ok' ? 'text-emerald-700' : info.updater!.lastRequest.result === 'working' ? 'text-amber-700 font-semibold' : 'text-red-700'}>
