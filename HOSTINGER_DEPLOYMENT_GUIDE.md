@@ -266,6 +266,47 @@ Once, at a quiet time. The shop keeps serving except for a second or two while C
 
 The version (`BUH-xx.xx.xx`) shows next to the Admin Hub title.
 
+### Podman on Windows (one container)
+
+A shop that runs as one Podman container (no Caddy, no second copy) gets the same updater in single-container mode: it checks for a new version every 15 minutes, saves the database first, tries the new version beside the shop (same data, no port) and switches only when it answers; Settings → Versions can update or switch versions; a shop that stops is started again. One difference: **at the switch the shop is closed for a few seconds** (the old container stops, the new one takes the port). If the new container does not answer on the port, the old one is put back and an alert is written.
+
+Turn it on once, in the shop folder on that computer, with your container name, port and data volume (`podman ps` shows them; these are the defaults):
+
+```bat
+scripts\podman-autoupdate.bat beautifuluaehome 443 beautifuluaehome-data
+```
+
+For plain-http use on the same computer (test mode), add the settings as a fourth argument:
+
+```bat
+scripts\podman-autoupdate.bat beautifuluaehome 443 beautifuluaehome-data "TZ=Asia/Dubai INSECURE_COOKIES=1 OTP_DEV_MODE=true"
+```
+
+The script finds Podman's socket inside the Podman machine, creates the updater's volumes, re-creates the shop container with two more volumes (requests and status for Settings → Versions; same image, same data volume, a few seconds' pause), and starts the updater as `beautifuluaehome-updater` with `--restart=always`. It refuses if the container keeps its data in another volume, and prints the one it found. Run it again to change a setting or to get a newer updater. A fifth argument sets the minutes between checks (`0` = only when you ask).
+
+- The updater's log:
+  ```bat
+  podman logs -f beautifuluaehome-updater
+  ```
+- What runs, the last good and previous versions:
+  ```bat
+  podman exec beautifuluaehome-updater updater-status
+  ```
+- Update now:
+  ```bat
+  podman exec beautifuluaehome-updater update-now
+  ```
+- Roll back to the version before (it was kept as the stopped container `beautifuluaehome-previous`):
+  ```bat
+  podman exec beautifuluaehome-updater rollback
+  ```
+- Turn automatic updates off (the shop keeps running):
+  ```bat
+  podman rm -f beautifuluaehome-updater
+  ```
+
+To stop the shop on purpose, stop the updater first (`podman stop beautifuluaehome-updater`), or it starts the shop again. After Windows restarts, `podman machine start` brings the updater back, and the updater starts the shop. If the image is private, sign in once with `podman login ghcr.io`. The updater controls Podman through its socket; [docs/security.md](docs/security.md) explains the trade-off.
+
 ## 6. Logs and health
 
 - Logs:

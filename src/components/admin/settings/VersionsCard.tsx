@@ -25,6 +25,8 @@ interface Info {
   changelog: Entry[];
   updater: {
     updatedAt: string;
+    /** single: one Podman container, a few seconds' pause at a switch; compose: blue/green, no pause. */
+    mode?: 'compose' | 'single';
     running: string;
     onServer: string[];
     autoUpdateMinutes: number;
@@ -41,6 +43,7 @@ const older = (a: string, b: string) => {
 };
 const IMAGE = 'ghcr.io/cxsmtp/buh';
 const PODMAN_RUN = `podman run --replace -d --name beautifuluaehome -p 443:3000 -v beautifuluaehome-data:/data -e TZ=Asia/Dubai --read-only --tmpfs /tmp --cap-drop ALL --security-opt no-new-privileges:true ${IMAGE}:latest`;
+const AUTOUPDATE_BAT = 'scripts\\podman-autoupdate.bat beautifuluaehome 443 beautifuluaehome-data';
 const label = (v: string) => `BUH-${v.split('.').map((n) => n.padStart(2, '0')).join('.')}`;
 
 export function VersionsCard() {
@@ -70,7 +73,8 @@ export function VersionsCard() {
 
   const switchTo = async (target: string) => {
     const what = target === 'latest' ? 'the latest version' : label(target);
-    if (!window.confirm(`Switch the shop to ${what}? A database snapshot is taken first; the shop stays open while it switches.`)) return;
+    const pause = info?.updater?.mode === 'single' ? 'the shop closes for a few seconds while it switches' : 'the shop stays open while it switches';
+    if (!window.confirm(`Switch the shop to ${what}? A database snapshot is taken first; ${pause}.`)) return;
     setBusy(target);
     setStatus(null);
     const { ok, data } = await postJson<{ message?: string }>('/api/admin/versions', { target });
@@ -100,7 +104,9 @@ export function VersionsCard() {
         </div>
         {managed ? (
           <p className="text-stone-500">
-            Automatic updates: {info.updater!.autoUpdateMinutes > 0 ? `checked every ${info.updater!.autoUpdateMinutes} minutes` : 'only when you ask'}.
+            Automatic updates{info.updater!.mode === 'single' ? ': Podman (one container), ' : ': '}
+            {info.updater!.autoUpdateMinutes > 0 ? `checked every ${info.updater!.autoUpdateMinutes} minutes` : 'only when you ask'}
+            {info.updater!.mode === 'single' ? '; a switch closes the shop for a few seconds (the new version is tried first, the database saved).' : '.'}
             {info.pending && <strong className="text-amber-700"> A switch is waiting to start (within a minute).</strong>}
             {info.updater!.lastRequest.at && !info.pending && (
               <span className={info.updater!.lastRequest.result === 'ok' ? 'text-emerald-700' : info.updater!.lastRequest.result === 'working' ? 'text-amber-700 font-semibold' : 'text-red-700'}>
@@ -120,6 +126,9 @@ export function VersionsCard() {
             <p>
               Then reload this page. If it still says <strong className="font-mono">{label(info.current)}</strong>, another, older container is still answering: <code>podman ps</code> shows which one holds the port; stop it.
             </p>
+            <p>To have the shop update itself (and this page switch versions), run once, in the shop folder on that computer (Windows):</p>
+            <code className="block bg-stone-100 rounded-lg p-2 break-all">{AUTOUPDATE_BAT}</code>
+            <p>It keeps your data volume and checks every 15 minutes; a switch closes the shop for a few seconds.</p>
             <details>
               <summary className="cursor-pointer">Docker Compose server (Hostinger guide)</summary>
               <code className="block bg-stone-100 rounded-lg p-2 mt-1 break-all">docker compose run --rm updater rollback {IMAGE}:2.0.0</code>

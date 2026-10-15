@@ -25,6 +25,8 @@ export interface ChangelogEntry {
 
 export interface UpdaterStatus {
   updatedAt: string;
+  /** "compose": blue/green behind Caddy, no downtime; "single": one container (Podman), a few seconds' pause at a switch. */
+  mode: 'compose' | 'single';
   running: string;
   lastGood: string;
   previous: string;
@@ -96,6 +98,7 @@ export function updaterStatus(now = Date.now()): UpdaterStatus | null {
     const lr = (raw.lastRequest ?? {}) as Partial<UpdaterStatus['lastRequest']>;
     return {
       updatedAt: new Date(at).toISOString(),
+      mode: raw.mode === 'single' ? 'single' : 'compose',
       running: v(raw.running),
       lastGood: v(raw.lastGood),
       previous: v(raw.previous),
@@ -145,7 +148,7 @@ export function requestSwitch(target: string, now = Date.now()): string {
     fs.writeFileSync(path.join(controlDir(), 'request'), `${line}\n`, { flag: 'wx', mode: 0o644 });
   } catch (err) {
     if ((err as NodeJS.ErrnoException).code === 'EEXIST') throw new HttpError(409, 'A version switch is already waiting. It starts within a minute.');
-    throw new HttpError(503, 'The request could not be handed to the updater. Check that it runs (docker compose ps updater).');
+    throw new HttpError(503, 'The request could not be handed to the updater. Check that it runs (docker compose ps updater, or podman ps on a single-container shop).');
   }
   return line;
 }

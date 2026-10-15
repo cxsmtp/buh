@@ -41,6 +41,12 @@ The image `ghcr.io/cxsmtp/buh:latest` is built, tested and published from main. 
 podman pull ghcr.io/cxsmtp/buh:latest && podman run --replace -d --name beautifuluaehome -p 443:3000 -v beautifuluaehome-data:/data -e TZ=Asia/Dubai --read-only --tmpfs /tmp --cap-drop ALL --security-opt no-new-privileges:true ghcr.io/cxsmtp/buh:latest
 ```
 
+Automatic updates for that one container (a few seconds' pause at each switch; data volume kept; see the [guide](HOSTINGER_DEPLOYMENT_GUIDE.md#podman-on-windows-one-container)):
+
+```
+scripts\podman-autoupdate.bat beautifuluaehome 443 beautifuluaehome-data
+```
+
 To try it on your own computer with Podman on Windows, run `scripts\run-local-podman.bat` (test mode, http://localhost:3000).
 
 ## Configure

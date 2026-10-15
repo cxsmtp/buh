@@ -62,6 +62,11 @@ test('the status is read defensively: odd values dropped, links refused', () => 
   assert.equal(s.running, '');
   assert.deepEqual(s.onServer, ['2.0.0']);
   assert.equal(s.lastRequest.message.length, 300);
+  assert.equal(s.mode, 'compose', 'no mode: the blue/green updater (before single mode existed)');
+  writeStatus({ mode: 'single' });
+  assert.equal(v.updaterStatus()!.mode, 'single');
+  writeStatus({ mode: '<b>other</b>' });
+  assert.equal(v.updaterStatus()!.mode, 'compose');
   fs.rmSync(path.join(statusDir, 'status.json'));
   const elsewhere = path.join(dir, 'elsewhere.json');
   fs.writeFileSync(elsewhere, JSON.stringify({ updatedAt: new Date().toISOString(), running: '9.9.9' }));
