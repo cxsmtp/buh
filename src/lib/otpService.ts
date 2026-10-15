@@ -5,7 +5,7 @@ import { logEvent, maskPhone } from '@/lib/server/log';
 import { assertPublicHttpsUrl, safeFetch } from '@/lib/server/outbound';
 import { takeAll, type LimitRule } from '@/lib/server/rateLimit';
 import { audit } from '@/lib/server/audit';
-import { supportEmail } from '@/lib/server/runtimeConfig';
+import { contactEmail as supportEmail } from '@/lib/server/settings';
 
 /**
  * Phone verification codes.

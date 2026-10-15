@@ -1,11 +1,22 @@
 import { handleRouteError, json } from '@/lib/server/http';
-import { supportEmail } from '@/lib/server/runtimeConfig';
-import { getSettings } from '@/lib/server/settings';
+import { contactEmail, getSettings } from '@/lib/server/settings';
 
-/** What every visitor sees: branding, the bank details for transfers, and the support email. */
+/**
+ * What every visitor sees: branding, bank details for transfers, the store's
+ * contact details (WhatsApp, Instagram…), the catalogue's categories and the
+ * low-stock threshold, and the support email. Nothing here is secret.
+ */
 export function GET() {
   try {
-    return json({ brand: getSettings('brand'), bank: getSettings('bank'), supportEmail: supportEmail() });
+    const store = getSettings('store');
+    const catalog = getSettings('catalog');
+    return json({
+      brand: getSettings('brand'),
+      bank: getSettings('bank'),
+      store,
+      catalog: { categories: catalog.categories, lowStockThreshold: catalog.lowStockThreshold },
+      supportEmail: contactEmail(),
+    });
   } catch (err) {
     return handleRouteError(err, 'settings/public');
   }

@@ -2,30 +2,27 @@
 
 import React from 'react';
 
-export type CategoryOption = 'all' | 'bedsheets' | 'duvet-covers' | 'fitted-sheets' | 'hotel-luxury' | 'silk-collection';
+/** 'all' or a category id from Settings → Catalogue. */
+export type CategoryOption = string;
 
 interface CategoryFilterProps {
   selectedCategory: CategoryOption;
   onSelectCategory: (category: CategoryOption) => void;
+  /** The shop's categories (Settings → Catalogue); only those with products are shown. */
+  categories: Array<{ id: string; label: string; icon: string }>;
 }
 
 export const CategoryFilter: React.FC<CategoryFilterProps> = ({
   selectedCategory,
   onSelectCategory,
+  categories,
 }) => {
-  const categories: { id: CategoryOption; label: string; icon: string }[] = [
-    { id: 'all', label: 'All Editions', icon: '✨' },
-    { id: 'bedsheets', label: 'Hand Block Sets', icon: '🛏️' },
-    { id: 'hotel-luxury', label: 'Mughal & Hotel 1000TC', icon: '👑' },
-    { id: 'silk-collection', label: 'Indigo Mud-Resist', icon: '💎' },
-    { id: 'fitted-sheets', label: '40cm Deep Fitted', icon: '📐' },
-    { id: 'duvet-covers', label: 'Duvet Covers', icon: '☁️' },
-  ];
+  const all = [{ id: 'all', label: 'All Editions', icon: '✨' }, ...categories];
 
   return (
     <div className="px-1 sm:px-2 mb-2">
       <div className="flex items-center gap-1.5 overflow-x-auto no-scrollbar py-0.5">
-        {categories.map((cat) => {
+        {all.map((cat) => {
           const isSelected = selectedCategory === cat.id;
           return (
             <button

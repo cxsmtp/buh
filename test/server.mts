@@ -23,7 +23,7 @@ export async function startServer(env: Record<string, string> = {}): Promise<Run
   let log = '';
   const child: ChildProcess = spawn(process.execPath, [SERVER], {
     cwd: path.dirname(SERVER),
-    env: { ...process.env, PORT: String(port), HOSTNAME: '127.0.0.1', DATA_DIR: dataDir, INSECURE_COOKIES: '1', OTP_DEV_MODE: 'true', TRUST_PROXY: '', BACKUP_DISABLED: 'true', ...env },
+    env: { ...process.env, PORT: String(port), HOSTNAME: '127.0.0.1', DATA_DIR: dataDir, INSECURE_COOKIES: '1', OTP_DEV_MODE: 'true', TRUST_PROXY: '', BACKUP_DISABLED: 'true', SEED_STOCK: '50', ...env },
     stdio: ['ignore', 'pipe', 'pipe'],
   });
   child.stdout!.on('data', (d) => (log += d));

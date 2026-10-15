@@ -1,9 +1,11 @@
-import type { BankTransferDetails, BrandSettings, CourierSettings, SmsGatewaySettings } from '@/types';
+import type { BankTransferDetails, BedProfileMeasurement, BrandSettings, CatalogSettings, CourierSettings, SmsGatewaySettings, StoreSettings } from '@/types';
+import { DEFAULT_CATALOG, DEFAULT_STORE } from '@/data/catalogDefaults';
 import { INITIAL_BANK_DETAILS, INITIAL_BRAND_SETTINGS, INITIAL_COURIER_SETTINGS, INITIAL_SMS_SETTINGS } from '@/data/initialData';
 import { getDb } from './db';
 import { HttpError } from './http';
 import { acceptImageRef } from './images';
 import { assertPublicHttpsUrl } from './outbound';
+import { supportEmail as envSupportEmail } from './runtimeConfig';
 
 /**
  * Shop settings, kept on the server so every visitor sees the same branding
@@ -20,6 +22,8 @@ export interface SettingsMap {
   bank: BankTransferDetails;
   courier: CourierSettings;
   sms: SmsGatewaySettings;
+  catalog: CatalogSettings;
+  store: StoreSettings;
 }
 export type SettingsKey = keyof SettingsMap;
 
@@ -42,7 +46,14 @@ const DEFAULTS: SettingsMap = {
     customWebhook: { endpointUrl: '', bearerToken: '' },
     isEnabled: false,
   },
+  catalog: DEFAULT_CATALOG,
+  store: DEFAULT_STORE,
 };
+
+/** Where customers are asked to email: Settings → Store first, then NEXT_PUBLIC_SUPPORT_EMAIL. */
+export function contactEmail(): string {
+  return getSettings('store').supportEmail || envSupportEmail();
+}
 
 /** Paths of secret fields per settings group. */
 const SECRETS: Record<SettingsKey, string[]> = {
@@ -50,6 +61,8 @@ const SECRETS: Record<SettingsKey, string[]> = {
   bank: [],
   courier: ['jeebly.apiKey', 'jeebly.clientKey', 'echo.apiKey'],
   sms: ['twilio.authToken', 'infobip.apiKey', 'customWebhook.bearerToken', 'unifonic.appSid'],
+  catalog: [],
+  store: [],
 };
 
 const cache = new Map<SettingsKey, unknown>();
@@ -149,6 +162,8 @@ const SECRET_HOSTS: Record<SettingsKey, Record<string, string>> = {
   bank: {},
   courier: {},
   sms: { 'infobip.apiKey': 'infobip.baseUrl', 'customWebhook.bearerToken': 'customWebhook.endpointUrl' },
+  catalog: {},
+  store: {},
 };
 
 /**
@@ -312,7 +327,79 @@ const VALIDATORS: { [K in SettingsKey]: (input: Obj, current: SettingsMap[K]) =>
       isEnabled: bool(input.isEnabled, current.isEnabled),
     };
   },
+
+  async catalog(input, current) {
+    const sizesIn = input.sizes === undefined ? current.sizes : input.sizes;
+    if (!Array.isArray(sizesIn) || sizesIn.length === 0 || sizesIn.length > 20) throw new HttpError(400, 'Keep 1 to 20 size presets.');
+    const sizes = sizesIn.map((s, i) => validateSizePreset(s, i));
+    if (new Set(sizes.map((s) => s.id)).size !== sizes.length) throw new HttpError(400, 'Each size preset needs its own id.');
+    const catsIn = input.categories === undefined ? current.categories : input.categories;
+    if (!Array.isArray(catsIn) || catsIn.length === 0 || catsIn.length > 30) throw new HttpError(400, 'Keep 1 to 30 categories.');
+    const categories = catsIn.map((c, i) => {
+      const o = obj(c);
+      const id = text(o.id, `Category ${i + 1} id`, 40);
+      if (!/^[a-z0-9][a-z0-9-]{0,39}$/.test(id)) throw new HttpError(400, `Category ${i + 1}: the id may use only lowercase letters, digits and dashes.`);
+      const label = text(o.label, `Category ${i + 1} name`, 40);
+      if (!label) throw new HttpError(400, `Category ${i + 1} needs a name.`);
+      return { id, label, icon: text(o.icon, `Category ${i + 1} icon`, 8) };
+    });
+    if (new Set(categories.map((c) => c.id)).size !== categories.length) throw new HttpError(400, 'Each category needs its own id.');
+    const threshold = input.lowStockThreshold === undefined ? current.lowStockThreshold : Number(input.lowStockThreshold);
+    if (!Number.isInteger(threshold) || threshold < 0 || threshold > 50) throw new HttpError(400, 'Low-stock warning must be a whole number from 0 to 50.');
+    return { sizes, categories, lowStockThreshold: threshold };
+  },
+
+  async store(input, current) {
+    const wa = text(input.whatsappNumber, 'WhatsApp number', 20, current.whatsappNumber).replace(/[\s()-]/g, '');
+    const whatsappNumber = wa.startsWith('00') ? `+${wa.slice(2)}` : wa.startsWith('05') ? `+971${wa.slice(1)}` : wa;
+    if (whatsappNumber && !/^\+[1-9]\d{7,14}$/.test(whatsappNumber)) throw new HttpError(400, 'WhatsApp number: use the international form, e.g. +971 50 123 4567.');
+    const supportEmail = text(input.supportEmail, 'Support email', 254, current.supportEmail);
+    if (supportEmail && !/^[^\s@<>"]+@[^\s@<>"]+\.[^\s@<>"]+$/.test(supportEmail)) throw new HttpError(400, 'Please check the support email.');
+    const ig = text(input.instagramHandle, 'Instagram', 40, current.instagramHandle).replace(/^@/, '').replace(/^https?:\/\/(www\.)?instagram\.com\//i, '').replace(/\/.*$/, '');
+    if (ig && !/^[A-Za-z0-9._]{1,30}$/.test(ig)) throw new HttpError(400, 'Instagram: the account name only (letters, digits, dots, underscores).');
+    const tt = text(input.tiktokHandle, 'TikTok', 40, current.tiktokHandle).replace(/^@/, '');
+    if (tt && !/^[A-Za-z0-9._]{2,24}$/.test(tt)) throw new HttpError(400, 'TikTok: the account name only.');
+    const fb = text(input.facebookUrl, 'Facebook', 200, current.facebookUrl);
+    if (fb && !/^https:\/\/(www\.|m\.)?(facebook|fb)\.com\/[A-Za-z0-9.\-/_?=&]+$/.test(fb)) throw new HttpError(400, 'Facebook: paste the https://facebook.com/… page address.');
+    return {
+      whatsappNumber,
+      whatsappGreeting: text(input.whatsappGreeting, 'WhatsApp greeting', 300, current.whatsappGreeting),
+      showWhatsAppButton: bool(input.showWhatsAppButton, current.showWhatsAppButton),
+      supportEmail,
+      instagramHandle: ig,
+      facebookUrl: fb,
+      tiktokHandle: tt,
+      storeAddress: text(input.storeAddress, 'Store address', 300, current.storeAddress),
+      showLocalCurrency: bool(input.showLocalCurrency, current.showLocalCurrency),
+    };
+  },
 };
+
+function validateSizePreset(v: unknown, i: number): BedProfileMeasurement {
+  const o = obj(v);
+  const n = `Size ${i + 1}`;
+  const id = text(o.id, `${n} id`, 30);
+  if (!/^[a-z0-9][a-z0-9-]{0,29}$/.test(id)) throw new HttpError(400, `${n}: the id may use only lowercase letters, digits and dashes.`);
+  const name = text(o.name, `${n} name`, 60);
+  if (!name) throw new HttpError(400, `${n} needs a name.`);
+  const pieces = Number(o.piecesIncluded ?? 1);
+  if (!Number.isInteger(pieces) || pieces < 1 || pieces > 20) throw new HttpError(400, `${n}: pieces must be 1 to 20.`);
+  const delta = Number(o.priceDelta ?? 0);
+  if (!Number.isFinite(delta) || Math.abs(delta) > 10_000) throw new HttpError(400, `${n}: price difference must be a number.`);
+  return {
+    id,
+    name,
+    badge: text(o.badge, `${n} label`, 40),
+    mattressSize: text(o.mattressSize, `${n} mattress`, 80),
+    fittedSheet: text(o.fittedSheet, `${n} fitted sheet`, 80),
+    flatSheet: text(o.flatSheet, `${n} flat sheet`, 80),
+    pillowcases: text(o.pillowcases, `${n} pillowcases`, 80),
+    duvetCover: text(o.duvetCover, `${n} duvet cover`, 80) || undefined,
+    cushionCovers: text(o.cushionCovers, `${n} cushion covers`, 80) || undefined,
+    piecesIncluded: pieces,
+    priceDelta: Math.round(delta * 100) / 100,
+  };
+}
 
 // ── helpers ─────────────────────────────────────────────────────────────────
 

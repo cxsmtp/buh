@@ -218,11 +218,13 @@ export function placeOrder(input: unknown): PlaceOrderResult {
       if (!profile) throw new HttpError(409, `${product.title}: that bed size is no longer offered.`);
       const color = line.color && product.colors.some((c2) => c2.name === line.color) ? line.color : product.colors[0]?.name;
       if (line.color && color !== line.color) throw new HttpError(409, `${product.title}: that colour is no longer offered.`);
-      // Reserve stock atomically: fails if another order took the last ones.
-      const reserved = getDb().prepare('UPDATE products SET stock = stock - ? WHERE id = ? AND active = 1 AND stock >= ?').run(line.quantity, product.id, line.quantity);
+      // Reserve this size's pieces atomically: fails if another order took the last one.
+      const reserved = getDb()
+        .prepare('UPDATE product_stock SET qty = qty - ? WHERE product_id = ? AND size_id = ? AND qty >= ? AND EXISTS (SELECT 1 FROM products WHERE id = ? AND active = 1 AND archived = 0)')
+        .run(line.quantity, product.id, profile.id, line.quantity, product.id);
       if (reserved.changes !== 1) {
-        const left = (getDb().prepare('SELECT stock FROM products WHERE id = ?').get(product.id) as { stock: number }).stock;
-        throw new HttpError(409, left > 0 ? `${product.title}: only ${left} left.` : `${product.title} is sold out.`);
+        const left = (getDb().prepare('SELECT qty FROM product_stock WHERE product_id = ? AND size_id = ?').get(product.id, profile.id) as { qty: number } | undefined)?.qty ?? 0;
+        throw new HttpError(409, left > 0 ? `${product.title} (${profile.name}): only ${left} left.` : `${product.title} (${profile.name}) has just sold out.`);
       }
       const unitFils = fils(product.price) + fils(profile.priceDelta || 0);
       items.push({
@@ -344,9 +346,11 @@ export function updateOrderByAdmin(id: string, patch: unknown, actor: string): O
         throw new HttpError(409, `An order that is ${order.status.replace(/_/g, ' ')} cannot become ${status.replace(/_/g, ' ')}.`);
       }
       if (status === 'cancelled') {
-        // Put the reserved stock back.
+        // Put the reserved pieces back, size by size (the row is recreated if the size was removed meanwhile).
         for (const item of order.items) {
-          getDb().prepare('UPDATE products SET stock = stock + ? WHERE id = ?').run(item.quantity, item.productId);
+          getDb()
+            .prepare('INSERT INTO product_stock (product_id, size_id, qty) SELECT ?, ?, ? WHERE EXISTS (SELECT 1 FROM products WHERE id = ?) ON CONFLICT(product_id, size_id) DO UPDATE SET qty = qty + excluded.qty')
+            .run(item.productId, item.profileId, item.quantity, item.productId);
         }
       }
       if (status === 'delivered') order.courier.deliveredAt = new Date().toISOString();

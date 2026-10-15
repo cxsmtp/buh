@@ -57,6 +57,43 @@ const MIGRATIONS: Array<(db: DB) => void> = [
       );
     `);
   },
+  // 2: stock per size. Most designs are one or two pieces, so "King: 1, Queen: 1"
+  //    is tracked, not one number for the product. products.stock stays as the
+  //    total (kept in step by triggers) so older code reading it still works.
+  (db) => {
+    db.exec(`
+      CREATE TABLE product_stock (
+        product_id  TEXT NOT NULL REFERENCES products(id) ON DELETE CASCADE,
+        size_id     TEXT NOT NULL,
+        qty         INTEGER NOT NULL CHECK (qty >= 0),
+        PRIMARY KEY (product_id, size_id)
+      );
+      -- Removing a product archives it: past orders still point at it.
+      ALTER TABLE products ADD COLUMN archived INTEGER NOT NULL DEFAULT 0;
+      CREATE TRIGGER product_stock_ins AFTER INSERT ON product_stock BEGIN
+        UPDATE products SET stock = (SELECT COALESCE(SUM(qty), 0) FROM product_stock WHERE product_id = NEW.product_id) WHERE id = NEW.product_id;
+      END;
+      CREATE TRIGGER product_stock_upd AFTER UPDATE ON product_stock BEGIN
+        UPDATE products SET stock = (SELECT COALESCE(SUM(qty), 0) FROM product_stock WHERE product_id = NEW.product_id) WHERE id = NEW.product_id;
+      END;
+      CREATE TRIGGER product_stock_del AFTER DELETE ON product_stock BEGIN
+        UPDATE products SET stock = (SELECT COALESCE(SUM(qty), 0) FROM product_stock WHERE product_id = OLD.product_id) WHERE id = OLD.product_id;
+      END;
+    `);
+    // Existing stock goes to each product's default size.
+    const rows = db.prepare('SELECT id, data, stock FROM products').all() as Array<{ id: string; data: string; stock: number }>;
+    const insert = db.prepare('INSERT INTO product_stock (product_id, size_id, qty) VALUES (?, ?, ?)');
+    for (const r of rows) {
+      let size = 'king';
+      try {
+        const p = JSON.parse(r.data) as { defaultProfileId?: string; profiles?: Array<{ id: string }> };
+        size = p.defaultProfileId || p.profiles?.[0]?.id || size;
+      } catch {
+        // unreadable product JSON: keep the default
+      }
+      insert.run(r.id, size, r.stock);
+    }
+  },
 ];
 
 let db: DB | null = null;

@@ -1,7 +1,9 @@
 'use client';
 
 import React, { useState, useEffect, useMemo, useCallback } from 'react';
-import { Product, Order, Customer, CourierSettings, CartItem, BedProfileMeasurement, BrandSettings, SmsGatewaySettings, BankTransferDetails } from '@/types';
+import { Product, Order, Customer, CourierSettings, CartItem, BedProfileMeasurement, BrandSettings, SmsGatewaySettings, BankTransferDetails, CatalogSettings, StoreSettings } from '@/types';
+import { DEFAULT_CATALOG, DEFAULT_STORE } from '@/data/catalogDefaults';
+import { piecesLeft, refreshCart, ShopProvider, type ShopInfo } from '@/lib/client/shop';
 import { INITIAL_BANK_DETAILS, INITIAL_BRAND_SETTINGS, INITIAL_COURIER_SETTINGS, INITIAL_SMS_SETTINGS } from '@/data/initialData';
 import { ADMIN_SIGNED_OUT_EVENT, getJson, postJson, sendJson } from '@/lib/apiClient';
 
@@ -13,13 +15,17 @@ interface AdminSetting<T> {
 interface AdminSettings {
   courier: AdminSetting<CourierSettings>;
   sms: AdminSetting<SmsGatewaySettings>;
+  catalog: AdminSetting<CatalogSettings>;
+  store: AdminSetting<StoreSettings>;
 }
+
+type AdminTab = 'orders' | 'add-product' | 'inventory' | 'crm' | 'settings';
 
 /** Catalogue + public settings from the server (no React state here). */
 async function fetchCatalog() {
   const [products, settings] = await Promise.all([
     getJson<{ products: Product[] }>('/api/products'),
-    getJson<{ brand: BrandSettings; bank: BankTransferDetails; supportEmail?: string }>('/api/settings/public'),
+    getJson<{ brand: BrandSettings; bank: BankTransferDetails; supportEmail?: string; store?: StoreSettings; catalog?: { categories: CatalogSettings['categories']; lowStockThreshold: number } }>('/api/settings/public'),
   ]);
   return { products, settings };
 }
@@ -85,6 +91,9 @@ import { AdminBrandingTab } from '@/components/admin/AdminBrandingTab';
 import { AdminSmsTab } from '@/components/admin/AdminSmsTab';
 import { AdminLoginModal } from '@/components/admin/AdminLoginModal';
 import { BackupStatus } from '@/components/admin/BackupStatus';
+import { CatalogSettingsCard } from '@/components/admin/settings/CatalogSettingsCard';
+import { SettingsConsole } from '@/components/admin/settings/SettingsConsole';
+import { StoreSettingsCard } from '@/components/admin/settings/StoreSettingsCard';
 
 import { Sparkles, Palette, ShieldCheck, Heart, Search, X } from 'lucide-react';
 
@@ -98,7 +107,7 @@ export default function HomePage() {
   const [isAdminLoginOpen, setIsAdminLoginOpen] = useState(false);
 
   const [storeTab, setStoreTab] = useState<'home' | 'catalog'>('home');
-  const [adminTab, setAdminTab] = useState<'orders' | 'add-product' | 'inventory' | 'crm' | 'couriers' | 'branding' | 'sms'>('orders');
+  const [adminTab, setAdminTab] = useState<AdminTab>('orders');
   const [selectedCategory, setSelectedCategory] = useState<CategoryOption>('all');
 
   // Core Data (all from the server)
@@ -107,6 +116,9 @@ export default function HomePage() {
   const [brandSettings, setBrandSettings] = useState<BrandSettings>(INITIAL_BRAND_SETTINGS);
   const [bankDetails, setBankDetails] = useState<BankTransferDetails>(INITIAL_BANK_DETAILS);
   const [supportEmail, setSupportEmail] = useState<string | undefined>(undefined);
+  const [storeSettings, setStoreSettings] = useState<StoreSettings>(DEFAULT_STORE);
+  const [lowStockThreshold, setLowStockThreshold] = useState(DEFAULT_CATALOG.lowStockThreshold);
+  const [categories, setCategories] = useState(DEFAULT_CATALOG.categories);
   // Pre-fills Track Order (only rendered once opened, so no server/client mismatch).
   const [lastOrderId, setLastOrderId] = useState(() => {
     try {
@@ -122,6 +134,8 @@ export default function HomePage() {
   const [adminSettings, setAdminSettings] = useState<AdminSettings>({
     courier: { value: INITIAL_COURIER_SETTINGS, secretsSet: {} },
     sms: { value: INITIAL_SMS_SETTINGS, secretsSet: {} },
+    catalog: { value: DEFAULT_CATALOG, secretsSet: {} },
+    store: { value: DEFAULT_STORE, secretsSet: {} },
   });
   const [adminLoadError, setAdminLoadError] = useState('');
   // Settings forms copy their values once; they are re-created when the server's values first arrive
@@ -156,6 +170,8 @@ export default function HomePage() {
   const applyCatalog = useCallback(({ products: res, settings }: Awaited<ReturnType<typeof fetchCatalog>>) => {
     if (res.ok) {
       setProducts(res.data.products);
+      // Latest prices and stock in the bag too (quantities capped to what is left).
+      setCart((prev) => refreshCart(prev, res.data.products));
       setCatalogError('');
     } else {
       setCatalogError('The shop could not be loaded. Please check your connection and refresh.');
@@ -164,6 +180,11 @@ export default function HomePage() {
       setBrandSettings(settings.data.brand);
       setBankDetails(settings.data.bank);
       if (settings.data.supportEmail) setSupportEmail(settings.data.supportEmail);
+      if (settings.data.store) setStoreSettings(settings.data.store);
+      if (settings.data.catalog) {
+        setLowStockThreshold(settings.data.catalog.lowStockThreshold);
+        setCategories(settings.data.catalog.categories);
+      }
       setPublicSettingsLoaded(true);
     }
     return res.ok ? res.data.products : null;
@@ -217,7 +238,7 @@ export default function HomePage() {
     if (c.ok) setCustomers(c.data.customers);
     if (p.ok) setAdminProducts(p.data.products);
     if (st.ok) {
-      setAdminSettings({ courier: st.data.courier, sms: st.data.sms });
+      setAdminSettings({ courier: st.data.courier, sms: st.data.sms, catalog: st.data.catalog, store: st.data.store });
       setAdminSettingsLoaded(true);
     }
     setAdminLoadError(o.ok && c.ok && p.ok && st.ok ? '' : 'Some admin data could not be loaded. Check your connection and refresh.');
@@ -234,10 +255,10 @@ export default function HomePage() {
   }, [isAdminAuthenticated, isAdminMode, applyAdminData]);
 
   /** Save one settings group on the server; resolves to an error message or null. */
-  const saveSettings = async (key: 'brand' | 'bank' | 'courier' | 'sms', settings: unknown): Promise<string | null> => {
+  const saveSettings = async (key: 'brand' | 'bank' | 'courier' | 'sms' | 'catalog' | 'store', settings: unknown): Promise<string | null> => {
     const { ok, data } = await sendJson<{ message?: string }>('PUT', `/api/admin/settings/${key}`, { settings });
     if (!ok) return data.message || 'Could not save. Please try again.';
-    await Promise.all([loadAdminData(), key === 'brand' || key === 'bank' ? loadCatalog() : Promise.resolve(null)]);
+    await Promise.all([loadAdminData(), key === 'brand' || key === 'bank' || key === 'catalog' || key === 'store' ? loadCatalog() : Promise.resolve(null)]);
     return null;
   };
 
@@ -267,15 +288,18 @@ export default function HomePage() {
   // Cart Handlers
   const handleAddToCart = (product: Product, profile: BedProfileMeasurement, color: string, quantity: number) => {
     setCart((prev) => {
+      // Never more in the bag than there are pieces of this size (across colours).
+      const left = piecesLeft(product, profile.id);
+      const inBag = prev.filter((i) => i.product.id === product.id && i.selectedProfile.id === profile.id).reduce((n, i) => n + i.quantity, 0);
+      const add = Math.min(quantity, Math.max(0, left - inBag));
+      if (add === 0) return prev;
       const existingIdx = prev.findIndex(
         (i) => i.product.id === product.id && i.selectedProfile.id === profile.id && i.selectedColor === color
       );
       if (existingIdx >= 0) {
-        const copy = [...prev];
-        copy[existingIdx].quantity += quantity;
-        return copy;
+        return prev.map((i, n) => (n === existingIdx ? { ...i, quantity: i.quantity + add } : i));
       }
-      return [...prev, { product, selectedProfile: profile, selectedColor: color, quantity }];
+      return [...prev, { product, selectedProfile: profile, selectedColor: color, quantity: add }];
     });
     setIsCartOpen(true);
   };
@@ -285,11 +309,13 @@ export default function HomePage() {
       handleRemoveFromCart(idx);
       return;
     }
-    setCart((prev) => {
-      const copy = [...prev];
-      copy[idx].quantity = newQty;
-      return copy;
-    });
+    setCart((prev) =>
+      prev.map((item, n) => {
+        if (n !== idx) return item;
+        const others = prev.filter((i, m) => m !== idx && i.product.id === item.product.id && i.selectedProfile.id === item.selectedProfile.id).reduce((t, i) => t + i.quantity, 0);
+        return { ...item, quantity: Math.max(1, Math.min(newQty, piecesLeft(item.product, item.selectedProfile.id) - others)) };
+      })
+    );
   };
 
   const handleRemoveFromCart = (idx: number) => {
@@ -315,21 +341,10 @@ export default function HomePage() {
     void loadAdminData(); // customers and stock may have changed too
   };
 
-  // Product Handlers
-  const handleAddProduct = async (newProd: Product): Promise<string | null> => {
-    const { ok, data } = await postJson<{ message?: string }>('/api/admin/products', { product: newProd });
-    if (!ok) return data.message || 'Could not save the product.';
-    await Promise.all([loadAdminData(), loadCatalog()]);
-    return null;
-  };
-
-  const handleUpdateProduct = async (id: string, changes: Partial<Product> & { expectedStock?: number }): Promise<string | null> => {
-    const { ok, status, data } = await sendJson<{ message?: string }>('PATCH', `/api/admin/products/${encodeURIComponent(id)}`, { product: changes });
-    if (status === 409) await Promise.all([loadAdminData(), loadCatalog()]); // show the stock as it is now
-    if (!ok) return data.message || 'Could not save the product.';
-    await Promise.all([loadAdminData(), loadCatalog()]);
-    return null;
-  };
+  const shopInfo = useMemo<ShopInfo>(
+    () => ({ store: storeSettings, lowStockThreshold, supportEmail: supportEmail || 'orders@beautifuluaehome.com' }),
+    [storeSettings, lowStockThreshold, supportEmail]
+  );
 
   // Filtered Products for Storefront
   const filteredProducts = useMemo(() => {
@@ -348,6 +363,7 @@ export default function HomePage() {
   const pendingOrdersCount = orders.filter((o) => o.status === 'pending_confirmation').length;
 
   return (
+    <ShopProvider value={shopInfo}>
     <div className={`min-h-screen flex flex-col font-sans transition-colors duration-300 ${isDarkMode ? 'dark' : ''}`}>
       {/* Header */}
       {isAdminMode ? (
@@ -381,12 +397,10 @@ export default function HomePage() {
             <div className="hidden sm:flex items-center gap-2 border-b border-stone-200 pb-2 overflow-x-auto no-scrollbar">
               {[
                 { id: 'orders', label: 'Orders & Dispatches', badge: pendingOrdersCount },
-                { id: 'add-product', label: '+ Add Bedding Set (AI Studio)' },
+                { id: 'add-product', label: '+ Add Product' },
                 { id: 'inventory', label: 'Inventory Stock' },
                 { id: 'crm', label: 'Customers & CRM' },
-                { id: 'couriers', label: 'Jeebly & Eco Couriers' },
-                { id: 'branding', label: '🎨 Logo & Marquee' },
-                { id: 'sms', label: '📱 SMS & Real OTP' },
+                { id: 'settings', label: '⚙️ Settings' },
               ].map((tab) => (
                 <button
                   key={tab.id}
@@ -423,9 +437,13 @@ export default function HomePage() {
 
             {(adminTab === 'add-product' || adminTab === 'inventory') && (
               <AdminInventoryTab
+                key={adminTab}
+                startAdding={adminTab === 'add-product'}
                 products={adminProducts}
-                onAddProduct={handleAddProduct}
-                onUpdateProduct={handleUpdateProduct}
+                catalog={adminSettings.catalog.value}
+                onChanged={async () => {
+                  await Promise.all([loadAdminData(), loadCatalog()]);
+                }}
               />
             )}
 
@@ -433,31 +451,82 @@ export default function HomePage() {
               <AdminCrmTab customers={customers} orders={orders} />
             )}
 
-            {adminTab === 'couriers' && (
-              <AdminCouriersTab
-                key={`couriers-${adminSettingsLoaded}`}
-                settings={adminSettings.courier.value}
-                secretsSet={adminSettings.courier.secretsSet}
-                onUpdateSettings={handleUpdateSettings}
-              />
-            )}
-
-            {adminTab === 'branding' && (
-              <AdminBrandingTab
-                key={`branding-${publicSettingsLoaded}`}
-                brandSettings={brandSettings}
-                onUpdateBrandSettings={handleUpdateBrandSettings}
-                bank={bankDetails}
-                onUpdateBank={handleUpdateBank}
-              />
-            )}
-
-            {adminTab === 'sms' && (
-              <AdminSmsTab
-                key={`sms-${adminSettingsLoaded}`}
-                smsSettings={adminSettings.sms.value}
-                secretsSet={adminSettings.sms.secretsSet}
-                onUpdateSmsSettings={handleUpdateSmsSettings}
+            {adminTab === 'settings' && (
+              <SettingsConsole
+                sections={[
+                  {
+                    id: 'store',
+                    label: 'Store & contact',
+                    icon: '🏬',
+                    hint: 'WhatsApp, email, social accounts, address and currency display.',
+                    content: <StoreSettingsCard key={`store-${adminSettingsLoaded}`} value={adminSettings.store.value} onSave={(v) => saveSettings('store', v)} />,
+                  },
+                  {
+                    id: 'catalog',
+                    label: 'Catalogue',
+                    icon: '📐',
+                    hint: 'Size presets, categories and the low-stock warning.',
+                    content: <CatalogSettingsCard key={`catalog-${adminSettingsLoaded}`} value={adminSettings.catalog.value} onSave={(v) => saveSettings('catalog', v)} />,
+                  },
+                  {
+                    id: 'branding',
+                    label: 'Branding & bank',
+                    icon: '🎨',
+                    hint: 'Logo, colours, the marquee and bank-transfer details.',
+                    content: (
+                      <AdminBrandingTab
+                        key={`branding-${publicSettingsLoaded}`}
+                        brandSettings={brandSettings}
+                        onUpdateBrandSettings={handleUpdateBrandSettings}
+                        bank={bankDetails}
+                        onUpdateBank={handleUpdateBank}
+                      />
+                    ),
+                  },
+                  {
+                    id: 'sms',
+                    label: 'Phone verification',
+                    icon: '📱',
+                    hint: 'The SMS gateway that sends checkout codes.',
+                    content: (
+                      <AdminSmsTab
+                        key={`sms-${adminSettingsLoaded}`}
+                        smsSettings={adminSettings.sms.value}
+                        secretsSet={adminSettings.sms.secretsSet}
+                        onUpdateSmsSettings={handleUpdateSmsSettings}
+                      />
+                    ),
+                  },
+                  {
+                    id: 'couriers',
+                    label: 'Couriers',
+                    icon: '🚚',
+                    hint: 'Jeebly and Eco Express keys, pickup details and routing.',
+                    content: (
+                      <AdminCouriersTab
+                        key={`couriers-${adminSettingsLoaded}`}
+                        settings={adminSettings.courier.value}
+                        secretsSet={adminSettings.courier.secretsSet}
+                        onUpdateSettings={handleUpdateSettings}
+                      />
+                    ),
+                  },
+                  {
+                    id: 'system',
+                    label: 'System & backups',
+                    icon: '🛡️',
+                    hint: 'Backups, version and health.',
+                    content: (
+                      <div className="space-y-3 text-xs text-stone-700">
+                        <BackupStatus />
+                        <p>
+                          Version <strong>{process.env.NEXT_PUBLIC_APP_VERSION}</strong>. Health check:{' '}
+                          <a className="underline" href="/api/health" target="_blank" rel="noopener noreferrer">/api/health</a>
+                        </p>
+                      </div>
+                    ),
+                  },
+                ]}
               />
             )}
           </div>
@@ -471,6 +540,7 @@ export default function HomePage() {
             <CategoryFilter
               selectedCategory={selectedCategory}
               onSelectCategory={setSelectedCategory}
+              categories={categories.filter((c) => products.some((p) => p.category === c.id))}
             />
 
             {/* Search Filter Active Notice */}
@@ -613,5 +683,6 @@ export default function HomePage() {
         }}
       />
     </div>
+    </ShopProvider>
   );
 }

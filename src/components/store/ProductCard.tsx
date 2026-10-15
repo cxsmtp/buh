@@ -3,6 +3,7 @@
 import React, { useState } from 'react';
 import { Product } from '@/types';
 import { Star, Sparkles, Layers, ArrowRight } from 'lucide-react';
+import { useShop } from '@/lib/client/shop';
 
 interface ProductCardProps {
   product: Product;
@@ -12,6 +13,9 @@ interface ProductCardProps {
 export const ProductCard: React.FC<ProductCardProps> = ({ product, onSelect }) => {
   // Always display the primary luxury staged photo directly in one go
   const currentImage = product.aiTransformedImage || product.featuredImage || product.galleryImages[0];
+  const { lowStockThreshold } = useShop();
+  const soldOut = product.stockCount === 0;
+  const fewLeft = !soldOut && product.stockCount <= lowStockThreshold;
 
   return (
     <div
@@ -35,6 +39,13 @@ export const ProductCard: React.FC<ProductCardProps> = ({ product, onSelect }) =
             <span>Artisan Linens</span>
           </span>
         </div>
+
+        {/* Most designs are one or two pieces: say so */}
+        {(soldOut || fewLeft) && (
+          <span className={`absolute top-8 sm:top-10 left-1.5 sm:left-2.5 text-[9px] sm:text-[10px] font-bold px-2 py-0.5 rounded-full shadow ${soldOut ? 'bg-stone-700 text-white' : 'bg-amber-500 text-white'}`}>
+            {soldOut ? 'Sold out' : product.stockCount === 1 ? 'Only 1 left' : `Only ${product.stockCount} left`}
+          </span>
+        )}
 
         {/* Savings Badge */}
         {product.compareAtPrice && product.compareAtPrice > product.price && (

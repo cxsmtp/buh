@@ -3,6 +3,7 @@
 import React from 'react';
 import { CartItem } from '@/types';
 import { cartFils, formatAed, lineFils } from '@/lib/money';
+import { piecesLeft, useShop } from '@/lib/client/shop';
 import { X, Trash2, ArrowRight, ShoppingBag, Truck, ShieldCheck } from 'lucide-react';
 
 interface CartDrawerProps {
@@ -22,11 +23,14 @@ export const CartDrawer: React.FC<CartDrawerProps> = ({
   onRemoveItem,
   onCheckout,
 }) => {
+  const { lowStockThreshold } = useShop();
   if (!isOpen) return null;
 
   // Delivery is free across the UAE (the server charges no delivery fee).
   const subtotal = formatAed(cartFils(items));
   const grandTotal = subtotal;
+  // A sold-out line (someone bought the last piece) must be removed before checkout.
+  const unavailable = items.some((i) => piecesLeft(i.product, i.selectedProfile.id) < i.quantity);
 
   return (
     <div className="fixed inset-0 z-50 overflow-hidden">
@@ -82,6 +86,7 @@ export const CartDrawer: React.FC<CartDrawerProps> = ({
             ) : (
               items.map((item, idx) => {
                 const itemTotalPrice = formatAed(lineFils(item));
+                const left = piecesLeft(item.product, item.selectedProfile.id);
                 return (
                   <div
                     key={`${item.product.id}-${item.selectedProfile.id}-${idx}`}
@@ -115,13 +120,20 @@ export const CartDrawer: React.FC<CartDrawerProps> = ({
                         <div className="text-[10px] text-stone-600 truncate mt-0.5">
                           {item.selectedProfile.fittedSheet}
                         </div>
+                        {left === 0 ? (
+                          <div className="text-[10px] font-bold text-red-700 mt-0.5" role="status">Just sold out: please remove it to check out.</div>
+                        ) : left <= lowStockThreshold ? (
+                          <div className="text-[10px] font-bold text-amber-700 mt-0.5">Only {left} left</div>
+                        ) : null}
                       </div>
 
                       {/* Quantity & Price */}
                       <div className="flex items-center justify-between mt-2 pt-1 border-t border-stone-200/60">
                         <div className="flex items-center border border-stone-300 rounded-lg bg-white overflow-hidden">
                           <button
+                            type="button"
                             onClick={() => onUpdateQuantity(idx, item.quantity - 1)}
+                            aria-label={`One fewer ${item.product.title}`}
                             className="px-2 py-0.5 text-xs font-bold text-stone-500 hover:bg-stone-100"
                           >
                             -
@@ -130,8 +142,11 @@ export const CartDrawer: React.FC<CartDrawerProps> = ({
                             {item.quantity}
                           </span>
                           <button
+                            type="button"
                             onClick={() => onUpdateQuantity(idx, item.quantity + 1)}
-                            className="px-2 py-0.5 text-xs font-bold text-stone-500 hover:bg-stone-100"
+                            disabled={item.quantity >= left}
+                            aria-label={`One more ${item.product.title}`}
+                            className="px-2 py-0.5 text-xs font-bold text-stone-500 hover:bg-stone-100 disabled:opacity-30"
                           >
                             +
                           </button>
@@ -180,11 +195,13 @@ export const CartDrawer: React.FC<CartDrawerProps> = ({
               </div>
 
               <button
+                type="button"
+                disabled={unavailable}
                 onClick={() => {
                   onClose();
                   onCheckout();
                 }}
-                className="w-full bg-[#0f1c2e] hover:bg-stone-800 active:scale-95 text-white font-bold text-sm py-3.5 rounded-xl shadow-lg flex items-center justify-center gap-2 transition-all"
+                className="w-full bg-[#0f1c2e] hover:bg-stone-800 active:scale-95 text-white font-bold text-sm py-3.5 rounded-xl shadow-lg flex items-center justify-center gap-2 transition-all disabled:opacity-50"
               >
                 <span>Proceed to Checkout</span>
                 <ArrowRight className="w-4 h-4 text-amber-300" />

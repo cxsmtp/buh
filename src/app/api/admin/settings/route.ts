@@ -11,6 +11,8 @@ export async function GET(req: Request) {
       bank: adminView('bank'),
       courier: adminView('courier'),
       sms: adminView('sms'),
+      catalog: adminView('catalog'),
+      store: adminView('store'),
     });
   } catch (err) {
     return handleRouteError(err, 'admin/settings');

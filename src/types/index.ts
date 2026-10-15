@@ -7,7 +7,8 @@ export type Emirate =
   | 'Fujairah'
   | 'Umm Al Quwain';
 
-export type BedSizeProfileId = 'single' | 'double' | 'queen' | 'king' | 'super-king' | 'custom';
+/** A size's id: the built-in ones (single, double, queen, king, super-king, custom) or one the owner adds in Settings. */
+export type BedSizeProfileId = string;
 
 export interface BedProfileMeasurement {
   id: BedSizeProfileId;
@@ -29,7 +30,8 @@ export interface Product {
   slug: string;
   description: string;
   shortDescription: string;
-  category: 'bedsheets' | 'duvet-covers' | 'fitted-sheets' | 'hotel-luxury' | 'silk-collection';
+  /** A category id from Settings → Catalogue (built-in: bedsheets, duvet-covers, fitted-sheets, hotel-luxury, silk-collection). */
+  category: string;
   price: number; // Base price in AED
   compareAtPrice?: number;
   material: string; // e.g. "100% Giza Egyptian Cotton"
@@ -42,7 +44,10 @@ export interface Product {
   aiTransformedImage?: string; // AI enhanced luxury bedroom mockup
   aiStagingPrompt?: string;
   isAiEnhanced?: boolean;
+  /** Total pieces in stock across all sizes (the sum of stockBySize). */
   stockCount: number;
+  /** Pieces in stock per size id. Most designs are one or two pieces, so stock is kept per size. */
+  stockBySize: Record<string, number>;
   /** Shown in the shop (false = hidden by the owner). Present on admin reads. */
   active?: boolean;
   isFeatured: boolean;
@@ -200,6 +205,33 @@ export interface CourierSettings {
     hubCode: string;
     serviceTier: string;
   };
+}
+
+/** Settings → Catalogue: the size presets offered when adding a product, and the categories. */
+export interface CatalogSettings {
+  sizes: BedProfileMeasurement[];
+  categories: Array<{ id: string; label: string; icon: string }>;
+  /** Show "Only 1 left" when a size's stock is at or below this. */
+  lowStockThreshold: number;
+}
+
+/** Settings → Store & contact: how customers reach the shop. */
+export interface StoreSettings {
+  /** WhatsApp number in +971… form; empty hides WhatsApp buttons. */
+  whatsappNumber: string;
+  /** The message a customer's WhatsApp opens with. */
+  whatsappGreeting: string;
+  /** Show the floating WhatsApp button on every page. */
+  showWhatsAppButton: boolean;
+  /** Overrides NEXT_PUBLIC_SUPPORT_EMAIL when set. */
+  supportEmail: string;
+  instagramHandle: string;
+  facebookUrl: string;
+  tiktokHandle: string;
+  /** Shown in the footer and on invoices. */
+  storeAddress: string;
+  /** Show an approximate price in the visitor's own currency next to AED (outside the UAE). */
+  showLocalCurrency: boolean;
 }
 
 export interface BrandSettings {
