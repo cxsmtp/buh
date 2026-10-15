@@ -1,3 +1,4 @@
+import crypto from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
 import { HttpError } from './http';
@@ -144,8 +145,17 @@ export function requestSwitch(target: string, now = Date.now()): string {
   }
   if (status.lastRequest.result === 'working') throw new HttpError(409, 'A version switch is in progress. Wait for it to finish.');
   if (pendingRequest()) throw new HttpError(409, 'A version switch is already waiting. It starts within a minute.');
+  // Written in full to a new file of our own first, then linked as "request": the updater never
+  // sees a request half written, and an existing one is never replaced (link fails with EEXIST).
+  // The folder is sticky and not listable: we may create, link and remove our own files only.
+  const tmp = path.join(controlDir(), `.request-${process.pid}-${crypto.randomBytes(8).toString('hex')}`);
   try {
-    fs.writeFileSync(path.join(controlDir(), 'request'), `${line}\n`, { flag: 'wx', mode: 0o644 });
+    fs.writeFileSync(tmp, `${line}\n`, { flag: 'wx', mode: 0o644 });
+    try {
+      fs.linkSync(tmp, path.join(controlDir(), 'request'));
+    } finally {
+      fs.rmSync(tmp, { force: true });
+    }
   } catch (err) {
     if ((err as NodeJS.ErrnoException).code === 'EEXIST') throw new HttpError(409, 'A version switch is already waiting. It starts within a minute.');
     throw new HttpError(503, 'The request could not be handed to the updater. Check that it runs (docker compose ps updater, or podman ps on a single-container shop).');

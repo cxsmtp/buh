@@ -101,6 +101,44 @@ test('a switch request: checked, one at a time, never older than 2.0.0, never th
   fs.rmSync(path.join(controlDir, 'request'));
 });
 
+test('regression: the request appears whole (never written in place, so the updater cannot read it empty), and never replaces one', () => {
+  writeStatus({ running: '2.0.0', onServer: ['2.0.0', '2.0.1'] });
+  const target = path.join(controlDir, 'request');
+  const written: string[] = [];
+  const realWrite = fs.writeFileSync;
+  const realOpen = fs.openSync;
+  fs.writeFileSync = ((file: fs.PathOrFileDescriptor, ...rest: unknown[]) => {
+    written.push(String(file));
+    return (realWrite as (...a: unknown[]) => void)(file, ...rest);
+  }) as typeof fs.writeFileSync;
+  fs.openSync = ((file: fs.PathLike, ...rest: unknown[]) => {
+    written.push(String(file));
+    return (realOpen as (...a: unknown[]) => number)(file, ...rest);
+  }) as typeof fs.openSync;
+  try {
+    assert.equal(v.requestSwitch('2.0.1'), 'rollback 2.0.1');
+  } finally {
+    fs.writeFileSync = realWrite;
+    fs.openSync = realOpen;
+  }
+  assert.ok(!written.includes(target), `the request file itself is never opened for writing: ${written.join(', ')}`);
+  assert.equal(request(), 'rollback 2.0.1\n');
+  assert.equal(fs.statSync(target).nlink, 1, 'the temporary name is gone');
+  assert.deepEqual(fs.readdirSync(controlDir), ['request']);
+
+  fs.rmSync(target);
+
+  // Something already there (here a link, which pendingRequest does not count): the link step
+  // refuses, nothing is replaced or written through, and no temporary file is left behind.
+  const other = path.join(dir, 'other');
+  fs.writeFileSync(other, 'keep\n');
+  fs.symlinkSync(other, target);
+  assert.equal(statusOf(() => v.requestSwitch('2.0.1')), 409);
+  assert.equal(fs.readFileSync(other, 'utf8'), 'keep\n');
+  assert.deepEqual(fs.readdirSync(controlDir), ['request']);
+  fs.rmSync(target);
+});
+
 test('during a switch (which can take minutes) the updater still counts as running, and a second switch waits', () => {
   writeStatus({ updatedAt: new Date(Date.now() - 6 * 60 * 1000).toISOString(), lastRequest: { request: 'rollback 2.0.1', result: 'working', message: 'Switching to 2.0.1…', at: '' } });
   assert.ok(v.updaterStatus(), 'a 6-minute-old status is not "stopped"');
