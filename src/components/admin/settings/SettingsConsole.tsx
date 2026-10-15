@@ -20,8 +20,9 @@ export interface SettingsSection {
 
 const KEY = 'buh_settings_section';
 
-export function SettingsConsole({ sections }: { sections: SettingsSection[] }) {
+export function SettingsConsole({ sections, openId }: { sections: SettingsSection[]; /** Open this section first (e.g. from the version badge). */ openId?: string }) {
   const [active, setActive] = useState(() => {
+    if (openId && sections.some((s) => s.id === openId)) return openId;
     try {
       const saved = typeof window === 'undefined' ? null : localStorage.getItem(KEY);
       return saved && sections.some((s) => s.id === saved) ? saved : sections[0]?.id;

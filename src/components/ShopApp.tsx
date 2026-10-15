@@ -103,6 +103,8 @@ import { StoreSettingsCard } from '@/components/admin/settings/StoreSettingsCard
 import { ThemeSettingsCard } from '@/components/admin/settings/ThemeSettingsCard';
 import { SettingsHistoryCard } from '@/components/admin/settings/SettingsHistoryCard';
 import { EmailSettingsCard } from '@/components/admin/settings/EmailSettingsCard';
+import { VersionsCard } from '@/components/admin/settings/VersionsCard';
+import { VersionBadge } from '@/components/common/VersionBadge';
 import { SystemHealthCard } from '@/components/admin/settings/SystemHealthCard';
 
 import { Sparkles, Palette, ShieldCheck, Heart, Search, X } from 'lucide-react';
@@ -125,6 +127,8 @@ export function ShopApp({ initialProductId }: { initialProductId?: string } = {}
 
   const [storeTab, setStoreTab] = useState<'home' | 'catalog'>('home');
   const [adminTab, setAdminTab] = useState<AdminTab>('orders');
+  // The version badge opens Settings → Versions (re-creating the console on that section).
+  const [settingsOpen, setSettingsOpen] = useState<{ id?: string; n: number }>({ n: 0 });
   const [selectedCategory, setSelectedCategory] = useState<CategoryOption>('all');
 
   // Core Data (all from the server)
@@ -558,6 +562,8 @@ export function ShopApp({ initialProductId }: { initialProductId?: string } = {}
 
             {adminTab === 'settings' && (
               <SettingsConsole
+                key={settingsOpen.n}
+                openId={settingsOpen.id}
                 sections={[
                   {
                     id: 'store',
@@ -636,6 +642,13 @@ export function ShopApp({ initialProductId }: { initialProductId?: string } = {}
                         onSave={(v) => saveSettings('email', v)}
                       />
                     ),
+                  },
+                  {
+                    id: 'versions',
+                    label: 'Versions',
+                    icon: '🕘',
+                    hint: 'Every release and what changed; switch to any of them without closing the shop.',
+                    content: <VersionsCard />,
                   },
                   {
                     id: 'system',
@@ -819,6 +832,17 @@ export function ShopApp({ initialProductId }: { initialProductId?: string } = {}
         onResetDone={() => setResetToken(null)}
       />
       {!isAdminMode && <WhatsAppButton />}
+      <VersionBadge
+        raised={isAdminMode}
+        onOpen={
+          isAdminMode
+            ? () => {
+                setSettingsOpen((x) => ({ id: 'versions', n: x.n + 1 }));
+                setAdminTab('settings');
+              }
+            : undefined
+        }
+      />
     </div>
     </ShopProvider>
   );

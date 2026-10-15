@@ -242,3 +242,25 @@ test('settings → Email & admin account: a private mail server is refused; the 
   assert.deepEqual(errors, []);
   await ctx.close();
 });
+
+test('version badge: bottom left for everyone; for the owner it opens Settings → Versions with every release', { skip }, async () => {
+  const shopper = await browser.newPage({ viewport: { width: 375, height: 800 } });
+  await shopper.goto(server.base, { waitUntil: 'domcontentloaded' });
+  const badge = shopper.getByLabel(/^Version BUH-\d{2}\.\d{2}\.\d{2}$/);
+  await badge.waitFor();
+  const box = (await badge.boundingBox())!;
+  assert.ok(box.x < 20 && box.y > 600, `bottom left (${box.x}, ${box.y})`);
+  assert.deepEqual(await overflow(shopper), []);
+  await shopper.close();
+
+  for (const width of [375, 1280]) {
+    const { ctx, page, errors } = await adminPage(width);
+    await page.getByRole('button', { name: /^BUH-\d{2}\.\d{2}\.\d{2}$/ }).click();
+    await page.getByText('BUH-01.00.00').first().waitFor();
+    await page.getByText(/Automatic updates are not running on this server/).waitFor();
+    assert.equal(await page.getByText('Running', { exact: true }).count(), 1);
+    assert.deepEqual(await overflow(page), [], `no sideways scroll at ${width}px`);
+    assert.deepEqual(errors, []);
+    await ctx.close();
+  }
+});

@@ -212,6 +212,8 @@ Each of these writes an alert. To stop the shop on purpose (for a restore, secti
 
 Automatic: a new version that does not become healthy is never switched to (above). To go back yourself, also without downtime:
 
+- **From the Admin Hub** (with automatic updates on): Settings → **Versions** (or tap the version, bottom left) lists every release and what changed. **Switch to this version** goes to that one; **Update to the latest** comes back. Versions before BUH-02.00.00 can't run on today's database and are not offered.
+
 - To the version before the current one:
   ```bash
   docker compose exec updater rollback
@@ -222,7 +224,7 @@ Automatic: a new version that does not become healthy is never switched to (abov
   ```
 - To any published version (every version is kept as `ghcr.io/cxsmtp/buh:<version>`):
   ```bash
-  docker compose exec updater rollback ghcr.io/cxsmtp/buh:1.2.0
+  docker compose exec updater rollback ghcr.io/cxsmtp/buh:2.0.0
   ```
 
 Without automatic updates, use `docker compose run --rm updater rollback` the same way. A rolled-back version is not re-installed automatically; the next published one is.

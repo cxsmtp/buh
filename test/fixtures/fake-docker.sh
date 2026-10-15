@@ -65,6 +65,7 @@ case $cmd in
         esac
         ;;
       prune) ev "prune" ;;
+      ls) cat "$D"/tags/* 2> /dev/null | sort -u ;;
     esac
     ;;
   pull)

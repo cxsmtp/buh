@@ -32,6 +32,9 @@ x-app: &app
     - TRUST_PROXY=1
   volumes:
     - buhome-data:/data
+    # Settings → Versions: requests to the updater (one line), and its status (read-only).
+    - updater-control:/updater-control
+    - updater-public:/updater-status:ro
   # Reachable only through Caddy (no port on the host).
   expose:
     - "3000"
@@ -115,6 +118,9 @@ services:
       - ./deploy/updater:/updater:ro
       # Its own state (last good image, rejected images, log, alerts): nothing of the shop's.
       - updater-state:/state
+      # Requests from Settings → Versions, and the status it shows (no secrets in either).
+      - updater-control:/control
+      - updater-public:/public
     read_only: true
     tmpfs:
       - /tmp
@@ -128,6 +134,8 @@ services:
 
 volumes:
   buhome-data:
+  updater-control:
+  updater-public:
   caddy-data:
   caddy-config:
   updater-state:

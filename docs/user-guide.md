@@ -26,7 +26,7 @@
 - No email set up? On the server: `docker compose exec app-blue rm /data/admin.json`, then `docker compose restart app-blue app-green`, then read the new one-time password with `docker compose logs app-blue` (Podman: `podman exec beautifuluaehome rm /data/admin.json`, `podman restart beautifuluaehome`, `podman logs beautifuluaehome`). You can also set `ADMIN_EMAIL` and `ADMIN_PASSWORD_HASH` (from `npm run hash-password`).
 - **Settings → Email & admin account:** your mail server (SMTP), where backups and alerts go, **Send a test email**, and your sign-in email (current password needed).
 - 5 wrong passwords from one place pause sign-in there for 15 minutes; try again later or from another network. **Sign out** signs you out on every device.
-- The build version (BUH-xx.xx.xx) shows next to the hub's title.
+- The version (BUH-xx.xx.xx) shows bottom left on every page. In the Admin Hub, tap it for **Settings → Versions**: every release with what changed, and (with automatic updates on) **Switch to this version** for any release from BUH-02.00.00, or **Update to the latest**. The shop stays open while it switches, and the database is saved first.
 - **Updates** (with the updater turned on, see the deployment guide) install themselves without closing the shop or signing you out. If a new version does not start properly, the shop stays on the one before and an alert is written. A customer in the middle of checkout carries on: their bag, details and SMS code are kept.
 
 ### Orders

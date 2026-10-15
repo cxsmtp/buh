@@ -22,6 +22,12 @@ What protects the shop, how it works, and what the owner must do. Each item has 
 - Changing the sign-in email needs the current password (counted like a sign-in attempt) and ends other sessions.
 - The SMTP password is write-only, and is dropped when the server changes. A mail server typed in Settings must resolve to a public address (no loopback, private or cloud-metadata ranges), the shop connects to the address it checked, and the certificate is checked against the name. Ports: 25, 465, 587, 2525.
 
+## Version switching from the Admin Hub
+
+- The shop never controls Docker. It writes one line (`rollback 2.0.1` or `update`) to a request folder shared only with the updater, creating the file new (no overwrite, no links) and only one at a time. Admins only, 10 an hour, written to the audit log.
+- The updater accepts only a small plain file whose line matches `rollback N.N.N` or `update` exactly, deletes it, and refuses versions before 2.0.0. The folder is sticky and not listable, so the shop can't remove or read anything else there.
+- The updater's status comes back through a second folder the shop mounts read-only; it holds versions and messages, no secrets. The updater writes it to a new file and renames it, so a planted link is replaced, never followed. The shop reads it defensively (size cap, links refused, fields checked).
+
 ## Checkout phone verification
 
 - **UAE mobiles only** (50, 52, 54, 55, 56, 58; `OTP_ALLOWED_PREFIXES`, default `+971`). Every way of writing a number (spaces, `00971`, `+971 0…`, Arabic digits) maps to one number and one set of limits. Other countries are shown the support email instead.

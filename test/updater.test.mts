@@ -295,3 +295,80 @@ test('the loop: UPDATE_CHECK_MINUTES=0 updates only when asked (trigger file), a
   assert.match(out, /updater stopped/);
   assert.equal(fs.existsSync(path.join(e.state, 'lock')), false);
 });
+
+test('Settings → Versions: the daemon takes a "rollback X.Y.Z" request, switches, and reports; bad or linked requests are ignored', async () => {
+  const e = setup();
+  running(e);
+  publish(e, NEW);
+  run(e, ['once']); // the shop now runs NEW (2.1.0); OLD (2.0.0) is on the server
+  fs.mkdirSync(path.join(e.fake, 'versions'), { recursive: true });
+  fs.writeFileSync(path.join(e.fake, 'versions', OLD), '2.0.0\n');
+  fs.writeFileSync(path.join(e.fake, 'versions', NEW), '2.1.0\n');
+  tag(e, 'ghcr.io/cxsmtp/buh:2.0.0', OLD);
+  const control = path.join(path.dirname(e.state), 'control');
+  const pub = path.join(path.dirname(e.state), 'public');
+  fs.mkdirSync(control);
+  fs.mkdirSync(pub);
+  // A link planted where the status goes must be replaced, not written through.
+  const precious = path.join(path.dirname(e.state), 'precious');
+  fs.writeFileSync(precious, 'keep me\n');
+  fs.symlinkSync(precious, path.join(pub, 'status.json'));
+  // A request that is a link is ignored (and removed).
+  fs.symlinkSync(precious, path.join(control, 'request'));
+
+  const child: ChildProcess = spawn('sh', [path.join(root, 'deploy/updater/updater.sh'), 'daemon'], {
+    env: {
+      PATH: `${e.bin}:${process.env.PATH}`,
+      NODE_ENV: 'test',
+      FAKE_DOCKER_DIR: e.fake,
+      COMPOSE_PROJECT_NAME: 'buhome',
+      PROJECT_DIR: e.project,
+      STATE_DIR: e.state,
+      ALERT_DIR: e.alerts,
+      CONTROL_DIR: control,
+      PUBLIC_DIR: pub,
+      SETTLE_SECONDS: '0',
+      HEAL_CHECK_SECONDS: '1',
+      UPDATE_CHECK_MINUTES: '0',
+    },
+  });
+  let out = '';
+  child.stdout?.on('data', (d: Buffer) => (out += d));
+  const status = () => {
+    try {
+      return JSON.parse(fs.readFileSync(path.join(pub, 'status.json'), 'utf8'));
+    } catch {
+      return null;
+    }
+  };
+  const until = async (fn: () => boolean) => {
+    for (let i = 0; i < 100 && !fn(); i++) await new Promise((r) => setTimeout(r, 100));
+    assert.ok(fn(), out);
+  };
+  try {
+    await until(() => status()?.running === '2.1.0');
+    assert.equal(fs.readFileSync(precious, 'utf8'), 'keep me\n', 'the planted link was not followed');
+    assert.equal(fs.lstatSync(path.join(pub, 'status.json')).isSymbolicLink(), false);
+    assert.ok(!fs.existsSync(path.join(control, 'request')), 'the linked request was removed');
+    assert.deepEqual(status().onServer.sort(), ['2.0.0', '2.1.0']);
+
+    // Not a version: ignored, nothing switched.
+    fs.writeFileSync(path.join(control, 'request'), 'rollback 2.0.0; rm -rf /\n');
+    await until(() => status()?.lastRequest.result === 'refused');
+    assert.equal(statusOf(e, 'green'), 'running');
+
+    fs.writeFileSync(path.join(control, 'request'), 'rollback 2.0.0\n');
+    await until(() => status()?.lastRequest.result === 'ok' && status()?.running === '2.0.0');
+    assert.equal(statusOf(e, 'blue'), 'running');
+    assert.equal(statusOf(e, 'green'), 'exited');
+
+    // "Update to the latest" brings 2.1.0 back, though the rollback had set it aside.
+    fs.writeFileSync(path.join(control, 'request'), 'update\n');
+    await until(() => status()?.running === '2.1.0' && status()?.lastRequest.request === 'update');
+    assert.equal(status().lastRequest.result, 'ok');
+  } finally {
+    const exited = new Promise((r) => child.on('exit', r));
+    child.kill('SIGTERM');
+    await exited;
+  }
+});

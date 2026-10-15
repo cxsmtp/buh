@@ -25,6 +25,11 @@
 #   rollback [image]  switch to buh:previous (or the image given) the same zero-downtime way
 #   status            what runs, the last good image, rejected images, recent log
 #
+# From the Admin Hub (Settings → System → Versions): the shop writes one line to
+# $CONTROL_DIR/request ("rollback 2.0.1" or "update"); the daemon checks it strictly, deletes
+# it, acts, and writes what runs and what happened to $PUBLIC_DIR/status.json, which the shop
+# reads (read-only). Neither folder holds anything of the updater's own state.
+#
 # Settings: UPDATE_CHECK_MINUTES (default 15; 0 = only on demand) and ALERT_WEBHOOK_URL are
 # read from the environment, else from .env.production (only those two keys).
 # Test/CI overrides (environment only): IMAGE, ONE_SHOT=1, HEALTH_TIMEOUT, SETTLE_SECONDS,
@@ -34,6 +39,8 @@ set -u
 PROJECT_DIR=${PROJECT_DIR:-/project}
 STATE_DIR=${STATE_DIR:-/state}
 ALERT_DIR=${ALERT_DIR:-/state/alerts}
+CONTROL_DIR=${CONTROL_DIR:-/control}
+PUBLIC_DIR=${PUBLIC_DIR:-/public}
 DEFAULT_IMAGE=ghcr.io/cxsmtp/buh:latest
 IMAGE=${IMAGE:-$DEFAULT_IMAGE}
 ONE_SHOT=${ONE_SHOT:-0}
@@ -525,6 +532,138 @@ heal_once() {
   return 1
 }
 
+# ── Rollback to a given image, the same zero-downtime way ───────────────────────
+
+# rollback_to REF: 0 switched (or already running), 1 the image failed, 2 refused or error.
+rollback_to() {
+  rb_ref=$1
+  # A published version (ghcr.io/cxsmtp/buh:1.2.0) is fetched first if it is not here yet.
+  image_id "$rb_ref" > /dev/null || docker pull -q "$rb_ref" > /dev/null 2>&1 || true
+  if ! image_id "$rb_ref" > /dev/null; then
+    log "rollback: $rb_ref could not be found or downloaded"
+    return 2
+  fi
+  # Versions before 2.0.0 keep stock as one number per product, not per size: on today's
+  # database they would refuse orders (stock guard). Refuse them unless forced.
+  rb_version=$(docker image inspect -f '{{index .Config.Labels "org.opencontainers.image.version"}}' "$rb_ref" 2>/dev/null || true)
+  case $rb_version in
+    0.* | 1.*)
+      if [ "${FORCE_OLD_SCHEMA:-0}" != 1 ]; then
+        log "refusing to roll back to $rb_version: versions before 2.0.0 cannot run on this database (restore the pre-update snapshot instead, or set FORCE_OLD_SCHEMA=1)"
+        return 2
+      fi
+      ;;
+  esac
+  rb_active=$(running_colour)
+  if [ -n "$rb_active" ]; then
+    rb_current=$(container_image "$(cid_of "$rb_active")")
+    if [ "$(image_id "$rb_ref")" = "$rb_current" ]; then
+      log "already running $rb_ref"
+      return 0
+    fi
+    # Keep automatic updates from bringing the rolled-back version straight back.
+    remember_bad "$rb_current"
+  fi
+  switch_to "$rb_ref" "rollback to $rb_ref"
+}
+
+# ── Requests from the Admin Hub, and the status it shows ──────────────────────
+
+# The image name without its tag: ghcr.io/cxsmtp/buh:latest -> ghcr.io/cxsmtp/buh.
+image_repo() {
+  case ${IMAGE##*/} in
+    *:*) printf '%s' "${IMAGE%:*}" ;;
+    *) printf '%s' "$IMAGE" ;;
+  esac
+}
+
+version_of() {
+  vo=$(docker image inspect -f '{{index .Config.Labels "org.opencontainers.image.version"}}' "$1" 2>/dev/null || true)
+  case $vo in '<no value>') vo='' ;; esac
+  printf '%s' "$vo"
+}
+
+last_request=''
+last_result=''
+last_message=''
+last_at=''
+
+# One request at most, taken (and deleted) only if it is a small regular file with a known line.
+take_request() {
+  [ -d "$CONTROL_DIR" ] && [ ! -L "$CONTROL_DIR" ] || return 0
+  rq_file="$CONTROL_DIR/request"
+  [ -e "$rq_file" ] || [ -L "$rq_file" ] || return 0
+  if [ -L "$rq_file" ] || [ ! -f "$rq_file" ] || [ "$(wc -c < "$rq_file")" -gt 64 ]; then
+    rm -rf "$rq_file"
+    log "ignored a request that was not a small plain file"
+    return 0
+  fi
+  rq_line=$(head -n 1 "$rq_file" | tr -d '\r')
+  rm -f "$rq_file"
+  last_at=$(stamp)
+  last_request=$rq_line
+  if printf '%s' "$rq_line" | grep -Eqx 'rollback [0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}'; then
+    rq_version=${rq_line#rollback }
+    log "Admin Hub asked to switch to version $rq_version"
+    rq_rc=0
+    rollback_to "$(image_repo):$rq_version" || rq_rc=$?
+    case $rq_rc in
+      0) last_result=ok last_message="The shop runs $rq_version." ;;
+      1) last_result=failed last_message="$rq_version did not start properly; the shop stays on the version it was running." ;;
+      *) last_result=refused last_message="$rq_version could not be used (not published, or older than 2.0.0, which cannot run on this database). See the updater log." ;;
+    esac
+  elif [ "$rq_line" = update ]; then
+    log "Admin Hub asked for the latest version"
+    docker pull -q "$IMAGE" > /dev/null 2>&1 || true
+    # Asked for by a person: give an image that was rolled back from another chance.
+    if rq_latest=$(image_id "$IMAGE"); then
+      if [ -f "$STATE_DIR/bad-images" ]; then
+        grep -vx "$rq_latest" "$STATE_DIR/bad-images" > "$STATE_DIR/bad-images.tmp" || true
+        mv "$STATE_DIR/bad-images.tmp" "$STATE_DIR/bad-images"
+      fi
+    fi
+    rq_rc=0
+    update_once || rq_rc=$?
+    case $rq_rc in
+      0) last_result=ok last_message="The shop runs the latest version." ;;
+      1) last_result=failed last_message="The latest version did not start properly; the shop stays on the version it was running." ;;
+      *) last_result=failed last_message="The latest version could not be fetched. See the updater log." ;;
+    esac
+  else
+    log "ignored an unknown request"
+    last_result=refused
+    last_message="Unknown request."
+  fi
+}
+
+# What runs, the versions on this server and the last request, for the Admin Hub.
+publish_status() {
+  [ -d "$PUBLIC_DIR" ] && [ ! -L "$PUBLIC_DIR" ] || return 0
+  ps_active=$(running_colour)
+  ps_running=''
+  [ -z "$ps_active" ] || ps_running=$(version_of "$(container_image "$(cid_of "$ps_active")")")
+  ps_good=''
+  image_id "$LAST_GOOD" > /dev/null && ps_good=$(version_of "$LAST_GOOD")
+  ps_prev=''
+  image_id "$PREVIOUS" > /dev/null && ps_prev=$(version_of "$PREVIOUS")
+  ps_versions=''
+  for ps_id in $(docker image ls -q --filter "label=$IMAGE_SOURCE_LABEL" 2>/dev/null | sort -u); do
+    ps_v=$(version_of "$ps_id")
+    if printf '%s' "$ps_v" | grep -Eqx '[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}'; then
+      case ",$ps_versions," in *",\"$ps_v\","*) ;; *) ps_versions="${ps_versions:+$ps_versions,}\"$ps_v\"" ;; esac
+    fi
+  done
+  ps_minutes=$(setting UPDATE_CHECK_MINUTES 15)
+  is_number "$ps_minutes" || ps_minutes=15
+  # Written to a new file, then renamed over the old one: a link planted there is replaced, never followed.
+  ps_tmp=$(mktemp "$PUBLIC_DIR/.status.XXXXXX") || return 0
+  printf '{"updatedAt":"%s","running":"%s","lastGood":"%s","previous":"%s","onServer":[%s],"autoUpdateMinutes":%s,"lastRequest":{"request":"%s","result":"%s","message":"%s","at":"%s"}}\n' \
+    "$(stamp)" "$(json_escape "$ps_running")" "$(json_escape "$ps_good")" "$(json_escape "$ps_prev")" "$ps_versions" "$ps_minutes" \
+    "$(json_escape "$last_request")" "$last_result" "$(json_escape "$last_message")" "$last_at" > "$ps_tmp"
+  chmod 644 "$ps_tmp" 2>/dev/null || true
+  mv -f "$ps_tmp" "$PUBLIC_DIR/status.json"
+}
+
 # ── Commands ─────────────────────────────────────────────────────────────────
 
 stop_requested=0
@@ -562,6 +701,8 @@ daemon() {
       if [ "$due" = 1 ] && [ "$stop_requested" = 0 ]; then
         update_once || true
       fi
+      [ "$stop_requested" = 1 ] || take_request
+      publish_status
       unlock
     fi
     [ "$stop_requested" = 0 ] || break
@@ -607,6 +748,9 @@ main() {
     exit 2
   fi
   unset BUH_IMAGE
+  # The shop (another user) may create its request file here but not remove others' (sticky)
+  # nor list the folder; the updater owns it, so it can read and remove requests.
+  if [ -d "$CONTROL_DIR" ] && [ ! -L "$CONTROL_DIR" ]; then chmod 1733 "$CONTROL_DIR" 2>/dev/null || true; fi
 
   cmd=${1:-daemon}
   if [ "$cmd" = daemon ] && [ "$ONE_SHOT" = 1 ]; then cmd=once; fi
@@ -632,31 +776,7 @@ main() {
     rollback)
       wait_for_lock || exit 2
       trap unlock EXIT
-      rb_ref=${2:-$PREVIOUS}
-      # A published version (ghcr.io/cxsmtp/buh:1.2.0) is fetched first if it is not here yet.
-      image_id "$rb_ref" > /dev/null || docker pull -q "$rb_ref" > /dev/null 2>&1 || true
-      # Versions before 2.0.0 keep stock as one number per product, not per size: on today's
-      # database they would refuse orders (stock guard). Refuse them unless forced.
-      rb_version=$(docker image inspect -f '{{index .Config.Labels "org.opencontainers.image.version"}}' "$rb_ref" 2>/dev/null || true)
-      case $rb_version in
-        0.* | 1.*)
-          if [ "${FORCE_OLD_SCHEMA:-0}" != 1 ]; then
-            log "refusing to roll back to $rb_version: versions before 2.0.0 cannot run on this database (restore the pre-update snapshot instead, or set FORCE_OLD_SCHEMA=1)"
-            exit 2
-          fi
-          ;;
-      esac
-      rb_active=$(running_colour)
-      if [ -n "$rb_active" ]; then
-        rb_current=$(container_image "$(cid_of "$rb_active")")
-        if [ "$(image_id "$rb_ref")" = "$rb_current" ]; then
-          log "already running $rb_ref"
-          exit 0
-        fi
-        # Keep automatic updates from bringing the rolled-back version straight back.
-        remember_bad "$rb_current"
-      fi
-      switch_to "$rb_ref" "rollback to $rb_ref"
+      rollback_to "${2:-$PREVIOUS}"
       ;;
     status)
       status
