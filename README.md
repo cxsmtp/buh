@@ -32,7 +32,7 @@ Open <http://localhost:3000>. The terminal prints the first admin password once;
 docker compose pull app-blue && docker compose up -d
 ```
 
-Updates switch between two copies of the shop with no downtime, roll back on their own if the new version is unhealthy, and restart a shop that stops answering; turn on the optional updater as described in the [guide](HOSTINGER_DEPLOYMENT_GUIDE.md#5-updates-without-downtime-and-rollback).
+Updates switch between two copies of the shop with no downtime, roll back on their own if the new version is unhealthy, and restart a shop that stops answering; turn on the optional updater as described in the [guide](HOSTINGER_DEPLOYMENT_GUIDE.md#5-updates-without-downtime-and-rollback). Settings → Versions lists every release and switches to any of them.
 
 The image `ghcr.io/cxsmtp/buh:latest` is built, tested and published from main. To try it on your own computer with Podman on Windows, run `scripts\run-local-podman.bat` (test mode, http://localhost:3000).
 

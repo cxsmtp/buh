@@ -1,6 +1,6 @@
 # Changelog
 
-## BUH-02.00.00 — DATE UTC · [#4](https://github.com/cxsmtp/buh/pull/4)
+## BUH-02.00.00 — 2026-10-15 10:20 UTC · [#4](https://github.com/cxsmtp/buh/pull/4)
 
 - **Inventory you can fully edit, stock per size.** Every product field (photos, text, prices, colours, sizes) is editable from a phone; stock is kept per size because most designs are one or two pieces, with one-tap + / −, "Only 1 left" and sold-out sizes for shoppers, and Remove (archive) that keeps past orders intact.
 - **A settings console.** Store & contact (WhatsApp number, email, Instagram, TikTok, Facebook, address), Catalogue (size presets, categories, low-stock warning), Branding & bank, Festival themes, Phone verification, Couriers (and Firebase as an SMS option, with Google's signed answer checked on the server), and System (health, backups, and earlier versions of every setting, restorable in one click).
@@ -10,10 +10,10 @@
 - **Updates without closing the shop, healing itself.** A new version starts beside the one serving, takes over only when healthy, and is rolled back automatically if not; a database snapshot is taken first; a stuck copy is restarted or replaced by the last version that worked; checkout SMS codes and caches are shared, so a customer mid-checkout carries on. Problems (disk, database, backups, SMS) are emailed, and a summary of yesterday's orders arrives every morning.
 - **Versions, email and a forgotten password.** The version (BUH-xx.xx.xx) shows bottom left on every page; Settings → Versions lists every release with what changed and switches the shop to any of them from 2.0.0 on, the same no-downtime way; Settings → Email & admin account sets the mail server, where backups and alerts go, and your sign-in email; **Forgot password?** emails a one-time link.
 - **Status.**
-  - **Benchmark:** BENCH
-  - **Tests:** TESTS
+  - **Benchmark:** same host, main vs this branch, two sets of 3 alternating rounds, 0 failed requests in every run. Storefront main 824 / 819 / 855 / 803 / 721 / 890 req/s, branch 681 / 885 / 653 / 796 / 751 / 751 (median about 8% lower; the page now also renders the festival theme, live-update and version pieces). Courier check main 626–728, branch 579–795. Catalogue main 736–837, branch 661–858 (one branch round had a 365 ms p95 that did not repeat; others 139–258 ms vs main's 135–240 ms).
+  - **Tests:** 212 passed: unit, end-to-end against the production build, real-browser at 375 px and 1280 px, and the updater against a fake Docker (including the version-switch request channel). CI starts real containers and switches versions under load with zero failed requests.
   - **Dependency audit:** production 0 vulnerabilities (adds firebase 12.19.0, with `@grpc/grpc-js` pinned for Firestore's unused server dependency); the same 5 dev-only ESLint findings as main.
-  - **Security scan:** SCAN
+  - **Security scan:** three independent reviews (security, correctness, and one of email, password reset and version switching); every finding fixed with a test or explained in the pull request. No automated scanner is available here.
 
 ## BUH-01.02.00 — 2026-10-15 07:19 UTC · [#3](https://github.com/cxsmtp/buh/pull/3)
 
