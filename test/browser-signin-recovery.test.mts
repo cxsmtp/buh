@@ -279,8 +279,11 @@ test('after a restore the Admin Hub says to review passkeys and make new codes; 
   let shop = await startServer({ DATA_DIR: dataDir });
   const hh = () => ({ 'content-type': 'application/json', origin: shop.base });
   await fetch(`${shop.base}/api/admin/login`, { method: 'POST', headers: hh(), body: JSON.stringify({ email: 'x@y.z', password: 'x' }) });
-  await new Promise((r) => setTimeout(r, 300));
-  const once = shop.log().match(/Password: (\S+)/)![1];
+  // The one-time password is printed once the account is created; under load that can take a while.
+  let found: RegExpMatchArray | null = null;
+  for (let i = 0; i < 150 && !(found = shop.log().match(/Password: (\S+)/)); i++) await new Promise((r) => setTimeout(r, 100));
+  assert.ok(found, 'the one-time password was printed');
+  const once = found[1];
   const first = await fetch(`${shop.base}/api/admin/login`, { method: 'POST', headers: hh(), body: JSON.stringify({ email: EMAIL, password: once }) });
   const pw = 'Restored-Shop-Pass-1';
   await fetch(`${shop.base}/api/admin/password`, { method: 'POST', headers: { ...hh(), cookie: (first.headers.get('set-cookie') || '').split(';')[0] }, body: JSON.stringify({ currentPassword: once, newPassword: pw }) });
