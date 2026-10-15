@@ -264,6 +264,10 @@ test('version badge: bottom left for everyone; for the owner it opens Settings â
     await page.getByRole('button', { name: /^BUH-\d{2}\.\d{2}\.\d{2}$/ }).click();
     await page.getByText('BUH-01.00.00').first().waitFor();
     await page.getByText(/Automatic updates are not running on this server/).waitFor();
+    // Without the updater the owner gets the Podman commands, with the published image's real name.
+    await page.getByText('podman pull ghcr.io/cxsmtp/buh:latest', { exact: true }).waitFor();
+    assert.equal(await page.getByText(/^podman run --replace .* ghcr\.io\/cxsmtp\/buh:latest$/).count(), 1);
+    assert.equal(await page.getByText(/docker compose run/).isVisible(), false, 'the Docker Compose command is folded away');
     assert.equal(await page.getByText('Running', { exact: true }).count(), 1);
     assert.deepEqual(await overflow(page), [], `no sideways scroll at ${width}px`);
     assert.deepEqual(errors, []);
