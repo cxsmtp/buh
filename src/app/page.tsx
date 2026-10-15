@@ -1,7 +1,7 @@
 'use client';
 
 import React, { useState, useEffect, useMemo, useCallback } from 'react';
-import { Product, Order, Customer, CourierSettings, CartItem, BedProfileMeasurement, BrandSettings, SmsGatewaySettings, BankTransferDetails } from '@/types';
+import { Product, Order, Customer, CourierSettings, CartItem, BedProfileMeasurement, BrandSettings, SmsGatewaySettings, BankTransferDetails, PhoneVerificationConfig } from '@/types';
 import { INITIAL_BANK_DETAILS, INITIAL_BRAND_SETTINGS, INITIAL_COURIER_SETTINGS, INITIAL_SMS_SETTINGS } from '@/data/initialData';
 import { ADMIN_SIGNED_OUT_EVENT, getJson, postJson, sendJson } from '@/lib/apiClient';
 
@@ -19,7 +19,7 @@ interface AdminSettings {
 async function fetchCatalog() {
   const [products, settings] = await Promise.all([
     getJson<{ products: Product[] }>('/api/products'),
-    getJson<{ brand: BrandSettings; bank: BankTransferDetails; supportEmail?: string }>('/api/settings/public'),
+    getJson<{ brand: BrandSettings; bank: BankTransferDetails; supportEmail?: string; phoneVerification?: PhoneVerificationConfig }>('/api/settings/public'),
   ]);
   return { products, settings };
 }
@@ -107,6 +107,8 @@ export default function HomePage() {
   const [brandSettings, setBrandSettings] = useState<BrandSettings>(INITIAL_BRAND_SETTINGS);
   const [bankDetails, setBankDetails] = useState<BankTransferDetails>(INITIAL_BANK_DETAILS);
   const [supportEmail, setSupportEmail] = useState<string | undefined>(undefined);
+  // How checkout verifies phones (the shop's own SMS, or Firebase).
+  const [phoneVerification, setPhoneVerification] = useState<PhoneVerificationConfig>({ method: 'server' });
   // Pre-fills Track Order (only rendered once opened, so no server/client mismatch).
   const [lastOrderId, setLastOrderId] = useState(() => {
     try {
@@ -164,6 +166,7 @@ export default function HomePage() {
       setBrandSettings(settings.data.brand);
       setBankDetails(settings.data.bank);
       if (settings.data.supportEmail) setSupportEmail(settings.data.supportEmail);
+      if (settings.data.phoneVerification) setPhoneVerification(settings.data.phoneVerification);
       setPublicSettingsLoaded(true);
     }
     return res.ok ? res.data.products : null;
@@ -577,6 +580,7 @@ export default function HomePage() {
         items={cart}
         bank={bankDetails}
         supportEmail={supportEmail}
+        phoneVerification={phoneVerification}
         onOrderPlaced={handleOrderPlaced}
         onPricesChanged={async () => {
           const list = await loadCatalog();

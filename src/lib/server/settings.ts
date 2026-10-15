@@ -1,6 +1,8 @@
-import type { BankTransferDetails, BrandSettings, CourierSettings, SmsGatewaySettings } from '@/types';
+import type { BankTransferDetails, BrandSettings, CourierSettings, FirebaseWebConfig, PhoneVerificationConfig, SmsGatewaySettings } from '@/types';
 import { INITIAL_BANK_DETAILS, INITIAL_BRAND_SETTINGS, INITIAL_COURIER_SETTINGS, INITIAL_SMS_SETTINGS } from '@/data/initialData';
 import { getDb } from './db';
+import { FIREBASE_PROJECT_ID } from './firebaseAuth';
+import { envGateways } from '@/lib/otpService';
 import { HttpError } from './http';
 import { acceptImageRef } from './images';
 import { assertPublicHttpsUrl } from './outbound';
@@ -113,6 +115,8 @@ export async function updateSettings<K extends SettingsKey>(key: K, input: unkno
         ? !(sms.infobip.apiKey && sms.infobip.baseUrl)
         : sms.provider === 'custom_webhook'
         ? !sms.customWebhook.endpointUrl
+        : sms.provider === 'firebase'
+        ? !firebaseConfigComplete(sms.firebase)
         : true;
     if (sms.isEnabled && missing) throw new HttpError(400, 'Fill in every field for the chosen SMS gateway before switching it on.');
   }
@@ -289,8 +293,8 @@ const VALIDATORS: { [K in SettingsKey]: (input: Obj, current: SettingsMap[K]) =>
     const i = obj(input.infobip);
     const w = obj(input.customWebhook);
     // Unifonic is not wired to checkout, so it can't be chosen (it would look active and send nothing).
-    const providers = ['twilio', 'infobip', 'custom_webhook'] as const;
-    if (input.provider !== undefined && !providers.includes(input.provider as never)) throw new HttpError(400, 'Choose Twilio, Infobip or a webhook.');
+    const providers = ['twilio', 'infobip', 'custom_webhook', 'firebase'] as const;
+    if (input.provider !== undefined && !providers.includes(input.provider as never)) throw new HttpError(400, 'Choose Twilio, Infobip, a webhook or Firebase.');
     const providerValue = (input.provider as SmsGatewaySettings['provider']) ?? (current.provider === 'unifonic' ? 'twilio' : current.provider);
     const senderId = text(input.senderId, 'Sender ID', 11, current.senderId) || 'BUHome';
     if (!/^[A-Za-z0-9 ]{1,11}$/.test(senderId)) throw new HttpError(400, 'Sender ID: up to 11 letters or digits.');
@@ -309,10 +313,54 @@ const VALIDATORS: { [K in SettingsKey]: (input: Obj, current: SettingsMap[K]) =>
       infobip: { apiKey: '', baseUrl, fromSender: senderId },
       unifonic: { appSid: '', senderId },
       customWebhook: { endpointUrl, bearerToken: '' },
+      firebase: firebaseConfig(obj(input.firebase), current.firebase ?? EMPTY_FIREBASE),
       isEnabled: bool(input.isEnabled, current.isEnabled),
     };
   },
 };
+
+// ── Firebase web config (public values, validated strictly) ────────────────
+
+const EMPTY_FIREBASE: FirebaseWebConfig = { apiKey: '', authDomain: '', projectId: '', appId: '' };
+const FIREBASE_API_KEY = /^AIza[0-9A-Za-z_-]{35}$/;
+const FIREBASE_APP_ID = /^1:\d{1,20}:web:[0-9a-f]{1,40}$/;
+const HOSTNAME = /^(?=.{4,253}$)(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z]{2,63}$/;
+
+/**
+ * How the storefront verifies phones. Firebase only when it is the chosen,
+ * switched-on and complete SMS option, and no gateway is set in the server
+ * environment (which, as for every other gateway, takes precedence).
+ */
+export function phoneVerificationConfig(): PhoneVerificationConfig {
+  const sms = getSettings('sms');
+  if (!sms.isEnabled || sms.provider !== 'firebase' || !firebaseConfigComplete(sms.firebase) || hasEnvGateway()) return { method: 'server' };
+  const { apiKey, authDomain, projectId, appId } = sms.firebase;
+  return { method: 'firebase', firebase: { apiKey, authDomain, projectId, appId } };
+}
+
+function hasEnvGateway(): boolean {
+  const g = envGateways();
+  return Boolean(g.twilio || g.infobip || g.webhook);
+}
+
+/** Every field present: what "switched on" and the storefront need. */
+export function firebaseConfigComplete(f: FirebaseWebConfig | undefined): f is FirebaseWebConfig {
+  return Boolean(f && f.apiKey && f.authDomain && f.projectId && f.appId);
+}
+
+function firebaseConfig(input: Obj, current: FirebaseWebConfig): FirebaseWebConfig {
+  const apiKey = text(input.apiKey, 'Firebase API key', 100, current.apiKey);
+  if (apiKey && !FIREBASE_API_KEY.test(apiKey)) throw new HttpError(400, 'Firebase API key starts with AIza followed by 35 letters, digits, - or _.');
+  const projectId = text(input.projectId, 'Firebase project ID', 100, current.projectId);
+  if (projectId && !FIREBASE_PROJECT_ID.test(projectId)) throw new HttpError(400, 'Firebase project ID: 4 to 40 lowercase letters, digits or dashes.');
+  const authDomain = text(input.authDomain, 'Firebase auth domain', 300, current.authDomain).toLowerCase();
+  if (authDomain && !(projectId && authDomain === `${projectId}.firebaseapp.com`) && !(HOSTNAME.test(authDomain) && !authDomain.endsWith('.localhost') && !authDomain.endsWith('.local') && !authDomain.endsWith('.internal'))) {
+    throw new HttpError(400, 'Firebase auth domain must be a host name such as your-project.firebaseapp.com (no https://, no path).');
+  }
+  const appId = text(input.appId, 'Firebase app ID', 100, current.appId);
+  if (appId && !FIREBASE_APP_ID.test(appId)) throw new HttpError(400, 'Firebase app ID looks like 1:123456789012:web:abc123def456.');
+  return { apiKey, authDomain, projectId, appId };
+}
 
 // ── helpers ─────────────────────────────────────────────────────────────────
 
