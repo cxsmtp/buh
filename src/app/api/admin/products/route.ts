@@ -3,11 +3,11 @@ import { requireAdmin } from '@/lib/server/guard';
 import { handleRouteError, json, readJsonBody } from '@/lib/server/http';
 import { createProduct, listProducts } from '@/lib/server/products';
 
-/** Every product, hidden ones included. */
+/** Every product, hidden and archived ones included (archived are marked). */
 export async function GET(req: Request) {
   try {
     await requireAdmin(req);
-    return json({ products: listProducts({ includeHidden: true }) });
+    return json({ products: listProducts({ includeHidden: true, includeArchived: true }) });
   } catch (err) {
     return handleRouteError(err, 'admin/products');
   }

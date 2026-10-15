@@ -69,29 +69,33 @@ test('one checkout reference = one order, and another phone cannot reuse it', ()
   assert.equal(status(() => orders.placeOrder({ ...b, verificationToken: issuePhoneToken('+971551112222') })), 409);
 });
 
-test('stock is reserved; the last item cannot be sold twice; cancelling returns it', () => {
+test('stock is reserved per size; the last piece cannot be sold twice; cancelling returns it', () => {
   const p = listProducts()[1];
-  updateProduct(p.id, { stockCount: 2 });
-  const a = orders.placeOrder(body({ items: [{ productId: p.id, profileId: p.profiles[0].id, quantity: 2 }] }));
-  assert.equal(listProducts().find((x) => x.id === p.id)!.stockCount, 0);
-  assert.equal(status(() => orders.placeOrder(body({ items: [{ productId: p.id, profileId: p.profiles[0].id, quantity: 1 }] }))), 409);
+  const [king, other] = [p.profiles[0].id, p.profiles[1].id];
+  updateProduct(p.id, { stockBySize: { ...Object.fromEntries(p.profiles.map((s) => [s.id, 0])), [king]: 2, [other]: 1 } });
+  const stockOf = (size: string) => listProducts().find((x) => x.id === p.id)!.stockBySize[size];
+  const a = orders.placeOrder(body({ items: [{ productId: p.id, profileId: king, quantity: 2 }] }));
+  assert.equal(stockOf(king), 0);
+  assert.equal(stockOf(other), 1, 'another size is untouched');
+  assert.equal(status(() => orders.placeOrder(body({ items: [{ productId: p.id, profileId: king, quantity: 1 }] }))), 409);
   orders.updateOrderByAdmin(a.order.id, { status: 'cancelled' }, 'test');
-  assert.equal(listProducts().find((x) => x.id === p.id)!.stockCount, 2);
+  assert.equal(stockOf(king), 2);
   // Cancelling again does not add stock twice (cancelled is final).
   assert.equal(status(() => orders.updateOrderByAdmin(a.order.id, { status: 'confirmed' }, 'test')), 409);
-  assert.equal(listProducts().find((x) => x.id === p.id)!.stockCount, 2);
+  assert.equal(stockOf(king), 2);
+  assert.equal(listProducts().find((x) => x.id === p.id)!.stockCount, 3, 'the total is the sum of the sizes');
 });
 
 test('a failing line rolls back the whole order (no stock taken for the others)', () => {
   const [p0, p1] = listProducts();
   const before = p0.stockCount;
-  updateProduct(p1.id, { stockCount: 0 });
+  updateProduct(p1.id, { stockBySize: { [p1.profiles[0].id]: 0 } });
   const code = status(() =>
     orders.placeOrder(body({ items: [{ productId: p0.id, profileId: p0.profiles[0].id, quantity: 1 }, { productId: p1.id, profileId: p1.profiles[0].id, quantity: 1 }] }))
   );
   assert.equal(code, 409);
   assert.equal(listProducts().find((x) => x.id === p0.id)!.stockCount, before);
-  updateProduct(p1.id, { stockCount: 20 });
+  updateProduct(p1.id, { stockBySize: { [p1.profiles[0].id]: 20 } });
 });
 
 test('bad orders are refused', () => {

@@ -218,6 +218,11 @@ export const AdminOrdersTab: React.FC<AdminOrdersTabProps> = ({
                     </div>
                     <div className="text-[11px] text-stone-500 mt-0.5">
                       {new Date(order.createdAt).toLocaleString()} • {order.customer.fullName}
+                      {order.source && order.source.source !== 'direct' && (
+                        <span className="ml-1.5 px-1.5 py-0.5 rounded-full bg-stone-100 text-stone-600 text-[10px] font-semibold capitalize" title={order.source.campaign ? `Campaign: ${order.source.campaign}` : 'Where the customer came from'}>
+                          via {order.source.source}
+                        </span>
+                      )}
                     </div>
                   </div>
 
@@ -347,7 +352,9 @@ export const AdminOrdersTab: React.FC<AdminOrdersTabProps> = ({
                         patchOrder(
                           order,
                           { status: 'cancelled' },
-                          `Cancel order ${order.id}? Its items go back into stock. This cannot be undone.` +
+                          (['dispatched', 'out_for_delivery'].includes(order.status)
+                            ? `Cancel order ${order.id}? It has left with the courier, so its pieces are NOT put back on sale: add them back in Inventory (+) when the parcel returns. This cannot be undone.`
+                            : `Cancel order ${order.id}? Its items go back into stock. This cannot be undone.`) +
                             (order.courier.awbNumber && !order.courier.simulated
                               ? `\n\nIt is booked with the courier (AWB ${order.courier.awbNumber}): cancel that booking in the carrier's portal too.`
                               : '')

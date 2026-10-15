@@ -7,7 +7,8 @@ export type Emirate =
   | 'Fujairah'
   | 'Umm Al Quwain';
 
-export type BedSizeProfileId = 'single' | 'double' | 'queen' | 'king' | 'super-king' | 'custom';
+/** A size's id: the built-in ones (single, double, queen, king, super-king, custom) or one the owner adds in Settings. */
+export type BedSizeProfileId = string;
 
 export interface BedProfileMeasurement {
   id: BedSizeProfileId;
@@ -29,7 +30,8 @@ export interface Product {
   slug: string;
   description: string;
   shortDescription: string;
-  category: 'bedsheets' | 'duvet-covers' | 'fitted-sheets' | 'hotel-luxury' | 'silk-collection';
+  /** A category id from Settings → Catalogue (built-in: bedsheets, duvet-covers, fitted-sheets, hotel-luxury, silk-collection). */
+  category: string;
   price: number; // Base price in AED
   compareAtPrice?: number;
   material: string; // e.g. "100% Giza Egyptian Cotton"
@@ -42,7 +44,10 @@ export interface Product {
   aiTransformedImage?: string; // AI enhanced luxury bedroom mockup
   aiStagingPrompt?: string;
   isAiEnhanced?: boolean;
+  /** Total pieces in stock across all sizes (the sum of stockBySize). */
   stockCount: number;
+  /** Pieces in stock per size id. Most designs are one or two pieces, so stock is kept per size. */
+  stockBySize: Record<string, number>;
   /** Shown in the shop (false = hidden by the owner). Present on admin reads. */
   active?: boolean;
   isFeatured: boolean;
@@ -148,6 +153,8 @@ export interface Order {
     };
   };
   adminNotes?: string;
+  /** Where the customer came from (first visit in the last 30 days). */
+  source?: { source: string; campaign?: string };
 }
 
 export interface Customer {
@@ -202,6 +209,61 @@ export interface CourierSettings {
   };
 }
 
+/** Settings → Catalogue: the size presets offered when adding a product, and the categories. */
+export interface CatalogSettings {
+  sizes: BedProfileMeasurement[];
+  categories: Array<{ id: string; label: string; icon: string }>;
+  /** Show "Only 1 left" when a size's stock is at or below this. */
+  lowStockThreshold: number;
+}
+
+/** Settings → Store & contact: how customers reach the shop. */
+export interface StoreSettings {
+  /** WhatsApp number in +971… form; empty hides WhatsApp buttons. */
+  whatsappNumber: string;
+  /** The message a customer's WhatsApp opens with. */
+  whatsappGreeting: string;
+  /** Show the floating WhatsApp button on every page. */
+  showWhatsAppButton: boolean;
+  /** Overrides NEXT_PUBLIC_SUPPORT_EMAIL when set. */
+  supportEmail: string;
+  instagramHandle: string;
+  facebookUrl: string;
+  tiktokHandle: string;
+  /** Shown in the footer and on invoices. */
+  storeAddress: string;
+  /** Show an approximate price in the visitor's own currency next to AED (outside the UAE). */
+  showLocalCurrency: boolean;
+}
+
+/** Settings → Email: the mail server for backups, alerts, the daily summary and password resets. */
+export interface EmailSettings {
+  /** Empty: use SMTP_* from .env.production. */
+  smtpHost: string;
+  smtpPort: number;
+  /** starttls (port 587/25/2525, upgrade required) or tls (port 465). */
+  smtpSecurity: 'starttls' | 'tls';
+  smtpUser: string;
+  /** Write-only. */
+  smtpPass: string;
+  fromAddress: string;
+  /** Where backups, alerts and the daily summary go (comma-separated); empty uses BACKUP_EMAIL. */
+  sendTo: string;
+}
+
+/** Settings → Themes: festival looks, picked automatically or by the admin. */
+export interface ThemeSettings {
+  /** auto: by the festival calendar; manual: always themeId; off: the everyday look. */
+  mode: 'auto' | 'manual' | 'off';
+  themeId: string;
+  /** Festivals that should never take over the theme (e.g. ones the shop does not mark). */
+  disabledFestivals: string[];
+  /** Festival greeting in the banner at the top of the shop. */
+  showBanner: boolean;
+  /** Festival lines added to the scrolling bar. */
+  showMarquee: boolean;
+}
+
 export interface BrandSettings {
   storeName: string;
   tagline: string;
@@ -217,7 +279,21 @@ export interface BrandSettings {
   };
 }
 
-export type SmsProvider = 'twilio' | 'infobip' | 'unifonic' | 'custom_webhook';
+export type SmsProvider = 'twilio' | 'infobip' | 'unifonic' | 'custom_webhook' | 'firebase';
+
+/** A Firebase web app's public config (not secrets: every visitor's browser receives it). */
+export interface FirebaseWebConfig {
+  apiKey: string;
+  authDomain: string;
+  projectId: string;
+  appId: string;
+}
+
+/** How the storefront verifies phones: the shop sends the code, or Firebase does. */
+export interface PhoneVerificationConfig {
+  method: 'server' | 'firebase';
+  firebase?: FirebaseWebConfig;
+}
 
 export interface SmsGatewaySettings {
   provider: SmsProvider;
@@ -241,5 +317,7 @@ export interface SmsGatewaySettings {
     endpointUrl: string;
     bearerToken?: string;
   };
+  /** Firebase Phone Authentication: the browser asks Firebase to send the SMS. */
+  firebase?: FirebaseWebConfig;
   isEnabled: boolean;
 }

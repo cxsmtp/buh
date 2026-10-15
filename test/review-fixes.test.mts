@@ -62,15 +62,17 @@ test('a test connection aimed at a new host does not get the saved key', async (
 
 test('saving a price does not overwrite stock sold in the meantime; a stale stock edit is refused', () => {
   const p = products.listProducts()[0];
-  products.updateProduct(p.id, { stockCount: 18 });
-  const seen = products.getProduct(p.id)!.stockCount; // what the admin hub shows
-  order('+971503000001', [{ productId: p.id, profileId: p.profiles[0].id, quantity: 2 }]);
+  const size = p.profiles[0].id;
+  const stockOf = () => products.getProduct(p.id)!.stockBySize[size];
+  products.updateProduct(p.id, { stockBySize: { [size]: 18 } });
+  const seen = stockOf(); // what the admin hub shows
+  order('+971503000001', [{ productId: p.id, profileId: size, quantity: 2 }]);
   products.updateProduct(p.id, { price: p.price + 1 });
-  assert.equal(products.getProduct(p.id)!.stockCount, 16, 'price-only save leaves stock alone');
-  assert.equal(statusOf(() => products.updateProduct(p.id, { stockCount: 30, expectedStock: seen })), 409);
-  assert.equal(products.getProduct(p.id)!.stockCount, 16);
-  products.updateProduct(p.id, { stockCount: 30, expectedStock: 16 });
-  assert.equal(products.getProduct(p.id)!.stockCount, 30);
+  assert.equal(stockOf(), 16, 'price-only save leaves stock alone');
+  assert.equal(statusOf(() => products.updateProduct(p.id, { stockBySize: { [size]: 30 }, expectedStockBySize: { [size]: seen } })), 409);
+  assert.equal(stockOf(), 16);
+  products.updateProduct(p.id, { stockBySize: { [size]: 30 }, expectedStockBySize: { [size]: 16 } });
+  assert.equal(stockOf(), 30);
   products.updateProduct(p.id, { price: p.price });
 });
 
@@ -142,7 +144,7 @@ test('bank transfer is only offered once the real account is saved, and the demo
 
 test('SMS: Unifonic cannot be chosen, only the chosen gateway is used, and an incomplete one cannot be switched on', async () => {
   const { gatewaysFromSettings } = await import('@/lib/otpService');
-  await assert.rejects(settings.updateSettings('sms', { provider: 'unifonic', isEnabled: true }), /Twilio, Infobip or a webhook/);
+  await assert.rejects(settings.updateSettings('sms', { provider: 'unifonic', isEnabled: true }), /Twilio, Infobip, a webhook or Firebase/);
   await assert.rejects(settings.updateSettings('sms', { provider: 'twilio', isEnabled: true, twilio: { accountSid: '' } }), /every field/);
   const both = {
     ...settings.getSettings('sms'),

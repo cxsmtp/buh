@@ -1,12 +1,39 @@
 import { handleRouteError, json } from '@/lib/server/http';
-import { supportEmail } from '@/lib/server/runtimeConfig';
-import { getSettings } from '@/lib/server/settings';
+import { contactEmail, getSettings, phoneVerificationConfig } from '@/lib/server/settings';
+import { storefrontTheme } from '@/lib/server/theme';
 
-/** What every visitor sees: branding, the bank details for transfers, and the support email. */
+/**
+ * What every visitor sees: branding, bank details for transfers, the store's
+ * contact details (WhatsApp, Instagram…), the catalogue's categories and the
+ * low-stock threshold, the support email, today's festival look, and how
+ * checkout verifies phones (the Firebase web config only when Firebase is the
+ * switched-on SMS option). Nothing here is secret.
+ */
 export function GET() {
   try {
-    return json({ brand: getSettings('brand'), bank: getSettings('bank'), supportEmail: supportEmail() });
+    const store = getSettings('store');
+    const catalog = getSettings('catalog');
+    return json({
+      brand: getSettings('brand'),
+      bank: getSettings('bank'),
+      store,
+      catalog: { categories: catalog.categories, lowStockThreshold: catalog.lowStockThreshold },
+      supportEmail: contactEmail(),
+      festival: festivalView(),
+      phoneVerification: phoneVerificationConfig(),
+    });
   } catch (err) {
     return handleRouteError(err, 'settings/public');
+  }
+}
+
+/** Today's festival look (or the everyday one), with what the admin wants shown. */
+function festivalView() {
+  const t = getSettings('theme');
+  try {
+    const { pick, theme } = storefrontTheme();
+    return { themeId: pick.themeId, festivalId: pick.festivalId ?? null, phase: pick.phase, daysToStart: pick.daysToStart ?? null, theme, showBanner: t.showBanner, showMarquee: t.showMarquee };
+  } catch {
+    return null; // never let a calendar problem break the shop
   }
 }

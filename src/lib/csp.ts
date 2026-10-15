@@ -10,12 +10,24 @@
  * storefront fell from ~790 to ~145 requests/s, and even an idle proxy cost
  * ~35%. React escapes all rendered text and the shop has no raw-HTML sinks,
  * so the static policy is the better trade (docs/security.md).
+ *
+ * Firebase Phone Authentication (an optional SMS method) needs Google's
+ * reCAPTCHA scripts and frames and Firebase's auth APIs. The policy is fixed
+ * at build time, so these few Google hosts are always listed, even while
+ * Firebase is off (docs/security.md explains the trade).
  */
+export const FIREBASE_PHONE_AUTH_SOURCES = {
+  script: ['https://www.google.com/recaptcha/', 'https://www.gstatic.com/recaptcha/', 'https://apis.google.com'],
+  frame: ['https://www.google.com/recaptcha/', 'https://recaptcha.google.com/recaptcha/', 'https://*.firebaseapp.com'],
+  connect: ['https://identitytoolkit.googleapis.com', 'https://securetoken.googleapis.com', 'https://www.google.com/recaptcha/'],
+};
+
 export function contentSecurityPolicy(): string {
   const isDev = process.env.NODE_ENV === 'development';
+  const fb = FIREBASE_PHONE_AUTH_SOURCES;
   return [
     "default-src 'self'",
-    `script-src 'self' 'unsafe-inline'${isDev ? " 'unsafe-eval'" : ''}`,
+    `script-src 'self' 'unsafe-inline'${isDev ? " 'unsafe-eval'" : ''} ${fb.script.join(' ')}`,
     // React style attributes need inline styles.
     "style-src 'self' 'unsafe-inline'",
     // Product photos come from https hosts; admin uploads are data:/blob: URLs.
@@ -23,7 +35,8 @@ export function contentSecurityPolicy(): string {
     "font-src 'self' data:",
     // Order-confirmation confetti draws in a worker created from a blob: URL.
     "worker-src 'self' blob:",
-    `connect-src 'self'${isDev ? ' ws: wss:' : ''}`,
+    `connect-src 'self'${isDev ? ' ws: wss:' : ''} ${fb.connect.join(' ')}`,
+    `frame-src 'self' ${fb.frame.join(' ')}`,
     "object-src 'none'",
     "base-uri 'none'",
     "form-action 'self'",

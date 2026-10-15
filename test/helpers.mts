@@ -6,6 +6,8 @@ import path from 'node:path';
 export function tempDataDir(): string {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'buh-test-'));
   process.env.DATA_DIR = dir;
+  // Plenty of every size, so tests are not limited by the shop's one-or-two-pieces stock.
+  process.env.SEED_STOCK ??= '50';
   return dir;
 }
 

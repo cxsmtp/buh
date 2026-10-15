@@ -1,718 +1,192 @@
 'use client';
 
-import { shrinkPhoto } from '@/lib/shrinkPhoto';
-import React, { useState } from 'react';
-import { Product, BedProfileMeasurement, BedSizeProfileId } from '@/types';
-import { DEFAULT_BED_PROFILES, ALL_BED_PROFILES_LIST } from '@/data/bedProfiles';
-import { AI_STAGING_PRESETS, transformProductImage, AiStagingPreset } from '@/lib/aiImageTransform';
-import { 
-  Plus, 
-  Camera, 
-  Sparkles, 
-  Layers, 
-  Ruler, 
-  Check, 
-  Upload, 
-  Trash2, 
-  Edit3, 
-  Package, 
-  CheckCircle2, 
-  ArrowRight,
-  Sliders,
-  Image as ImageIcon
-} from 'lucide-react';
+import React, { useMemo, useState } from 'react';
+import { Archive, ArchiveRestore, ArrowDown, ArrowUp, Edit3, Eye, EyeOff, Minus, Package, Plus, Search } from 'lucide-react';
+import type { CatalogSettings, Product } from '@/types';
+import { postJson, sendJson } from '@/lib/apiClient';
+import { ProductEditor } from './inventory/ProductEditor';
+
+/**
+ * Inventory: every product with its pieces per size. + / − change one size's
+ * stock straight away (each tap is one atomic change on the server, so a sale
+ * at the same moment is never lost). Edit opens the full editor; Remove
+ * archives (past orders keep showing it) and can be undone.
+ */
+
+type AdminProduct = Product & { archived?: boolean };
+type Filter = 'all' | 'low' | 'sold-out' | 'hidden' | 'archived';
 
 interface AdminInventoryTabProps {
-  products: Product[];
-  /** Save on the server; resolve to an error message, or null when saved. */
-  onAddProduct: (product: Product) => Promise<string | null>;
-  onUpdateProduct: (id: string, changes: Partial<Product> & { expectedStock?: number }) => Promise<string | null>;
+  products: AdminProduct[];
+  catalog: CatalogSettings;
+  /** Reload products (after any change). */
+  onChanged: () => Promise<void> | void;
+  /** Open the editor for a new product straight away (the "+ Add" tab). */
+  startAdding?: boolean;
 }
 
-/** Price, stock and visibility, editable straight from the list. */
-function ProductQuickEdit({
-  product,
-  onSave,
-  initialError = '',
-}: {
-  product: Product;
-  onSave: (changes: Partial<Product> & { expectedStock?: number }) => Promise<string | null>;
-  /** A message from the last save, kept when the row reloads with fresh stock. */
-  initialError?: string;
-}) {
-  const [price, setPrice] = useState(String(product.price));
-  const [stock, setStock] = useState(String(product.stockCount));
-  const [saving, setSaving] = useState(false);
-  const [error, setError] = useState(initialError);
-  const visible = product.active !== false;
-  const dirty = price !== String(product.price) || stock !== String(product.stockCount);
+export const AdminInventoryTab: React.FC<AdminInventoryTabProps> = ({ products, catalog, onChanged, startAdding = false }) => {
+  const [editing, setEditing] = useState<AdminProduct | 'new' | null>(startAdding ? 'new' : null);
+  const [query, setQuery] = useState('');
+  const [filter, setFilter] = useState<Filter>('all');
+  const [busy, setBusy] = useState<string | null>(null);
+  const [message, setMessage] = useState<{ id: string; text: string } | null>(null);
+  const low = catalog.lowStockThreshold;
 
-  const save = async (changes: Partial<Product> & { expectedStock?: number }) => {
-    setSaving(true);
-    setError('');
-    const problem = await onSave(changes);
-    setSaving(false);
-    if (problem) setError(problem);
+  const live = products.filter((p) => !p.archived);
+  const counts = {
+    all: live.length,
+    low: live.filter((p) => p.profiles.some((s) => (p.stockBySize[s.id] ?? 0) > 0 && (p.stockBySize[s.id] ?? 0) <= low)).length,
+    'sold-out': live.filter((p) => p.stockCount === 0).length,
+    hidden: live.filter((p) => p.active === false).length,
+    archived: products.filter((p) => p.archived).length,
   };
 
+  const shown = useMemo(() => {
+    const q = query.trim().toLowerCase();
+    return products
+      .filter((p) => (filter === 'archived' ? p.archived : !p.archived))
+      .filter((p) =>
+        filter === 'low'
+          ? p.profiles.some((s) => (p.stockBySize[s.id] ?? 0) > 0 && (p.stockBySize[s.id] ?? 0) <= low)
+          : filter === 'sold-out'
+          ? p.stockCount === 0
+          : filter === 'hidden'
+          ? p.active === false
+          : true
+      )
+      .filter((p) => !q || p.title.toLowerCase().includes(q) || p.material.toLowerCase().includes(q) || p.category.includes(q));
+  }, [products, filter, query, low]);
+
+  const run = async (id: string, call: () => Promise<{ ok: boolean; data: { message?: string } }>) => {
+    setBusy(id);
+    setMessage(null);
+    const { ok, data } = await call();
+    setBusy(null);
+    if (!ok) setMessage({ id, text: data.message || 'Could not save that change.' });
+    await onChanged();
+  };
+
+  const adjust = (p: AdminProduct, sizeId: string, delta: number) =>
+    run(p.id, () => postJson(`/api/admin/products/${encodeURIComponent(p.id)}/stock`, { sizeId, delta }));
+  const toggleVisible = (p: AdminProduct) =>
+    run(p.id, () => sendJson('PATCH', `/api/admin/products/${encodeURIComponent(p.id)}`, { product: { active: p.active === false } }));
+  const archive = (p: AdminProduct, archived: boolean) => {
+    if (archived && !window.confirm(`Remove "${p.title}" from the shop? It stays in past orders, and you can restore it under "Removed".`)) return;
+    return run(p.id, () => postJson(`/api/admin/products/${encodeURIComponent(p.id)}/archive`, { archived }));
+  };
+  const move = (p: AdminProduct, dir: -1 | 1) => {
+    const ids = products.map((x) => x.id);
+    const i = ids.indexOf(p.id);
+    const j = i + dir;
+    if (j < 0 || j >= ids.length) return;
+    [ids[i], ids[j]] = [ids[j], ids[i]];
+    return run(p.id, () => sendJson('PUT', '/api/admin/products/order', { ids }));
+  };
+
+  const categoryLabel = (id: string) => catalog.categories.find((c) => c.id === id)?.label ?? id;
+
   return (
-    <div className="pt-1 border-t border-stone-100 mt-1 space-y-1">
-      <div className="flex items-center gap-1.5 flex-wrap">
-        <label className="flex items-center gap-1 text-[10px] text-stone-500">
-          AED
-          <input
-            type="number"
-            min={1}
-            step="0.01"
-            value={price}
-            onChange={(e) => setPrice(e.target.value)}
-            aria-label={`Price of ${product.title}`}
-            className="w-16 px-1.5 py-0.5 rounded-md border border-stone-300 text-xs font-bold text-[#0f1c2e]"
-          />
-        </label>
-        <label className="flex items-center gap-1 text-[10px] text-stone-500">
-          Stock
-          <input
-            type="number"
-            min={0}
-            step={1}
-            value={stock}
-            onChange={(e) => setStock(e.target.value)}
-            aria-label={`Stock of ${product.title}`}
-            className={`w-14 px-1.5 py-0.5 rounded-md border text-xs font-bold ${Number(stock) > 10 ? 'border-stone-300' : 'border-red-300 text-red-700'}`}
-          />
-        </label>
-        {dirty && (
+    <div className="space-y-3">
+      <div className="flex flex-wrap items-center gap-2">
+        <h2 className="font-serif font-bold text-lg text-[#0f1c2e] flex items-center gap-2"><Package className="w-5 h-5 text-[#c5a059]" /> Inventory</h2>
+        <button type="button" onClick={() => setEditing('new')} className="ml-auto px-3.5 py-2 rounded-xl bg-[#0f1c2e] text-white text-xs font-bold flex items-center gap-1.5">
+          <Plus className="w-4 h-4" /> Add product
+        </button>
+      </div>
+
+      <div className="flex flex-wrap gap-1.5 text-xs">
+        {(
+          [
+            ['all', 'All'],
+            ['low', `Low (≤ ${low})`],
+            ['sold-out', 'Sold out'],
+            ['hidden', 'Hidden'],
+            ['archived', 'Removed'],
+          ] as Array<[Filter, string]>
+        ).map(([id, name]) => (
           <button
+            key={id}
             type="button"
-            disabled={saving}
-            onClick={() =>
-              save({
-                price: Number(price),
-                // Only send stock when it was changed here, and say what it was, so a sale in between is not overwritten.
-                ...(stock !== String(product.stockCount) ? { stockCount: Number(stock), expectedStock: product.stockCount } : {}),
-              })
-            }
-            className="text-[10px] font-bold px-2 py-0.5 rounded-md bg-[#0f1c2e] text-white disabled:opacity-50"
+            onClick={() => setFilter(id)}
+            aria-pressed={filter === id}
+            className={`px-2.5 py-1 rounded-full border font-semibold ${filter === id ? 'bg-[#0f1c2e] text-white border-[#0f1c2e]' : 'bg-white border-stone-300 text-stone-700'}`}
           >
-            {saving ? 'Saving…' : 'Save'}
+            {name} <span className="opacity-70">{counts[id]}</span>
           </button>
-        )}
-        <button
-          type="button"
-          disabled={saving}
-          onClick={() => save({ active: !visible })}
-          className={`ml-auto text-[10px] font-bold px-2 py-0.5 rounded-md border disabled:opacity-50 ${
-            visible ? 'border-emerald-300 bg-emerald-50 text-emerald-800' : 'border-stone-300 bg-stone-100 text-stone-600'
-          }`}
-          title={visible ? 'Shown in the shop: click to hide' : 'Hidden from the shop: click to show'}
-        >
-          {visible ? 'Visible' : 'Hidden'}
-        </button>
-      </div>
-      {error && <p role="alert" className="text-[10px] text-red-700">{error}</p>}
-    </div>
-  );
-}
-
-export const AdminInventoryTab: React.FC<AdminInventoryTabProps> = ({
-  products,
-  onAddProduct,
-  onUpdateProduct,
-}) => {
-  const [saveError, setSaveError] = useState('');
-  const [quickErrors, setQuickErrors] = useState<Record<string, string>>({});
-  const [savingProduct, setSavingProduct] = useState(false);
-  const [isAdding, setIsAdding] = useState(false);
-  const [searchQuery, setSearchQuery] = useState('');
-
-  // Add Product Form State
-  const [title, setTitle] = useState('');
-  const [price, setPrice] = useState<number>(349);
-  const [compareAtPrice, setCompareAtPrice] = useState<number>(450);
-  const [material, setMaterial] = useState('100% Giza Egyptian Cotton');
-  const [threadCount, setThreadCount] = useState<number>(800);
-  const [stockCount, setStockCount] = useState<number>(30);
-  const [category, setCategory] = useState<Product['category']>('bedsheets');
-  const [colorsText, setColorsText] = useState('Pearl White, Desert Sand, Royal Navy');
-
-  // Images & AI Staging
-  const [rawPhotoUrl, setRawPhotoUrl] = useState<string | null>(null);
-  const [aiTransformedUrl, setAiTransformedUrl] = useState<string | null>(null);
-  const [selectedPresetId, setSelectedPresetId] = useState<string>('dubai-luxury-master');
-  const [isTransforming, setIsTransforming] = useState<boolean>(false);
-  const [aiPromptNotes, setAiPromptNotes] = useState<string>('');
-  const [sliderPos, setSliderPos] = useState<number>(50);
-
-  // Smart Profiles Selected
-  const [selectedProfileIds, setSelectedProfileIds] = useState<BedSizeProfileId[]>([
-    'single',
-    'double',
-    'queen',
-    'king',
-    'super-king',
-  ]);
-  const [customProfiles, setCustomProfiles] = useState<Record<BedSizeProfileId, BedProfileMeasurement>>({
-    ...DEFAULT_BED_PROFILES,
-  });
-
-  // Handle Photo Capture from Mobile Camera or Upload (shrunk in the browser first).
-  const [photoError, setPhotoError] = useState('');
-  const handlePhotoUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
-    setPhotoError('');
-    try {
-      setRawPhotoUrl(await shrinkPhoto(file));
-      // Reset transformed image so user can trigger AI
-      setAiTransformedUrl(null);
-    } catch (err) {
-      setPhotoError(err instanceof Error ? err.message : 'Could not read the photo.');
-    }
-  };
-
-  // Handle Custom Transformed Image Upload
-  const handleCustomAiUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
-    setPhotoError('');
-    try {
-      setAiTransformedUrl(await shrinkPhoto(file));
-    } catch (err) {
-      setPhotoError(err instanceof Error ? err.message : 'Could not read the photo.');
-    }
-  };
-
-  // Run AI Transformation
-  const handleTriggerAiTransform = async () => {
-    if (!rawPhotoUrl) return;
-    setIsTransforming(true);
-
-    try {
-      const result = await transformProductImage(rawPhotoUrl, selectedPresetId);
-      setAiTransformedUrl(result.transformedUrl);
-      setAiPromptNotes(result.transformationNotes);
-    } catch (err) {
-      console.error('AI Transform failed:', err);
-      alert('AI image staging encountered an error. Using preset template.');
-    } finally {
-      setIsTransforming(false);
-    }
-  };
-
-  // Toggle Bed Profile
-  const toggleProfile = (id: BedSizeProfileId) => {
-    if (selectedProfileIds.includes(id)) {
-      if (selectedProfileIds.length === 1) {
-        alert('You must offer at least one bed size profile.');
-        return;
-      }
-      setSelectedProfileIds(selectedProfileIds.filter((p) => p !== id));
-    } else {
-      setSelectedProfileIds([...selectedProfileIds, id]);
-    }
-  };
-
-  // Save Product to Inventory
-  const handleSaveProduct = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!title) {
-      alert('Please provide a title for the bedding set.');
-      return;
-    }
-
-    const featuredImg = aiTransformedUrl || rawPhotoUrl || 'https://images.unsplash.com/photo-1631049307264-da0ec9d70304?auto=format&fit=crop&w=1200&q=80';
-
-    const colorItems = colorsText.split(',').map((c) => ({
-      name: c.trim(),
-      hex: c.toLowerCase().includes('white') ? '#FFFFFF' : c.toLowerCase().includes('sand') ? '#E6DCB8' : '#2B2B2B',
-    }));
-
-    const finalProfiles = selectedProfileIds.map((id) => customProfiles[id]);
-
-    const newProd: Product = {
-      id: `prod-${Date.now()}`,
-      title,
-      slug: title.toLowerCase().replace(/[^a-z0-9]+/g, '-'),
-      description: `${title}. Made of ${material} with ${threadCount} thread count. Premium bed sheet set tailored for UAE deep mattresses.`,
-      shortDescription: `${material} • ${threadCount} TC • Silky Sateen Finish • Deep Pocket Fit`,
-      category,
-      price,
-      compareAtPrice,
-      material,
-      threadCount,
-      weave: 'Sateen',
-      colors: colorItems.length > 0 ? colorItems : [{ name: 'Standard White', hex: '#FFFFFF' }],
-      featuredImage: featuredImg,
-      // Each photo is sent once (the request is size-capped).
-      galleryImages: [...new Set([featuredImg, rawPhotoUrl].filter((x): x is string => Boolean(x)))],
-      aiTransformedImage: aiTransformedUrl || undefined,
-      isAiEnhanced: Boolean(aiTransformedUrl),
-      stockCount,
-      isFeatured: true,
-      isNewArrival: true,
-      rating: 5.0,
-      reviewsCount: 1,
-      profiles: finalProfiles,
-      defaultProfileId: selectedProfileIds.includes('king') ? 'king' : selectedProfileIds[0],
-      createdAt: new Date().toISOString(),
-    };
-
-    setSavingProduct(true);
-    setSaveError('');
-    const problem = await onAddProduct(newProd);
-    setSavingProduct(false);
-    if (problem) {
-      setSaveError(problem);
-      return;
-    }
-    setIsAdding(false);
-    
-    // Reset Form
-    setTitle('');
-    setRawPhotoUrl(null);
-    setAiTransformedUrl(null);
-  };
-
-  const filteredProducts = products.filter((p) =>
-    p.title.toLowerCase().includes(searchQuery.toLowerCase()) ||
-    p.material.toLowerCase().includes(searchQuery.toLowerCase())
-  );
-
-  return (
-    <div className="space-y-4">
-      {/* Top Action Bar */}
-      <div className="flex items-center justify-between gap-2">
-        <div className="relative flex-1">
-          <input
-            type="text"
-            placeholder="Search inventory..."
-            value={searchQuery}
-            onChange={(e) => setSearchQuery(e.target.value)}
-            className="w-full px-3 py-2 text-xs rounded-xl border border-stone-300 bg-white"
-          />
-        </div>
-
-        <button
-          onClick={() => setIsAdding(!isAdding)}
-          className="flex items-center gap-1.5 bg-[#0f1c2e] hover:bg-stone-800 text-white font-bold text-xs px-3.5 py-2.5 rounded-xl transition-all shadow shrink-0"
-        >
-          {isAdding ? (
-            <span>Close Form</span>
-          ) : (
-            <>
-              <Plus className="w-4 h-4 text-amber-300" />
-              <span>Add Bedding (+ AI Photo)</span>
-            </>
-          )}
-        </button>
+        ))}
+        <label className="relative ml-auto min-w-0 flex-1 sm:flex-none sm:w-56">
+          <Search className="w-3.5 h-3.5 absolute left-2.5 top-1/2 -translate-y-1/2 text-stone-400" />
+          <input value={query} onChange={(e) => setQuery(e.target.value)} placeholder="Search products" aria-label="Search products" className="w-full pl-8 pr-2 py-1.5 rounded-full border border-stone-300 bg-white" />
+        </label>
       </div>
 
-      {/* MOBILE ADD PRODUCT FORM WITH CAMERA & AI TRANSFORMATION */}
-      {isAdding && (
-        <form
-          onSubmit={handleSaveProduct}
-          className="bg-white rounded-3xl p-4 sm:p-6 border border-stone-200 shadow-xl space-y-5 animate-in slide-in-from-top-4 duration-200"
-        >
-          <div className="flex items-center justify-between border-b border-stone-200 pb-3">
-            <div>
-              <h3 className="font-serif font-bold text-base text-[#0f1c2e] flex items-center gap-2">
-                <Sparkles className="w-5 h-5 text-[#c5a059]" />
-                <span>Add New Bed Sheet Inventory</span>
-              </h3>
-              <p className="text-xs text-stone-500">
-                Snap photo from camera → AI enhances to luxury bedroom → Select bed size measurements
-              </p>
-            </div>
-            <button
-              type="button"
-              onClick={() => setIsAdding(false)}
-              className="text-xs font-semibold text-stone-400 hover:text-stone-700"
-            >
-              ✕
-            </button>
-          </div>
+      {shown.length === 0 && <p className="text-center text-sm text-stone-500 py-10 bg-white rounded-2xl border border-stone-200">Nothing here.</p>}
 
-          {/* STEP 1: MOBILE CAMERA SNAP & AI STAGING STUDIO */}
-          <div className="space-y-3 bg-gradient-to-br from-amber-50/40 via-stone-50 to-amber-50/20 p-4 rounded-2xl border border-amber-200/60">
-            <div className="flex items-center justify-between">
-              <span className="text-xs font-black uppercase tracking-wider text-stone-900 flex items-center gap-1.5">
-                <Camera className="w-4 h-4 text-[#c5a059]" />
-                <span>Step 1: Snap Bed Sheet & AI Transformation</span>
-              </span>
-              <span className="text-[10px] bg-amber-200 text-amber-900 font-bold px-2 py-0.5 rounded-full">
-                AI Staging Engine
-              </span>
-            </div>
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-3">
+        {shown.map((p) => (
+          <div key={p.id} className={`bg-white rounded-2xl border p-3 flex gap-3 ${p.active === false || p.archived ? 'border-stone-200 opacity-80' : 'border-stone-200'}`}>
+            {/* eslint-disable-next-line @next/next/no-img-element */}
+            <img src={p.featuredImage} alt="" className="w-20 h-20 sm:w-24 sm:h-24 rounded-xl object-cover bg-stone-100 shrink-0" />
+            <div className="min-w-0 flex-1 space-y-1.5">
+              <div className="flex items-start gap-2">
+                <div className="min-w-0">
+                  <div className="font-bold text-sm text-[#0f1c2e] truncate">{p.title}</div>
+                  <div className="text-[11px] text-stone-500">
+                    AED {p.price} · {categoryLabel(p.category)}
+                    {p.active === false && !p.archived && <span className="ml-1 font-semibold text-stone-700">· hidden</span>}
+                    {p.stockCount === 0 && !p.archived && <span className="ml-1 font-semibold text-red-700">· sold out</span>}
+                  </div>
+                </div>
+              </div>
 
-            {/* Camera Capture Controls */}
-            {!rawPhotoUrl ? (
-              <div className="border-2 border-dashed border-stone-300 rounded-2xl p-6 text-center space-y-3 bg-white">
-                <div className="w-12 h-12 rounded-full bg-amber-100 text-amber-800 flex items-center justify-center mx-auto">
-                  <Camera className="w-6 h-6" />
+              {!p.archived && (
+                <div className="flex flex-wrap gap-1.5">
+                  {p.profiles.map((s) => {
+                    const qty = p.stockBySize[s.id] ?? 0;
+                    return (
+                      <div key={s.id} className={`flex items-center rounded-lg border text-[11px] ${qty === 0 ? 'border-red-200 bg-red-50' : qty <= low ? 'border-amber-200 bg-amber-50' : 'border-stone-200 bg-stone-50'}`}>
+                        <button type="button" disabled={busy === p.id || qty === 0} onClick={() => void adjust(p, s.id, -1)} className="px-2.5 py-2 disabled:opacity-30" aria-label={`One fewer ${s.name} of ${p.title}`}><Minus className="w-3 h-3" /></button>
+                        <span className="px-1 font-semibold whitespace-nowrap">{s.badge || s.name}: {qty}</span>
+                        <button type="button" disabled={busy === p.id} onClick={() => void adjust(p, s.id, 1)} className="px-2.5 py-2 disabled:opacity-30" aria-label={`One more ${s.name} of ${p.title}`}><Plus className="w-3 h-3" /></button>
+                      </div>
+                    );
+                  })}
                 </div>
-                <div>
-                  <strong className="text-xs text-stone-800 block">Take Photo with Phone Camera</strong>
-                  <span className="text-[11px] text-stone-500 block mt-0.5">
-                    Take a simple photo of the folded bed sheet or flatbed sample
-                  </span>
-                </div>
+              )}
 
-                <div className="flex items-center justify-center gap-2 pt-1">
-                  <label className="bg-[#0f1c2e] hover:bg-stone-800 text-white font-bold text-xs px-4 py-2.5 rounded-xl cursor-pointer flex items-center gap-2 shadow transition-all">
-                    <Camera className="w-4 h-4 text-amber-300" />
-                    <span>Open Camera / Upload</span>
-                    <input
-                      type="file"
-                      accept="image/*"
-                      capture="environment"
-                      onChange={handlePhotoUpload}
-                      className="hidden"
-                    />
-                  </label>
-                </div>
-                {photoError && (
-                  <p role="alert" className="text-xs text-red-700 bg-red-50 border border-red-200 rounded-lg px-3 py-2 font-medium">
-                    {photoError}
-                  </p>
+              <div className="flex flex-wrap items-center gap-1.5 text-[11px] pt-0.5">
+                {p.archived ? (
+                  <button type="button" onClick={() => void archive(p, false)} disabled={busy === p.id} className="px-2 py-1 rounded-lg border border-stone-300 font-semibold flex items-center gap-1"><ArchiveRestore className="w-3.5 h-3.5" /> Restore (hidden)</button>
+                ) : (
+                  <>
+                    <button type="button" onClick={() => setEditing(p)} className="px-2 py-1 rounded-lg bg-[#0f1c2e] text-white font-semibold flex items-center gap-1"><Edit3 className="w-3.5 h-3.5" /> Edit</button>
+                    <button type="button" onClick={() => void toggleVisible(p)} disabled={busy === p.id} className="px-2 py-1 rounded-lg border border-stone-300 font-semibold flex items-center gap-1" title={p.active === false ? 'Hidden from the shop: click to show' : 'Shown in the shop: click to hide'}>
+                      {p.active === false ? <><EyeOff className="w-3.5 h-3.5" /> Hidden</> : <><Eye className="w-3.5 h-3.5" /> Visible</>}
+                    </button>
+                    <button type="button" onClick={() => void move(p, -1)} disabled={busy === p.id} className="p-1 rounded-lg border border-stone-300" aria-label={`Move ${p.title} up`}><ArrowUp className="w-3.5 h-3.5" /></button>
+                    <button type="button" onClick={() => void move(p, 1)} disabled={busy === p.id} className="p-1 rounded-lg border border-stone-300" aria-label={`Move ${p.title} down`}><ArrowDown className="w-3.5 h-3.5" /></button>
+                    <button type="button" onClick={() => void archive(p, true)} disabled={busy === p.id} className="ml-auto px-2 py-1 rounded-lg border border-red-200 text-red-700 font-semibold flex items-center gap-1"><Archive className="w-3.5 h-3.5" /> Remove</button>
+                  </>
                 )}
               </div>
-            ) : (
-              <div className="space-y-3">
-                {/* Visual Preview: Clean Beautiful Picture in One Go */}
-                <div className="relative aspect-[16/10] bg-stone-900 rounded-2xl overflow-hidden select-none border border-stone-800 shadow-md group">
-                  {/* eslint-disable-next-line @next/next/no-img-element */}
-                  <img
-                    src={aiTransformedUrl || rawPhotoUrl}
-                    alt="Luxury Staged Bedding"
-                    className="w-full h-full object-cover transition-transform duration-500 group-hover:scale-102"
-                  />
-
-                  <div className="absolute top-2.5 left-2.5 bg-[#0f1c2e]/90 text-amber-300 text-[10px] font-bold px-2.5 py-1 rounded-full border border-amber-400/40 flex items-center gap-1.5 shadow">
-                    <Sparkles className="w-3.5 h-3.5 text-[#c5a059]" />
-                    <span>{aiTransformedUrl ? 'AI Transformed Luxury Bedroom' : 'Photo Loaded — Ready to Transform'}</span>
-                  </div>
-
-                  {aiTransformedUrl && (
-                    <div className="absolute bottom-2.5 right-2.5 bg-emerald-600/90 text-white text-[10px] font-bold px-2.5 py-1 rounded-lg flex items-center gap-1 shadow">
-                      <Check className="w-3 h-3" />
-                      <span>Transformed in One Go</span>
-                    </div>
-                  )}
-                </div>
-
-                {/* AI Preset Selection Pills */}
-                <div className="space-y-1.5">
-                  <label className="text-[11px] font-bold text-stone-700 block">
-                    Choose AI Staging Architecture:
-                  </label>
-                  <div className="grid grid-cols-2 gap-2">
-                    {AI_STAGING_PRESETS.map((preset) => {
-                      const isSelected = selectedPresetId === preset.id;
-                      return (
-                        <button
-                          key={preset.id}
-                          type="button"
-                          onClick={() => setSelectedPresetId(preset.id)}
-                          className={`p-2 rounded-xl text-left border transition-all text-xs ${
-                            isSelected
-                              ? 'border-[#0f1c2e] bg-[#0f1c2e] text-white'
-                              : 'border-stone-200 bg-white text-stone-700 hover:border-stone-300'
-                          }`}
-                        >
-                          <strong className="block text-[11px] leading-tight truncate">
-                            {preset.name}
-                          </strong>
-                          <span className={`text-[9px] block ${isSelected ? 'text-amber-200' : 'text-stone-500'}`}>
-                            {preset.tagline}
-                          </span>
-                        </button>
-                      );
-                    })}
-                  </div>
-                </div>
-
-                {/* Action Buttons for AI */}
-                <div className="flex flex-wrap items-center gap-2 pt-1">
-                  <button
-                    type="button"
-                    disabled={isTransforming}
-                    onClick={handleTriggerAiTransform}
-                    className="flex-1 bg-gradient-to-r from-[#c5a059] to-[#dfc082] hover:brightness-105 active:scale-95 text-[#0f1c2e] font-bold text-xs py-2.5 px-4 rounded-xl shadow flex items-center justify-center gap-2 transition-all disabled:opacity-50"
-                  >
-                    <Sparkles className="w-4 h-4" />
-                    <span>{isTransforming ? 'Transforming via AI...' : 'Transform into Luxury Bedroom'}</span>
-                  </button>
-
-                  <label className="bg-white border border-stone-300 hover:bg-stone-50 text-stone-700 font-semibold text-xs px-3 py-2.5 rounded-xl cursor-pointer flex items-center gap-1.5 transition-colors">
-                    <Upload className="w-3.5 h-3.5 text-[#c5a059]" />
-                    <span>Upload Custom Staged</span>
-                    <input
-                      type="file"
-                      accept="image/*"
-                      onChange={handleCustomAiUpload}
-                      className="hidden"
-                    />
-                  </label>
-
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setRawPhotoUrl(null);
-                      setAiTransformedUrl(null);
-                    }}
-                    className="text-stone-400 hover:text-red-600 p-2"
-                    title="Retake photo"
-                  >
-                    <Trash2 className="w-4 h-4" />
-                  </button>
-                </div>
-              </div>
-            )}
-          </div>
-
-          {/* STEP 2: SMART BED PROFILE DIMENSION PRESETS (Requested by user) */}
-          <div className="space-y-3 bg-stone-50 p-4 rounded-2xl border border-stone-200">
-            <div className="flex items-center justify-between">
-              <span className="text-xs font-black uppercase tracking-wider text-stone-900 flex items-center gap-1.5">
-                <Ruler className="w-4 h-4 text-[#c5a059]" />
-                <span>Step 2: Bed Size Dimension Profiles (Shown to Customers)</span>
-              </span>
-              <span className="text-[10px] text-stone-500 font-medium">
-                Auto-fills UAE measurements
-              </span>
-            </div>
-
-            {/* Checkboxes for available sizes */}
-            <div className="grid grid-cols-2 sm:grid-cols-5 gap-2">
-              {(Object.keys(DEFAULT_BED_PROFILES) as BedSizeProfileId[])
-                .filter((id) => id !== 'custom')
-                .map((id) => {
-                  const profile = customProfiles[id];
-                  const isChecked = selectedProfileIds.includes(id);
-                  return (
-                    <div
-                      key={id}
-                      onClick={() => toggleProfile(id)}
-                      className={`p-2.5 rounded-xl border cursor-pointer transition-all ${
-                        isChecked
-                          ? 'border-[#0f1c2e] bg-[#0f1c2e] text-white shadow-sm'
-                          : 'border-stone-200 bg-white text-stone-600'
-                      }`}
-                    >
-                      <div className="flex items-center justify-between text-xs font-bold">
-                        <span>{profile.name.split(' ')[0]}</span>
-                        <input
-                          type="checkbox"
-                          checked={isChecked}
-                          onChange={() => {}}
-                          className="rounded text-amber-500"
-                        />
-                      </div>
-                      <span className={`text-[10px] block mt-0.5 truncate ${isChecked ? 'text-amber-200' : 'text-stone-500'}`}>
-                        {profile.mattressSize.split('(')[0]}
-                      </span>
-                    </div>
-                  );
-                })}
-            </div>
-
-            {/* Live Measurements Preview for Shoppers */}
-            <div className="bg-white rounded-xl p-3 border border-stone-200 space-y-2 text-xs">
-              <span className="text-[11px] font-bold text-stone-800 block">
-                Measurements preview for selected profiles:
-              </span>
-              <div className="space-y-1.5">
-                {selectedProfileIds.map((id) => {
-                  const p = customProfiles[id];
-                  return (
-                    <div key={id} className="flex items-center justify-between text-[11px] text-stone-600 border-b border-stone-100 pb-1">
-                      <strong className="text-stone-900">{p.name}:</strong>
-                      <span>Fitted: {p.fittedSheet} • Flat: {p.flatSheet} • {p.pillowcases}</span>
-                    </div>
-                  );
-                })}
-              </div>
-            </div>
-          </div>
-
-          {/* STEP 3: PRODUCT SPECS, PRICING & STOCK */}
-          <div className="space-y-3">
-            <span className="text-xs font-black uppercase tracking-wider text-stone-900 block border-b border-stone-100 pb-1">
-              Step 3: Title, Pricing & Fabric Specs
-            </span>
-
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-xs">
-              <div className="sm:col-span-2">
-                <label className="block text-stone-700 font-semibold mb-1">
-                  Product Name / Title <span className="text-red-500">*</span>
-                </label>
-                <input
-                  type="text"
-                  required
-                  placeholder="e.g. Royal Giza 800TC Sateen Bed Sheet Set"
-                  value={title}
-                  onChange={(e) => setTitle(e.target.value)}
-                  className="w-full px-3 py-2 rounded-xl border border-stone-300 text-xs focus:ring-2 focus:ring-[#c5a059]"
-                />
-              </div>
-
-              <div>
-                <label className="block text-stone-700 font-semibold mb-1">
-                  Base Price (AED) <span className="text-red-500">*</span>
-                </label>
-                <input
-                  type="number"
-                  required
-                  value={price}
-                  onChange={(e) => setPrice(Number(e.target.value))}
-                  className="w-full px-3 py-2 rounded-xl border border-stone-300 text-xs focus:ring-2 focus:ring-[#c5a059]"
-                />
-              </div>
-
-              <div>
-                <label className="block text-stone-700 font-semibold mb-1">
-                  Compare at Price (AED)
-                </label>
-                <input
-                  type="number"
-                  value={compareAtPrice}
-                  onChange={(e) => setCompareAtPrice(Number(e.target.value))}
-                  className="w-full px-3 py-2 rounded-xl border border-stone-300 text-xs focus:ring-2 focus:ring-[#c5a059]"
-                />
-              </div>
-
-              <div>
-                <label className="block text-stone-700 font-semibold mb-1">
-                  Material & Fabric
-                </label>
-                <input
-                  type="text"
-                  value={material}
-                  onChange={(e) => setMaterial(e.target.value)}
-                  className="w-full px-3 py-2 rounded-xl border border-stone-300 text-xs focus:ring-2 focus:ring-[#c5a059]"
-                />
-              </div>
-
-              <div>
-                <label className="block text-stone-700 font-semibold mb-1">
-                  Thread Count (TC)
-                </label>
-                <input
-                  type="number"
-                  value={threadCount}
-                  onChange={(e) => setThreadCount(Number(e.target.value))}
-                  className="w-full px-3 py-2 rounded-xl border border-stone-300 text-xs focus:ring-2 focus:ring-[#c5a059]"
-                />
-              </div>
-
-              <div>
-                <label className="block text-stone-700 font-semibold mb-1">
-                  Initial Stock Count
-                </label>
-                <input
-                  type="number"
-                  value={stockCount}
-                  onChange={(e) => setStockCount(Number(e.target.value))}
-                  className="w-full px-3 py-2 rounded-xl border border-stone-300 text-xs focus:ring-2 focus:ring-[#c5a059]"
-                />
-              </div>
-
-              <div>
-                <label className="block text-stone-700 font-semibold mb-1">
-                  Color Variants (Comma Separated)
-                </label>
-                <input
-                  type="text"
-                  value={colorsText}
-                  onChange={(e) => setColorsText(e.target.value)}
-                  className="w-full px-3 py-2 rounded-xl border border-stone-300 text-xs focus:ring-2 focus:ring-[#c5a059]"
-                />
-              </div>
-            </div>
-          </div>
-
-          {/* Publish Action */}
-          <div className="pt-2">
-            <button
-              type="submit"
-              disabled={savingProduct}
-              className="w-full bg-[#0f1c2e] hover:bg-stone-800 disabled:opacity-60 text-white font-bold text-sm py-4 rounded-xl shadow-xl flex items-center justify-center gap-2 transition-all active:scale-95"
-            >
-              <CheckCircle2 className="w-5 h-5 text-amber-300" />
-              <span>{savingProduct ? 'Publishing…' : 'Save & Publish to Customer Storefront'}</span>
-            </button>
-            {photoError && rawPhotoUrl && (
-              <p role="alert" className="mt-2 text-xs text-red-700 bg-red-50 border border-red-200 rounded-lg px-3 py-2 font-medium">
-                {photoError}
-              </p>
-            )}
-            {saveError && (
-              <p role="alert" className="mt-2 text-xs text-red-700 bg-red-50 border border-red-200 rounded-lg px-3 py-2 font-medium">
-                {saveError}
-              </p>
-            )}
-          </div>
-        </form>
-      )}
-
-      {/* INVENTORY LIST */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-        {filteredProducts.map((p) => (
-          <div
-            key={p.id}
-            className="bg-white rounded-2xl p-3 border border-stone-200 flex gap-3 shadow-sm hover:border-stone-300"
-          >
-            {/* Product Image */}
-            <div className="w-24 h-24 rounded-xl overflow-hidden bg-stone-100 shrink-0 relative">
-              {/* eslint-disable-next-line @next/next/no-img-element */}
-              <img
-                src={p.featuredImage}
-                alt={p.title}
-                className="w-full h-full object-cover"
-              />
-              {p.isAiEnhanced && (
-                <span className="absolute bottom-1 right-1 bg-[#0f1c2e] text-amber-300 text-[8px] font-bold px-1.5 py-0.5 rounded shadow">
-                  AI Staged
-                </span>
-              )}
-            </div>
-
-            {/* Info */}
-            <div className="flex-1 min-w-0 flex flex-col justify-between">
-              <div>
-                <h4 className="font-serif font-bold text-xs text-stone-900 truncate">
-                  {p.title}
-                </h4>
-                <div className="text-[11px] text-stone-500 mt-0.5">
-                  {p.material} • {p.threadCount} TC
-                </div>
-                <div className="flex items-center gap-1 mt-1 flex-wrap">
-                  {p.profiles.map((prof) => (
-                    <span
-                      key={prof.id}
-                      className="text-[9px] px-1 py-0.2 bg-stone-100 rounded text-stone-600 font-medium"
-                    >
-                      {prof.name.split(' ')[0]}
-                    </span>
-                  ))}
-                </div>
-              </div>
-
-              <ProductQuickEdit
-                key={`${p.id}-${p.price}-${p.stockCount}-${p.active}`}
-                product={p}
-                initialError={quickErrors[p.id]}
-                onSave={async (changes) => {
-                  const problem = await onUpdateProduct(p.id, changes);
-                  setQuickErrors((e) => ({ ...e, [p.id]: problem ?? '' }));
-                  return problem;
-                }}
-              />
+              {message?.id === p.id && <p role="alert" className="text-[11px] text-red-700">{message.text}</p>}
             </div>
           </div>
         ))}
       </div>
+
+      {editing && (
+        <ProductEditor
+          product={editing === 'new' ? null : editing}
+          catalog={catalog}
+          onClose={() => setEditing(null)}
+          onSaved={() => {
+            setEditing(null);
+            void onChanged();
+          }}
+        />
+      )}
     </div>
   );
 };

@@ -1,14 +1,14 @@
 'use client';
 
 import React from 'react';
-import { Home, Package, ShoppingBag, Truck, Camera, Users, Settings, Store, Sparkles, ClipboardList, Palette, MessageSquare } from 'lucide-react';
+import { Home, Package, ShoppingBag, Truck, Camera, Users, Settings, Store, Sparkles, ClipboardList } from 'lucide-react';
 
 interface BottomNavProps {
   isAdminMode: boolean;
   storeTab: 'home' | 'catalog';
   onSetStoreTab: (tab: 'home' | 'catalog') => void;
-  adminTab: 'orders' | 'add-product' | 'inventory' | 'crm' | 'couriers' | 'branding' | 'sms';
-  onSetAdminTab: (tab: 'orders' | 'add-product' | 'inventory' | 'crm' | 'couriers' | 'branding' | 'sms') => void;
+  adminTab: 'orders' | 'add-product' | 'inventory' | 'crm' | 'settings';
+  onSetAdminTab: (tab: 'orders' | 'add-product' | 'inventory' | 'crm' | 'settings') => void;
   cartCount: number;
   onOpenCart: () => void;
   onOpenTrack: () => void;
@@ -57,7 +57,7 @@ export const BottomNav: React.FC<BottomNavProps> = ({
           <div className="w-7 h-7 rounded-full bg-gradient-to-tr from-[#c5a059] to-[#dfc082] text-white flex items-center justify-center shadow-md -mt-2.5 ring-2 ring-white">
             <Camera className="w-3.5 h-3.5" />
           </div>
-          <span className="text-[9px] mt-0.5 font-medium">+ AI</span>
+          <span className="text-[9px] mt-0.5 font-medium">+ Add</span>
         </button>
 
         {/* Inventory */}
@@ -82,39 +82,15 @@ export const BottomNav: React.FC<BottomNavProps> = ({
           <span className="text-[9px] mt-0.5">CRM</span>
         </button>
 
-        {/* Courier Hub (Jeebly & Echo) */}
+        {/* Settings console (store, catalogue, branding, SMS, couriers, system) */}
         <button
-          onClick={() => onSetAdminTab('couriers')}
+          onClick={() => onSetAdminTab('settings')}
           className={`flex flex-col items-center py-1 px-1.5 rounded-lg text-xs ${
-            adminTab === 'couriers' ? 'text-[#c5a059] font-bold' : 'text-stone-500'
+            adminTab === 'settings' ? 'text-[#c5a059] font-bold' : 'text-stone-500'
           }`}
         >
-          <Truck className="w-4 h-4" />
-          <span className="text-[9px] mt-0.5">Couriers</span>
-        </button>
-
-        {/* Branding & Marquee */}
-        <button
-          onClick={() => onSetAdminTab('branding')}
-          className={`flex flex-col items-center py-1 px-1.5 rounded-lg text-xs ${
-            adminTab === 'branding' ? 'text-[#c5a059] font-bold' : 'text-stone-500'
-          }`}
-          title="Store Logo, Branding & Live Marquee"
-        >
-          <Palette className="w-4 h-4" />
-          <span className="text-[9px] mt-0.5">Brand</span>
-        </button>
-
-        {/* SMS gateway (phone codes at checkout) */}
-        <button
-          onClick={() => onSetAdminTab('sms')}
-          className={`flex flex-col items-center py-1 px-1.5 rounded-lg text-xs ${
-            adminTab === 'sms' ? 'text-[#c5a059] font-bold' : 'text-stone-500'
-          }`}
-          title="SMS gateway for checkout phone codes"
-        >
-          <MessageSquare className="w-4 h-4" />
-          <span className="text-[9px] mt-0.5">SMS</span>
+          <Settings className="w-4 h-4" />
+          <span className="text-[9px] mt-0.5">Settings</span>
         </button>
 
         {/* Return to Shop */}

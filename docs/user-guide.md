@@ -10,21 +10,28 @@
    - **SMS not arriving?** If the shop's SMS service is down, checkout says so and offers the shop's email.
 3. Fill in the delivery address (or **Use My GPS**), choose Cash on Delivery or bank transfer (with an optional receipt screenshot or PDF), and **Confirm & Raise Order**. The button stays locked until the phone is verified.
 4. **Track Order:** enter the order number (shown on the confirmation and pre-filled on the same phone) and the mobile number used for the order.
-- The bag is kept if the page is reloaded. Prices and stock are always checked by the shop when the order is placed.
+- **Picking up where you left off.** The bag and your delivery details are kept on your phone (**Not you? Clear them** at checkout forgets the details). **Save or send this bag as a link** carries it to another browser, e.g. from Instagram's built-in browser to Safari or Chrome.
+- **Most designs are one or two pieces.** A size shows **Only 1 left** or **Sold out**; you can't add more than there are, and a sold-out size offers **Ask us** (WhatsApp or email) instead.
+- Prices are in AED. Visitors outside the UAE also see an approximate price in their own currency; you always pay in AED.
+- Stock and prices update on the open page within seconds. Prices and stock are always checked by the shop when the order is placed.
+- **Share** on a product sends its link (with its photo in the preview) through WhatsApp or the phone's share sheet.
 
 ## For the owner: the Admin Hub
 
 ### First sign-in
 
-- **Docker / PM2:** the first start prints a one-time password in the log (`docker logs buhome-uae` or `pm2 logs buhome-app`).
+- **Docker / PM2:** the first start prints a one-time password in the log (`docker compose logs app-blue` or `pm2 logs buhome-app`).
 - Sign in from **Admin Hub** with that email and password, then choose your own password: at least 12 characters, with at least 5 different characters.
-- Lost the password? Stop the app, delete `admin.json` from `DATA_DIR`, and start it again. A new one-time password is printed. You can also set `ADMIN_EMAIL` and `ADMIN_PASSWORD_HASH` (from `npm run hash-password`).
+- **Forgot password?** on the sign-in screen emails a link to the admin email (works once, for 30 minutes); every device is signed out when you choose the new password. It needs email set up (Settings → Email & admin account).
+- No email set up? On the server: `docker compose exec app-blue rm /data/admin.json`, then `docker compose restart app-blue app-green`, then read the new one-time password with `docker compose logs app-blue` (Podman: `podman exec beautifuluaehome rm /data/admin.json`, `podman restart beautifuluaehome`, `podman logs beautifuluaehome`). You can also set `ADMIN_EMAIL` and `ADMIN_PASSWORD_HASH` (from `npm run hash-password`).
+- **Settings → Email & admin account:** your mail server (SMTP), where backups and alerts go, **Send a test email**, and your sign-in email (current password needed).
 - 5 wrong passwords from one place pause sign-in there for 15 minutes; try again later or from another network. **Sign out** signs you out on every device.
-- The build version (BUH-xx.xx.xx) shows next to the hub's title.
+- The version (BUH-xx.xx.xx) shows bottom left on every page. In the Admin Hub, tap it for **Settings → Versions**: every release with what changed, and (with automatic updates on) **Switch to this version** for any release from BUH-02.00.00, or **Update to the latest**. The shop stays open while it switches, and the database is saved first.
+- **Updates** (with the updater turned on, see the deployment guide) install themselves without closing the shop or signing you out. If a new version does not start properly, the shop stays on the one before and an alert is written. A customer in the middle of checkout carries on: their bag, details and SMS code are kept.
 
 ### Orders
 
-New orders appear under **Orders & Dispatches** (the list refreshes every minute). For each order:
+New orders appear under **Orders & Dispatches** within seconds, with a notice at the top. An order shows **via Instagram** (or WhatsApp, TikTok…) when that is where the customer came from. For each order:
 
 - **Confirm & Assign Courier** books Jeebly or Eco Express and prints the label.
 - **Mark dispatched**, then **Out for delivery** or **Mark delivered**, as the parcel moves.
@@ -37,17 +44,52 @@ Every change is recorded with who made it and when.
 
 ### Inventory
 
-**Inventory Stock** lists every product. You can change the price and stock right there (**Save**), and **Visible / Hidden** shows or hides a product in the shop. **+ Add Bedding Set** creates a new one; phone photos are shrunk to 1600 px before upload and stored on the server.
+**Inventory Stock** lists every product with its pieces per size (most designs are one or two pieces, so stock is kept per size).
 
-If a customer buys while you are editing the stock, **Save** says the stock changed and shows the new figure: check it and save again.
+- **+ / −** next to a size adds or removes one piece straight away.
+- **Edit** opens everything: photos (up to 8; the first is the main one; reorder or remove them), name, prices, category, material, colours, sizes (add from your presets, change measurements and price differences) and pieces per size, and whether it is shown, featured or new.
+- **+ Add Product** (or **+ Add** on a phone) opens the same editor for a new product. Phone photos are shrunk before upload.
+- **Visible / Hidden** shows or hides a product; the arrows change its place in the shop.
+- **Remove** takes a product out of the shop for good, but keeps it for past orders; it can be restored (hidden) under **Removed**.
+- Filters: **Low** (at or below your warning level), **Sold out**, **Hidden**, **Removed**, and a search box.
+- If a customer buys while you are editing stock, **Save** says the stock changed and shows the new figure: check it and save again.
 
 ### Customers
 
 **Customers & CRM** is built from the orders: one line per phone number, with the number of orders and the total spent.
 
+### Settings
+
+**⚙️ Settings** holds every option, in sections:
+
+- **Store & contact:** your WhatsApp number (change it any time; empty hides the WhatsApp buttons), the message a chat opens with, the floating WhatsApp button, the support email, Instagram, TikTok and Facebook, the address, and whether visitors abroad see their own currency.
+- **Catalogue:** the size presets offered when adding a product (name, measurements, price difference, pieces in the set), the categories shown in the shop, and the **Only N left** level.
+- **Branding & bank:** logo, colours, the scrolling bar, and bank-transfer details.
+- **Festival themes:** see below.
+- **Phone verification:** the SMS gateway (see below).
+- **Couriers:** see below.
+- **System & backups:** health (disk, database, backups, SMS), backups, and **Settings history**: every save keeps the version it replaced (keys excepted); **Restore** puts an earlier one back and can itself be undone.
+
+### Festival themes
+
+From 3 weeks before a major festival until 1 week after, the banner shows its greeting and colours and the scrolling bar its lines (smaller festivals: about a week before to two days after; solemn days such as Good Friday and Commemoration Day only on the day, with a calm look). 33 festivals are included: the UAE's national days, Ramadan and the Eids, Diwali, Holi, Onam, Navratri, Vaisakhi, Christmas, Easter (and the Orthodox ones), Lunar New Year, Nowruz, Hanukkah and more.
+
+- Dates are built in and checked online every week from public holiday calendars (UAE official dates win for the Islamic festivals); **Refresh dates now** checks straight away.
+- **Always this look** keeps one theme; **Everyday look only** turns themes off; untick **Show** to skip a festival.
+
+### Instagram, WhatsApp and the product feed
+
+- Every product has its own link, `https://yourdomain.ae/p/<product>`, which previews with the photo, name and price when pasted in WhatsApp or Instagram. **Share** on a product copies or sends it.
+- **Instagram / Facebook Shopping and Google:** add `https://yourdomain.ae/feeds/meta.csv` as a scheduled data feed in Meta Commerce Manager (or Google Merchant Center). It lists every product and size with live stock.
+- Links you post can carry `?utm_source=instagram&utm_campaign=eid`; orders then show where customers came from.
+
+### Daily summary and alerts
+
+Every morning at 8:00 (UAE) an email to the backup address lists yesterday's orders and sales, orders waiting for you, what is sold out or low, and anything needing attention. A problem (low disk space, a database or backup failure, no SMS gateway) is emailed when it starts, daily while it lasts, and when it is resolved.
+
 ### Bank details
 
-Under **🎨 Logo & Marquee → Bank transfer details**. Customers paying by transfer see exactly these at checkout, with your instructions.
+Under **⚙️ Settings → Branding & bank → Bank transfer details**. Customers paying by transfer see exactly these at checkout, with your instructions.
 
 - **Bank transfer only appears at checkout once the bank name, account name and IBAN are saved.**
 - The IBAN is checked (AE plus 21 digits, with its check digits), so most typos are caught.
@@ -62,9 +104,19 @@ The line at the top of the Admin Hub shows when the last backup ran:
 
 **Back up now** runs one immediately. Backups run every 12 hours on their own. Courier and SMS keys are not in backups: after a restore, enter them again. Restoring: see HOSTINGER_DEPLOYMENT_GUIDE.md.
 
-### SMS & Real OTP
+### Phone verification (SMS)
 
 Enter the gateway's details, tap **Send test** to try it on your own mobile, then **Save Gateway Credentials**. Checkout then sends codes through it (a gateway set in `.env.production` takes priority). Keys are kept on the server and never shown again: leave a key field blank to keep the saved one. Webhook and Infobip URLs must be public https addresses.
+
+**Firebase Phone Auth** (optional): Google sends the code instead of your gateway.
+
+1. Create a project at console.firebase.google.com.
+2. Authentication → Sign-in method: turn on **Phone**.
+3. Authentication → Settings → Authorized domains: add your shop's domain.
+4. Upgrade to the **Blaze** plan. Firebase only sends phone codes on Blaze, and Google bills every SMS; set a budget alert.
+5. Project settings → add a Web app, copy `apiKey`, `authDomain`, `projectId` and `appId` into **Settings → Phone verification**, choose **Firebase Phone Auth** and save.
+
+There is no **Send test** for Firebase: try a checkout on your own phone (a billed SMS). A gateway in `.env.production` still takes priority.
 
 ### Couriers
 

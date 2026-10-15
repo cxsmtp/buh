@@ -11,6 +11,8 @@ const nextConfig: NextConfig = {
   // Loaded at runtime from node_modules (native SQLite driver; mailer with dynamic requires).
   serverExternalPackages: ["better-sqlite3", "nodemailer"],
   env: { NEXT_PUBLIC_APP_VERSION: appVersion },
+  // Settings → Versions shows the changelog of the running build.
+  outputFileTracingIncludes: { "/api/admin/versions": ["./CHANGELOG.md"] },
   images: {
     unoptimized: true,
   },

@@ -1,0 +1,71 @@
+'use client';
+
+import React, { useEffect, useState } from 'react';
+import { History, Loader2 } from 'lucide-react';
+import { getJson, postJson } from '@/lib/apiClient';
+
+/**
+ * Settings → System → History: every save keeps the version it replaced (the
+ * last 30 per group). Restoring one puts it back as it was, keeping the keys
+ * saved now, and can itself be undone the same way.
+ */
+
+const NAMES: Record<string, string> = {
+  brand: 'Branding',
+  bank: 'Bank details',
+  courier: 'Couriers',
+  sms: 'Phone verification',
+  catalog: 'Catalogue',
+  store: 'Store & contact',
+  theme: 'Festival themes',
+};
+
+interface Version {
+  id: number;
+  key: string;
+  savedAt: string;
+}
+
+export function SettingsHistoryCard({ onRestored }: { onRestored: () => void }) {
+  const [versions, setVersions] = useState<Version[] | null>(null);
+  const [busy, setBusy] = useState<number | null>(null);
+  const [status, setStatus] = useState<{ ok: boolean; text: string } | null>(null);
+  const [nonce, setNonce] = useState(0);
+
+  useEffect(() => {
+    void getJson<{ versions: Version[] }>('/api/admin/settings/history').then(({ ok, data }) => {
+      if (ok) setVersions(data.versions);
+    });
+  }, [nonce]);
+
+  const restore = async (v: Version) => {
+    if (!window.confirm(`Put ${NAMES[v.key] ?? v.key} back as it was on ${new Date(v.savedAt).toLocaleString()}? You can undo this the same way.`)) return;
+    setBusy(v.id);
+    const { ok, data } = await postJson<{ message?: string }>('/api/admin/settings/history', { id: v.id });
+    setBusy(null);
+    setStatus(ok ? { ok: true, text: `${NAMES[v.key] ?? v.key} restored.` } : { ok: false, text: data.message || 'Could not restore that version.' });
+    setNonce((n) => n + 1);
+    if (ok) onRestored();
+  };
+
+  return (
+    <div className="space-y-2 text-xs">
+      <h3 className="font-bold text-sm text-[#0f1c2e] flex items-center gap-1.5"><History className="w-4 h-4" /> Settings history</h3>
+      <p className="text-stone-500">Each save keeps the version it replaced. Restore one to go back to a setup that worked.</p>
+      {status && <p role="status" className={`font-semibold ${status.ok ? 'text-emerald-700' : 'text-red-700'}`}>{status.text}</p>}
+      <ul className="divide-y divide-stone-100 border border-stone-200 rounded-xl bg-white max-h-80 overflow-y-auto">
+        {versions === null && <li className="p-3 text-stone-500">Loading…</li>}
+        {versions?.length === 0 && <li className="p-3 text-stone-500">Nothing yet: versions appear after the first change.</li>}
+        {versions?.map((v) => (
+          <li key={v.id} className="flex items-center gap-2 p-2.5">
+            <span className="font-semibold text-stone-800">{NAMES[v.key] ?? v.key}</span>
+            <span className="text-stone-500">as of {new Date(v.savedAt).toLocaleString()}</span>
+            <button type="button" onClick={() => void restore(v)} disabled={busy !== null} className="ml-auto px-2 py-1 rounded-lg border border-stone-300 font-semibold flex items-center gap-1 disabled:opacity-50">
+              {busy === v.id && <Loader2 className="w-3 h-3 animate-spin" />} Restore
+            </button>
+          </li>
+        ))}
+      </ul>
+    </div>
+  );
+}

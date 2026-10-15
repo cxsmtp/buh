@@ -4,110 +4,241 @@ import { INITIAL_PRODUCTS } from '@/data/initialData';
 import { getDb, inTransaction } from './db';
 import { HttpError } from './http';
 import { acceptImageRef } from './images';
+import { bump, changedElsewhere } from './live';
+import { getSettings } from './settings';
 
 /**
- * The catalogue. Stock lives in its own column so orders can reserve it
- * atomically (UPDATE … WHERE stock >= qty); everything else is the Product
+ * The catalogue. Stock is kept per product and size in product_stock, so an
+ * order reserves exactly the piece it buys (UPDATE … WHERE qty >= n) and two
+ * customers can never both get the last King. Everything else is the Product
  * JSON. Seeded with the starter catalogue on first start.
+ *
+ * Removing a product archives it (past orders still show it); archived
+ * products are hidden everywhere except "Show archived" in the admin hub.
  */
 
 export interface StoredProduct extends Product {
   active: boolean;
+  archived?: boolean;
 }
 
 interface Row {
   id: string;
   data: string;
-  stock: number;
   active: number;
+  archived: number;
 }
 
 let cache: StoredProduct[] | null = null;
+
+const SIZE_ID = /^[a-z0-9][a-z0-9-]{0,29}$/;
+
+function writeStock(productId: string, stockBySize: Record<string, number>) {
+  const db = getDb();
+  const upsert = db.prepare(
+    'INSERT INTO product_stock (product_id, size_id, qty) VALUES (?, ?, ?) ON CONFLICT(product_id, size_id) DO UPDATE SET qty = excluded.qty'
+  );
+  for (const [size, qty] of Object.entries(stockBySize)) upsert.run(productId, size, qty);
+}
+
+/**
+ * SEED_STOCK (demos and tests only): the starter catalogue gets this many
+ * pieces of every size, instead of its realistic one or two.
+ */
+function seedStock(p: Product): Record<string, number> {
+  const n = Number(process.env.SEED_STOCK);
+  return Number.isInteger(n) && n > 0 && n <= 1000 ? Object.fromEntries(p.profiles.map((s) => [s.id, n])) : p.stockBySize;
+}
 
 function seedIfEmpty() {
   const db = getDb();
   const { n } = db.prepare('SELECT COUNT(*) AS n FROM products').get() as { n: number };
   if (n > 0) return;
-  const insert = db.prepare('INSERT INTO products (id, data, stock, active, position, updated_at) VALUES (?, ?, ?, 1, ?, ?)');
+  const insert = db.prepare('INSERT INTO products (id, data, stock, active, position, updated_at) VALUES (?, ?, 0, 1, ?, ?)');
   inTransaction(() => {
     INITIAL_PRODUCTS.forEach((p, i) => {
-      const { stockCount, ...rest } = p;
-      insert.run(p.id, JSON.stringify(rest), stockCount, i, new Date().toISOString());
+      const { stockCount, stockBySize, ...rest } = p;
+      void stockCount;
+      insert.run(p.id, JSON.stringify(rest), i, new Date().toISOString());
+      void stockBySize;
+      writeStock(p.id, seedStock(p));
     });
   });
 }
 
-function fromRow(r: Row): StoredProduct {
-  return { ...(JSON.parse(r.data) as Product), stockCount: r.stock, active: r.active === 1 };
+function stockMap(): Map<string, Record<string, number>> {
+  const map = new Map<string, Record<string, number>>();
+  for (const r of getDb().prepare('SELECT product_id, size_id, qty FROM product_stock').all() as Array<{ product_id: string; size_id: string; qty: number }>) {
+    const m = map.get(r.product_id) ?? {};
+    m[r.size_id] = r.qty;
+    map.set(r.product_id, m);
+  }
+  return map;
 }
 
-export function listProducts({ includeHidden = false } = {}): StoredProduct[] {
+function fromRow(r: Row, stock: Record<string, number>): StoredProduct {
+  const p = JSON.parse(r.data) as Product;
+  // Only sizes the product still offers count.
+  const stockBySize: Record<string, number> = {};
+  for (const pr of p.profiles) stockBySize[pr.id] = stock[pr.id] ?? 0;
+  const stockCount = Object.values(stockBySize).reduce((a, b) => a + b, 0);
+  return { ...p, stockBySize, stockCount, active: r.active === 1, ...(r.archived ? { archived: true } : {}) };
+}
+
+export function listProducts({ includeHidden = false, includeArchived = false } = {}): StoredProduct[] {
+  if (cache && changedElsewhere('catalog')) cache = null;
   if (!cache) {
     seedIfEmpty();
-    cache = (getDb().prepare('SELECT id, data, stock, active FROM products ORDER BY position, rowid').all() as Row[]).map(fromRow);
+    const stock = stockMap();
+    cache = (getDb().prepare('SELECT id, data, active, archived FROM products ORDER BY position, rowid').all() as Row[]).map((r) => fromRow(r, stock.get(r.id) ?? {}));
   }
-  return includeHidden ? cache : cache.filter((p) => p.active);
+  return cache.filter((p) => (includeArchived || !p.archived) && (includeHidden || p.active));
 }
 
 export function getProduct(id: string): StoredProduct | undefined {
-  return listProducts({ includeHidden: true }).find((p) => p.id === id);
+  return listProducts({ includeHidden: true, includeArchived: true }).find((p) => p.id === id);
 }
 
 export function invalidateProducts() {
   cache = null;
+  bump('catalog'); // open pages reload the catalogue
+}
+
+/** Stock for the sizes given in the input: stockBySize, or (older callers) stockCount for the default size. */
+function stockFromInput(input: Obj, product: StoredProduct): Record<string, number> | undefined {
+  if (input.stockBySize !== undefined) {
+    if (!input.stockBySize || typeof input.stockBySize !== 'object' || Array.isArray(input.stockBySize)) throw new HttpError(400, 'Stock per size must be an object.');
+    const out: Record<string, number> = {};
+    for (const [size, qty] of Object.entries(input.stockBySize as Obj)) {
+      if (!product.profiles.some((pr) => pr.id === size)) throw new HttpError(400, `Stock given for a size this product does not offer (${size.slice(0, 30)}).`);
+      out[size] = num(qty, `Stock for ${size}`, 0, 100_000, { integer: true });
+    }
+    return out;
+  }
+  if (input.stockCount !== undefined) return { [product.defaultProfileId]: num(input.stockCount, 'Stock', 0, 100_000, { integer: true }) };
+  return undefined;
 }
 
 export function createProduct(input: unknown): StoredProduct {
   const product = validateProduct(input);
   product.id = `prod-${crypto.randomBytes(6).toString('hex')}`;
   product.createdAt = new Date().toISOString();
-  const { stockCount, active, ...rest } = product;
+  const stock = stockFromInput(input as Obj, product) ?? {};
+  const { stockCount, stockBySize, active, ...rest } = product;
+  void stockCount;
+  void stockBySize;
   seedIfEmpty();
-  // New products go first in the catalogue.
-  getDb()
-    .prepare('INSERT INTO products (id, data, stock, active, position, updated_at) VALUES (?, ?, ?, ?, (SELECT COALESCE(MIN(position), 0) - 1 FROM products), ?)')
-    .run(product.id, JSON.stringify(rest), stockCount, active ? 1 : 0, new Date().toISOString());
+  inTransaction(() => {
+    // New products go first in the catalogue.
+    getDb()
+      .prepare('INSERT INTO products (id, data, stock, active, position, updated_at) VALUES (?, ?, 0, ?, (SELECT COALESCE(MIN(position), 0) - 1 FROM products), ?)')
+      .run(product.id, JSON.stringify(rest), active ? 1 : 0, new Date().toISOString());
+    writeStock(product.id, stock);
+  });
   invalidateProducts();
   return getProduct(product.id)!;
 }
 
+/**
+ * Change a product. Stock moves with every sale, so it is only written for the
+ * sizes sent, and, with expectedStockBySize (what the admin saw), only if
+ * nobody bought one meanwhile: otherwise 409 and nothing is saved.
+ */
 export function updateProduct(id: string, input: unknown): StoredProduct {
   const existing = getProduct(id);
   if (!existing) throw new HttpError(404, 'Product not found.');
-  const changes = { ...((input && typeof input === 'object' ? input : {}) as Record<string, unknown>) };
-  // Stock moves with every sale, so it is only written when it was sent, and
-  // with expectedStock only if nobody has bought one since the admin looked.
-  const setsStock = changes.stockCount !== undefined;
-  const expected = changes.expectedStock;
+  const changes = { ...((input && typeof input === 'object' ? input : {}) as Obj) };
+  const expectedBySize = expectedStockFromInput(changes, existing);
   delete changes.expectedStock;
-  if (expected !== undefined && !(Number.isInteger(expected) && (expected as number) >= 0)) {
-    throw new HttpError(400, 'expectedStock must be a whole number.');
-  }
-  const product = validateProduct({ ...existing, ...changes });
-  const { stockCount, active, ...rest } = { ...product, id: existing.id, createdAt: existing.createdAt };
-  const now = new Date().toISOString();
+  delete changes.expectedStockBySize;
+  const product = validateProduct({ ...existing, ...changes, stockBySize: undefined });
+  const stock = stockFromInput(changes, product);
+  const { stockCount, stockBySize, active, ...rest } = { ...product, id: existing.id, createdAt: existing.createdAt };
+  void stockCount;
+  void stockBySize;
   const db = getDb();
-  const result = !setsStock
-    ? db.prepare('UPDATE products SET data = ?, active = ?, updated_at = ? WHERE id = ?').run(JSON.stringify(rest), active ? 1 : 0, now, id)
-    : expected === undefined
-    ? db.prepare('UPDATE products SET data = ?, stock = ?, active = ?, updated_at = ? WHERE id = ?').run(JSON.stringify(rest), stockCount, active ? 1 : 0, now, id)
-    : db
-        .prepare('UPDATE products SET data = ?, stock = ?, active = ?, updated_at = ? WHERE id = ? AND stock = ?')
-        .run(JSON.stringify(rest), stockCount, active ? 1 : 0, now, id, expected);
+  inTransaction(() => {
+    db.prepare('UPDATE products SET data = ?, active = ?, updated_at = ? WHERE id = ?').run(JSON.stringify(rest), active ? 1 : 0, new Date().toISOString(), id);
+    for (const [size, qty] of Object.entries(stock ?? {})) {
+      const expected = expectedBySize?.[size];
+      if (expected === undefined) {
+        writeStock(id, { [size]: qty });
+        continue;
+      }
+      const current = (db.prepare('SELECT qty FROM product_stock WHERE product_id = ? AND size_id = ?').get(id, size) as { qty: number } | undefined)?.qty ?? 0;
+      if (current !== expected) {
+        const name = product.profiles.find((pr) => pr.id === size)?.name ?? size;
+        throw new HttpError(409, `Stock for ${name} changed while you were editing (now ${current}). Check it and save again.`);
+      }
+      writeStock(id, { [size]: qty });
+    }
+    // Sizes no longer offered keep no stock.
+    const offered = product.profiles.map((pr) => pr.id);
+    db.prepare(`DELETE FROM product_stock WHERE product_id = ? AND size_id NOT IN (${offered.map(() => '?').join(',')})`).run(id, ...offered);
+  });
   invalidateProducts();
-  if (result.changes === 0) {
-    const current = getProduct(id);
-    throw new HttpError(409, `Stock changed while you were editing (now ${current?.stockCount ?? 0}). Check it and save again.`);
-  }
   return getProduct(id)!;
+}
+
+function expectedStockFromInput(input: Obj, product: StoredProduct): Record<string, number> | undefined {
+  const check = (v: unknown) => {
+    if (!(Number.isInteger(v) && (v as number) >= 0)) throw new HttpError(400, 'Expected stock must be a whole number.');
+    return v as number;
+  };
+  if (input.expectedStockBySize !== undefined) {
+    if (!input.expectedStockBySize || typeof input.expectedStockBySize !== 'object') throw new HttpError(400, 'Expected stock must be an object.');
+    return Object.fromEntries(Object.entries(input.expectedStockBySize as Obj).map(([k, v]) => [k, check(v)]));
+  }
+  if (input.expectedStock !== undefined) return { [product.defaultProfileId]: check(input.expectedStock) };
+  return undefined;
+}
+
+/** Add or remove pieces of one size (the + / − buttons); never below zero. */
+export function adjustStock(id: string, sizeId: string, delta: number): StoredProduct {
+  const product = getProduct(id);
+  if (!product) throw new HttpError(404, 'Product not found.');
+  if (!product.profiles.some((pr) => pr.id === sizeId)) throw new HttpError(400, 'This product does not offer that size.');
+  if (!Number.isInteger(delta) || delta === 0 || Math.abs(delta) > 1000) throw new HttpError(400, 'Change must be a whole number from -1000 to 1000.');
+  const db = getDb();
+  inTransaction(() => {
+    db.prepare('INSERT OR IGNORE INTO product_stock (product_id, size_id, qty) VALUES (?, ?, 0)').run(id, sizeId);
+    const r = db.prepare('UPDATE product_stock SET qty = qty + ? WHERE product_id = ? AND size_id = ? AND qty + ? >= 0').run(delta, id, sizeId, delta);
+    if (r.changes !== 1) throw new HttpError(409, 'There are not that many pieces to remove.');
+  });
+  invalidateProducts();
+  return getProduct(id)!;
+}
+
+/** Remove from the shop for good (kept for past orders); restore brings it back hidden. */
+export function setArchived(id: string, archived: boolean): StoredProduct {
+  if (!getProduct(id)) throw new HttpError(404, 'Product not found.');
+  getDb()
+    .prepare('UPDATE products SET archived = ?, active = CASE WHEN ? = 1 THEN 0 ELSE active END, updated_at = ? WHERE id = ?')
+    .run(archived ? 1 : 0, archived ? 1 : 0, new Date().toISOString(), id);
+  invalidateProducts();
+  return getProduct(id)!;
+}
+
+/** Order of products in the shop: the ids in the order given (unknown ids are refused). */
+export function reorderProducts(ids: unknown): void {
+  if (!Array.isArray(ids) || ids.length > 1000 || ids.some((x) => typeof x !== 'string')) throw new HttpError(400, 'Give the product ids in order.');
+  const known = new Set(listProducts({ includeHidden: true, includeArchived: true }).map((p) => p.id));
+  if ((ids as string[]).some((x) => !known.has(x))) throw new HttpError(400, 'Unknown product in the list.');
+  const update = getDb().prepare('UPDATE products SET position = ? WHERE id = ?');
+  inTransaction(() => (ids as string[]).forEach((pid, i) => update.run(i, pid)));
+  invalidateProducts();
 }
 
 // ── validation ──────────────────────────────────────────────────────────────
 
+/** The stored product without going through the cache (used during validation). */
+function getProductRaw(id: string): Product | undefined {
+  const r = getDb().prepare('SELECT data FROM products WHERE id = ?').get(id) as { data: string } | undefined;
+  return r ? (JSON.parse(r.data) as Product) : undefined;
+}
+
 type Obj = Record<string, unknown>;
-const CATEGORIES = ['bedsheets', 'duvet-covers', 'fitted-sheets', 'hotel-luxury', 'silk-collection'];
 const WEAVES = ['Sateen', 'Percale', 'Linen', 'Jacquard'];
-const PROFILE_IDS = ['single', 'double', 'queen', 'king', 'super-king', 'custom'];
 
 function text(v: unknown, field: string, max: number, { required = false } = {}): string {
   if (v === undefined || v === null || v === '') {
@@ -130,8 +261,8 @@ function num(v: unknown, field: string, min: number, max: number, { integer = fa
 
 function validateProfile(v: unknown, i: number): BedProfileMeasurement {
   const p = (v && typeof v === 'object' ? v : {}) as Obj;
-  const id = text(p.id, `Size ${i + 1}`, 20, { required: true });
-  if (!PROFILE_IDS.includes(id)) throw new HttpError(400, `Size ${i + 1} is not a known bed size.`);
+  const id = text(p.id, `Size ${i + 1}`, 30, { required: true });
+  if (!SIZE_ID.test(id)) throw new HttpError(400, `Size ${i + 1}: the id may use only lowercase letters, digits and dashes.`);
   return {
     id: id as BedProfileMeasurement['id'],
     name: text(p.name, `Size ${i + 1} name`, 60, { required: true }),
@@ -151,18 +282,20 @@ export function validateProduct(input: unknown): StoredProduct {
   if (!input || typeof input !== 'object' || Array.isArray(input)) throw new HttpError(400, 'Product must be an object.');
   const p = input as Obj;
   const title = text(p.title, 'Title', 160, { required: true });
-  const category = text(p.category, 'Category', 30, { required: true });
-  if (!CATEGORIES.includes(category)) throw new HttpError(400, 'Unknown category.');
+  const category = text(p.category, 'Category', 40, { required: true });
+  // A product may keep a category the owner later removed; new values must exist.
+  const existing = typeof p.id === 'string' ? getProductRaw(p.id) : undefined;
+  if (category !== existing?.category && !getSettings('catalog').categories.some((c) => c.id === category)) throw new HttpError(400, 'Unknown category: add it in Settings → Catalogue first.');
   const weave = text(p.weave, 'Weave', 20) || 'Sateen';
   if (!WEAVES.includes(weave)) throw new HttpError(400, 'Unknown weave.');
   const price = num(p.price, 'Price', 1, 100_000);
   const compareAt = p.compareAtPrice === undefined || p.compareAtPrice === null || p.compareAtPrice === '' ? undefined : num(p.compareAtPrice, 'Compare-at price', 0, 100_000);
 
-  if (!Array.isArray(p.profiles) || p.profiles.length === 0 || p.profiles.length > 8) throw new HttpError(400, 'Add 1 to 8 bed sizes.');
+  if (!Array.isArray(p.profiles) || p.profiles.length === 0 || p.profiles.length > 12) throw new HttpError(400, 'Add 1 to 12 sizes.');
   const profiles = p.profiles.map(validateProfile);
   if (new Set(profiles.map((x) => x.id)).size !== profiles.length) throw new HttpError(400, 'Each bed size may appear once.');
   for (const pr of profiles) if (price + pr.priceDelta <= 0) throw new HttpError(400, `${pr.name} would cost nothing or less.`);
-  const defaultProfileId = text(p.defaultProfileId, 'Default size', 20) || profiles[0].id;
+  const defaultProfileId = text(p.defaultProfileId, 'Default size', 30) || profiles[0].id;
   if (!profiles.some((x) => x.id === defaultProfileId)) throw new HttpError(400, 'The default size must be one of the sizes.');
 
   const colorsIn = Array.isArray(p.colors) ? p.colors : [];
@@ -183,7 +316,7 @@ export function validateProduct(input: unknown): StoredProduct {
     slug: title.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '').slice(0, 80),
     description: text(p.description, 'Description', 4000),
     shortDescription: text(p.shortDescription, 'Short description', 300),
-    category: category as Product['category'],
+    category,
     price,
     compareAtPrice: compareAt,
     material: text(p.material, 'Material', 120),
@@ -196,13 +329,14 @@ export function validateProduct(input: unknown): StoredProduct {
     aiTransformedImage: acceptImageRef(p.aiTransformedImage, 'Styled photo') || undefined,
     aiStagingPrompt: text(p.aiStagingPrompt, 'Staging prompt', 1000) || undefined,
     isAiEnhanced: p.isAiEnhanced === true,
-    stockCount: num(p.stockCount ?? 0, 'Stock', 0, 100_000, { integer: true }),
+    stockCount: 0,
+    stockBySize: {},
     isFeatured: p.isFeatured === true,
     isNewArrival: p.isNewArrival === true,
     rating: num(p.rating ?? 5, 'Rating', 0, 5),
     reviewsCount: num(p.reviewsCount ?? 0, 'Reviews', 0, 1_000_000, { integer: true }),
     profiles,
-    defaultProfileId: defaultProfileId as Product['defaultProfileId'],
+    defaultProfileId,
     createdAt: typeof p.createdAt === 'string' ? p.createdAt.slice(0, 40) : new Date().toISOString(),
     active: p.active === undefined ? true : p.active === true,
   };

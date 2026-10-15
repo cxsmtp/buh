@@ -1,0 +1,3 @@
+#!/bin/sh
+# docker compose exec updater rollback [image]: go back to buh:previous (or the image given), without downtime.
+exec /bin/sh /updater/updater.sh rollback "$@"

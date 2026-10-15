@@ -57,6 +57,91 @@ const MIGRATIONS: Array<(db: DB) => void> = [
       );
     `);
   },
+  // 2: stock per size. Most designs are one or two pieces, so "King: 1, Queen: 1"
+  //    is tracked, not one number for the product. products.stock stays as the
+  //    total (kept in step by triggers) so older code reading it still works.
+  (db) => {
+    db.exec(`
+      CREATE TABLE product_stock (
+        product_id  TEXT NOT NULL REFERENCES products(id) ON DELETE CASCADE,
+        size_id     TEXT NOT NULL,
+        qty         INTEGER NOT NULL CHECK (qty >= 0),
+        PRIMARY KEY (product_id, size_id)
+      );
+      -- Removing a product archives it: past orders still point at it.
+      ALTER TABLE products ADD COLUMN archived INTEGER NOT NULL DEFAULT 0;
+      CREATE TRIGGER product_stock_ins AFTER INSERT ON product_stock BEGIN
+        UPDATE products SET stock = (SELECT COALESCE(SUM(qty), 0) FROM product_stock WHERE product_id = NEW.product_id) WHERE id = NEW.product_id;
+      END;
+      CREATE TRIGGER product_stock_upd AFTER UPDATE ON product_stock BEGIN
+        UPDATE products SET stock = (SELECT COALESCE(SUM(qty), 0) FROM product_stock WHERE product_id = NEW.product_id) WHERE id = NEW.product_id;
+      END;
+      CREATE TRIGGER product_stock_del AFTER DELETE ON product_stock BEGIN
+        UPDATE products SET stock = (SELECT COALESCE(SUM(qty), 0) FROM product_stock WHERE product_id = OLD.product_id) WHERE id = OLD.product_id;
+      END;
+    `);
+    // Existing stock goes to each product's default size.
+    const rows = db.prepare('SELECT id, data, stock FROM products').all() as Array<{ id: string; data: string; stock: number }>;
+    const insert = db.prepare('INSERT INTO product_stock (product_id, size_id, qty) VALUES (?, ?, ?)');
+    for (const r of rows) {
+      let size = 'king';
+      try {
+        const p = JSON.parse(r.data) as { defaultProfileId?: string; profiles?: Array<{ id: string }> };
+        size = p.defaultProfileId || p.profiles?.[0]?.id || size;
+      } catch {
+        // unreadable product JSON: keep the default
+      }
+      insert.run(r.id, size, r.stock);
+    }
+  },
+  // 3: small shared state every running copy of the shop sees (during an
+  //    update two copies run for a moment): change counters for live updates,
+  //    cached exchange rates, festival dates and the like.
+  (db) => {
+    db.exec(`
+      CREATE TABLE kv (
+        key         TEXT PRIMARY KEY,
+        data        TEXT NOT NULL,
+        updated_at  TEXT NOT NULL
+      );
+      -- Festival dates fetched from the internet (they replace the offline ones), and the last refresh.
+      CREATE TABLE IF NOT EXISTS festival_dates (
+        festival_id TEXT,
+        year        INTEGER,
+        start       TEXT,
+        end         TEXT,
+        source      TEXT,
+        PRIMARY KEY (festival_id, year)
+      );
+      CREATE TABLE IF NOT EXISTS festival_meta (
+        key    TEXT PRIMARY KEY,
+        value  TEXT NOT NULL
+      );
+      -- Earlier versions of each settings group, to restore a known-good one (keys blanked).
+      CREATE TABLE settings_history (
+        id        INTEGER PRIMARY KEY,
+        key       TEXT NOT NULL,
+        data      TEXT NOT NULL,
+        saved_at  TEXT NOT NULL
+      );
+      CREATE INDEX settings_history_by_key ON settings_history(key, id);
+      -- Older versions (before 2.0.0) reserve stock on products.stock and know nothing of sizes.
+      -- If one ever runs on this database (a rollback, the move from the old setup), its sale
+      -- fails instead of selling a piece the per-size stock no longer has.
+      CREATE TRIGGER products_stock_guard BEFORE UPDATE OF stock ON products
+      WHEN NEW.stock <> (SELECT COALESCE(SUM(qty), 0) FROM product_stock WHERE product_id = NEW.id)
+      BEGIN
+        SELECT RAISE(ABORT, 'stock is kept per size');
+      END;
+      -- Checkout SMS codes (hashed), shared by both copies of the shop during an update.
+      CREATE TABLE otp_codes (
+        phone       TEXT PRIMARY KEY,
+        hash        TEXT NOT NULL,
+        expires_at  INTEGER NOT NULL,
+        attempts    INTEGER NOT NULL DEFAULT 0
+      );
+    `);
+  },
 ];
 
 let db: DB | null = null;

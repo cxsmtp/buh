@@ -1,62 +1,81 @@
 # Beautiful UAE Home — production on one VPS (Hostinger KVM with the Docker template).
 #
-#   app    the shop (Next.js), data in the buhome-data volume (database, photos,
-#          receipts, backups, audit log). One instance on purpose.
-#   caddy  HTTPS with automatic Let's Encrypt certificates, in front of the app.
+#   app-blue   the shop (Next.js), data in the buhome-data volume (database, photos,
+#   app-green  receipts, backups, audit log). Two identical copies of one definition:
+#              only one runs normally; both run for a minute during an update.
+#   caddy      HTTPS with automatic Let's Encrypt certificates. Sends every request to
+#              the first healthy copy and retries on the other while they switch.
+#   updater    optional (profile "autoupdate"): pulls a new image, starts it beside the
+#              running copy, switches only when it is healthy, rolls back otherwise,
+#              and restarts a copy that stops answering. See deploy/updater/updater.sh.
 #
-# Start / update with the published image:  docker compose pull app && docker compose up -d
-# Or build it here instead:                 docker compose up -d --build
-# Logs:            docker compose logs -f app
+# First start:              docker compose pull app-blue && docker compose up -d
+# Turn on auto-updates:     echo COMPOSE_PROFILES=autoupdate >> .env && docker compose up -d updater
+# Update now, no downtime:  docker compose exec updater update-now   (updater off: docker compose run --rm updater update-now)
+# Roll back:                docker compose exec updater rollback
+# Logs:                     docker compose logs -f app-blue app-green updater
+
+# One definition for both colours, so they cannot drift apart.
+x-app: &app
+  # Published by .github/workflows/container.yml from main. The updater sets
+  # BUH_IMAGE only to start a specific image (a rollback, or a test in CI).
+  image: ${BUH_IMAGE:-ghcr.io/cxsmtp/buh:latest}
+  restart: unless-stopped
+  env_file:
+    - .env.production
+  environment:
+    - NODE_ENV=production
+    - PORT=3000
+    - HOSTNAME=0.0.0.0
+    - DATA_DIR=/data
+    # Caddy sets X-Real-IP; per-address limits use it.
+    - TRUST_PROXY=1
+  volumes:
+    - buhome-data:/data
+    # Settings → Versions: requests to the updater (one line), and its status (read-only).
+    - updater-control:/updater-control
+    - updater-public:/updater-status:ro
+  # Reachable only through Caddy (no port on the host).
+  expose:
+    - "3000"
+  read_only: true
+  tmpfs:
+    - /tmp
+  cap_drop:
+    - ALL
+  security_opt:
+    - no-new-privileges:true
+  pids_limit: 512
+  # Let in-flight checkouts finish on update or restart.
+  stop_grace_period: 20s
+  healthcheck:
+    test: ["CMD", "wget", "-qO-", "http://127.0.0.1:3000/api/health"]
+    interval: 10s
+    timeout: 5s
+    retries: 3
+    start_period: 30s
+  logging: &logging
+    driver: json-file
+    options:
+      max-size: "10m"
+      max-file: "5"
+
 services:
-  app:
+  app-blue:
+    <<: *app
     build:
       context: .
       dockerfile: Dockerfile
-    # Published by .github/workflows/container.yml from main.
-    image: ghcr.io/cxsmtp/buh:latest
-    restart: unless-stopped
-    env_file:
-      - .env.production
-    environment:
-      - NODE_ENV=production
-      - PORT=3000
-      - HOSTNAME=0.0.0.0
-      - DATA_DIR=/data
-      # Caddy sets X-Real-IP; per-address limits use it.
-      - TRUST_PROXY=1
-    volumes:
-      - buhome-data:/data
-    # Reachable only through Caddy (no port on the host).
-    expose:
-      - "3000"
-    read_only: true
-    tmpfs:
-      - /tmp
-    cap_drop:
-      - ALL
-    security_opt:
-      - no-new-privileges:true
-    pids_limit: 512
-    # Let in-flight checkouts finish on update or restart.
-    stop_grace_period: 20s
-    healthcheck:
-      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:3000/api/health"]
-      interval: 30s
-      timeout: 5s
-      retries: 3
-      start_period: 30s
-    logging:
-      driver: json-file
-      options:
-        max-size: "10m"
-        max-file: "5"
+
+  app-green:
+    <<: *app
+    # Started only by the updater (it names the service), never by a plain `up`.
+    profiles: ["green"]
 
   caddy:
     image: caddy:2.8.4-alpine
     restart: unless-stopped
-    depends_on:
-      app:
-        condition: service_healthy
+    # No depends_on: Caddy health-checks both copies itself and serves whichever is up.
     env_file:
       - .env.production
     ports:
@@ -64,7 +83,8 @@ services:
       - "443:443"
       - "443:443/udp"
     volumes:
-      - ./deploy/Caddyfile:/etc/caddy/Caddyfile:ro
+      # The folder, not the single file, so `git pull` + `caddy reload` sees the new config.
+      - ./deploy:/etc/caddy:ro
       - caddy-data:/data
       - caddy-config:/config
     cap_drop:
@@ -73,13 +93,49 @@ services:
       - NET_BIND_SERVICE
     security_opt:
       - no-new-privileges:true
-    logging:
-      driver: json-file
-      options:
-        max-size: "10m"
-        max-file: "5"
+    logging: *logging
+
+  updater:
+    # Opt-in: the Docker socket gives it control of the host (docs/security.md).
+    profiles: ["autoupdate"]
+    image: docker:27.3.1-cli
+    restart: unless-stopped
+    entrypoint: ["/bin/sh", "/updater/updater.sh"]
+    command: ["daemon"]
+    # Stopping it while it switches versions waits for the switch to finish (idle, it stops at once).
+    stop_grace_period: 3m
+    working_dir: /project
+    environment:
+      # Settings (UPDATE_CHECK_MINUTES, ALERT_WEBHOOK_URL) are read from .env.production;
+      # only those keys, so the shop's other secrets are not in this container's environment.
+      - PATH=/updater/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+      - HOME=/tmp
+      - DOCKER_CONFIG=/state/docker-config
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      # The compose project, read-only: the updater starts app-blue / app-green from it.
+      - .:/project:ro
+      - ./deploy/updater:/updater:ro
+      # Its own state (last good image, rejected images, log, alerts): nothing of the shop's.
+      - updater-state:/state
+      # Requests from Settings → Versions, and the status it shows (no secrets in either).
+      - updater-control:/control
+      - updater-public:/public
+    read_only: true
+    tmpfs:
+      - /tmp
+    # No capabilities: it only talks to the Docker socket and writes its own volume.
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    pids_limit: 128
+    logging: *logging
 
 volumes:
   buhome-data:
+  updater-control:
+  updater-public:
   caddy-data:
   caddy-config:
+  updater-state:
