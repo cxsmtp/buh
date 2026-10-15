@@ -38,6 +38,7 @@ export function EmailSettingsCard({
   const autosave = useAutoSave({ settingsKey: 'email', value: { ...d, smtpPass: '', imapPass: '' }, enabled: Boolean(auto), ...auto });
 
   const save = async () => {
+    autosave.cancel();
     setSaving(true);
     setStatus(null);
     const problem = await onSave(d);

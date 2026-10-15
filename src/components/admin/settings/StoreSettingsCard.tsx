@@ -23,6 +23,7 @@ export function StoreSettingsCard({ value, onSave, auto }: { value: StoreSetting
   const set = <K extends keyof StoreSettings>(k: K, v: StoreSettings[K]) => setD((x) => ({ ...x, [k]: v }));
 
   const save = async () => {
+    autosave.cancel();
     setSaving(true);
     setStatus(null);
     const problem = await onSave(d);
@@ -80,11 +81,11 @@ export function StoreSettingsCard({ value, onSave, auto }: { value: StoreSetting
         <legend className={label}>Where customers can ask (only the ones ticked show on the shop)</legend>
         <label className="flex items-center gap-2">
           <input type="checkbox" checked={d.askOnWhatsApp} onChange={(e) => set('askOnWhatsApp', e.target.checked)} />
-          &ldquo;Ask on WhatsApp&rdquo; on products and in Help {!d.whatsappNumber && <span className="text-stone-400">(add the number above)</span>}
+          &ldquo;Ask on WhatsApp&rdquo; on products and in Help {!d.whatsappNumber && <span className="text-stone-500">(add the number above)</span>}
         </label>
         <label className="flex items-center gap-2">
           <input type="checkbox" checked={d.askOnInstagram} onChange={(e) => set('askOnInstagram', e.target.checked)} />
-          &ldquo;Ask on Instagram&rdquo; (opens a direct message to your account) {!d.instagramHandle && <span className="text-stone-400">(add the account above)</span>}
+          &ldquo;Ask on Instagram&rdquo; (opens a direct message to your account) {!d.instagramHandle && <span className="text-stone-500">(add the account above)</span>}
         </label>
         <p className="text-stone-500">The chat assistant has its own section (Settings → Chat assistant).</p>
       </fieldset>

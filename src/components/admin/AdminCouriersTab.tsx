@@ -54,6 +54,7 @@ export const AdminCouriersTab: React.FC<AdminCouriersTabProps> = ({
 
   const handleSave = async (e: React.FormEvent) => {
     e.preventDefault();
+    autosave.cancel();
     setSaving(true);
     setSaveError('');
     const error = await onUpdateSettings(formData);
@@ -393,7 +394,7 @@ export const AdminCouriersTab: React.FC<AdminCouriersTabProps> = ({
                 <CheckCircle2 className="w-4 h-4 text-emerald-400" />
                 <span>API Connection Diagnostics Result:</span>
               </span>
-              <span className="text-[10px] text-stone-400">Response 200 OK</span>
+              <span className="text-[10px] text-stone-500">Response 200 OK</span>
             </div>
             <pre className="font-mono text-[11px] overflow-x-auto text-emerald-400 p-2 bg-black/50 rounded-lg">
               {JSON.stringify(testResult, null, 2)}

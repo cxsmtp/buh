@@ -398,7 +398,7 @@ test('settings save themselves; a bad value is not saved (the working one stays)
   await page.getByText('Saved automatically.').waitFor();
   assert.equal(await saved(), '+971502223333');
   await page.getByRole('button', { name: 'Undo' }).click();
-  await page.getByLabel('WhatsApp number').and(page.locator('[value="+971501110000"]')).waitFor();
+  await page.waitForFunction(() => (document.getElementById('st-wa') as HTMLInputElement | null)?.value === '+971501110000');
   assert.equal(await saved(), '+971501110000');
   assert.deepEqual(errors, []);
   await ctx.close();

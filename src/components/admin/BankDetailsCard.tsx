@@ -31,6 +31,7 @@ export const BankDetailsCard: React.FC<BankDetailsCardProps> = ({ bank, onSave, 
   const [saved, setSaved] = useState(false);
 
   const save = async () => {
+    autosave.cancel();
     setSaving(true);
     setError('');
     const problem = await onSave(form);

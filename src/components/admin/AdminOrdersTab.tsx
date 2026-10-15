@@ -438,7 +438,7 @@ export const AdminOrdersTab: React.FC<AdminOrdersTabProps> = ({
               </div>
               <button
                 onClick={() => setSelectedOrderForConfirm(null)}
-                className="p-1.5 text-stone-400 hover:text-stone-700 rounded-full hover:bg-stone-100"
+                className="p-1.5 text-stone-500 hover:text-stone-700 rounded-full hover:bg-stone-100"
               >
                 ✕
               </button>

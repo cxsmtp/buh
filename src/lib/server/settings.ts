@@ -110,22 +110,36 @@ function withoutSecrets(key: SettingsKey, value: unknown): Obj {
   return copy;
 }
 
-function save<K extends SettingsKey>(key: K, value: SettingsMap[K], { keepHistory = false }: { keepHistory?: boolean } = {}) {
+function save<K extends SettingsKey>(key: K, value: SettingsMap[K], { keepHistory = false, auto = false, expectUpdatedAt }: { keepHistory?: boolean; auto?: boolean; expectUpdatedAt?: string | null } = {}) {
   // Keep the version being replaced, so it can be restored (Settings → System → History).
   const db = getDb();
   const before = db.prepare('SELECT data, updated_at FROM settings WHERE key = ?').get(key) as { data: string; updated_at: string } | undefined;
+  // Two saves at once (an autosave still checking the mail server, and a Save): the one that read
+  // older settings must not overwrite the newer ones.
+  if (expectUpdatedAt !== undefined && (before?.updated_at ?? null) !== expectUpdatedAt) {
+    throw new HttpError(409, 'These settings were changed meanwhile. Check them and save again.', {}, { code: 'changed_meanwhile' });
+  }
+  // Only autosaves are merged into one edit session, and only into one that began with an autosave
+  // (an explicit Save just before is its own version: Undo must not go back past it).
+  const lastAuto = db.prepare('SELECT data FROM kv WHERE key = ?').pluck().get(`settings:last-auto:${key}`) as string | undefined;
   const sameSession =
+    auto &&
     !keepHistory &&
-    before &&
-    Date.now() - Date.parse(before.updated_at) < SESSION_MS &&
-    Boolean(db.prepare('SELECT 1 FROM settings_history WHERE key = ? AND saved_at <= ? ORDER BY id DESC LIMIT 1').get(key, before.updated_at));
+    before !== undefined &&
+    lastAuto === JSON.stringify(before.updated_at) &&
+    Date.now() - Date.parse(before.updated_at) < SESSION_MS;
   if (before && !sameSession) {
     db.prepare('INSERT INTO settings_history (key, data, saved_at) VALUES (?, ?, ?)').run(key, JSON.stringify(withoutSecrets(key, JSON.parse(before.data))), before.updated_at);
     db.prepare('DELETE FROM settings_history WHERE key = ? AND id NOT IN (SELECT id FROM settings_history WHERE key = ? ORDER BY id DESC LIMIT ?)').run(key, key, HISTORY_KEEP);
   }
+  const at = new Date().toISOString();
   getDb()
     .prepare('INSERT INTO settings (key, data, updated_at) VALUES (?, ?, ?) ON CONFLICT(key) DO UPDATE SET data = excluded.data, updated_at = excluded.updated_at')
-    .run(key, JSON.stringify(value), new Date().toISOString());
+    .run(key, JSON.stringify(value), at);
+  // Remember whether this version came from an autosave (the next autosave may join its session).
+  getDb()
+    .prepare('INSERT INTO kv (key, data, updated_at) VALUES (?, ?, ?) ON CONFLICT(key) DO UPDATE SET data = excluded.data, updated_at = excluded.updated_at')
+    .run(`settings:last-auto:${key}`, JSON.stringify(auto ? at : null), at);
   cache.set(key, value);
   bump('settings');
 }
@@ -179,6 +193,8 @@ export function adminView<K extends SettingsKey>(key: K): { value: SettingsMap[K
 
 export interface UpdateOptions<K extends SettingsKey> {
   keepHistory?: boolean;
+  /** An autosave: merged into the current edit session, and never allowed to drop a saved key. */
+  auto?: boolean;
   /** Runs on the complete new settings (keys included) before they are stored; throwing keeps the current ones. */
   beforeSave?: (next: SettingsMap[K], current: SettingsMap[K]) => Promise<void>;
 }
@@ -186,6 +202,7 @@ export interface UpdateOptions<K extends SettingsKey> {
 export async function updateSettings<K extends SettingsKey>(key: K, input: unknown, options: UpdateOptions<K> = {}): Promise<void> {
   if (!input || typeof input !== 'object' || Array.isArray(input)) throw new HttpError(400, 'Settings must be an object.');
   const current = getSettings(key);
+  const currentAt = (getDb().prepare('SELECT updated_at FROM settings WHERE key = ?').get(key) as { updated_at: string } | undefined)?.updated_at ?? null;
   const next = await VALIDATORS[key](input as Record<string, unknown>, current as never);
 
   // Write-only secrets.
@@ -212,6 +229,14 @@ export async function updateSettings<K extends SettingsKey>(key: K, input: unkno
       sms.customWebhook.bearerToken = '';
     }
   }
+  // An autosave never removes a saved key (a half-typed new address would): that takes Save with the key.
+  if (options.auto) {
+    for (const p of SECRETS[key]) {
+      if (getPath(current as unknown as Obj, p) && !getPath(next as unknown as Obj, p)) {
+        throw new HttpError(409, 'Changing this address removes the saved password or key. Type the new one and press Save.', {}, { code: 'needs_save' });
+      }
+    }
+  }
   // Switched on means checkout sends codes through it, so the chosen gateway must be complete.
   if (key === 'sms') {
     const sms = next as unknown as SmsGatewaySettings;
@@ -228,7 +253,7 @@ export async function updateSettings<K extends SettingsKey>(key: K, input: unkno
     if (sms.isEnabled && missing) throw new HttpError(400, 'Fill in every field for the chosen SMS gateway before switching it on.');
   }
   if (options.beforeSave) await options.beforeSave(next as SettingsMap[K], current);
-  save(key, next as SettingsMap[K], { keepHistory: options.keepHistory });
+  save(key, next as SettingsMap[K], { keepHistory: options.keepHistory, auto: options.auto, expectUpdatedAt: currentAt });
 }
 
 /**

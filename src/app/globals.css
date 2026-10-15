@@ -99,12 +99,3 @@ input::placeholder, textarea::placeholder {
     padding: 10px;
   }
 }
-
-/*
- * Readable small print: Tailwind's stone-400 (2.6:1 on white) is too faint for text, so text set
- * in it uses stone-500 (4.6:1). Unlayered, so it wins over the utility; borders and icons on
- * dark backgrounds are not affected (they use other classes).
- */
-.text-stone-400 {
-  color: var(--color-stone-500);
-}

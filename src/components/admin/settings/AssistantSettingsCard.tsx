@@ -37,6 +37,7 @@ export function AssistantSettingsCard({ value, sizes, onSave, auto }: { value: A
   const answer = useMemo(() => (trial.trim() ? reply(trial, d, sizes) : null), [trial, d, sizes]);
 
   const save = async () => {
+    autosave.cancel();
     setSaving(true);
     setStatus(null);
     const problem = await onSave(d);

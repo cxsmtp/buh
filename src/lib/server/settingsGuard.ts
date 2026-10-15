@@ -1,8 +1,8 @@
-import crypto from 'node:crypto';
 import type { EmailSettings } from '@/types';
 import { HttpError } from './http';
 import { kvGet, kvSet } from './kv';
 import { logEvent } from './log';
+import { mac } from './secrets';
 import { getSettings, updateSettings, type SettingsKey, type SettingsMap } from './settings';
 
 /**
@@ -20,7 +20,8 @@ import { getSettings, updateSettings, type SettingsKey, type SettingsMap } from 
  */
 
 const goodKey = (key: SettingsKey) => `settings:good:${key}`;
-const fingerprint = (value: unknown) => crypto.createHash('sha256').update(JSON.stringify(value)).digest('base64url');
+/** Keyed with the server's own secret: a backup holding this can't be used to test password guesses. */
+const fingerprint = (value: unknown) => mac('settings-known-working', JSON.stringify(value));
 
 /** Remember that these settings (as stored now) work. */
 export function markWorking(key: SettingsKey, value: unknown = getSettings(key)) {
@@ -70,13 +71,14 @@ export interface GuardedResult {
  * Save settings, trying them first where that is possible (see above).
  * `verifiers` is injectable for tests.
  */
-export async function saveGuarded<K extends SettingsKey>(key: K, input: unknown, verifiers: { email?: Verifier } = { email: verifyEmail }): Promise<GuardedResult> {
+export async function saveGuarded<K extends SettingsKey>(key: K, input: unknown, verifiers: { email?: Verifier } = { email: verifyEmail }, { auto = false }: { auto?: boolean } = {}): Promise<GuardedResult> {
   const result: GuardedResult = { verified: false };
   if (key !== 'email') {
-    await updateSettings(key, input);
+    await updateSettings(key, input, { auto });
     return result;
   }
   await updateSettings(key, input, {
+    auto,
     beforeSave: async (next, current) => {
       const n = next as unknown as EmailSettings;
       const unchanged = JSON.stringify(n) === JSON.stringify(current);

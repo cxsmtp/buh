@@ -837,23 +837,23 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
 
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 bg-white p-3 rounded-xl border border-amber-200 text-[11px]">
                   <div>
-                    <span className="text-stone-400 block">Bank Name</span>
+                    <span className="text-stone-500 block">Bank Name</span>
                     <strong className="text-stone-800">{bank.bankName}</strong>
                   </div>
                   <div>
-                    <span className="text-stone-400 block">Account Name</span>
+                    <span className="text-stone-500 block">Account Name</span>
                     <strong className="text-stone-800">{bank.accountName}</strong>
                   </div>
                   <div className="sm:col-span-2">
-                    <span className="text-stone-400 block">IBAN Number</span>
+                    <span className="text-stone-500 block">IBAN Number</span>
                     <strong className="font-mono text-stone-900 text-xs">{bank.iban}</strong>
                   </div>
                   <div>
-                    <span className="text-stone-400 block">Account Number</span>
+                    <span className="text-stone-500 block">Account Number</span>
                     <strong className="font-mono text-stone-800">{bank.accountNumber}</strong>
                   </div>
                   <div>
-                    <span className="text-stone-400 block">SWIFT Code</span>
+                    <span className="text-stone-500 block">SWIFT Code</span>
                     <strong className="font-mono text-stone-800">{bank.swiftCode}</strong>
                   </div>
                 </div>

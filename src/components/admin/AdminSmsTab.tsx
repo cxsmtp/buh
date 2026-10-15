@@ -99,11 +99,14 @@ export const AdminSmsTab: React.FC<AdminSmsTabProps> = ({
     twilio: { ...s.twilio, authToken: '' },
     infobip: { ...s.infobip, apiKey: '' },
     customWebhook: { ...s.customWebhook, bearerToken: '' },
+    // Switching the gateway on is Save's job (checkout starts sending through it).
+    isEnabled: smsSettings.isEnabled,
   });
   const autosave = useAutoSave({ settingsKey: 'sms', value: withoutKeys(draft()), enabled: Boolean(auto), ...auto });
 
   const handleSave = async (e?: React.FormEvent) => {
     if (e) e.preventDefault();
+    autosave.cancel();
     const updated = draft();
     setSaveError('');
     const error = await onUpdateSmsSettings(updated);
@@ -291,7 +294,7 @@ export const AdminSmsTab: React.FC<AdminSmsTabProps> = ({
               maxLength={11}
               className="w-full px-3.5 py-2.5 rounded-xl border border-stone-300 bg-white text-stone-900 text-xs font-medium focus:outline-none focus:ring-2 focus:ring-[#c5a059]"
             />
-            <p className="text-[10px] text-stone-400 mt-1">
+            <p className="text-[10px] text-stone-500 mt-1">
               Up to 11 characters. Displays as the sender name in the customer&apos;s SMS inbox.
             </p>
           </div>}

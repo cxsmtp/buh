@@ -45,6 +45,7 @@ export function CatalogSettingsCard({ value, onSave, auto }: { value: CatalogSet
   };
 
   const save = async () => {
+    autosave.cancel();
     setSaving(true);
     setStatus(null);
     const problem = await onSave(draft);

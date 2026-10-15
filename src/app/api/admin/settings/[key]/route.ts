@@ -14,7 +14,7 @@ export async function PUT(req: Request, { params }: { params: Promise<{ key: str
     // Branding may carry a logo image (stored as a file).
     const body = await readJsonBody(req, key === 'brand' ? 4 * 1024 * 1024 : 64 * 1024);
     // Validated, and tried first where possible: a change that fails keeps the working settings.
-    const result = await saveGuarded(key as SettingsKey, body.settings);
+    const result = await saveGuarded(key as SettingsKey, body.settings, undefined, { auto: body.auto === true });
     // Field names only: never the values (they may be keys).
     audit('settings.updated', { by: session.email, key, fields: Object.keys((body.settings as object) || {}), auto: body.auto === true, verified: result.verified });
     return json({ success: true, ...result, undoId: undoVersionId(key as SettingsKey), ...adminView(key as SettingsKey) });

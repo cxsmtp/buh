@@ -26,6 +26,7 @@ export function DeliverySettingsCard({ value, onSave, auto }: { value: DeliveryS
   const toggle = (k: 'emirates' | 'sameDayEmirates', e: Emirate) => set(k, d[k].includes(e) ? d[k].filter((x) => x !== e) : [...d[k], e]);
 
   const save = async () => {
+    autosave.cancel();
     setSaving(true);
     setStatus(null);
     const problem = await onSave({ ...d, notServed: notServed.split(/[\n,]/).map((s) => s.trim()).filter(Boolean) });
