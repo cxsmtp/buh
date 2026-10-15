@@ -22,6 +22,7 @@ export function GET() {
       festival: festivalView(),
       phoneVerification: phoneVerificationConfig(),
       chat: chatView(),
+      delivery: getSettings('delivery'),
     });
   } catch (err) {
     return handleRouteError(err, 'settings/public');

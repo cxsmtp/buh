@@ -135,6 +135,8 @@ export interface Order {
   }[];
   subtotal: number;
   deliveryFee: number;
+  /** standard (free, standardDays) or same_day (with Settings → Delivery's charge). */
+  deliveryOption?: 'standard' | 'same_day';
   codFee: number;
   discount: number;
   total: number;
@@ -238,6 +240,22 @@ export interface StoreSettings {
   askOnWhatsApp: boolean;
   /** "Ask on Instagram" (opens a direct message to instagramHandle). */
   askOnInstagram: boolean;
+}
+
+/** Settings → Delivery: where we deliver, how fast, and the optional same-day service. */
+export interface DeliverySettings {
+  /** Emirates we deliver to (all seven by default). */
+  emirates: Emirate[];
+  /** Areas we don't deliver to (matched by name), e.g. remote islands. */
+  notServed: string[];
+  /** Shown to customers, e.g. "1–2 days". */
+  standardDays: string;
+  sameDayEnabled: boolean;
+  /** Extra charge for same-day delivery, in AED. */
+  sameDayFee: number;
+  /** Orders before this time (UAE, HH:MM) can be delivered the same day. */
+  sameDayCutoff: string;
+  sameDayEmirates: Emirate[];
 }
 
 /** One thing the shop assistant knows: matched by its keywords and question, answered as written. */

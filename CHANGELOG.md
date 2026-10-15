@@ -1,5 +1,17 @@
 # Changelog
 
+## BUH-02.02.00 — DATE UTC · [#NN](https://github.com/cxsmtp/buh/pull/NN)
+
+- **Fixed: customers whose device reports a far-away location can order again.** Laptops (and phones on a VPN) often report a network location, e.g. in the USA; checkout turned that into "Corniche, Abu Dhabi", called it accurate, and refused the order as outside the UAE. Delivery is now decided by the address the customer chooses; a location outside the UAE is ignored with a plain message, and inside the UAE it only suggests the nearest area.
+- **A simple delivery promise.** Checkout shows a green tick, "We deliver to Al Barsha, Dubai" and "Delivery in 1–2 days, free"; the courier, its hubs and zones are no longer shown to customers (the old "Jeebly API Verified" badge was never a real check: the courier is still booked, and any refusal reported, behind the scenes).
+- **Same-day delivery, if you want it.** Switch it on in Settings → Delivery with your charge, the cut-off time (UAE) and the emirates; customers choose it at checkout, the charge is added to their total by the server, and an order placed after the cut-off is moved back to standard before anything is charged.
+- **Settings → Delivery.** Choose the emirates you deliver to, list areas you don't serve, and the delivery time customers see.
+- **Status.**
+  - **Benchmark:** BENCH
+  - **Tests:** TESTS
+  - **Dependency audit:** production 0 vulnerabilities; no new packages.
+  - **Security scan:** SCAN
+
 ## BUH-02.01.00 — 2026-10-15 10:49 UTC · [#5](https://github.com/cxsmtp/buh/pull/5)
 
 - **A chat that answers, then hands over.** The new **Help** button answers sizes (from your size presets), delivery, payment, care, returns and discount questions from what you teach it in Settings → Chat assistant; anything else, an order problem, or "Talk to a person" comes to you, and it never makes up a price, discount or promise.
