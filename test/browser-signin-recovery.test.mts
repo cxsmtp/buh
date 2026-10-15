@@ -1,0 +1,244 @@
+/**
+ * Real-browser checks (Chromium against the production build) for the ways
+ * back into the Admin Hub: recovery codes and passkeys, at phone (375 px) and
+ * desktop (1280 px) width, by keyboard, and a full passkey round trip with
+ * Chromium's virtual authenticator. Skipped without a build or Playwright.
+ */
+import assert from 'node:assert/strict';
+import fs from 'node:fs';
+import { after, before, test } from 'node:test';
+import { hasBuild, startServer, type RunningServer } from './server.mjs';
+
+type PW = typeof import('playwright');
+const pw: PW | null = hasBuild ? await import('playwright').catch(() => null) : null;
+const skip = !pw;
+
+let server: RunningServer;
+let browser: import('playwright').Browser;
+let cookie = '';
+let password = 'Recovery-Owner-Pass-1';
+const EMAIL = 'admin@beautifuluaehome.com';
+
+const h = () => ({ 'content-type': 'application/json', origin: server.base });
+
+async function signInByApi() {
+  const res = await fetch(`${server.base}/api/admin/login`, { method: 'POST', headers: h(), body: JSON.stringify({ email: EMAIL, password }) });
+  assert.equal(res.status, 200);
+  cookie = (res.headers.get('set-cookie') || '').split(';')[0];
+}
+
+before(async () => {
+  if (skip) return;
+  server = await startServer();
+  browser = await pw!.chromium.launch();
+  await fetch(`${server.base}/api/admin/login`, { method: 'POST', headers: h(), body: JSON.stringify({ email: 'x@y.z', password: 'x' }) });
+  await new Promise((r) => setTimeout(r, 300));
+  const once = server.log().match(/Password: (\S+)/)![1];
+  const login = await fetch(`${server.base}/api/admin/login`, { method: 'POST', headers: h(), body: JSON.stringify({ email: EMAIL, password: once }) });
+  const first = (login.headers.get('set-cookie') || '').split(';')[0];
+  const changed = await fetch(`${server.base}/api/admin/password`, { method: 'POST', headers: { ...h(), cookie: first }, body: JSON.stringify({ currentPassword: once, newPassword: password }) });
+  cookie = (changed.headers.get('set-cookie') || '').split(';')[0];
+});
+after(async () => {
+  await browser?.close();
+  server?.stop();
+});
+
+async function overflow(page: import('playwright').Page) {
+  return page.evaluate(() => (document.documentElement.scrollWidth > document.documentElement.clientWidth ? [`${document.documentElement.scrollWidth}px wide`] : []));
+}
+
+async function openSignIn(page: import('playwright').Page, base: string) {
+  const checked = page.waitForResponse((r) => r.url().endsWith('/api/admin/session'));
+  await page.goto(base, { waitUntil: 'domcontentloaded' });
+  await checked;
+  await page.locator('header button:has-text("Admin Hub")').click();
+  await page.getByText('Admin Hub Security Access').waitFor();
+}
+
+async function openSettingsSection(page: import('playwright').Page) {
+  await page.getByRole('navigation', { name: 'Admin sections' }).getByRole('button', { name: /Settings/ }).click();
+  await page.getByRole('navigation', { name: 'Settings sections' }).getByRole('button', { name: 'Passkeys & recovery codes' }).click();
+  await page.getByRole('heading', { name: 'Recovery codes', exact: true }).waitFor();
+}
+
+for (const width of [375, 1280]) {
+  test(`sign-in screen at ${width} px: a passkey button and "Use a recovery code", reachable by keyboard, no sideways scroll`, { skip }, async () => {
+    const ctx = await browser.newContext({ viewport: { width, height: 860 } });
+    const page = await ctx.newPage();
+    const errors: string[] = [];
+    page.on('pageerror', (e) => errors.push(e.message));
+    await openSignIn(page, server.base);
+    await page.getByRole('button', { name: 'Sign in with a passkey' }).waitFor();
+    assert.deepEqual(await overflow(page), []);
+
+    // Keyboard only: focus the link, Enter, type, Tab to the next field.
+    await page.getByRole('button', { name: 'Use a recovery code' }).focus();
+    await page.keyboard.press('Enter');
+    await page.locator('#admin-recovery-email').focus();
+    await page.keyboard.type(EMAIL);
+    await page.keyboard.press('Tab');
+    assert.equal(await page.evaluate(() => document.activeElement?.id), 'admin-recovery-code');
+    await page.keyboard.type('abcd-efgh-jklm-npqr');
+    await page.keyboard.press('Enter');
+    await page.getByText('Wrong email or recovery code.').waitFor();
+    assert.deepEqual(await overflow(page), []);
+    await page.getByRole('button', { name: 'Back to sign-in' }).click();
+    await page.getByRole('button', { name: 'Unlock Admin Portal' }).waitFor();
+    assert.deepEqual(errors, []);
+    await ctx.close();
+  });
+
+  test(`settings at ${width} px: create recovery codes (shown once, Download), see how many are left`, { skip }, async () => {
+    const ctx = await browser.newContext({ viewport: { width, height: 900 }, acceptDownloads: true });
+    const [name, value] = cookie.split('=');
+    await ctx.addCookies([{ name, value, url: server.base }]);
+    const page = await ctx.newPage();
+    const errors: string[] = [];
+    page.on('pageerror', (e) => errors.push(e.message));
+    const checked = page.waitForResponse((r) => r.url().endsWith('/api/admin/session'));
+    await page.goto(server.base, { waitUntil: 'domcontentloaded' });
+    await checked;
+    await page.locator('header button:has-text("Admin Hub")').click();
+    await openSettingsSection(page);
+
+    // At this address (no NEXT_PUBLIC_APP_URL, not localhost) passkeys can't work: say so plainly.
+    await page.getByText(/Passkeys need the shop’s address/).waitFor();
+
+    // A wrong password: told so, still signed in.
+    await page.locator('#recovery-password').fill('not-my-password');
+    await page.locator('#recovery-password').press('Enter');
+    await page.getByText('That is not your current password.').waitFor();
+
+    await page.locator('#recovery-password').fill(password);
+    await page.locator('#recovery-password').press('Enter');
+    const list = page.getByRole('list', { name: 'Your new recovery codes' });
+    await list.waitFor();
+    const codes = (await list.getByRole('listitem').allTextContents()).map((t) => t.replace(/^\d+\./, '').trim());
+    assert.equal(codes.length, 10);
+    for (const c of codes) assert.match(c, /^[2-9A-HJ-NP-Z]{4}(-[2-9A-HJ-NP-Z]{4}){3}$/);
+    assert.deepEqual(await overflow(page), [], 'the codes fit');
+
+    const downloading = page.waitForEvent('download');
+    await page.getByRole('button', { name: 'Download' }).click();
+    const file = await (await downloading).path();
+    const text = fs.readFileSync(file, 'utf8');
+    for (const c of codes) assert.ok(text.includes(c));
+    await page.getByRole('button', { name: 'Print' }).waitFor();
+    await page.getByRole('button', { name: 'Copy' }).waitFor();
+
+    await page.getByRole('button', { name: 'I’ve saved them' }).or(page.getByRole('button', { name: "I've saved them" })).click();
+    await page.getByText(/10 of 10 codes left/).waitFor();
+    assert.equal(await list.count(), 0, 'shown once');
+    await page.getByRole('button', { name: /Create a new set \(the old codes stop working\)/ }).waitFor();
+    assert.deepEqual(errors, []);
+    await ctx.close();
+  });
+}
+
+test('forgot the password on a phone: a recovery code signs in, warns when few are left, and a new password is chosen', { skip }, async () => {
+  const made = await fetch(`${server.base}/api/admin/recovery-codes`, { method: 'POST', headers: { ...h(), cookie }, body: JSON.stringify({ currentPassword: password }) });
+  const { codes } = (await made.json()) as { codes: string[] };
+  // Use 8 of the 10 elsewhere (each one ends every other session).
+  for (const code of codes.slice(0, 8)) {
+    const res = await fetch(`${server.base}/api/admin/login/recovery`, { method: 'POST', headers: h(), body: JSON.stringify({ email: EMAIL, code }) });
+    assert.equal(res.status, 200);
+  }
+  const used = await fetch(`${server.base}/api/admin/login/recovery`, { method: 'POST', headers: h(), body: JSON.stringify({ email: EMAIL, code: codes[0] }) });
+  assert.equal(used.status, 401, 'a used code is refused');
+  const stale = await fetch(`${server.base}/api/admin/account`, { headers: { cookie } });
+  assert.equal(stale.status, 401, 'the earlier session ended');
+
+  const ctx = await browser.newContext({ viewport: { width: 375, height: 860 } });
+  const page = await ctx.newPage();
+  const errors: string[] = [];
+  page.on('pageerror', (e) => errors.push(e.message));
+  await openSignIn(page, server.base);
+  await page.getByRole('button', { name: 'Use a recovery code' }).click();
+  await page.locator('#admin-recovery-email').fill(EMAIL);
+  await page.locator('#admin-recovery-code').fill(codes[8].toLowerCase());
+  await page.getByRole('button', { name: 'Sign In With Recovery Code' }).click();
+  await page.getByText(/You have 1 recovery code left\. Create a new set/).waitFor();
+  assert.deepEqual(await overflow(page), []);
+
+  // Before choosing a password, nothing else is allowed with this session.
+  const ctxCookies = await ctx.cookies();
+  const recoveryCookie = ctxCookies.find((c) => c.name === 'buh_admin')!;
+  const blocked = await fetch(`${server.base}/api/admin/account`, { headers: { cookie: `buh_admin=${recoveryCookie.value}` } });
+  assert.equal(blocked.status, 403);
+
+  // A reload keeps the owner on "choose a new password".
+  await page.reload({ waitUntil: 'domcontentloaded' });
+  await page.locator('header button:has-text("Admin Hub")').click();
+  await page.locator('#admin-recovery-new').waitFor();
+
+  password = 'Chosen-After-Recovery-7';
+  await page.locator('#admin-recovery-new').fill(password);
+  await page.locator('#admin-recovery-confirm').fill(password);
+  await page.getByRole('button', { name: 'Save New Password' }).click();
+  await page.getByRole('navigation', { name: 'Admin sections' }).waitFor();
+  await openSettingsSection(page);
+  await page.getByText(/1 of 10 codes left.*Running low/).waitFor();
+  assert.deepEqual(await overflow(page), []);
+  assert.deepEqual(errors, []);
+  await ctx.close();
+  await signInByApi(); // the new password works
+});
+
+test('passkey round trip (virtual authenticator): add at desktop width, sign in with it on a phone, then remove it', { skip }, async () => {
+  // Passkeys need a domain name: the browser refuses numeric addresses, so use localhost.
+  const base = server.base.replace('127.0.0.1', 'localhost');
+  const ctx = await browser.newContext({ viewport: { width: 1280, height: 900 } });
+  const page = await ctx.newPage();
+  const errors: string[] = [];
+  page.on('pageerror', (e) => errors.push(e.message));
+  const cdp = await ctx.newCDPSession(page);
+  await cdp.send('WebAuthn.enable');
+  const { authenticatorId } = await cdp.send('WebAuthn.addVirtualAuthenticator', {
+    options: { protocol: 'ctap2', transport: 'internal', hasResidentKey: true, hasUserVerification: true, isUserVerified: true, automaticPresenceSimulation: true },
+  });
+
+  await openSignIn(page, base);
+  await page.locator('input[autocomplete="username"]').first().fill(EMAIL);
+  await page.locator('input[autocomplete="current-password"]').fill(password);
+  await page.getByRole('button', { name: 'Unlock Admin Portal' }).click();
+  await page.getByRole('navigation', { name: 'Admin sections' }).waitFor();
+  await openSettingsSection(page);
+  await page.getByText('No passkeys yet.').waitFor();
+  await page.getByLabel('Name for this passkey').fill('Test laptop');
+  await page.locator('#passkey-password').fill(password);
+  await page.getByRole('button', { name: 'Add a passkey' }).click();
+  await page.getByText(/Passkey “Test laptop” added/).waitFor();
+  const passkeys = page.getByRole('list', { name: 'Your passkeys' });
+  await passkeys.getByText('Test laptop').waitFor();
+  await passkeys.getByText(/Last used never/).waitFor();
+  assert.deepEqual(await overflow(page), []);
+  const { credentials } = await cdp.send('WebAuthn.getCredentials', { authenticatorId });
+  assert.equal(credentials.length, 1);
+  assert.equal(credentials[0].isResidentCredential, true, 'a discoverable passkey');
+
+  // Signed out; on a phone, sign in with the passkey alone (no email, no password).
+  await ctx.clearCookies();
+  await page.setViewportSize({ width: 375, height: 860 });
+  await openSignIn(page, base);
+  assert.deepEqual(await overflow(page), []);
+  await page.getByRole('button', { name: 'Sign in with a passkey' }).click();
+  await page.getByRole('navigation', { name: 'Admin sections' }).waitFor();
+  await openSettingsSection(page);
+  await passkeys.getByText('Test laptop').waitFor();
+  assert.equal(await passkeys.getByText(/Last used never/).count(), 0, 'last used is recorded');
+  // Just signed in with a passkey: new recovery codes without typing the password.
+  await page.getByText('You signed in with a passkey a moment ago').waitFor();
+  assert.deepEqual(await overflow(page), []);
+
+  // Remove it (asks first); then it no longer opens the Admin Hub.
+  await page.getByRole('button', { name: 'Remove passkey Test laptop' }).click();
+  await page.getByRole('button', { name: 'Yes, remove' }).click();
+  await page.getByText('No passkeys yet.').waitFor();
+  await ctx.clearCookies();
+  await openSignIn(page, base);
+  await page.getByRole('button', { name: 'Sign in with a passkey' }).click();
+  await page.getByText(/That passkey was not accepted/).waitFor();
+  assert.deepEqual(errors, []);
+  await ctx.close();
+});

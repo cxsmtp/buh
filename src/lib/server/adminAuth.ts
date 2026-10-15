@@ -25,7 +25,12 @@ import { dummyPasswordHash, generatePassword, hashPassword, verifyPassword } fro
  * email from that address for 15 minutes; 50 in an hour from anywhere pause
  * it everywhere (a distributed guess). While paused the password is not
  * checked at all, so a pause reveals nothing about whether a guess was right,
- * and a stranger on another address cannot lock the owner out.
+ * and a stranger on another address cannot lock the owner out. Wrong recovery
+ * codes count towards the same pauses.
+ *
+ * Ways back in when the password is forgotten: a one-time recovery code
+ * (recoveryCodes.ts; the session it gives can only choose a new password) or a
+ * passkey (passkeys.ts; the same session as a password sign-in).
  */
 
 export const SESSION_COOKIE = 'buh_admin';

@@ -42,7 +42,7 @@ Everything the shop stores lives in one Docker volume and is backed up every 12 
    ```bash
    cp .env.production.example .env.production && nano .env.production
    ```
-   - Fill in `DOMAIN`, `ACME_EMAIL`, `NEXT_PUBLIC_APP_URL` and `NEXT_PUBLIC_SUPPORT_EMAIL`.
+   - Fill in `DOMAIN`, `ACME_EMAIL`, `NEXT_PUBLIC_APP_URL` and `NEXT_PUBLIC_SUPPORT_EMAIL`. `NEXT_PUBLIC_APP_URL` must be the `https://` address you open the shop at: Admin Hub passkeys only work there.
    - **Fill in the backup email (`SMTP_*`, `BACKUP_EMAIL`).**
    - Set a `BACKUP_PASSPHRASE` of at least 12 characters, and store it in your password manager. Without it, customer data is emailed unencrypted.
 6. **Start** (pulls the ready-made image `ghcr.io/cxsmtp/buh:latest`):
@@ -58,6 +58,7 @@ Everything the shop stores lives in one Docker volume and is backed up every 12 
 
 ## 2. Go-live checklist (in the Admin Hub)
 
+- [ ] **⚙️ Settings → Passkeys & recovery codes:** add a passkey on your phone, and create recovery codes (Download or Print them, keep them safe). They get you back in if you forget the password, even without email.
 - [ ] **⚙️ Settings → Phone verification:** enter your Twilio or Infobip keys, **Send test** to your own mobile, then **Save**.
   - Or choose **Firebase Phone Auth** (Blaze plan, billed per SMS; see docs/user-guide.md) and test with a checkout on your phone.
   - Checkout needs a working SMS gateway: customers cannot order without verifying their number.
@@ -130,7 +131,7 @@ On the server (this replaces the live data; the current data is kept aside in `r
    docker compose start updater
    ```
 
-Then sign in with the new one-time password from `docker compose logs app-blue`, and re-enter the courier and SMS keys. Keys and the admin account are deliberately not in backups.
+Then sign in with the new one-time password from `docker compose logs app-blue` (or with a passkey, or a recovery code and your admin email: they are in the backup), and re-enter the courier and SMS keys. Keys and the admin account are deliberately not in backups.
 
 To check a backup on your own computer (Node 20+, in a checkout of this repository after `npm ci`):
 

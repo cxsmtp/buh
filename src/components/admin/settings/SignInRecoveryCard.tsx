@@ -293,7 +293,7 @@ function RecoveryCodesSection() {
           <p className="text-xs font-bold text-stone-900">Save these codes now: this is the only time they are shown.</p>
           <ol className="grid grid-cols-1 min-[420px]:grid-cols-2 gap-x-6 gap-y-1 font-mono text-sm text-stone-900" aria-label="Your new recovery codes">
             {codes.map((c, i) => (
-              <li key={c} className="flex gap-2"><span className="text-stone-600 w-5 text-right">{i + 1}.</span><span className="tracking-wider">{c}</span></li>
+              <li key={c} className="flex gap-2"><span className="text-stone-600 w-7 shrink-0 text-right">{i + 1}.</span><span className="tracking-wider">{c}</span></li>
             ))}
           </ol>
           <div className="flex flex-wrap gap-2">
