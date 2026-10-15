@@ -3,6 +3,7 @@
 import React, { useState } from 'react';
 import { CourierSettings, CourierProvider } from '@/types';
 import { Truck, ShieldCheck, CheckCircle2, AlertCircle, RefreshCw, ExternalLink, Settings, Key, Globe, Layers } from 'lucide-react';
+import { useAutoSave, type AutoSaveHooks } from './settings/useAutoSave';
 import { postJson } from '@/lib/apiClient';
 
 interface AdminCouriersTabProps {
@@ -11,6 +12,7 @@ interface AdminCouriersTabProps {
   secretsSet: Record<string, boolean>;
   /** Saves on the server; resolves to an error message, or null when saved. */
   onUpdateSettings: (newSettings: CourierSettings) => Promise<string | null>;
+  auto?: AutoSaveHooks;
 }
 
 /** Placeholder for a write-only key field. */
@@ -22,6 +24,7 @@ export const AdminCouriersTab: React.FC<AdminCouriersTabProps> = ({
   settings,
   secretsSet,
   onUpdateSettings,
+  auto,
 }) => {
   const [saveError, setSaveError] = useState('');
   const [saving, setSaving] = useState(false);
@@ -32,6 +35,13 @@ export const AdminCouriersTab: React.FC<AdminCouriersTabProps> = ({
 
   // Local form state
   const [formData, setFormData] = useState<CourierSettings>(settings);
+  // Keys are never autosaved (half-typed ones would replace working ones): Save sends them.
+  const autosave = useAutoSave({
+    settingsKey: 'courier',
+    value: { ...formData, jeebly: { ...formData.jeebly, apiKey: '', clientKey: '' }, echo: { ...formData.echo, apiKey: '' } },
+    enabled: Boolean(auto),
+    ...auto,
+  });
 
   const handleTestConnection = async (provider: 'jeebly' | 'echo') => {
     setTesting(true);
@@ -44,6 +54,7 @@ export const AdminCouriersTab: React.FC<AdminCouriersTabProps> = ({
 
   const handleSave = async (e: React.FormEvent) => {
     e.preventDefault();
+    autosave.cancel();
     setSaving(true);
     setSaveError('');
     const error = await onUpdateSettings(formData);
@@ -175,7 +186,7 @@ export const AdminCouriersTab: React.FC<AdminCouriersTabProps> = ({
             }`}
           >
             <span>Eco Express Courier</span>
-            <span className="hidden md:inline text-[10px] px-1.5 py-0.2 rounded-full bg-blue-400 text-white font-bold">
+            <span className="hidden md:inline text-[10px] px-1.5 py-0.2 rounded-full bg-blue-700 text-white font-bold">
               Apiary / ecofreight.ae
             </span>
           </button>
@@ -188,7 +199,7 @@ export const AdminCouriersTab: React.FC<AdminCouriersTabProps> = ({
               <div>
                 <strong className="text-stone-900 text-sm block">Jeebly Logistics Configuration</strong>
                 <span className="text-stone-500 text-[11px]">
-                  Official API Documentation: <a href="https://integration.jeebly.com/v1/api-reference.html" target="_blank" rel="noopener noreferrer" className="text-[#c5a059] underline font-medium">integration.jeebly.com/v1</a>
+                  Official API Documentation: <a href="https://integration.jeebly.com/v1/api-reference.html" target="_blank" rel="noopener noreferrer" className="text-[#8a6a2c] underline font-medium">integration.jeebly.com/v1</a>
                 </span>
               </div>
               <button
@@ -287,7 +298,7 @@ export const AdminCouriersTab: React.FC<AdminCouriersTabProps> = ({
               <div>
                 <strong className="text-stone-900 text-sm block">Eco Express Courier Configuration</strong>
                 <span className="text-stone-500 text-[11px]">
-                  Official Apiary Spec: <a href="https://ecoexpress.docs.apiary.io/#" target="_blank" rel="noopener noreferrer" className="text-[#c5a059] underline font-medium">ecoexpress.docs.apiary.io</a>
+                  Official Apiary Spec: <a href="https://ecoexpress.docs.apiary.io/#" target="_blank" rel="noopener noreferrer" className="text-[#8a6a2c] underline font-medium">ecoexpress.docs.apiary.io</a>
                 </span>
               </div>
               <button
@@ -383,7 +394,7 @@ export const AdminCouriersTab: React.FC<AdminCouriersTabProps> = ({
                 <CheckCircle2 className="w-4 h-4 text-emerald-400" />
                 <span>API Connection Diagnostics Result:</span>
               </span>
-              <span className="text-[10px] text-stone-400">Response 200 OK</span>
+              <span className="text-[10px] text-stone-500">Response 200 OK</span>
             </div>
             <pre className="font-mono text-[11px] overflow-x-auto text-emerald-400 p-2 bg-black/50 rounded-lg">
               {JSON.stringify(testResult, null, 2)}
@@ -413,6 +424,7 @@ export const AdminCouriersTab: React.FC<AdminCouriersTabProps> = ({
           >
             {saving ? 'Saving…' : 'Save Carrier Settings'}
           </button>
+          {auto && autosave.bar}
         </div>
       </div>
     </div>

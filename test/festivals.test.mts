@@ -42,12 +42,11 @@ test('Easter by the computus, Gregorian and Julian', () => {
   assert.equal(fd.orthodoxEaster(2028), '2028-04-16');
 });
 
-test('Chinese, Hebrew, Persian calendars and fixed days', () => {
+test('Chinese and Persian calendars and fixed days', () => {
   assert.equal(offline(2026, 'lunar-new-year').start, '2026-02-17');
   assert.equal(offline(2027, 'lunar-new-year').start, '2027-02-06', 'ICU says 7 Feb; corrected');
   assert.equal(offline(2030, 'lunar-new-year').start, '2030-02-03', 'ICU says 2 Feb; corrected');
   assert.equal(offline(2031, 'laylat-al-qadr').start.slice(0, 7), '2031-01', 'from the Ramadan that began in Dec 2030');
-  assert.equal(offline(2026, 'hanukkah').start, '2026-12-05');
   assert.equal(offline(2026, 'nowruz').start, '2026-03-21');
   assert.deepEqual([offline(2026, 'uae-national-day').start, offline(2026, 'uae-national-day').end], ['2026-12-02', '2026-12-03']);
   assert.equal(offline(2026, 'uae-mothers-day').start, '2026-03-21');
@@ -220,15 +219,14 @@ test('refresh: one feed failing does not stop the others; UAE dates win; never t
     if (url.includes('en.islamic')) return ics([eid, 'Eid al-Fitr'], ['20270101', 'New Year’s Day']);
     if (url.includes('en.ae')) return ics([eidUae.replaceAll('-', ''), 'Eid al-Fitr Holiday']);
     if (url.includes('en.christian')) throw new Error('connect ECONNREFUSED');
-    if (url.includes('en.judaism')) return 'X'.repeat(fd.MAX_ICS_BYTES + 10);
+    if (url.includes('en.china')) return 'X'.repeat(fd.MAX_ICS_BYTES + 10);
     return 'not a calendar';
   };
   const r = await fd.refreshFestivalDates(fetcher, NOW);
   assert.equal(r.ok, false);
   assert.equal(r.fetchedAt, NOW.toISOString());
   assert.ok(r.errors.some((e) => e.startsWith('google:christian: ') && /ECONNREFUSED/.test(e)), r.errors.join('\n'));
-  assert.ok(r.errors.some((e) => e.startsWith('google:jewish: ') && /2 MB/.test(e)));
-  assert.ok(r.errors.some((e) => e.startsWith('google:china: ') && /no events/.test(e)));
+  assert.ok(r.errors.some((e) => e.startsWith('google:china: ') && /2 MB/.test(e)));
   assert.ok(r.updated.includes('diwali 2027: 2027-10-26'), r.updated.join('\n'));
   assert.ok(r.updated.includes(`eid-al-fitr 2027: ${eidUae}`));
   assert.ok(r.rejected.some((x) => x.startsWith('holi 2028')));
@@ -303,7 +301,7 @@ test('the catalogue is complete and well-formed', () => {
     'ramadan', 'eid-al-fitr', 'eid-al-adha', 'islamic-new-year', 'mawlid', 'isra-miraj', 'laylat-al-qadr', 'diwali', 'holi',
     'good-friday', 'easter', 'christmas', 'new-year', 'uae-national-day', 'uae-mothers-day', 'uae-flag-day', 'commemoration-day',
     'emirati-womens-day', 'lunar-new-year', 'nowruz', 'onam', 'vishu', 'pongal', 'navratri-dussehra', 'raksha-bandhan',
-    'ganesh-chaturthi', 'vaisakhi', 'gurpurab', 'orthodox-christmas', 'orthodox-easter', 'hanukkah',
+    'ganesh-chaturthi', 'vaisakhi', 'gurpurab', 'orthodox-christmas', 'orthodox-easter',
   ]) assert.ok(ids.includes(need), need);
   const hex = /^#[0-9a-f]{6}$/i;
   for (const f of catalog.FESTIVALS) {

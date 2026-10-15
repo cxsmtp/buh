@@ -6,7 +6,7 @@
  * which theme shows today is decided by src/lib/festivals/select.ts.
  *
  * The UAE is home to many communities (Emirati and Arab, South Asian, Filipino,
- * Chinese and East Asian, Iranian, European, Orthodox Christian, Jewish), so
+ * Chinese and East Asian, Iranian, European, Orthodox Christian), so
  * the list is broad. Greetings are the ones each community uses itself.
  *
  * - `tier` 1 is a major, nationwide or large-community festival; it gets the
@@ -343,17 +343,6 @@ export const FESTIVALS: Festival[] = [
       greeting: 'Merry Christmas',
       headline: 'Warm wishes for Orthodox Christmas',
       marquee: ['Merry Orthodox Christmas'],
-    },
-  },
-
-  // ---- Jewish -------------------------------------------------------------------
-  {
-    id: 'hanukkah', name: 'Hanukkah', durationDays: 8, priority: 45, tier: 2,
-    theme: {
-      accent: '#3a6cbd', accentSoft: '#eaf0fa', gradient: ['#1d3f7a', '#0f1c2e'], ornament: '🕎',
-      greeting: 'Chag Sameach · Happy Hanukkah',
-      headline: 'Eight nights of warmth at home',
-      marquee: ['Happy Hanukkah'],
     },
   },
 

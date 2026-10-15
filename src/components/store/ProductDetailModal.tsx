@@ -214,7 +214,7 @@ const ProductDetailContent: React.FC<ProductDetailModalProps & { product: Produc
                     <Ruler className="w-4 h-4 text-[#c5a059]" />
                     <span>1. Select Bed Profile & Size:</span>
                   </label>
-                  <span className="text-[11px] text-[#c5a059] font-medium">
+                  <span className="text-[11px] text-[#8a6a2c] font-medium">
                     {selectedProfile.name}
                   </span>
                 </div>
@@ -238,7 +238,7 @@ const ProductDetailContent: React.FC<ProductDetailModalProps & { product: Produc
                           isSelected
                             ? 'border-[#0f1c2e] bg-[#0f1c2e] text-white shadow-md ring-2 ring-[#c5a059]/40'
                             : pieces === 0
-                            ? 'border-stone-200 bg-stone-50 text-stone-400'
+                            ? 'border-stone-200 bg-stone-50 text-stone-500'
                             : 'border-stone-200 bg-white text-stone-800 hover:border-stone-400'
                         }`}
                       >

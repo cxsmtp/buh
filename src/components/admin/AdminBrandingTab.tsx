@@ -19,6 +19,7 @@ import {
   Eye,
   Megaphone
 } from 'lucide-react';
+import { useAutoSave, type AutoSaveHooks } from './settings/useAutoSave';
 import { INITIAL_BRAND_SETTINGS } from '@/data/initialData';
 
 interface AdminBrandingTabProps {
@@ -27,6 +28,8 @@ interface AdminBrandingTabProps {
   onUpdateBrandSettings: (updated: BrandSettings) => Promise<string | null>;
   bank: BankTransferDetails;
   onUpdateBank: (bank: BankTransferDetails) => Promise<string | null>;
+  /** Autosave (Admin Hub): branding and bank details save themselves as you type. */
+  auto?: AutoSaveHooks;
 }
 
 export const AdminBrandingTab: React.FC<AdminBrandingTabProps> = ({
@@ -34,6 +37,7 @@ export const AdminBrandingTab: React.FC<AdminBrandingTabProps> = ({
   onUpdateBrandSettings,
   bank,
   onUpdateBank,
+  auto,
 }) => {
   const [saveError, setSaveError] = useState('');
   // Local editable state
@@ -107,10 +111,9 @@ export const AdminBrandingTab: React.FC<AdminBrandingTabProps> = ({
     });
   };
 
-  // Save all settings
-  const handleSave = async (e?: React.FormEvent) => {
-    if (e) e.preventDefault();
-    const updated: BrandSettings = {
+  // A new logo is uploaded once: after that the stored address is sent, not the picture again.
+  const [sentLogo, setSentLogo] = useState('');
+  const draft = (): BrandSettings => ({
       storeName: storeName.trim() || 'BEAUTIFUL UAE HOME',
       tagline: tagline.trim() || 'HANDPRINTED & MACHINE BLOCK LINENS • DUBAI',
       badgeText: badgeText.trim() || 'UAE ATELIER',
@@ -123,8 +126,24 @@ export const AdminBrandingTab: React.FC<AdminBrandingTabProps> = ({
         speedSeconds: Number(marqueeSpeed) || 26,
         messages: messages.filter((m) => m.trim().length > 0),
       },
-    };
+    });
+  const current = draft();
+  const autosave = useAutoSave({
+    settingsKey: 'brand',
+    value: current.logoImageUrl && current.logoImageUrl === sentLogo ? { ...current, logoImageUrl: brandSettings.logoImageUrl } : current,
+    enabled: Boolean(auto),
+    ...auto,
+    onSent: (sent) => {
+      if (sent.logoImageUrl?.startsWith('data:')) setSentLogo(sent.logoImageUrl);
+    },
+  });
 
+  // Save all settings
+  const handleSave = async (e?: React.FormEvent) => {
+    if (e) e.preventDefault();
+    autosave.cancel();
+    const updated = draft();
+    if (updated.logoImageUrl?.startsWith('data:')) setSentLogo(updated.logoImageUrl);
     setSaveError('');
     const error = await onUpdateBrandSettings(updated);
     if (error) {
@@ -215,7 +234,7 @@ export const AdminBrandingTab: React.FC<AdminBrandingTabProps> = ({
             <Eye className="w-3.5 h-3.5" />
             <span>Live Storefront Header Preview</span>
           </span>
-          <span className="text-[10px] text-stone-400">Updates live as you edit below</span>
+          <span className="text-[10px] text-stone-500">Updates live as you edit below</span>
         </div>
 
         {/* Live Running Marquee Bar Preview */}
@@ -272,7 +291,7 @@ export const AdminBrandingTab: React.FC<AdminBrandingTabProps> = ({
             </div>
           </div>
 
-          <div className="text-[11px] font-semibold text-stone-400 hidden sm:block">
+          <div className="text-[11px] font-semibold text-stone-500 hidden sm:block">
             Storefront Header Live Simulation
           </div>
         </div>
@@ -311,7 +330,7 @@ export const AdminBrandingTab: React.FC<AdminBrandingTabProps> = ({
                 <Type className={`w-4 h-4 ${logoType === 'text' ? 'text-amber-300' : 'text-[#c5a059]'}`} />
                 <div>
                   <strong className="block text-xs">Monogram Initials</strong>
-                  <span className={`text-[10px] block ${logoType === 'text' ? 'text-stone-300' : 'text-stone-400'}`}>
+                  <span className={`text-[10px] block ${logoType === 'text' ? 'text-stone-300' : 'text-stone-500'}`}>
                     Artisan lettermark
                   </span>
                 </div>
@@ -329,7 +348,7 @@ export const AdminBrandingTab: React.FC<AdminBrandingTabProps> = ({
                 <ImageIcon className={`w-4 h-4 ${logoType === 'image' ? 'text-amber-300' : 'text-[#c5a059]'}`} />
                 <div>
                   <strong className="block text-xs">Custom Graphic Logo</strong>
-                  <span className={`text-[10px] block ${logoType === 'image' ? 'text-stone-300' : 'text-stone-400'}`}>
+                  <span className={`text-[10px] block ${logoType === 'image' ? 'text-stone-300' : 'text-stone-500'}`}>
                     Upload image or URL
                   </span>
                 </div>
@@ -548,7 +567,7 @@ export const AdminBrandingTab: React.FC<AdminBrandingTabProps> = ({
               <label className="font-semibold text-stone-800">
                 Active Marquee Messages ({messages.length})
               </label>
-              <span className="text-[10px] text-stone-400">Repeats continuously in loop</span>
+              <span className="text-[10px] text-stone-500">Repeats continuously in loop</span>
             </div>
 
             <div className="space-y-2 max-h-56 overflow-y-auto p-1">
@@ -569,7 +588,7 @@ export const AdminBrandingTab: React.FC<AdminBrandingTabProps> = ({
                   <button
                     type="button"
                     onClick={() => handleRemoveMessage(index)}
-                    className="p-1.5 text-stone-400 hover:text-red-600 rounded-lg hover:bg-stone-200 transition-colors shrink-0"
+                    className="p-1.5 text-stone-500 hover:text-red-600 rounded-lg hover:bg-stone-200 transition-colors shrink-0"
                     title="Remove message"
                   >
                     <Trash2 className="w-3.5 h-3.5" />
@@ -634,12 +653,13 @@ export const AdminBrandingTab: React.FC<AdminBrandingTabProps> = ({
               <Check className="w-4 h-4 text-amber-300" />
               <span>Apply & Save Store Branding & Marquee</span>
             </button>
+          {auto && autosave.bar}
           </div>
         </div>
 
       </div>
 
-      <BankDetailsCard bank={bank} onSave={onUpdateBank} />
+      <BankDetailsCard bank={bank} onSave={onUpdateBank} auto={auto} />
     </div>
   );
 };

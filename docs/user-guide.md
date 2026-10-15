@@ -74,7 +74,9 @@ On each product, customers see **Ask in chat**, **Ask on WhatsApp** and **Ask on
 
 ### Settings
 
-**⚙️ Settings** holds every option, in sections:
+**⚙️ Settings** holds every option, in sections. Changes **save themselves** a moment after you stop typing ("Saved automatically · Undo"); **Undo** puts back what was there before your current round of changes, and Settings → System & backups → history keeps earlier versions. A change that isn't valid is not saved, and new mail settings are tried first: if they can't connect, the working ones stay. Passwords and keys are saved only when you press **Save**.
+
+**⚙️ Settings** sections:
 
 - **Store & contact:** your WhatsApp number (change it any time; empty hides the WhatsApp buttons), the message a chat opens with, the floating WhatsApp button, the support email, Instagram, TikTok and Facebook, which of **Ask on WhatsApp / Instagram** show, the address, and whether visitors abroad see their own currency.
 - **Chat assistant:** see Chats above.
@@ -89,7 +91,7 @@ On each product, customers see **Ask in chat**, **Ask on WhatsApp** and **Ask on
 
 ### Festival themes
 
-From 3 weeks before a major festival until 1 week after, the banner shows its greeting and colours and the scrolling bar its lines (smaller festivals: about a week before to two days after; solemn days such as Good Friday and Commemoration Day only on the day, with a calm look). 33 festivals are included: the UAE's national days, Ramadan and the Eids, Diwali, Holi, Onam, Navratri, Vaisakhi, Christmas, Easter (and the Orthodox ones), Lunar New Year, Nowruz, Hanukkah and more.
+From 3 weeks before a major festival until 1 week after, the banner shows its greeting and colours and the scrolling bar its lines (smaller festivals: about a week before to two days after; solemn days such as Good Friday and Commemoration Day only on the day, with a calm look). 32 festivals are included: the UAE's national days, Ramadan and the Eids, Diwali, Holi, Onam, Navratri, Vaisakhi, Christmas, Easter (and the Orthodox ones), Lunar New Year, Nowruz and more.
 
 - Dates are built in and checked online every week from public holiday calendars (UAE official dates win for the Islamic festivals); **Refresh dates now** checks straight away.
 - **Always this look** keeps one theme; **Everyday look only** turns themes off; untick **Show** to skip a festival.

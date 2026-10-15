@@ -67,7 +67,7 @@ export const OrderTrackerModal: React.FC<OrderTrackerModalProps> = ({
           </div>
           <button
             onClick={onClose}
-            className="p-1 text-stone-400 hover:text-stone-700 rounded-full hover:bg-stone-100"
+            className="p-1 text-stone-500 hover:text-stone-700 rounded-full hover:bg-stone-100"
           >
             <X className="w-5 h-5" />
           </button>

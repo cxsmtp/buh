@@ -147,9 +147,9 @@ export function ThemeSettingsCard({ value, onSave }: { value: ThemeSettings; onS
           {(overview?.upcoming ?? []).map((u) => (
             <li key={`${u.id}-${u.start}`} className="flex flex-wrap items-center gap-x-3 gap-y-1 p-2.5">
               <span aria-hidden="true">{themeFor(u.id).ornament}</span>
-              <span className={`font-semibold ${u.disabled ? 'line-through text-stone-400' : 'text-stone-800'}`}>{u.name}</span>
+              <span className={`font-semibold ${u.disabled ? 'line-through text-stone-500' : 'text-stone-800'}`}>{u.name}</span>
               <span className="text-stone-500">{fmt(u.start)}{u.end !== u.start ? ` – ${fmt(u.end)}` : ''}</span>
-              <span className="text-stone-400">look {fmt(u.themeFrom)} → {fmt(u.themeUntil)}</span>
+              <span className="text-stone-500">look {fmt(u.themeFrom)} → {fmt(u.themeUntil)}</span>
               <label className="ml-auto flex items-center gap-1.5">
                 <input
                   type="checkbox"

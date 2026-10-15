@@ -266,7 +266,7 @@ export function HelpLauncher() {
               </form>
             )}
             {busy && (
-              <div className="flex items-center gap-1.5 text-xs text-stone-400">
+              <div className="flex items-center gap-1.5 text-xs text-stone-500">
                 <Loader2 className="w-3.5 h-3.5 animate-spin" /> …
               </div>
             )}
