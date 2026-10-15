@@ -154,8 +154,8 @@ test('orders: the server sets prices and stock; a forged price is ignored; a ret
 
   // No phone proof, or someone else's: refused.
   assert.equal((await post('/api/orders', { ...body, idempotencyKey: crypto.randomUUID(), verificationToken: 'forged.token' })).status, 401);
-  // More than in stock: refused with how many are left.
-  const tooMany = await post('/api/orders', { ...body, idempotencyKey: crypto.randomUUID(), items: [{ productId: p.id, profileId: p.profiles[0].id, quantity: 20 }] });
+  // More than one order may hold: refused (the per-size stock limit is covered by the unit tests).
+  const tooMany = await post('/api/orders', { ...body, idempotencyKey: crypto.randomUUID(), items: [{ productId: p.id, profileId: p.profiles[0].id, quantity: 21 }] });
   assert.ok([400, 409].includes(tooMany.status));
 });
 
