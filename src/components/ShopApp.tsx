@@ -1,7 +1,7 @@
 'use client';
 
 import React, { useState, useEffect, useMemo, useCallback, useRef } from 'react';
-import { Product, Order, Customer, CourierSettings, CartItem, BedProfileMeasurement, BrandSettings, SmsGatewaySettings, BankTransferDetails, CatalogSettings, StoreSettings, ThemeSettings } from '@/types';
+import { Product, Order, Customer, CourierSettings, CartItem, BedProfileMeasurement, BrandSettings, SmsGatewaySettings, BankTransferDetails, CatalogSettings, StoreSettings, ThemeSettings, PhoneVerificationConfig } from '@/types';
 import { DEFAULT_CATALOG, DEFAULT_STORE, DEFAULT_THEME_SETTINGS } from '@/data/catalogDefaults';
 import { piecesLeft, refreshCart, ShopProvider, type FestivalView, type ShopInfo } from '@/lib/client/shop';
 import { captureLanding, decodeBag, type BagLine, type Landing } from '@/lib/client/landing';
@@ -28,7 +28,7 @@ type AdminTab = 'orders' | 'add-product' | 'inventory' | 'crm' | 'settings';
 async function fetchCatalog() {
   const [products, settings] = await Promise.all([
     getJson<{ products: Product[] }>('/api/products'),
-    getJson<{ brand: BrandSettings; bank: BankTransferDetails; supportEmail?: string; store?: StoreSettings; catalog?: { categories: CatalogSettings['categories']; lowStockThreshold: number }; festival?: FestivalView | null }>('/api/settings/public'),
+    getJson<{ brand: BrandSettings; bank: BankTransferDetails; supportEmail?: string; store?: StoreSettings; catalog?: { categories: CatalogSettings['categories']; lowStockThreshold: number }; festival?: FestivalView | null; phoneVerification?: PhoneVerificationConfig }>('/api/settings/public'),
   ]);
   return { products, settings };
 }
@@ -129,6 +129,8 @@ export function ShopApp({ initialProductId }: { initialProductId?: string } = {}
   const [brandSettings, setBrandSettings] = useState<BrandSettings>(INITIAL_BRAND_SETTINGS);
   const [bankDetails, setBankDetails] = useState<BankTransferDetails>(INITIAL_BANK_DETAILS);
   const [supportEmail, setSupportEmail] = useState<string | undefined>(undefined);
+  // How checkout verifies phones (the shop's own SMS, or Firebase).
+  const [phoneVerification, setPhoneVerification] = useState<PhoneVerificationConfig>({ method: 'server' });
   const [storeSettings, setStoreSettings] = useState<StoreSettings>(DEFAULT_STORE);
   const [lowStockThreshold, setLowStockThreshold] = useState(DEFAULT_CATALOG.lowStockThreshold);
   const [categories, setCategories] = useState(DEFAULT_CATALOG.categories);
@@ -199,6 +201,7 @@ export function ShopApp({ initialProductId }: { initialProductId?: string } = {}
       setBrandSettings(settings.data.brand);
       setBankDetails(settings.data.bank);
       if (settings.data.supportEmail) setSupportEmail(settings.data.supportEmail);
+      if (settings.data.phoneVerification) setPhoneVerification(settings.data.phoneVerification);
       if (settings.data.store) setStoreSettings(settings.data.store);
       setFestival(settings.data.festival ?? null);
       if (settings.data.catalog) {
@@ -745,6 +748,7 @@ export function ShopApp({ initialProductId }: { initialProductId?: string } = {}
         items={cart}
         bank={bankDetails}
         supportEmail={supportEmail}
+        phoneVerification={phoneVerification}
         landing={landing}
         onOrderPlaced={handleOrderPlaced}
         onPricesChanged={async () => {

@@ -1,5 +1,18 @@
 # Changelog
 
+## BUH-01.03.00 — 2026-10-15 09:10 UTC · [#4](https://github.com/cxsmtp/buh/pull/4)
+
+- **Firebase Phone Auth as an SMS option.** In Admin Hub → SMS you can now choose Firebase: Google texts and checks the code, and the shop's server checks Google's signed answer before an order can use the number.
+- **Plain setup steps and costs.** The SMS tab lists the five Firebase steps and says plainly that Firebase only sends SMS on the paid Blaze plan, billed per message.
+- **Same checkout for shoppers.** The six code boxes, resend timer and messages stay the same; Firebase errors (wrong code, too many tries, quota reached) are shown in plain words with the shop's email as the way out.
+- **Only this shop's Firebase project is trusted.** Tokens from another project, expired or forged tokens, and non-UAE numbers are refused, and the route is closed unless Firebase is switched on.
+- **Firebase loads only when used.** Its code is fetched only at checkout when Firebase is on; the security policy now allows Google's reCAPTCHA and Firebase sign-in hosts (see docs/security.md for the trade-off).
+- **Status.**
+  - **Benchmark:** shared 4 vCPU host (load average 3–5 from other work), main vs branch, 3 rounds, alternating. Storefront main 517 / 694 / 567 req/s, branch 508 / 602 / 613 (p95 130–301 vs 179–308 ms). Serviceability main 438 / 558 / 443, branch 444 / 642 / 454. Catalogue main 577 / 639 / 637, branch 606 / 818 / 684. 0 failed requests. Level within the spread; no benchmarked path runs the new code.
+  - **Tests:** 134 passed, 14 of them new (token verifier, settings, public config, route).
+  - **Dependency audit:** production 0 vulnerabilities (firebase 12.19.0, with `@grpc/grpc-js` pinned to 1.13.6 for Firestore's unused server dependency); the same 5 dev-only ESLint findings as main.
+  - **Security scan:** no automated scanner here. A real Firebase project could not be reached from this environment, so sending and confirming a real SMS was not tested.
+
 ## BUH-01.02.00 — 2026-10-15 07:19 UTC · [#3](https://github.com/cxsmtp/buh/pull/3)
 
 - **A ready-made container image.** Every change on main is built, started and checked, then published as `ghcr.io/cxsmtp/buh:latest` (plus a tag per version), so the server and your own computer can pull it instead of building it.

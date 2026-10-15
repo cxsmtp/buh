@@ -2,7 +2,10 @@
 
 import React, { useEffect, useRef, useState } from 'react';
 import { BadgeCheck, Globe2, Loader2, Mail, MessageSquareText, Pencil, RotateCcw, ShieldCheck, Smartphone } from 'lucide-react';
+import type { ConfirmationResult } from 'firebase/auth';
 import { postJson } from '@/lib/apiClient';
+import { confirmFirebaseCode, firebaseErrorMessage, preloadFirebasePhone, sendFirebaseCode } from '@/lib/firebasePhoneClient';
+import type { PhoneVerificationConfig } from '@/types';
 
 /** Shown until the shop's settings load (the real address comes from the server at runtime). */
 export const DEFAULT_SUPPORT_EMAIL = 'orders@beautifuluaehome.com';
@@ -60,7 +63,11 @@ interface PhoneVerificationProps {
   orderSummary: string;
   /** Where international customers email (from the server's settings). */
   supportEmail?: string;
+  /** 'server' (default): the shop texts the code. 'firebase': Firebase Phone Authentication does. */
+  verification?: PhoneVerificationConfig;
 }
+
+type VerifyResponse = { valid?: boolean; message?: string; verificationToken?: string };
 
 export const PhoneVerification: React.FC<PhoneVerificationProps> = ({
   phone,
@@ -69,7 +76,12 @@ export const PhoneVerification: React.FC<PhoneVerificationProps> = ({
   onVerifiedChange,
   orderSummary,
   supportEmail = DEFAULT_SUPPORT_EMAIL,
+  verification,
 }) => {
+  const firebase = verification?.method === 'firebase' ? verification.firebase : undefined;
+  // Firebase: the pending sign-in for the code that was sent, and where its invisible reCAPTCHA renders.
+  const confirmation = useRef<ConfirmationResult | null>(null);
+  const recaptchaHost = useRef<HTMLDivElement | null>(null);
   const [stage, setStage] = useState<'enter' | 'code'>('enter');
   const [digits, setDigits] = useState<string[]>(() => Array(CODE_LENGTH).fill(''));
   const [sending, setSending] = useState(false);
@@ -86,6 +98,11 @@ export const PhoneVerification: React.FC<PhoneVerificationProps> = ({
   const info = classifyPhone(phone);
   const wait = cooldownFor === info.e164 ? cooldown : 0;
 
+  // Firebase only: fetch the SDK while the shopper types, so "Send code" answers quickly.
+  useEffect(() => {
+    if (firebase) preloadFirebasePhone(firebase);
+  }, [firebase]);
+
   useEffect(() => {
     if (cooldown <= 0) return;
     const t = setTimeout(() => setCooldown((s) => s - 1), 1000);
@@ -97,6 +114,7 @@ export const PhoneVerification: React.FC<PhoneVerificationProps> = ({
   const changeNumber = () => {
     onVerifiedChange(false);
     setStage('enter');
+    confirmation.current = null;
     resetCode();
     setSandboxCode('');
     setError('');
@@ -110,6 +128,25 @@ export const PhoneVerification: React.FC<PhoneVerificationProps> = ({
     }
     setSending(true);
     setError('');
+    if (firebase) {
+      try {
+        if (!recaptchaHost.current) throw new Error('reCAPTCHA host missing');
+        confirmation.current = await sendFirebaseCode(firebase, info.e164, recaptchaHost.current);
+      } catch (err) {
+        setSending(false);
+        setError(firebaseErrorMessage(err, supportEmail));
+        return;
+      }
+      setSending(false);
+      resetCode();
+      setStage('code');
+      setCooldown(RESEND_SECONDS);
+      setCooldownFor(info.e164);
+      setSandboxCode('');
+      setNotice(`We sent a 6-digit code by SMS to +971 ${formatLocal(info.local)}.`);
+      setTimeout(() => boxes.current[0]?.focus(), 50);
+      return;
+    }
     const { ok, status, data } = await postJson<{ success?: boolean; message?: string; devOtpCode?: string }>(
       '/api/otp/send',
       { phone: info.e164 }
@@ -144,7 +181,7 @@ export const PhoneVerification: React.FC<PhoneVerificationProps> = ({
     verifying.current = true;
     setChecking(true);
     setError('');
-    const { data } = await postJson<{ valid?: boolean; message?: string; verificationToken?: string }>('/api/otp/verify', { phone: info.e164, code });
+    const data = firebase ? await verifyWithFirebase(code) : (await postJson<VerifyResponse>('/api/otp/verify', { phone: info.e164, code })).data;
     verifying.current = false;
     setChecking(false);
     if (data.valid) {
@@ -156,6 +193,19 @@ export const PhoneVerification: React.FC<PhoneVerificationProps> = ({
       resetCode();
       setTimeout(() => boxes.current[0]?.focus(), 50);
     }
+  };
+
+  /** Firebase checks the code; our server then checks Firebase's signed answer and issues the phone token. */
+  const verifyWithFirebase = async (code: string): Promise<VerifyResponse> => {
+    if (!firebase || !confirmation.current) return { valid: false, message: 'Please tap “Resend code” for a new code.' };
+    let idToken: string;
+    try {
+      idToken = await confirmFirebaseCode(firebase, confirmation.current, code);
+    } catch (err) {
+      return { valid: false, message: firebaseErrorMessage(err, supportEmail) };
+    }
+    confirmation.current = null; // used: a new code is needed for another try
+    return (await postJson<VerifyResponse>('/api/otp/firebase', { idToken })).data;
   };
 
   const setCode = (next: string[]) => {
@@ -398,6 +448,8 @@ export const PhoneVerification: React.FC<PhoneVerificationProps> = ({
             {error}
           </p>
         )}
+        {/* Firebase only: its invisible reCAPTCHA renders here when "Send code" is tapped. */}
+        {firebase && <div ref={recaptchaHost} className="empty:hidden" />}
       </div>
     </div>
   );

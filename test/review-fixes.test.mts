@@ -144,7 +144,7 @@ test('bank transfer is only offered once the real account is saved, and the demo
 
 test('SMS: Unifonic cannot be chosen, only the chosen gateway is used, and an incomplete one cannot be switched on', async () => {
   const { gatewaysFromSettings } = await import('@/lib/otpService');
-  await assert.rejects(settings.updateSettings('sms', { provider: 'unifonic', isEnabled: true }), /Twilio, Infobip or a webhook/);
+  await assert.rejects(settings.updateSettings('sms', { provider: 'unifonic', isEnabled: true }), /Twilio, Infobip, a webhook or Firebase/);
   await assert.rejects(settings.updateSettings('sms', { provider: 'twilio', isEnabled: true, twilio: { accountSid: '' } }), /every field/);
   const both = {
     ...settings.getSettings('sms'),

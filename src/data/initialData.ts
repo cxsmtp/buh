@@ -479,6 +479,7 @@ export const INITIAL_SMS_SETTINGS: SmsGatewaySettings = {
     endpointUrl: '',
     bearerToken: '',
   },
+  firebase: { apiKey: '', authDomain: '', projectId: '', appId: '' },
   isEnabled: false,
 };
 

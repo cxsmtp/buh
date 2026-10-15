@@ -26,6 +26,13 @@ What protects the shop, how it works, and what the owner must do. Each item has 
 - **If SMS is unavailable**, the gateway is down or the cap is reached, checkout cannot complete, by design: orders need a verified number. Customers are told to try again or email the shop, and the server log warns at start-up when no gateway is configured.
 - **The browser cannot choose the gateway.** The public endpoint ignores any gateway settings in the request and uses the server's environment only. Older builds would post the code to any URL a caller supplied.
 - **No code in the browser in production.** With no gateway configured, test mode shows the code on screen, but only outside production (or with `OTP_DEV_MODE=true`).
+- **Firebase Phone Authentication (optional).** Google sends and checks the code; the browser then posts a Firebase ID token to `/api/otp/firebase`. The server verifies it with Node's crypto (no Firebase SDK on the server):
+  - RS256 only, with a key id Google publishes (certificates cached for their `max-age`, refetched at most once a minute for an unknown key id, 10 s timeout);
+  - issuer and audience must be this shop's project, so a token from any other Firebase project is refused;
+  - not expired, not issued in the future (60 s skew), signed in by phone within the last 10 minutes, with a `phone_number`;
+  - the number must still be a UAE mobile. The answer is the same signed phone token as the shop's own codes.
+  - The route is closed unless Firebase is the switched-on SMS option, is same-origin only, size-capped and limited to 30 attempts per address per 15 minutes. Firebase's own abuse limits apply to sending; the shop's per-number send limits do not.
+  - The web config (API key, auth domain, project ID, app ID) is public by design. Protect the project in Firebase: authorized domains set to the shop only, a Google Cloud budget alert, and (optionally) SMS region policy allowing only the UAE.
 
 ## Outbound calls (SSRF)
 
@@ -62,6 +69,8 @@ Carrier endpoints are fixed in code.
 Every page sends:
 
 - **Content Security Policy:** scripts and connections only to this site, no plugins, no `<base>`, no framing.
+  - Exception, for Firebase phone sign-in: reCAPTCHA scripts and frames (`www.google.com/recaptcha/`, `www.gstatic.com/recaptcha/`, `recaptcha.google.com/recaptcha/`), `apis.google.com`, frames from `*.firebaseapp.com`, and connections to `identitytoolkit.googleapis.com` and `securetoken.googleapis.com`.
+  - **Trade-off:** the policy is fixed at build time (a per-request one costs too much, below), so these Google hosts are allowed even while Firebase is off. They are Google-run, path-limited where CSP allows, and nothing on the page loads from them unless Firebase is switched on. A custom auth domain (not `<project>.firebaseapp.com`) is not covered; keep the default.
 - `X-Frame-Options: DENY`, `nosniff`, `Cross-Origin-Opener-Policy: same-origin`, HSTS, and a `Permissions-Policy` that allows only geolocation (for the address pin).
 - API responses add `Cache-Control: no-store`.
 

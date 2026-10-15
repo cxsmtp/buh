@@ -2,7 +2,7 @@ import { NextRequest } from 'next/server';
 import { gatewaysFromSettings, sendRealSmsOtp } from '@/lib/otpService';
 import { audit } from '@/lib/server/audit';
 import { clientIp, requireAdmin } from '@/lib/server/guard';
-import { handleRouteError, json, readJsonBody } from '@/lib/server/http';
+import { handleRouteError, HttpError, json, readJsonBody } from '@/lib/server/http';
 import { withStoredSecrets } from '@/lib/server/settings';
 import { SmsGatewaySettings } from '@/types';
 
@@ -11,6 +11,10 @@ export async function POST(req: NextRequest) {
   try {
     const session = await requireAdmin(req);
     const body = await readJsonBody(req, 8 * 1024);
+    if ((body.settings as { provider?: unknown } | undefined)?.provider === 'firebase') {
+      // Firebase sends the SMS from the customer's browser, so there is nothing for the server to send.
+      throw new HttpError(400, 'Firebase sends codes from the shopper’s browser: save it, switch it on, then try it at checkout on the shop.');
+    }
     const gateways = await gatewaysFromSettings(withStoredSecrets('sms', body.settings) as Partial<SmsGatewaySettings>);
     const result = await sendRealSmsOtp(String(body.phone ?? ''), { gateways, ip: clientIp(req) });
     audit('sms.test_send', { by: session.email, provider: result.provider, success: result.success });

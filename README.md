@@ -6,7 +6,7 @@
 | --- | --- |
 | **Orders reach you** | Every order is stored on the server with prices and stock checked there, and appears in the Admin Hub: book the courier, follow it to delivery, confirm bank transfers, cancel (stock returns). |
 | **Backed up every 12 hours** | The shop emails itself to you: the full database, Excel-ready CSVs of orders and customers, and receipts, optionally encrypted. Status and **Back up now** in the Admin Hub; tested restore. |
-| **Verified orders only** | Customers confirm their UAE mobile with a 6-digit SMS code before they can order. Other countries are invited to email the shop instead. |
+| **Verified orders only** | Customers confirm their UAE mobile with a 6-digit SMS code (through the shop's SMS gateway or Firebase Phone Auth) before they can order. Other countries are invited to email the shop instead. |
 | **An admin hub only you can open** | Server-checked sign-in with lockout, a one-time first password you replace at first sign-in, and an audit log of every sign-in and courier booking. |
 | **Real courier bookings** | Jeebly and Eco Express AWBs come from the carrier. A failed booking says so; it never invents a tracking number. |
 | **Safe by default** | Security headers on every page, size-capped and validated API input, limits against SMS-pumping fraud, and no secrets in the browser or the logs ([security](docs/security.md)). |

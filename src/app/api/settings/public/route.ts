@@ -1,11 +1,13 @@
 import { handleRouteError, json } from '@/lib/server/http';
-import { contactEmail, getSettings } from '@/lib/server/settings';
+import { contactEmail, getSettings, phoneVerificationConfig } from '@/lib/server/settings';
 import { storefrontTheme } from '@/lib/server/theme';
 
 /**
  * What every visitor sees: branding, bank details for transfers, the store's
  * contact details (WhatsApp, Instagram…), the catalogue's categories and the
- * low-stock threshold, and the support email. Nothing here is secret.
+ * low-stock threshold, the support email, today's festival look, and how
+ * checkout verifies phones (the Firebase web config only when Firebase is the
+ * switched-on SMS option). Nothing here is secret.
  */
 export function GET() {
   try {
@@ -18,6 +20,7 @@ export function GET() {
       catalog: { categories: catalog.categories, lowStockThreshold: catalog.lowStockThreshold },
       supportEmail: contactEmail(),
       festival: festivalView(),
+      phoneVerification: phoneVerificationConfig(),
     });
   } catch (err) {
     return handleRouteError(err, 'settings/public');

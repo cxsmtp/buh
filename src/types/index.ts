@@ -264,7 +264,21 @@ export interface BrandSettings {
   };
 }
 
-export type SmsProvider = 'twilio' | 'infobip' | 'unifonic' | 'custom_webhook';
+export type SmsProvider = 'twilio' | 'infobip' | 'unifonic' | 'custom_webhook' | 'firebase';
+
+/** A Firebase web app's public config (not secrets: every visitor's browser receives it). */
+export interface FirebaseWebConfig {
+  apiKey: string;
+  authDomain: string;
+  projectId: string;
+  appId: string;
+}
+
+/** How the storefront verifies phones: the shop sends the code, or Firebase does. */
+export interface PhoneVerificationConfig {
+  method: 'server' | 'firebase';
+  firebase?: FirebaseWebConfig;
+}
 
 export interface SmsGatewaySettings {
   provider: SmsProvider;
@@ -288,5 +302,7 @@ export interface SmsGatewaySettings {
     endpointUrl: string;
     bearerToken?: string;
   };
+  /** Firebase Phone Authentication: the browser asks Firebase to send the SMS. */
+  firebase?: FirebaseWebConfig;
   isEnabled: boolean;
 }

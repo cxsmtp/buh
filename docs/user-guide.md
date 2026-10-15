@@ -66,6 +66,16 @@ The line at the top of the Admin Hub shows when the last backup ran:
 
 Enter the gateway's details, tap **Send test** to try it on your own mobile, then **Save Gateway Credentials**. Checkout then sends codes through it (a gateway set in `.env.production` takes priority). Keys are kept on the server and never shown again: leave a key field blank to keep the saved one. Webhook and Infobip URLs must be public https addresses.
 
+**Firebase Phone Auth** (optional): Google sends the code instead of your gateway.
+
+1. Create a project at console.firebase.google.com.
+2. Authentication → Sign-in method: turn on **Phone**.
+3. Authentication → Settings → Authorized domains: add your shop's domain.
+4. Upgrade to the **Blaze** plan. Firebase only sends phone codes on Blaze, and Google bills every SMS; set a budget alert.
+5. Project settings → add a Web app, copy `apiKey`, `authDomain`, `projectId` and `appId` into the SMS tab, choose **Firebase Phone Auth** and save.
+
+There is no **Send test** for Firebase: try a checkout on your own phone (a billed SMS). A gateway in `.env.production` still takes priority.
+
 ### Couriers
 
 Enter the Jeebly and Eco Express keys and use **Test connection**. Keys are kept on the server and never shown again: leave a key field blank to keep the saved one.

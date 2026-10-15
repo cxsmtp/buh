@@ -1,7 +1,7 @@
 'use client';
 
 import React, { useState, useEffect } from 'react';
-import { BankTransferDetails, CartItem, Emirate, Order, PaymentMethod } from '@/types';
+import { BankTransferDetails, CartItem, Emirate, Order, PaymentMethod, PhoneVerificationConfig } from '@/types';
 import { UAE_EMIRATES, UAE_POPULAR_AREAS } from '@/data/initialData';
 import { cartFils, formatAed } from '@/lib/money';
 import { postJson } from '@/lib/apiClient';
@@ -46,6 +46,8 @@ interface CheckoutModalProps {
   supportEmail?: string;
   /** Where the customer came from (Instagram, WhatsApp…), recorded on the order. */
   landing?: { source: string; campaign?: string } | null;
+  /** How phones are verified: the shop's own SMS (default) or Firebase. */
+  phoneVerification?: PhoneVerificationConfig;
 }
 
 /** The customer's details from last time (this browser only; never the phone check). */
@@ -104,6 +106,7 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
   onPricesChanged,
   supportEmail,
   landing,
+  phoneVerification,
 }) => {
   // One checkout attempt = one order, even if "Confirm" is sent twice (double tap, retry).
   const [idempotencyKey] = useState(() => crypto.randomUUID());
@@ -524,6 +527,7 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
 
               <PhoneVerification
                 supportEmail={supportEmail}
+                verification={phoneVerification}
                 phone={phone}
                 onPhoneChange={setPhone}
                 verified={isPhoneVerified}

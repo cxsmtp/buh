@@ -51,6 +51,13 @@ export const AdminSmsTab: React.FC<AdminSmsTabProps> = ({
   const [webhookUrl, setWebhookUrl] = useState(smsSettings.customWebhook?.endpointUrl || '');
   const [webhookBearer, setWebhookBearer] = useState(smsSettings.customWebhook?.bearerToken || '');
 
+  // Firebase Phone Authentication (public web config, not secrets)
+  const [fbApiKey, setFbApiKey] = useState(smsSettings.firebase?.apiKey || '');
+  const [fbAuthDomain, setFbAuthDomain] = useState(smsSettings.firebase?.authDomain || '');
+  const [fbProjectId, setFbProjectId] = useState(smsSettings.firebase?.projectId || '');
+  const [fbAppId, setFbAppId] = useState(smsSettings.firebase?.appId || '');
+  const firebaseConfig = { apiKey: fbApiKey.trim(), authDomain: fbAuthDomain.trim(), projectId: fbProjectId.trim(), appId: fbAppId.trim() };
+
   // Testing State
   const [testPhone, setTestPhone] = useState('+971 5');
   const [isSendingTest, setIsSendingTest] = useState(false);
@@ -82,6 +89,7 @@ export const AdminSmsTab: React.FC<AdminSmsTabProps> = ({
         endpointUrl: webhookUrl.trim(),
         bearerToken: webhookBearer.trim(),
       },
+      firebase: firebaseConfig,
       isEnabled: true,
     };
 
@@ -121,6 +129,7 @@ export const AdminSmsTab: React.FC<AdminSmsTabProps> = ({
         endpointUrl: webhookUrl.trim(),
         bearerToken: webhookBearer.trim(),
       },
+      firebase: firebaseConfig,
       isEnabled: true,
     };
 
@@ -136,7 +145,8 @@ export const AdminSmsTab: React.FC<AdminSmsTabProps> = ({
   const isConfigured =
     (provider === 'twilio' && twilioAccountSid && (twilioAuthToken || secretsSet['twilio.authToken'])) ||
     (provider === 'infobip' && (infobipApiKey || secretsSet['infobip.apiKey'])) ||
-    (provider === 'custom_webhook' && webhookUrl);
+    (provider === 'custom_webhook' && webhookUrl) ||
+    (provider === 'firebase' && firebaseConfig.apiKey && firebaseConfig.authDomain && firebaseConfig.projectId && firebaseConfig.appId);
 
   return (
     <div className="space-y-6">
@@ -232,15 +242,17 @@ export const AdminSmsTab: React.FC<AdminSmsTabProps> = ({
           </div>
 
           {/* Provider Selection Tabs */}
-          <div className="grid grid-cols-1 min-[420px]:grid-cols-3 gap-2 text-xs">
+          <div className="grid grid-cols-2 gap-2 text-xs">
             {[
               { id: 'twilio', name: 'Twilio SMS', badge: 'Recommended' },
               { id: 'infobip', name: 'Infobip UAE', badge: 'Direct Etisalat' },
               { id: 'custom_webhook', name: 'Webhook', badge: 'Custom' },
+              { id: 'firebase', name: 'Firebase Phone Auth', badge: 'Google, Blaze plan' },
             ].map((p) => (
               <button
                 key={p.id}
                 type="button"
+                aria-pressed={provider === p.id}
                 onClick={() => setProvider(p.id as SmsProvider)}
                 className={`p-2.5 rounded-xl border text-center transition-all ${
                   provider === p.id
@@ -254,8 +266,8 @@ export const AdminSmsTab: React.FC<AdminSmsTabProps> = ({
             ))}
           </div>
 
-          {/* SENDER ID */}
-          <div className="text-xs">
+          {/* SENDER ID (Firebase sends its own message, so it does not apply there) */}
+          {provider !== 'firebase' && <div className="text-xs">
             <label className="block text-stone-800 font-semibold mb-1">
               Sender ID / Brand Alphanumeric Header
             </label>
@@ -270,7 +282,66 @@ export const AdminSmsTab: React.FC<AdminSmsTabProps> = ({
             <p className="text-[10px] text-stone-400 mt-1">
               Up to 11 characters. Displays as the sender name in the customer&apos;s SMS inbox.
             </p>
-          </div>
+          </div>}
+
+          {/* FIREBASE CONFIG */}
+          {provider === 'firebase' && (
+            <div className="space-y-3 p-3.5 bg-stone-50 rounded-2xl border border-stone-200 text-xs animate-in fade-in-50">
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <span className="font-bold text-stone-900">Firebase Phone Authentication</span>
+                <a
+                  href="https://console.firebase.google.com/"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="text-[11px] text-[#c5a059] hover:underline flex items-center gap-1 font-semibold"
+                >
+                  <span>Firebase console</span>
+                  <ExternalLink className="w-3 h-3" />
+                </a>
+              </div>
+
+              <div role="note" className="p-2.5 rounded-xl bg-amber-50 border border-amber-200 text-amber-950 text-[11px] leading-relaxed">
+                <strong>Costs money per SMS.</strong> Firebase only sends phone codes on the paid <strong>Blaze</strong> plan, and Google bills
+                every SMS it sends (UAE numbers are among the pricier destinations). Set a budget alert in Google Cloud billing.
+              </div>
+
+              <ol className="list-decimal list-inside space-y-1 text-stone-600 text-[11px] leading-relaxed">
+                <li>Create a Firebase project in the Firebase console.</li>
+                <li>Authentication → Sign-in method: turn on <strong>Phone</strong>.</li>
+                <li>Authentication → Settings → <strong>Authorized domains</strong>: add this shop&apos;s domain.</li>
+                <li>Upgrade the project to the <strong>Blaze</strong> (pay as you go) plan.</li>
+                <li>Project settings → Your apps → add a <strong>Web app</strong>, then copy its config values below.</li>
+              </ol>
+
+              {([
+                ['fb-api-key', 'API key (apiKey)', 'AIza…', fbApiKey, setFbApiKey],
+                ['fb-auth-domain', 'Auth domain (authDomain)', 'your-project.firebaseapp.com', fbAuthDomain, setFbAuthDomain],
+                ['fb-project-id', 'Project ID (projectId)', 'your-project', fbProjectId, setFbProjectId],
+                ['fb-app-id', 'App ID (appId)', '1:123456789012:web:abc123…', fbAppId, setFbAppId],
+              ] as const).map(([id, label, placeholder, value, set]) => (
+                <div key={id}>
+                  <label htmlFor={id} className="block text-stone-700 font-semibold mb-1">
+                    {label}:
+                  </label>
+                  <input
+                    id={id}
+                    type="text"
+                    autoComplete="off"
+                    spellCheck={false}
+                    placeholder={placeholder}
+                    value={value}
+                    onChange={(e) => set(e.target.value)}
+                    className="w-full px-3.5 py-2 rounded-xl border border-stone-300 bg-white text-stone-900 font-mono text-xs focus:outline-none focus:ring-1 focus:ring-[#c5a059]"
+                  />
+                </div>
+              ))}
+              <p className="text-[10px] text-stone-500 leading-relaxed">
+                These values are public (every shopper&apos;s browser receives them), not passwords. Keep the auth domain as
+                <code className="mx-1 bg-stone-200 px-1 rounded font-mono">your-project.firebaseapp.com</code>: the shop&apos;s security policy allows that domain.
+                A gateway set in the server environment (Twilio, Infobip, webhook) still takes precedence.
+              </p>
+            </div>
+          )}
 
           {/* TWILIO CONFIG */}
           {provider === 'twilio' && (
@@ -431,8 +502,16 @@ export const AdminSmsTab: React.FC<AdminSmsTabProps> = ({
               </p>
             </div>
 
+            {provider === 'firebase' && (
+              <div role="note" className="p-3.5 rounded-2xl bg-stone-50 border border-stone-200 text-[11px] text-stone-700 leading-relaxed">
+                With Firebase, Google texts the code straight to the shopper&apos;s phone from their browser, so there is no test send
+                from here. Save, then open the shop on your own phone, add something to the bag and verify your number at checkout.
+                Each test is a billed SMS.
+              </div>
+            )}
+
             {/* Test Phone Input */}
-            <div className="space-y-2 text-xs">
+            {provider !== 'firebase' && <div className="space-y-2 text-xs">
               <label className="block text-stone-800 font-semibold">
                 Your Mobile Number (+971 or International):
               </label>
@@ -458,7 +537,7 @@ export const AdminSmsTab: React.FC<AdminSmsTabProps> = ({
                   <span>{isSendingTest ? 'Dispatching...' : 'Send Test SMS'}</span>
                 </button>
               </div>
-            </div>
+            </div>}
 
             {/* Test Result Display */}
             {testResult && (
@@ -497,7 +576,7 @@ export const AdminSmsTab: React.FC<AdminSmsTabProps> = ({
             )}
 
             {/* Step-by-Step Instructions Card */}
-            <div className="bg-stone-50 p-4 rounded-2xl border border-stone-200 text-xs space-y-2">
+            {provider !== 'firebase' && <div className="bg-stone-50 p-4 rounded-2xl border border-stone-200 text-xs space-y-2">
               <span className="font-bold text-stone-900 flex items-center gap-1.5">
                 <HelpCircle className="w-3.5 h-3.5 text-[#c5a059]" />
                 <span>How to Get Real SMS Delivery to UAE Mobiles:</span>
@@ -517,7 +596,7 @@ export const AdminSmsTab: React.FC<AdminSmsTabProps> = ({
                   Enter your mobile number and tap <strong>&quot;Send Test SMS&quot;</strong> — the physical text message will arrive on your phone in 2-5 seconds!
                 </li>
               </ol>
-            </div>
+            </div>}
           </div>
         </div>
 
