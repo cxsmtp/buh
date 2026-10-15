@@ -234,6 +234,55 @@ export interface StoreSettings {
   storeAddress: string;
   /** Show an approximate price in the visitor's own currency next to AED (outside the UAE). */
   showLocalCurrency: boolean;
+  /** "Ask on WhatsApp" on products and in the help menu (needs the number). */
+  askOnWhatsApp: boolean;
+  /** "Ask on Instagram" (opens a direct message to instagramHandle). */
+  askOnInstagram: boolean;
+}
+
+/** One thing the shop assistant knows: matched by its keywords and question, answered as written. */
+export interface AssistantEntry {
+  id: string;
+  question: string;
+  keywords: string[];
+  answer: string;
+}
+
+/** Settings → Chat assistant: the chat on the shop, and its "memory" (what it may answer by itself). */
+export interface AssistantSettings {
+  /** Show the chat on the shop. */
+  enabled: boolean;
+  /** Its name in the chat. */
+  name: string;
+  greeting: string;
+  /** Answer size and measurement questions from Settings → Catalogue's size presets. */
+  answerSizes: boolean;
+  /** No reply from a person within this many seconds: tell the customer we'll get back to them. */
+  waitSeconds: number;
+  entries: AssistantEntry[];
+}
+
+/** A conversation from the shop's chat (customer side never sees contactDetails of others). */
+export interface ChatThread {
+  id: string;
+  createdAt: string;
+  updatedAt: string;
+  /** bot: the assistant answers; waiting: handed to a person, no reply yet; human: a person replied; closed. */
+  status: 'bot' | 'waiting' | 'human' | 'closed';
+  customerName: string;
+  contact: string;
+  page: string;
+  /** Messages the admin hasn't seen. */
+  unread: number;
+  lastMessage: string;
+}
+
+export interface ChatMessage {
+  id: number;
+  at: string;
+  author: 'customer' | 'bot' | 'admin' | 'system';
+  body: string;
+  via: 'web' | 'email' | 'admin';
 }
 
 /** Settings → Email: the mail server for backups, alerts, the daily summary and password resets. */
@@ -247,6 +296,13 @@ export interface EmailSettings {
   /** Write-only. */
   smtpPass: string;
   fromAddress: string;
+  /** Mailbox the shop reads for replies to chat emails (IMAP, port 993). Empty: chat replies by email are off. */
+  imapHost: string;
+  imapPort: number;
+  /** Empty: the SMTP username. */
+  imapUser: string;
+  /** Write-only. Empty: the SMTP password (when the username is the same). */
+  imapPass: string;
   /** Where backups, alerts and the daily summary go (comma-separated); empty uses BACKUP_EMAIL. */
   sendTo: string;
 }

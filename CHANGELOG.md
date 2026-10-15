@@ -1,5 +1,19 @@
 # Changelog
 
+## BUH-02.01.00 — 2026-10-15 10:49 UTC · [#5](https://github.com/cxsmtp/buh/pull/5)
+
+- **A chat that answers, then hands over.** The new **Help** button answers sizes (from your size presets), delivery, payment, care, returns and discount questions from what you teach it in Settings → Chat assistant; anything else, an order problem, or "Talk to a person" comes to you, and it never makes up a price, discount or promise.
+- **Chats in the Admin Hub and by email.** Admin Hub → Chats shows the chats waiting for you first, with a badge; you get an email for each, and replying to that email answers in the chat (once the mailbox is set in Settings → Email & admin account).
+- **Nobody left waiting.** If no one answers within the waiting time (2.5 minutes by default), the customer is told once that you'll get back to them and asked for a phone or email; a reply you write after they've left is emailed to them.
+- **The assistant's memory is yours.** Add, edit and remove its answers, try a question before saving, and download the memory as a file to keep or to load back.
+- **Ask on WhatsApp, Instagram or in chat.** Each product offers the ways you switch on in Settings → Store & contact; Instagram copies the product's link for the customer to paste.
+- **Chats are backed up.** The database and a `chats.csv` are in every backup, and the restore script brings them back; chats only the assistant handled are removed after 30 days.
+- **Status.**
+  - **Benchmark:** same host, main (BUH-02.00.00) vs this branch, two sets of 3 alternating rounds, 0 failed requests in every run. Storefront main 922 / 855 / 860 / 791 / 801 / 751 req/s, branch 813 / 778 / 796 / 795 / 878 / 867 (level: the first set favoured main, the second the branch). Courier check main 614–826, branch 601–671. Catalogue main 733–911, branch 756–840. p95 within 103–207 ms on both.
+  - **Tests:** 231: unit (assistant, chat, email replies, settings), a fake IMAP mail server over TLS, end-to-end on the production build, and real-browser chat from shopper to owner and back at 375 px and 1280 px, keyboard included.
+  - **Dependency audit:** production 0 vulnerabilities (adds imapflow 2.1.2 and mailparser 3.9.32, both a few weeks old); the same 5 dev-only ESLint findings as main.
+  - **Security scan:** an independent security and correctness review; all 9 findings fixed with tests (own notification or out-of-office never posted as a reply, owner replies need DKIM/DMARC pass, no sending password offered to another server, per-chat and owner-email limits, both copies claim emails atomically, no skipped replies, order problems go to a person, keyboard focus, a full chat can still be answered). No automated scanner here.
+
 ## BUH-02.00.00 — 2026-10-15 10:20 UTC · [#4](https://github.com/cxsmtp/buh/pull/4)
 
 - **Inventory you can fully edit, stock per size.** Every product field (photos, text, prices, colours, sizes) is editable from a phone; stock is kept per size because most designs are one or two pieces, with one-tap + / −, "Only 1 left" and sold-out sizes for shoppers, and Remove (archive) that keeps past orders intact.

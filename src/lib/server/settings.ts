@@ -1,7 +1,7 @@
 import net from 'node:net';
-import type { BankTransferDetails, BedProfileMeasurement, BrandSettings, CatalogSettings, CourierSettings, EmailSettings, FirebaseWebConfig, PhoneVerificationConfig, SmsGatewaySettings, StoreSettings, ThemeSettings } from '@/types';
+import type { AssistantSettings, BankTransferDetails, BedProfileMeasurement, BrandSettings, CatalogSettings, CourierSettings, EmailSettings, FirebaseWebConfig, PhoneVerificationConfig, SmsGatewaySettings, StoreSettings, ThemeSettings } from '@/types';
 import { FESTIVALS } from '@/lib/festivals/catalog';
-import { DEFAULT_CATALOG, DEFAULT_EMAIL_SETTINGS, DEFAULT_STORE, DEFAULT_THEME_SETTINGS } from '@/data/catalogDefaults';
+import { DEFAULT_ASSISTANT, DEFAULT_CATALOG, DEFAULT_EMAIL_SETTINGS, DEFAULT_STORE, DEFAULT_THEME_SETTINGS } from '@/data/catalogDefaults';
 import { INITIAL_BANK_DETAILS, INITIAL_BRAND_SETTINGS, INITIAL_COURIER_SETTINGS, INITIAL_SMS_SETTINGS } from '@/data/initialData';
 import { getDb } from './db';
 import { SMTP_PORTS, assertPublicMailHost } from './mail';
@@ -32,6 +32,7 @@ export interface SettingsMap {
   store: StoreSettings;
   theme: ThemeSettings;
   email: EmailSettings;
+  assistant: AssistantSettings;
 }
 export type SettingsKey = keyof SettingsMap;
 
@@ -58,6 +59,7 @@ const DEFAULTS: SettingsMap = {
   store: DEFAULT_STORE,
   theme: DEFAULT_THEME_SETTINGS,
   email: DEFAULT_EMAIL_SETTINGS,
+  assistant: DEFAULT_ASSISTANT,
 };
 
 /** Where customers are asked to email: Settings → Store first, then NEXT_PUBLIC_SUPPORT_EMAIL. */
@@ -74,7 +76,8 @@ const SECRETS: Record<SettingsKey, string[]> = {
   catalog: [],
   store: [],
   theme: [],
-  email: ['smtpPass'],
+  email: ['smtpPass', 'imapPass'],
+  assistant: [],
 };
 
 const cache = new Map<SettingsKey, unknown>();
@@ -170,6 +173,8 @@ export async function updateSettings<K extends SettingsKey>(key: K, input: unkno
     const e = next as unknown as EmailSettings;
     const i = input as { smtpPass?: unknown };
     if (e.smtpHost.toLowerCase() !== (current as EmailSettings).smtpHost.toLowerCase() && !nonEmpty(i.smtpPass)) e.smtpPass = '';
+    const ii = input as { imapPass?: unknown };
+    if (e.imapHost.toLowerCase() !== (current as EmailSettings).imapHost.toLowerCase() && !nonEmpty(ii.imapPass)) e.imapPass = '';
   }
   if (key === 'sms') {
     const sms = next as unknown as SmsGatewaySettings;
@@ -232,6 +237,7 @@ const SECRET_HOSTS: Record<SettingsKey, Record<string, string>> = {
   store: {},
   theme: {},
   email: {},
+  assistant: {},
 };
 
 /**
@@ -281,6 +287,13 @@ function text(v: unknown, field: string, max: number, fallback = ''): string {
   if (v === undefined || v === null) return fallback;
   if (typeof v !== 'string') throw new HttpError(400, `${field} must be text.`);
   return v.replace(/[\u0000-\u001f\u007f]+/g, ' ').trim().slice(0, max);
+}
+
+/** Like text(), keeping line breaks (answers, greetings). */
+function longText(v: unknown, field: string, max: number, fallback = ''): string {
+  if (v === undefined || v === null) return fallback;
+  if (typeof v !== 'string') throw new HttpError(400, `${field} must be text.`);
+  return v.replace(/\r\n?/g, '\n').replace(/[\u0000-\u0009\u000b-\u001f\u007f]+/g, ' ').replace(/\n{3,}/g, '\n\n').trim().slice(0, max);
 }
 
 function bool(v: unknown, fallback: boolean): boolean {
@@ -440,6 +453,8 @@ const VALIDATORS: { [K in SettingsKey]: (input: Obj, current: SettingsMap[K]) =>
       tiktokHandle: tt,
       storeAddress: text(input.storeAddress, 'Store address', 300, current.storeAddress),
       showLocalCurrency: bool(input.showLocalCurrency, current.showLocalCurrency),
+      askOnWhatsApp: bool(input.askOnWhatsApp, current.askOnWhatsApp),
+      askOnInstagram: bool(input.askOnInstagram, current.askOnInstagram),
     };
   },
 
@@ -457,7 +472,41 @@ const VALIDATORS: { [K in SettingsKey]: (input: Obj, current: SettingsMap[K]) =>
     if (from && !emailRe.test(from)) throw new HttpError(400, 'Please check the From address.');
     const sendTo = text(input.sendTo, 'Send to', 600, current.sendTo).split(',').map((x) => x.trim()).filter(Boolean);
     if (sendTo.length > 5 || sendTo.some((x) => !emailRe.test(x))) throw new HttpError(400, 'Send to: up to 5 email addresses, separated by commas.');
-    return { smtpHost: host, smtpPort: port, smtpSecurity: security, smtpUser: user, smtpPass: '', fromAddress: from, sendTo: sendTo.join(', ') };
+    const imapHost = text(input.imapHost, 'Mailbox server', 253, current.imapHost).toLowerCase();
+    if (imapHost && !net.isIPv4(imapHost) && !/^(?=.{3,253}$)(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z]{2,63}$/.test(imapHost)) throw new HttpError(400, 'Mailbox server: a host name such as imap.hostinger.com.');
+    if (imapHost && imapHost !== current.imapHost) await assertPublicMailHost(imapHost);
+    const imapPort = input.imapPort === undefined ? current.imapPort : Number(input.imapPort);
+    if (imapPort !== 993) throw new HttpError(400, 'Mailbox server port: 993 (IMAP over TLS).');
+    const imapUser = text(input.imapUser, 'Mailbox user', 254, current.imapUser);
+    return { smtpHost: host, smtpPort: port, smtpSecurity: security, smtpUser: user, smtpPass: '', fromAddress: from, sendTo: sendTo.join(', '), imapHost, imapPort, imapUser, imapPass: '' };
+  },
+
+  async assistant(input, current) {
+    const waitSeconds = input.waitSeconds === undefined ? current.waitSeconds : Number(input.waitSeconds);
+    if (!Number.isInteger(waitSeconds) || waitSeconds < 30 || waitSeconds > 900) throw new HttpError(400, 'Waiting time: 30 to 900 seconds.');
+    const entriesIn = input.entries === undefined ? current.entries : input.entries;
+    if (!Array.isArray(entriesIn) || entriesIn.length > 200) throw new HttpError(400, 'Keep up to 200 answers.');
+    const entries = entriesIn.map((e, i) => {
+      const o = obj(e);
+      const n = i + 1;
+      const id = text(o.id, `Answer ${n} id`, 40) || `a${n}`;
+      if (!/^[a-z0-9][a-z0-9-]{0,39}$/i.test(id)) throw new HttpError(400, `Answer ${n}: the id may use only letters, digits and dashes.`);
+      const question = text(o.question, `Answer ${n} question`, 200);
+      const answer = longText(o.answer, `Answer ${n}`, 1500);
+      if (!question || !answer) throw new HttpError(400, `Answer ${n}: fill in the question and the answer.`);
+      const kwIn = Array.isArray(o.keywords) ? o.keywords : typeof o.keywords === 'string' ? o.keywords.split(',') : [];
+      const keywords = [...new Set(kwIn.map((k) => text(k, `Answer ${n} keyword`, 40).toLowerCase()).filter(Boolean))].slice(0, 30);
+      return { id, question, keywords, answer };
+    });
+    if (new Set(entries.map((e) => e.id)).size !== entries.length) throw new HttpError(400, 'Each answer needs its own id.');
+    return {
+      enabled: bool(input.enabled, current.enabled),
+      name: text(input.name, 'Assistant name', 40, current.name) || 'Shop assistant',
+      greeting: longText(input.greeting, 'Greeting', 500, current.greeting),
+      answerSizes: bool(input.answerSizes, current.answerSizes),
+      waitSeconds,
+      entries,
+    };
   },
 
   async theme(input, current) {

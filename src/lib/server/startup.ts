@@ -1,3 +1,5 @@
+import { sweepChats } from './chat';
+import { startChatMail } from './chatMail';
 import { ensureAdminAccount } from './adminAuth';
 import { MIN_PASSPHRASE_LENGTH, emailConfigured, startBackupSchedule } from './backup';
 import { getDb } from './db';
@@ -19,6 +21,7 @@ export async function onStartup() {
     startBackupSchedule();
     startFestivalRefresh();
     startMonitor();
+    startChat();
   } catch (err) {
     logEvent('error', 'startup_failed', { error: err instanceof Error ? err.message : String(err) });
   }
@@ -55,4 +58,18 @@ export async function onStartup() {
       ].join('\n')
     );
   }
+}
+
+/** Chat: email the owner and read emailed replies; every 30 s, reassure customers left waiting. */
+function startChat() {
+  startChatMail();
+  if (process.env.CHAT_SWEEP_DISABLED === '1') return;
+  const t = setInterval(() => {
+    try {
+      sweepChats();
+    } catch (err) {
+      logEvent('warn', 'chat_sweep_failed', { error: err instanceof Error ? err.message : String(err) });
+    }
+  }, 30_000);
+  t.unref();
 }

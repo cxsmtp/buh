@@ -28,6 +28,15 @@ What protects the shop, how it works, and what the owner must do. Each item has 
 - The updater first moves the request into a new folder only it can open, so it can't be swapped for a link or a pipe while being read; it then accepts only a small plain file whose line matches `rollback N.N.N` or `update` exactly, and refuses versions before 2.0.0. Anything else is dropped unread and never echoed. The folder is sticky and not listable, so the shop can't remove or read anything else there.
 - The updater's status comes back through a second folder the shop mounts read-only; it holds versions and messages, no secrets. The updater writes it to a new file and renames it, so a planted link is replaced, never followed. The shop reads it defensively (size cap, links refused, fields checked).
 
+## Chat
+
+- Each chat has a random id and a 192-bit secret kept in the customer's browser; only its SHA-256 is stored, and it travels in a header or the request body, never in an address. A wrong secret and an unknown chat get the same answer.
+- Starting chats is limited per address (6 an hour) and shop-wide (300 an hour); messages to 40 per 10 minutes per address; a chat holds at most 300 messages of up to 1,000 characters. Text is shown as text, never as HTML.
+- The owner is emailed at most once every 5 minutes per chat. Subjects carry only the chat's key and the customer's name/contact after control characters are removed.
+- **Replies by email:** the mailbox (IMAP over TLS, port 993) is read once a minute. A server typed in Settings must resolve to a public address; the shop connects to the address it checked and verifies the certificate against the name. Only mail whose subject has a known `[Chat #KEY]` (10 random characters) is used, only the new text (not the quote), at most once per Message-ID. It counts as the owner's reply only from the owner's addresses (backup address, sign-in email, sender), and is refused when the receiving server reports DMARC failure (or SPF and DKIM both failing); otherwise only from the customer's own email, as the customer. The mailbox password is write-only and dropped when the server changes.
+- The assistant answers only from the owner's text and the size presets; it never composes prices, discounts or promises.
+- Owner replies and status changes are in the audit log; chats are in backups.
+
 ## Checkout phone verification
 
 - **UAE mobiles only** (50, 52, 54, 55, 56, 58; `OTP_ALLOWED_PREFIXES`, default `+971`). Every way of writing a number (spaces, `00971`, `+971 0…`, Arabic digits) maps to one number and one set of limits. Other countries are shown the support email instead.

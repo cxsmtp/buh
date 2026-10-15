@@ -18,10 +18,12 @@ const label = 'block text-xs font-semibold text-stone-700 mb-1';
 export function EmailSettingsCard({
   value,
   passwordSaved,
+  imapPasswordSaved = false,
   onSave,
 }: {
   value: EmailSettings;
   passwordSaved: boolean;
+  imapPasswordSaved?: boolean;
   onSave: (v: EmailSettings) => Promise<string | null>;
 }) {
   const [d, setD] = useState<EmailSettings>(value);
@@ -35,7 +37,7 @@ export function EmailSettingsCard({
     setStatus(null);
     const problem = await onSave(d);
     setSaving(false);
-    if (!problem) set('smtpPass', '');
+    if (!problem) setD((x) => ({ ...x, smtpPass: '', imapPass: '' }));
     setStatus(problem ? { ok: false, text: problem } : { ok: true, text: 'Saved. Use "Send a test email" to check it works.' });
   };
 
@@ -110,6 +112,27 @@ export function EmailSettingsCard({
             <p className="text-[11px] text-stone-500 mt-1">Up to 5, separated by commas. Empty uses BACKUP_EMAIL.</p>
           </div>
         </div>
+        <details className="rounded-xl border border-stone-200 p-3" open={Boolean(d.imapHost)}>
+          <summary className="text-xs font-bold text-[#0f1c2e] cursor-pointer">Answer chats by replying to the email (mailbox, IMAP)</summary>
+          <p className="text-xs text-stone-500 mt-2">
+            When a customer asks for a person, you get an email. If the shop can read the mailbox those replies go to, your reply appears in the customer&apos;s chat.
+            Hostinger: imap.hostinger.com; Gmail: imap.gmail.com (with an app password). Leave the server empty to switch this off.
+          </p>
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 mt-2">
+            <div>
+              <label className={label} htmlFor="em-imap">Mailbox server</label>
+              <input id="em-imap" className={field} placeholder="imap.hostinger.com" autoCapitalize="none" spellCheck={false} value={d.imapHost} maxLength={253} onChange={(e) => set('imapHost', e.target.value.trim())} />
+            </div>
+            <div>
+              <label className={label} htmlFor="em-imap-user">Mailbox username</label>
+              <input id="em-imap-user" className={field} autoComplete="off" autoCapitalize="none" spellCheck={false} placeholder="Same as above" value={d.imapUser} maxLength={254} onChange={(e) => set('imapUser', e.target.value.trim())} />
+            </div>
+            <div>
+              <label className={label} htmlFor="em-imap-pass">Mailbox password</label>
+              <input id="em-imap-pass" className={field} type="password" autoComplete="new-password" placeholder={imapPasswordSaved ? 'Saved: type to replace' : 'Same as above'} value={d.imapPass} maxLength={256} onChange={(e) => set('imapPass', e.target.value)} />
+            </div>
+          </div>
+        </details>
         <div className="flex flex-wrap gap-2">
           <button type="button" onClick={() => void save()} disabled={saving} className="px-4 py-2 rounded-xl bg-[#0f1c2e] text-white text-xs font-bold flex items-center gap-1.5 disabled:opacity-60">
             {saving && <Loader2 className="w-3.5 h-3.5 animate-spin" />} Save email settings

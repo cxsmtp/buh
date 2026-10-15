@@ -74,6 +74,19 @@ export function StoreSettingsCard({ value, onSave }: { value: StoreSettings; onS
         </div>
       </section>
 
+      <fieldset className="space-y-1.5 text-xs">
+        <legend className={label}>Where customers can ask (only the ones ticked show on the shop)</legend>
+        <label className="flex items-center gap-2">
+          <input type="checkbox" checked={d.askOnWhatsApp} onChange={(e) => set('askOnWhatsApp', e.target.checked)} />
+          &ldquo;Ask on WhatsApp&rdquo; on products and in Help {!d.whatsappNumber && <span className="text-stone-400">(add the number above)</span>}
+        </label>
+        <label className="flex items-center gap-2">
+          <input type="checkbox" checked={d.askOnInstagram} onChange={(e) => set('askOnInstagram', e.target.checked)} />
+          &ldquo;Ask on Instagram&rdquo; (opens a direct message to your account) {!d.instagramHandle && <span className="text-stone-400">(add the account above)</span>}
+        </label>
+        <p className="text-stone-500">The chat assistant has its own section (Settings → Chat assistant).</p>
+      </fieldset>
+
       <section>
         <label className={label} htmlFor="st-addr">Store address (footer)</label>
         <input id="st-addr" className={field} placeholder="Dubai, United Arab Emirates" value={d.storeAddress} maxLength={300} onChange={(e) => set('storeAddress', e.target.value)} />

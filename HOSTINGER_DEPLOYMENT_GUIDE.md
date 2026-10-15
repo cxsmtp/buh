@@ -79,6 +79,8 @@ Everything the shop stores lives in one Docker volume and is backed up every 12 
 - [ ] **Uptime monitor:** use a free service (e.g. UptimeRobot) on `https://yourdomain.ae/api/health`.
 - [ ] **Automatic updates** (recommended): turn on the updater (section 5).
 
+**Chat replies by email (optional):** in Admin Hub → Settings → Email & admin account, fill in the mailbox (IMAP) server, e.g. `imap.hostinger.com`. Then replying to a chat email answers in the chat. Without it, reply in Admin Hub → Chats.
+
 ## 3. Backups (automatic, every 12 hours)
 
 The shop backs itself up every 12 hours, and straight after a restart if one is due. It emails the backup to `BACKUP_EMAIL` and keeps the newest 14 on the server. Each backup contains:
