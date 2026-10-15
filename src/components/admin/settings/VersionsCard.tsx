@@ -39,6 +39,8 @@ const older = (a: string, b: string) => {
   for (let i = 0; i < 3; i++) if (pa[i] !== pb[i]) return pa[i] < pb[i];
   return false;
 };
+const IMAGE = 'ghcr.io/cxsmtp/buh';
+const PODMAN_RUN = `podman run --replace -d --name beautifuluaehome -p 443:3000 -v beautifuluaehome-data:/data -e TZ=Asia/Dubai --read-only --tmpfs /tmp --cap-drop ALL --security-opt no-new-privileges:true ${IMAGE}:latest`;
 const label = (v: string) => `BUH-${v.split('.').map((n) => n.padStart(2, '0')).join('.')}`;
 
 export function VersionsCard() {
@@ -108,10 +110,21 @@ export function VersionsCard() {
             )}
           </p>
         ) : (
-          <div className="text-stone-600 space-y-1">
-            <p>Automatic updates are not running on this server, so switch versions with a command (on the server, in the shop folder):</p>
-            <code className="block bg-stone-100 rounded-lg p-2 break-all">docker compose run --rm updater rollback ghcr.io/cxsmtp/buh:2.0.0</code>
-            <p>Change 2.0.0 to the version you want. To let this page do it, turn on automatic updates (deployment guide, section 5).</p>
+          <div className="text-stone-600 space-y-1.5">
+            <p>Automatic updates are not running on this server, so update with these two commands on the computer that runs the shop (Podman):</p>
+            <code className="block bg-stone-100 rounded-lg p-2 break-all">podman pull {IMAGE}:latest</code>
+            <code className="block bg-stone-100 rounded-lg p-2 break-all">{PODMAN_RUN}</code>
+            <p>
+              Use your own container and data-volume names if they differ (<code>podman ps</code> lists them); the data volume must be the one the shop already uses. For an older version, change <code>latest</code> to its number, e.g. <code>2.0.0</code>.
+            </p>
+            <p>
+              Then reload this page. If it still says <strong className="font-mono">{label(info.current)}</strong>, another, older container is still answering: <code>podman ps</code> shows which one holds the port; stop it.
+            </p>
+            <details>
+              <summary className="cursor-pointer">Docker Compose server (Hostinger guide)</summary>
+              <code className="block bg-stone-100 rounded-lg p-2 mt-1 break-all">docker compose run --rm updater rollback {IMAGE}:2.0.0</code>
+              <p className="mt-1">To let this page switch versions, turn on automatic updates (deployment guide, section 5).</p>
+            </details>
           </div>
         )}
         {status && <p role="status" className={`font-semibold ${status.ok ? 'text-emerald-700' : 'text-red-700'}`}>{status.text}</p>}

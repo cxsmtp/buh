@@ -1,5 +1,15 @@
 # Changelog
 
+## BUH-02.03.02 — 2026-10-15 21:13 UTC · [#9](https://github.com/cxsmtp/buh/pull/9)
+
+- **Settings → Versions shows the Podman update.** On a server without automatic updates, the page now gives the two Podman commands (pull `ghcr.io/cxsmtp/buh:latest`, then restart the container in place with its data volume) instead of a Docker Compose command; the Compose one is folded away for the Hostinger setup.
+- **Still the old version after updating?** The page says so in plain words: another, older container is still answering (for example on a different port), and `podman ps` shows which one to stop.
+- **Status.**
+  - **Benchmark:** same host, main (BUH-02.03.01) vs this branch, 3 alternating rounds, 0 failed requests. Storefront main 839 / 827 / 810 req/s, branch 831 / 868 / 854 (p95 100–160 vs 95–152 ms); courier check main 664 / 663 / 701, branch 738 / 665 / 676; catalogue main 843 / 819 / 768, branch 820 / 815 / 815. Level.
+  - **Tests:** 255 passed; the Versions test now checks for the Podman commands with the real image name (it fails on the previous version).
+  - **Dependency audit:** production 0 vulnerabilities; no package changes.
+  - **Security scan:** text-only change on an admin page; no new routes or inputs.
+
 ## BUH-02.03.01 — 2026-10-15 20:50 UTC · [#8](https://github.com/cxsmtp/buh/pull/8)
 
 - **Podman update command in the README.** One line pulls the newest shop and restarts it in place, keeping your data; it uses the image's real name, `ghcr.io/cxsmtp/buh` (pulling `ghcr.io/cxsmtp/beautifuluaehome` fails with "manifest unknown").
