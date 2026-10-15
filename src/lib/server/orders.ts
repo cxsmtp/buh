@@ -2,7 +2,7 @@ import crypto from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
 import type { Customer, Emirate, Order, OrderStatus } from '@/types';
-import { checkJeeblyServiceability } from '@/lib/jeeblyServiceability';
+import { deliveryCheck, uaeDate } from '@/lib/delivery';
 import { dataDir } from './dataDir';
 import { getDb, inTransaction } from './db';
 import { HttpError } from './http';
@@ -171,8 +171,14 @@ export function placeOrder(input: unknown): PlaceOrderResult {
     phoneVerified: true,
   };
 
-  const serviceability = checkJeeblyServiceability({ emirate, area: customer.area, lat, lng });
-  if (!serviceability.serviceable) throw new HttpError(400, serviceability.serviceMessage);
+  // Where we deliver comes from the address, never the GPS reading (often a network location far away).
+  const delivery = deliveryCheck({ emirate, area: customer.area }, getSettings('delivery'));
+  if (!delivery.serviceable) throw new HttpError(400, delivery.message);
+  const deliveryOption = body.deliveryOption === 'same_day' ? 'same_day' : 'standard';
+  if (deliveryOption === 'same_day' && !delivery.sameDay.available) {
+    throw new HttpError(409, delivery.sameDay.reason || 'Same-day delivery is not available for this order. Choose standard delivery.', {}, { code: 'same_day_unavailable' });
+  }
+  const deliveryFils = deliveryOption === 'same_day' ? fils(delivery.sameDay.fee) : fils(DELIVERY_FEE);
 
   const paymentMethod = text(body.paymentMethod, 'Payment method', 20, { required: true });
   if (paymentMethod !== 'cod' && paymentMethod !== 'bank_transfer') throw new HttpError(400, 'Choose Cash on Delivery or Bank Transfer.');
@@ -255,7 +261,7 @@ export function placeOrder(input: unknown): PlaceOrderResult {
 
     const subtotalFils = items.reduce((s, i) => s + fils(i.totalPrice), 0);
     const codFils = paymentMethod === 'cod' ? fils(COD_FEE) : 0;
-    const totalFils = subtotalFils + fils(DELIVERY_FEE) + codFils;
+    const totalFils = subtotalFils + deliveryFils + codFils;
     // Never charge a total the customer was not shown (a price changed while they were at checkout).
     if (expectedTotalFils !== null && expectedTotalFils !== totalFils) {
       throw new HttpError(409, `Prices have changed since you opened checkout: your total is now AED ${aed(totalFils)}. Please check your bag and confirm again.`, {}, { code: 'price_changed', total: aed(totalFils) });
@@ -271,7 +277,8 @@ export function placeOrder(input: unknown): PlaceOrderResult {
       customer,
       items,
       subtotal: aed(subtotalFils),
-      deliveryFee: DELIVERY_FEE,
+      deliveryFee: aed(deliveryFils),
+      deliveryOption,
       codFee: aed(codFils),
       discount: 0,
       total: aed(totalFils),
@@ -282,20 +289,21 @@ export function placeOrder(input: unknown): PlaceOrderResult {
       status: 'pending_confirmation',
       courier: {
         provider: provider === 'manual' ? 'jeebly' : provider,
-        serviceType: 'Scheduled',
+        serviceType: deliveryOption === 'same_day' ? 'Express' : 'Scheduled',
         awbNumber: '',
         trackingUrl: '',
         status: 'Order placed – awaiting confirmation',
-        pickupDate: new Date(Date.now() + 86_400_000).toISOString().slice(0, 10),
+        // Same day: collected today (UAE date); otherwise tomorrow.
+        pickupDate: uaeDate(Date.now(), deliveryOption === 'same_day' ? 0 : 1),
         weightKg: Math.min(500, 2.5 * items.reduce((s, i) => s + i.quantity, 0)),
         pieces: items.reduce((s, i) => s + i.quantity, 0),
         labelGenerated: false,
         codAmountCollected: paymentMethod === 'cod' ? aed(totalFils) : 0,
         serviceability: {
-          verified: serviceability.serviceable,
-          hub: serviceability.hub,
-          deliverySpeed: serviceability.deliverySpeed,
-          zone: serviceability.zone,
+          verified: delivery.serviceable,
+          hub: '',
+          deliverySpeed: deliveryOption === 'same_day' ? 'Same day' : delivery.days,
+          zone: emirate,
           checkedAt: now,
         },
       } as Order['courier'],
@@ -416,8 +424,8 @@ export function customerView(order: Order) {
 }
 
 function trackingView(order: Order) {
+  // The courier's name is not shown to customers (the tracking link is enough).
   return {
-    provider: order.courier.provider,
     awbNumber: order.courier.simulated ? '' : order.courier.awbNumber,
     trackingUrl: order.courier.simulated ? '' : order.courier.trackingUrl,
     status: order.courier.status,

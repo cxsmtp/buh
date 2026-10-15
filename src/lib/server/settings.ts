@@ -1,7 +1,7 @@
 import net from 'node:net';
-import type { AssistantSettings, BankTransferDetails, BedProfileMeasurement, BrandSettings, CatalogSettings, CourierSettings, EmailSettings, FirebaseWebConfig, PhoneVerificationConfig, SmsGatewaySettings, StoreSettings, ThemeSettings } from '@/types';
+import type { AssistantSettings, BankTransferDetails, DeliverySettings, Emirate, BedProfileMeasurement, BrandSettings, CatalogSettings, CourierSettings, EmailSettings, FirebaseWebConfig, PhoneVerificationConfig, SmsGatewaySettings, StoreSettings, ThemeSettings } from '@/types';
 import { FESTIVALS } from '@/lib/festivals/catalog';
-import { DEFAULT_ASSISTANT, DEFAULT_CATALOG, DEFAULT_EMAIL_SETTINGS, DEFAULT_STORE, DEFAULT_THEME_SETTINGS } from '@/data/catalogDefaults';
+import { DEFAULT_ASSISTANT, DEFAULT_CATALOG, DEFAULT_DELIVERY, DEFAULT_EMAIL_SETTINGS, DEFAULT_STORE, DEFAULT_THEME_SETTINGS } from '@/data/catalogDefaults';
 import { INITIAL_BANK_DETAILS, INITIAL_BRAND_SETTINGS, INITIAL_COURIER_SETTINGS, INITIAL_SMS_SETTINGS } from '@/data/initialData';
 import { getDb } from './db';
 import { SMTP_PORTS, assertPublicMailHost } from './mail';
@@ -33,6 +33,7 @@ export interface SettingsMap {
   theme: ThemeSettings;
   email: EmailSettings;
   assistant: AssistantSettings;
+  delivery: DeliverySettings;
 }
 export type SettingsKey = keyof SettingsMap;
 
@@ -60,6 +61,7 @@ const DEFAULTS: SettingsMap = {
   theme: DEFAULT_THEME_SETTINGS,
   email: DEFAULT_EMAIL_SETTINGS,
   assistant: DEFAULT_ASSISTANT,
+  delivery: DEFAULT_DELIVERY,
 };
 
 /** Where customers are asked to email: Settings → Store first, then NEXT_PUBLIC_SUPPORT_EMAIL. */
@@ -78,6 +80,7 @@ const SECRETS: Record<SettingsKey, string[]> = {
   theme: [],
   email: ['smtpPass', 'imapPass'],
   assistant: [],
+  delivery: [],
 };
 
 const cache = new Map<SettingsKey, unknown>();
@@ -238,6 +241,7 @@ const SECRET_HOSTS: Record<SettingsKey, Record<string, string>> = {
   theme: {},
   email: {},
   assistant: {},
+  delivery: {},
 };
 
 /**
@@ -479,6 +483,42 @@ const VALIDATORS: { [K in SettingsKey]: (input: Obj, current: SettingsMap[K]) =>
     if (imapPort !== 993) throw new HttpError(400, 'Mailbox server port: 993 (IMAP over TLS).');
     const imapUser = text(input.imapUser, 'Mailbox user', 254, current.imapUser);
     return { smtpHost: host, smtpPort: port, smtpSecurity: security, smtpUser: user, smtpPass: '', fromAddress: from, sendTo: sendTo.join(', '), imapHost, imapPort, imapUser, imapPass: '' };
+  },
+
+  async delivery(input, current) {
+    const emirateList = (v: unknown, field: string, fallback: Emirate[]): Emirate[] => {
+      if (v === undefined) return fallback;
+      if (!Array.isArray(v) || v.some((e) => !EMIRATES.includes(e as string))) throw new HttpError(400, `${field}: choose from the seven emirates.`);
+      return [...new Set(v as Emirate[])];
+    };
+    const emirates = emirateList(input.emirates, 'Emirates we deliver to', current.emirates);
+    if (!emirates.length) throw new HttpError(400, 'Deliver to at least one emirate.');
+    const notIn = input.notServed === undefined ? current.notServed : input.notServed;
+    const notServed = (Array.isArray(notIn) ? notIn : typeof notIn === 'string' ? notIn.split(/[,\n]/) : [])
+      .map((a, i) => text(a, `Area ${i + 1}`, 80))
+      .filter(Boolean)
+      .slice(0, 200);
+    const tooShort = notServed.find((a) => a.replace(/[^\p{L}\p{N}]/gu, '').length < 3);
+    if (tooShort) throw new HttpError(400, `Areas not served: "${tooShort}" is too short; write the full area name.`);
+    const feeIn = input.sameDayFee === undefined ? current.sameDayFee : Number(input.sameDayFee);
+    // 19.99 × 100 is 1998.9999… in floating point: compare with a tolerance, then keep exact fils.
+    if (!Number.isFinite(feeIn) || feeIn < 0 || feeIn > 500 || Math.abs(feeIn * 100 - Math.round(feeIn * 100)) > 1e-6) throw new HttpError(400, 'Same-day charge: AED 0 to 500 (up to 2 decimals).');
+    const fee = Math.round(feeIn * 100) / 100;
+    const cutoff = text(input.sameDayCutoff, 'Same-day cut-off', 5, current.sameDayCutoff);
+    if (!/^([01]\d|2[0-3]):[0-5]\d$/.test(cutoff)) throw new HttpError(400, 'Same-day cut-off: a time like 13:00.');
+    const sameDayEmirates = emirateList(input.sameDayEmirates, 'Same-day emirates', current.sameDayEmirates);
+    const sameDayEnabled = bool(input.sameDayEnabled, current.sameDayEnabled);
+    if (sameDayEnabled && !sameDayEmirates.length) throw new HttpError(400, 'Choose where same-day delivery is offered.');
+    if (sameDayEnabled && cutoff === '00:00') throw new HttpError(400, 'Same-day cut-off: 00:00 would never allow it; choose a time like 13:00.');
+    return {
+      emirates,
+      notServed,
+      standardDays: text(input.standardDays, 'Delivery time', 40, current.standardDays) || '1–2 days',
+      sameDayEnabled,
+      sameDayFee: fee,
+      sameDayCutoff: cutoff,
+      sameDayEmirates,
+    };
   },
 
   async assistant(input, current) {

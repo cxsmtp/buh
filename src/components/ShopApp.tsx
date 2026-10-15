@@ -1,8 +1,8 @@
 'use client';
 
 import React, { useState, useEffect, useMemo, useCallback, useRef } from 'react';
-import { Product, Order, Customer, CourierSettings, CartItem, BedProfileMeasurement, BrandSettings, SmsGatewaySettings, BankTransferDetails, CatalogSettings, StoreSettings, ThemeSettings, EmailSettings, AssistantSettings, PhoneVerificationConfig } from '@/types';
-import { DEFAULT_ASSISTANT, DEFAULT_CATALOG, DEFAULT_EMAIL_SETTINGS, DEFAULT_STORE, DEFAULT_THEME_SETTINGS } from '@/data/catalogDefaults';
+import { Product, Order, Customer, CourierSettings, CartItem, BedProfileMeasurement, BrandSettings, SmsGatewaySettings, BankTransferDetails, CatalogSettings, StoreSettings, ThemeSettings, EmailSettings, AssistantSettings, DeliverySettings, PhoneVerificationConfig } from '@/types';
+import { DEFAULT_ASSISTANT, DEFAULT_CATALOG, DEFAULT_DELIVERY, DEFAULT_EMAIL_SETTINGS, DEFAULT_STORE, DEFAULT_THEME_SETTINGS } from '@/data/catalogDefaults';
 import { piecesLeft, refreshCart, ShopProvider, type FestivalView, type ShopInfo } from '@/lib/client/shop';
 import { captureLanding, decodeBag, type BagLine, type Landing } from '@/lib/client/landing';
 import { useLiveUpdates } from '@/lib/client/live';
@@ -22,6 +22,7 @@ interface AdminSettings {
   theme: AdminSetting<ThemeSettings>;
   email: AdminSetting<EmailSettings>;
   assistant: AdminSetting<AssistantSettings>;
+  delivery: AdminSetting<DeliverySettings>;
 }
 
 type AdminTab = 'orders' | 'add-product' | 'inventory' | 'crm' | 'settings' | 'chats';
@@ -30,7 +31,7 @@ type AdminTab = 'orders' | 'add-product' | 'inventory' | 'crm' | 'settings' | 'c
 async function fetchCatalog() {
   const [products, settings] = await Promise.all([
     getJson<{ products: Product[] }>('/api/products'),
-    getJson<{ brand: BrandSettings; bank: BankTransferDetails; supportEmail?: string; store?: StoreSettings; catalog?: { categories: CatalogSettings['categories']; lowStockThreshold: number }; festival?: FestivalView | null; phoneVerification?: PhoneVerificationConfig; chat?: { name: string; greeting: string } | null }>('/api/settings/public'),
+    getJson<{ brand: BrandSettings; bank: BankTransferDetails; supportEmail?: string; store?: StoreSettings; catalog?: { categories: CatalogSettings['categories']; lowStockThreshold: number }; festival?: FestivalView | null; phoneVerification?: PhoneVerificationConfig; chat?: { name: string; greeting: string } | null; delivery?: DeliverySettings }>('/api/settings/public'),
   ]);
   return { products, settings };
 }
@@ -106,6 +107,7 @@ import { SettingsHistoryCard } from '@/components/admin/settings/SettingsHistory
 import { EmailSettingsCard } from '@/components/admin/settings/EmailSettingsCard';
 import { VersionsCard } from '@/components/admin/settings/VersionsCard';
 import { AssistantSettingsCard } from '@/components/admin/settings/AssistantSettingsCard';
+import { DeliverySettingsCard } from '@/components/admin/settings/DeliverySettingsCard';
 import { AdminChatsTab } from '@/components/admin/AdminChatsTab';
 import { HelpLauncher } from '@/components/store/HelpLauncher';
 import { VersionBadge } from '@/components/common/VersionBadge';
@@ -148,6 +150,7 @@ export function ShopApp({ initialProductId }: { initialProductId?: string } = {}
   const [categories, setCategories] = useState(DEFAULT_CATALOG.categories);
   const [festival, setFestival] = useState<FestivalView | null>(null);
   const [chatInfo, setChatInfo] = useState<{ name: string; greeting: string } | null>(null);
+  const [delivery, setDelivery] = useState<DeliverySettings>(DEFAULT_DELIVERY);
   // Admin Hub → Chats: conversations waiting for a person (badge), and a counter that reloads the tab.
   const [chatsWaiting, setChatsWaiting] = useState(0);
   const [chatsKey, setChatsKey] = useState(0);
@@ -173,6 +176,7 @@ export function ShopApp({ initialProductId }: { initialProductId?: string } = {}
     theme: { value: DEFAULT_THEME_SETTINGS, secretsSet: {} },
     email: { value: DEFAULT_EMAIL_SETTINGS, secretsSet: {} },
     assistant: { value: DEFAULT_ASSISTANT, secretsSet: {} },
+    delivery: { value: DEFAULT_DELIVERY, secretsSet: {} },
   });
   const [adminLoadError, setAdminLoadError] = useState('');
   // Settings forms copy their values once; they are re-created when the server's values first arrive
@@ -223,6 +227,7 @@ export function ShopApp({ initialProductId }: { initialProductId?: string } = {}
       if (settings.data.store) setStoreSettings(settings.data.store);
       setFestival(settings.data.festival ?? null);
       setChatInfo(settings.data.chat ?? null);
+      if (settings.data.delivery) setDelivery(settings.data.delivery);
       if (settings.data.catalog) {
         setLowStockThreshold(settings.data.catalog.lowStockThreshold);
         setCategories(settings.data.catalog.categories);
@@ -305,7 +310,7 @@ export function ShopApp({ initialProductId }: { initialProductId?: string } = {}
     if (c.ok) setCustomers(c.data.customers);
     if (p.ok) setAdminProducts(p.data.products);
     if (st.ok) {
-      setAdminSettings({ courier: st.data.courier, sms: st.data.sms, catalog: st.data.catalog, store: st.data.store, theme: st.data.theme, email: st.data.email, assistant: st.data.assistant });
+      setAdminSettings({ courier: st.data.courier, sms: st.data.sms, catalog: st.data.catalog, store: st.data.store, theme: st.data.theme, email: st.data.email, assistant: st.data.assistant, delivery: st.data.delivery });
       setAdminSettingsLoaded(true);
     }
     setAdminLoadError(o.ok && c.ok && p.ok && st.ok ? '' : 'Some admin data could not be loaded. Check your connection and refresh.');
@@ -368,10 +373,10 @@ export function ShopApp({ initialProductId }: { initialProductId?: string } = {}
   }, [isAdminAuthenticated, isAdminMode, applyAdminData]);
 
   /** Save one settings group on the server; resolves to an error message or null. */
-  const saveSettings = async (key: 'brand' | 'bank' | 'courier' | 'sms' | 'catalog' | 'store' | 'theme' | 'email' | 'assistant', settings: unknown): Promise<string | null> => {
+  const saveSettings = async (key: 'brand' | 'bank' | 'courier' | 'sms' | 'catalog' | 'store' | 'theme' | 'email' | 'assistant' | 'delivery', settings: unknown): Promise<string | null> => {
     const { ok, data } = await sendJson<{ message?: string }>('PUT', `/api/admin/settings/${key}`, { settings });
     if (!ok) return data.message || 'Could not save. Please try again.';
-    await Promise.all([loadAdminData(), key === 'brand' || key === 'bank' || key === 'catalog' || key === 'store' || key === 'theme' || key === 'assistant' ? loadCatalog() : Promise.resolve(null)]);
+    await Promise.all([loadAdminData(), key === 'brand' || key === 'bank' || key === 'catalog' || key === 'store' || key === 'theme' || key === 'assistant' || key === 'delivery' ? loadCatalog() : Promise.resolve(null)]);
     return null;
   };
 
@@ -455,8 +460,8 @@ export function ShopApp({ initialProductId }: { initialProductId?: string } = {}
   };
 
   const shopInfo = useMemo<ShopInfo>(
-    () => ({ store: storeSettings, lowStockThreshold, supportEmail: supportEmail || 'orders@beautifuluaehome.com', festival, chat: chatInfo }),
-    [storeSettings, lowStockThreshold, supportEmail, festival, chatInfo]
+    () => ({ store: storeSettings, lowStockThreshold, supportEmail: supportEmail || 'orders@beautifuluaehome.com', festival, chat: chatInfo, delivery }),
+    [storeSettings, lowStockThreshold, supportEmail, festival, chatInfo, delivery]
   );
 
   // Filtered Products for Storefront
@@ -650,6 +655,13 @@ export function ShopApp({ initialProductId }: { initialProductId?: string } = {}
                         onUpdateSettings={handleUpdateSettings}
                       />
                     ),
+                  },
+                  {
+                    id: 'delivery',
+                    label: 'Delivery',
+                    icon: '📦',
+                    hint: 'Where you deliver, the time customers see, and same-day delivery with its charge.',
+                    content: <DeliverySettingsCard key={`delivery-${adminSettingsLoaded}-${settingsEpoch}`} value={adminSettings.delivery.value} onSave={(v) => saveSettings('delivery', v)} />,
                   },
                   {
                     id: 'assistant',

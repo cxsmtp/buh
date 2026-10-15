@@ -112,7 +112,6 @@ test('bad orders are refused', () => {
     ['emirate', { customer: { ...body().customer, emirate: 'Narnia' } }],
     ['missing address', { customer: { ...body().customer, streetAddress: '' } }],
     ['bad email', { customer: { ...body().customer, email: 'not-an-email' } }],
-    ['pin outside the UAE', { customer: { ...body().customer, gpsCoordinates: { lat: 51.5, lng: -0.1 } } }],
     ['bad checkout reference', { idempotencyKey: 'x' }],
     ['fake receipt', { paymentMethod: 'bank_transfer', receipt: `data:application/pdf;base64,${Buffer.from('not a pdf').toString('base64')}` }],
   ];

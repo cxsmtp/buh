@@ -3,15 +3,11 @@
 import React, { useState, useEffect } from 'react';
 import { BankTransferDetails, CartItem, Emirate, Order, PaymentMethod, PhoneVerificationConfig } from '@/types';
 import { UAE_EMIRATES, UAE_POPULAR_AREAS } from '@/data/initialData';
-import { cartFils, formatAed } from '@/lib/money';
+import { cartFils, formatAed, toFils } from '@/lib/money';
 import { useShop } from '@/lib/client/shop';
 import { postJson } from '@/lib/apiClient';
-import { 
-  checkJeeblyServiceability, 
-  findClosestUAELocation, 
-  UAE_KEY_LOCATIONS, 
-  ServiceabilityResult 
-} from '@/lib/jeeblyServiceability';
+import { nearestUAELocation, UAE_KEY_LOCATIONS } from '@/lib/uaeLocations';
+import { deliveryCheck, inUAE } from '@/lib/delivery';
 import { 
   X, 
   CheckCircle2, 
@@ -154,11 +150,12 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
   // Customer Mobile OTP State
   const [isPhoneVerified, setIsPhoneVerified] = useState(false);
 
-  // Jeebly Serviceability State
-  const [serviceability, setServiceability] = useState<ServiceabilityResult>(() =>
-    checkJeeblyServiceability({ emirate: 'Dubai', area: '' })
-  );
-  const [isCheckingServiceability, setIsCheckingServiceability] = useState(false);
+  // Delivery: decided by the address (the server checks again and charges any same-day fee).
+  const { delivery: deliverySettings } = useShop();
+  // Same day is chosen for one address: changing the emirate or area goes back to standard.
+  const [deliveryChoice, setDeliveryChoice] = useState<{ option: 'standard' | 'same_day'; key: string }>({ option: 'standard', key: '' });
+  const setDeliveryOption = (option: 'standard' | 'same_day') => setDeliveryChoice({ option, key: `${emirate}|${area}` });
+  const [locationProblem, setLocationProblem] = useState(false);
 
   // Payment Method & Bank Transfer
   const [paymentMethod, setPaymentMethod] = useState<PaymentMethod>('cod');
@@ -172,28 +169,16 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
   const [submitError, setSubmitError] = useState('');
 
   // Financial Calculations
-  // In fils, like the server. Delivery and COD are free; the server is the source of truth and
+  // In fils, like the server. Standard delivery and COD are free (same day adds Settings → Delivery's charge); the server is the source of truth and
   // refuses the order if its total differs from the one shown here (a price changed meanwhile).
-  const totalFils = cartFils(items);
+  const delivery = deliveryCheck({ emirate, area }, deliverySettings);
+  const sameDayChosen = deliveryChoice.option === 'same_day' && deliveryChoice.key === `${emirate}|${area}` && delivery.sameDay.available;
+  const deliveryFils = sameDayChosen ? toFils(delivery.sameDay.fee) : 0;
+  const totalFils = cartFils(items) + deliveryFils;
   const grandTotal = formatAed(totalFils);
   const bankReady = Boolean(bank.iban && bank.accountName && bank.bankName);
   const shopWhatsApp = useShop().store.whatsappNumber.replace(/\D/g, '');
 
-  // Re-verify Jeebly serviceability when Emirate, Area or GPS coordinates update
-  useEffect(() => {
-    setIsCheckingServiceability(true);
-    const timer = setTimeout(() => {
-      const result = checkJeeblyServiceability({
-        emirate,
-        area,
-        lat: gpsCoordinates?.lat,
-        lng: gpsCoordinates?.lng,
-      });
-      setServiceability(result);
-      setIsCheckingServiceability(false);
-    }, 250);
-    return () => clearTimeout(timer);
-  }, [emirate, area, gpsCoordinates]);
 
 
   // Escape closes checkout (not while an order is being saved).
@@ -218,28 +203,39 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
     setIsLocating(true);
     setLocationNotice(null);
 
+    setLocationProblem(false);
     navigator.geolocation.getCurrentPosition(
       (pos) => {
         setIsLocating(false);
-        const { latitude, longitude } = pos.coords;
+        const { latitude, longitude, accuracy } = pos.coords;
+        // Laptops and some phones report a network location (often another country, e.g. through a VPN):
+        // only a reading inside the UAE is used, and the address fields are only suggested, never forced.
+        if (!inUAE(latitude, longitude)) {
+          setGpsCoordinates(null);
+          setLocationProblem(true);
+          setLocationNotice('Your device’s location doesn’t look like the UAE (this happens with network or VPN locations). Please choose your emirate and area below.');
+          return;
+        }
         setGpsCoordinates({ lat: latitude, lng: longitude });
-
-        // Match closest UAE community
-        const closest = findClosestUAELocation(latitude, longitude);
-        setEmirate(closest.emirate);
-        if (!area) setArea(closest.name);
-        setLocationNotice(`📍 GPS Pin dropped: ${closest.name}, ${closest.emirate} (${latitude.toFixed(4)}°N, ${longitude.toFixed(4)}°E)`);
+        const near = nearestUAELocation(latitude, longitude);
+        const approx = accuracy > 1000 ? ` (about ${Math.round(accuracy / 1000)} km accuracy, please check)` : '';
+        if (near && !area) {
+          setEmirate(near.location.emirate);
+          setArea(near.location.name);
+          setLocationNotice(`📍 Location saved for the driver, near ${near.location.name}, ${near.location.emirate}${approx}.`);
+        } else if (near) {
+          // The customer already typed an area: never switch the emirate under it.
+          setLocationNotice(`📍 Location saved for the driver (near ${near.location.name}, ${near.location.emirate}${approx}). Your address above is kept.`);
+        } else {
+          setLocationNotice(`📍 Location saved for the driver${approx}. Please choose your emirate and area below.`);
+        }
       },
-      (err) => {
+      () => {
         setIsLocating(false);
-        // Fallback default to Dubai Marina GPS if permissions blocked
-        const fallback = UAE_KEY_LOCATIONS[0];
-        setGpsCoordinates({ lat: fallback.lat, lng: fallback.lng });
-        setEmirate(fallback.emirate);
-        if (!area) setArea(fallback.name);
-        setLocationNotice(`📍 Pin set to ${fallback.name} (${fallback.lat}°N, ${fallback.lng}°E)`);
+        setLocationProblem(true);
+        setLocationNotice('We couldn’t get your location. No problem: choose your emirate and area below, and add a landmark for the driver.');
       },
-      { timeout: 8000, enableHighAccuracy: true }
+      { timeout: 10000, enableHighAccuracy: true, maximumAge: 60_000 }
     );
   };
 
@@ -314,6 +310,7 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
         quantity: item.quantity,
       })),
       paymentMethod,
+      deliveryOption: sameDayChosen ? 'same_day' : 'standard',
       expectedTotal: totalFils / 100,
       source: landing ?? undefined,
       bankTransferRef: paymentMethod === 'bank_transfer' ? bankRef || undefined : undefined,
@@ -329,6 +326,8 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
       }
       // A price changed since the bag was filled: reload it, so the new total is shown before confirming.
       if (status === 409 && (data as { code?: string }).code === 'price_changed') await onPricesChanged();
+      // Same-day closed while they were at checkout (past the cut-off): back to standard, total shown again.
+      if (status === 409 && (data as { code?: string }).code === 'same_day_unavailable') setDeliveryOption('standard');
       setSubmitError(data.message || 'We could not place your order. Nothing was charged. Please try again.');
       return;
     }
@@ -393,21 +392,12 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
             )}
 
             <div className="flex justify-between items-center">
-              <span className="text-stone-500 font-medium">Delivery Service</span>
+              <span className="text-stone-500 font-medium">Delivery</span>
               <span className="font-bold text-[#c5a059] flex items-center gap-1">
-                <span>UAE Priority Express</span>
+                <span>{confirmedOrder.deliveryOption === 'same_day' ? `Same day (AED ${confirmedOrder.deliveryFee})` : `${confirmedOrder.courier.serviceability?.deliverySpeed || deliverySettings.standardDays}, free`}</span>
               </span>
             </div>
 
-            {confirmedOrder.courier.serviceability && (
-              <div className="flex justify-between items-center text-[11px]">
-                <span className="text-stone-500 font-medium">Serviceability</span>
-                <span className="text-emerald-700 font-semibold flex items-center gap-1">
-                  <Check className="w-3.5 h-3.5" />
-                  <span>Verified Serviceable</span>
-                </span>
-              </div>
-            )}
 
             <div className="flex justify-between items-center">
               <span className="text-stone-500 font-medium">Payment Mode</span>
@@ -460,7 +450,7 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
               Fast UAE Checkout
             </h2>
             <p className="text-[11px] text-stone-600">
-              Handprinted & Machine-Printed Bed Linens • Express Delivery All 7 Emirates
+              Handprinted & Machine-Printed Bed Linens • Delivery across the UAE
             </p>
           </div>
           <button
@@ -485,7 +475,8 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
             </div>
             <div className="text-right">
               <span className="text-[10px] text-stone-500 block">Total Due</span>
-              <span className="text-base font-bold text-[#0f1c2e]">AED {grandTotal}</span>
+              <span id="checkout-total" className="text-base font-bold text-[#0f1c2e]">AED {grandTotal}</span>
+              {sameDayChosen && <span className="text-[10px] text-stone-500 block">incl. same-day AED {formatAed(deliveryFils)}</span>}
             </div>
           </div>
 
@@ -589,11 +580,8 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
 
             {/* GPS Location Notice Pill */}
             {locationNotice && (
-              <div className="bg-emerald-50 text-emerald-900 text-[11px] p-2.5 rounded-xl border border-emerald-200 flex items-center justify-between">
+              <div role="status" className={`text-[11px] p-2.5 rounded-xl border ${locationProblem ? 'bg-amber-50 text-amber-900 border-amber-200' : 'bg-emerald-50 text-emerald-900 border-emerald-200'}`}>
                 <span className="font-semibold">{locationNotice}</span>
-                <span className="text-[10px] bg-emerald-200 text-emerald-950 font-bold px-2 py-0.5 rounded-full">
-                  Accurate
-                </span>
               </div>
             )}
 
@@ -738,45 +726,38 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
               </div>
             </div>
 
-            {/* JEEBLY DELIVERY API SERVICEABILITY VERIFICATION BADGE */}
-            <div className="bg-gradient-to-br from-emerald-50/90 to-stone-50 p-3.5 rounded-2xl border border-emerald-200/90 text-xs space-y-1.5 shadow-xs">
-              <div className="flex items-center justify-between">
-                <div className="flex items-center gap-1.5">
-                  <Truck className="w-4 h-4 text-emerald-700" />
-                  <span className="font-bold text-stone-900">
-                    {isCheckingServiceability
-                      ? 'Verifying Delivery Serviceability...'
-                      : serviceability.serviceable
-                        ? 'Delivery Serviceability Verified'
-                        : 'Unserviceable Location'}
-                  </span>
-                </div>
-                {serviceability.serviceable ? (
-                  <span className="text-[10px] bg-emerald-200 text-emerald-950 font-bold px-2 py-0.5 rounded-full flex items-center gap-1">
-                    <Check className="w-3 h-3 text-emerald-700" />
-                    <span>Jeebly API Verified</span>
-                  </span>
+            {/* Delivery: from the address; the courier is chosen behind the scenes */}
+            <div className={`p-3.5 rounded-2xl border text-xs space-y-2.5 ${delivery.serviceable ? 'bg-emerald-50/80 border-emerald-200' : 'bg-red-50 border-red-200'}`} role="status" aria-live="polite">
+              <div className="flex items-center gap-2">
+                {delivery.serviceable ? (
+                  <span className="w-6 h-6 rounded-full bg-emerald-600 text-white flex items-center justify-center shrink-0"><Check className="w-4 h-4" /></span>
                 ) : (
-                  <span className="text-[10px] bg-red-100 text-red-700 font-bold px-2 py-0.5 rounded-full">
-                    Out of Range
-                  </span>
+                  <AlertCircle className="w-5 h-5 text-red-600 shrink-0" />
                 )}
-              </div>
-
-              <p className="text-[11px] text-stone-700 leading-relaxed">
-                {serviceability.serviceMessage}
-              </p>
-
-              <div className="grid grid-cols-2 gap-2 pt-1 border-t border-emerald-200/60 text-[10px] text-stone-600">
                 <div>
-                  <span className="text-stone-400 block">Assigned Logistics Hub:</span>
-                  <strong className="text-stone-800">{serviceability.hub}</strong>
-                </div>
-                <div>
-                  <span className="text-stone-400 block">Delivery Timeframe:</span>
-                  <strong className="text-emerald-700">{serviceability.deliverySpeed}</strong>
+                  <div className={`font-bold ${delivery.serviceable ? 'text-emerald-900' : 'text-red-800'}`}>{delivery.message}</div>
+                  {delivery.serviceable && <div className="text-stone-600">Delivery in {delivery.days}, free</div>}
                 </div>
               </div>
+              {delivery.serviceable && deliverySettings.sameDayEnabled && (
+                <fieldset className="grid grid-cols-1 sm:grid-cols-2 gap-2 pt-1">
+                  <legend className="sr-only">Delivery speed</legend>
+                  <label className={`flex items-start gap-2 p-2.5 rounded-xl border cursor-pointer ${!sameDayChosen ? 'border-[#0f1c2e] bg-white' : 'border-stone-200 bg-white/60'}`}>
+                    <input type="radio" name="delivery-option" className="mt-0.5" checked={!sameDayChosen} onChange={() => setDeliveryOption('standard')} />
+                    <span>
+                      <strong className="block text-stone-900">Standard · free</strong>
+                      <span className="text-stone-500">{delivery.days}</span>
+                    </span>
+                  </label>
+                  <label className={`flex items-start gap-2 p-2.5 rounded-xl border ${delivery.sameDay.available ? 'cursor-pointer' : 'opacity-60'} ${sameDayChosen ? 'border-[#0f1c2e] bg-white' : 'border-stone-200 bg-white/60'}`}>
+                    <input type="radio" name="delivery-option" className="mt-0.5" checked={sameDayChosen} disabled={!delivery.sameDay.available} onChange={() => setDeliveryOption('same_day')} />
+                    <span>
+                      <strong className="block text-stone-900">Same day · +AED {formatAed(toFils(delivery.sameDay.fee))}</strong>
+                      <span className="text-stone-500">{delivery.sameDay.available ? `Order before ${delivery.sameDay.cutoff}` : delivery.sameDay.reason}</span>
+                    </span>
+                  </label>
+                </fieldset>
+              )}
             </div>
           </div>
 
@@ -931,7 +912,7 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
             )}
             <button
               type="submit"
-              disabled={isSubmitting || !serviceability.serviceable || !isPhoneVerified}
+              disabled={isSubmitting || !delivery.serviceable || !isPhoneVerified}
               className="w-full bg-[#0f1c2e] hover:bg-stone-800 active:scale-95 text-white font-bold text-sm py-4 rounded-xl shadow-xl flex items-center justify-center gap-2 transition-all disabled:opacity-50"
             >
               {isSubmitting ? (
@@ -951,7 +932,7 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
               )}
             </button>
             <p className="text-[10px] text-center text-stone-600 mt-2">
-              Dispatched with priority UAE courier tracking. Doorstep delivery verified by Jeebly logistics network.
+              Delivered to your door, with a tracking link as soon as it ships.
             </p>
           </div>
         </form>

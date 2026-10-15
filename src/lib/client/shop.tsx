@@ -1,7 +1,7 @@
 'use client';
 
 import React, { createContext, useContext } from 'react';
-import type { CartItem, Product, StoreSettings } from '@/types';
+import type { CartItem, DeliverySettings, Product, StoreSettings } from '@/types';
 import type { FestivalTheme } from '@/lib/festivals/catalog';
 
 /** Today's festival look, from /api/settings/public (null: the everyday look). */
@@ -14,7 +14,7 @@ export interface FestivalView {
   showBanner: boolean;
   showMarquee: boolean;
 }
-import { DEFAULT_CATALOG, DEFAULT_STORE } from '@/data/catalogDefaults';
+import { DEFAULT_CATALOG, DEFAULT_DELIVERY, DEFAULT_STORE } from '@/data/catalogDefaults';
 
 /** Shop-wide public settings for storefront components (from /api/settings/public). */
 export interface ShopInfo {
@@ -24,6 +24,7 @@ export interface ShopInfo {
   festival: FestivalView | null;
   /** The shop's chat (Settings → Chat assistant), null when switched off. */
   chat: { name: string; greeting: string } | null;
+  delivery: DeliverySettings;
 }
 
 const ShopContext = createContext<ShopInfo>({
@@ -32,6 +33,7 @@ const ShopContext = createContext<ShopInfo>({
   supportEmail: 'orders@beautifuluaehome.com',
   festival: null,
   chat: null,
+  delivery: DEFAULT_DELIVERY,
 });
 
 export const ShopProvider = ShopContext.Provider;

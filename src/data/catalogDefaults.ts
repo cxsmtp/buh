@@ -1,4 +1,4 @@
-import type { AssistantSettings, CatalogSettings, EmailSettings, StoreSettings, ThemeSettings } from '@/types';
+import type { AssistantSettings, DeliverySettings, CatalogSettings, EmailSettings, StoreSettings, ThemeSettings } from '@/types';
 import { ALL_BED_PROFILES_LIST } from './bedProfiles';
 
 /** Settings → Catalogue before the owner changes anything. */
@@ -92,4 +92,15 @@ export const DEFAULT_ASSISTANT: AssistantSettings = {
       answer: 'If something arrives damaged or wrong, message us within 48 hours with a photo and we will make it right. Tap "Talk to a person" and we will take it from there.',
     },
   ],
+};
+
+/** Delivery before the owner changes anything: all seven emirates, 1–2 days, no same-day service. */
+export const DEFAULT_DELIVERY: DeliverySettings = {
+  emirates: ['Dubai', 'Abu Dhabi', 'Sharjah', 'Ajman', 'Ras Al Khaimah', 'Fujairah', 'Umm Al Quwain'],
+  notServed: [],
+  standardDays: '1–2 days',
+  sameDayEnabled: false,
+  sameDayFee: 25,
+  sameDayCutoff: '13:00',
+  sameDayEmirates: ['Dubai'],
 };

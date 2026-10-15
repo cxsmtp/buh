@@ -28,6 +28,10 @@ What protects the shop, how it works, and what the owner must do. Each item has 
 - The updater first moves the request into a new folder only it can open, so it can't be swapped for a link or a pipe while being read; it then accepts only a small plain file whose line matches `rollback N.N.N` or `update` exactly, and refuses versions before 2.0.0. Anything else is dropped unread and never echoed. The folder is sticky and not listable, so the shop can't remove or read anything else there.
 - The updater's status comes back through a second folder the shop mounts read-only; it holds versions and messages, no secrets. The updater writes it to a new file and renames it, so a planted link is replaced, never followed. The shop reads it defensively (size cap, links refused, fields checked).
 
+## Delivery charges
+
+- Whether we deliver, and any same-day charge, are decided on the server from the address and Settings → Delivery, in fils; a GPS reading never decides it (devices often report a network location). The browser's total must match the server's or the order is refused before anything is charged; a same-day order after the cut-off is refused (409) and checkout moves back to standard.
+
 ## Chat
 
 - Each chat has a random id and a 192-bit secret kept in the customer's browser; only its SHA-256 is stored, and it travels in a header or the request body, never in an address. A wrong secret and an unknown chat get the same answer.
