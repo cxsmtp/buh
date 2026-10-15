@@ -70,6 +70,7 @@ Every page sends:
 ## Deployment
 
 - **Docker:** non-root, `read_only`, `tmpfs /tmp`, `cap_drop: ALL`, `no-new-privileges`, bound to `127.0.0.1`, data in a volume, healthcheck on `/api/health`.
+- **Published image** (`ghcr.io/cxsmtp/buh`): built by GitHub Actions from main only, after a smoke test that starts it read-only, as user 1001, with every capability dropped. Pull requests build and test it but never publish. No secrets are baked in: the support email and shop address are read from the environment at start-up.
 - **PM2:** one instance. Codes and limits live in process memory; move them to Redis before running more.
 - **`TRUST_PROXY=1`** only behind nginx, which sets `X-Real-IP`. Without a trusted proxy, per-address limits are skipped (not shared by everyone); the per-number, per-account and shop-wide limits still apply.
 - **Back up `DATA_DIR`.** It holds the database, uploaded photos, receipts, backups, the admin account, session key and audit log, with owner-only permissions (an existing folder is tightened to 700 at start).

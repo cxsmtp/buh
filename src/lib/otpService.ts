@@ -5,6 +5,7 @@ import { logEvent, maskPhone } from '@/lib/server/log';
 import { assertPublicHttpsUrl, safeFetch } from '@/lib/server/outbound';
 import { takeAll, type LimitRule } from '@/lib/server/rateLimit';
 import { audit } from '@/lib/server/audit';
+import { supportEmail } from '@/lib/server/runtimeConfig';
 
 /**
  * Phone verification codes.
@@ -81,9 +82,6 @@ export function normalizePhoneNumber(rawPhone: string): string {
 // UAE mobile networks: 50, 52, 54, 55, 56, 58. Matches the checkout form.
 const UAE_MOBILE = /^\+9715[024568]\d{7}$/;
 
-function supportEmail(): string {
-  return process.env.NEXT_PUBLIC_SUPPORT_EMAIL || 'orders@beautifuluaehome.com';
-}
 
 function allowedPrefixes(): string[] {
   return (process.env.OTP_ALLOWED_PREFIXES || '+971')
