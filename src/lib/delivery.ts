@@ -34,7 +34,10 @@ export function deliveryCheck(input: { emirate: string; area: string }, s: Deliv
   const emirate = EMIRATES_LIST.find((e) => e === input.emirate);
   const area = input.area.trim();
   const notServed = s.notServed.map(norm).filter(Boolean);
-  const blocked = Boolean(area) && notServed.some((n) => norm(area) === n || norm(area).includes(n));
+  // The whole area name, or (for names of two words or more) that name inside a longer address:
+  // "Bay" must not block "Business Bay", nor "Al" every "Al …" area.
+  const padded = ` ${norm(area)} `;
+  const blocked = Boolean(area) && notServed.some((n) => norm(area) === n || (n.includes(' ') && padded.includes(` ${n} `)));
   const where = [area, emirate].filter(Boolean).join(', ');
   const serviceable = Boolean(emirate) && s.emirates.includes(emirate!) && !blocked;
   const [h, m] = s.sameDayCutoff.split(':').map(Number);
@@ -58,7 +61,16 @@ export function deliveryCheck(input: { emirate: string; area: string }, s: Deliv
   };
 }
 
-/** A GPS reading inside the UAE (anything else is a network location, not the customer). */
+/** Today's date in the UAE, YYYY-MM-DD. */
+export function uaeDate(now: number, plusDays = 0): string {
+  return new Date(now + 4 * 60 * 60 * 1000 + plusDays * 86_400_000).toISOString().slice(0, 10);
+}
+
+/**
+ * A GPS reading inside the UAE (anything else is a network location, not the customer).
+ * A box around the UAE, without Qatar (west of 51.7°E, north of 24.4°N).
+ */
 export function inUAE(lat: number, lng: number): boolean {
-  return lat >= 22.5 && lat <= 26.2 && lng >= 51.4 && lng <= 56.5;
+  if (!(lat >= 22.5 && lat <= 26.2 && lng >= 51.4 && lng <= 56.5)) return false;
+  return !(lng < 51.7 && lat > 24.4);
 }

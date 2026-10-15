@@ -152,7 +152,9 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
 
   // Delivery: decided by the address (the server checks again and charges any same-day fee).
   const { delivery: deliverySettings } = useShop();
-  const [deliveryOption, setDeliveryOption] = useState<'standard' | 'same_day'>('standard');
+  // Same day is chosen for one address: changing the emirate or area goes back to standard.
+  const [deliveryChoice, setDeliveryChoice] = useState<{ option: 'standard' | 'same_day'; key: string }>({ option: 'standard', key: '' });
+  const setDeliveryOption = (option: 'standard' | 'same_day') => setDeliveryChoice({ option, key: `${emirate}|${area}` });
   const [locationProblem, setLocationProblem] = useState(false);
 
   // Payment Method & Bank Transfer
@@ -170,7 +172,7 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
   // In fils, like the server. Standard delivery and COD are free (same day adds Settings → Delivery's charge); the server is the source of truth and
   // refuses the order if its total differs from the one shown here (a price changed meanwhile).
   const delivery = deliveryCheck({ emirate, area }, deliverySettings);
-  const sameDayChosen = deliveryOption === 'same_day' && delivery.sameDay.available;
+  const sameDayChosen = deliveryChoice.option === 'same_day' && deliveryChoice.key === `${emirate}|${area}` && delivery.sameDay.available;
   const deliveryFils = sameDayChosen ? toFils(delivery.sameDay.fee) : 0;
   const totalFils = cartFils(items) + deliveryFils;
   const grandTotal = formatAed(totalFils);
@@ -217,10 +219,13 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
         setGpsCoordinates({ lat: latitude, lng: longitude });
         const near = nearestUAELocation(latitude, longitude);
         const approx = accuracy > 1000 ? ` (about ${Math.round(accuracy / 1000)} km accuracy, please check)` : '';
-        if (near) {
+        if (near && !area) {
           setEmirate(near.location.emirate);
-          if (!area) setArea(near.location.name);
+          setArea(near.location.name);
           setLocationNotice(`📍 Location saved for the driver, near ${near.location.name}, ${near.location.emirate}${approx}.`);
+        } else if (near) {
+          // The customer already typed an area: never switch the emirate under it.
+          setLocationNotice(`📍 Location saved for the driver (near ${near.location.name}, ${near.location.emirate}${approx}). Your address above is kept.`);
         } else {
           setLocationNotice(`📍 Location saved for the driver${approx}. Please choose your emirate and area below.`);
         }

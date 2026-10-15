@@ -498,13 +498,18 @@ const VALIDATORS: { [K in SettingsKey]: (input: Obj, current: SettingsMap[K]) =>
       .map((a, i) => text(a, `Area ${i + 1}`, 80))
       .filter(Boolean)
       .slice(0, 200);
-    const fee = input.sameDayFee === undefined ? current.sameDayFee : Number(input.sameDayFee);
-    if (!Number.isFinite(fee) || fee < 0 || fee > 500 || Math.round(fee * 100) !== fee * 100) throw new HttpError(400, 'Same-day charge: AED 0 to 500 (up to 2 decimals).');
+    const tooShort = notServed.find((a) => a.replace(/[^\p{L}\p{N}]/gu, '').length < 3);
+    if (tooShort) throw new HttpError(400, `Areas not served: "${tooShort}" is too short; write the full area name.`);
+    const feeIn = input.sameDayFee === undefined ? current.sameDayFee : Number(input.sameDayFee);
+    // 19.99 × 100 is 1998.9999… in floating point: compare with a tolerance, then keep exact fils.
+    if (!Number.isFinite(feeIn) || feeIn < 0 || feeIn > 500 || Math.abs(feeIn * 100 - Math.round(feeIn * 100)) > 1e-6) throw new HttpError(400, 'Same-day charge: AED 0 to 500 (up to 2 decimals).');
+    const fee = Math.round(feeIn * 100) / 100;
     const cutoff = text(input.sameDayCutoff, 'Same-day cut-off', 5, current.sameDayCutoff);
     if (!/^([01]\d|2[0-3]):[0-5]\d$/.test(cutoff)) throw new HttpError(400, 'Same-day cut-off: a time like 13:00.');
     const sameDayEmirates = emirateList(input.sameDayEmirates, 'Same-day emirates', current.sameDayEmirates);
     const sameDayEnabled = bool(input.sameDayEnabled, current.sameDayEnabled);
     if (sameDayEnabled && !sameDayEmirates.length) throw new HttpError(400, 'Choose where same-day delivery is offered.');
+    if (sameDayEnabled && cutoff === '00:00') throw new HttpError(400, 'Same-day cut-off: 00:00 would never allow it; choose a time like 13:00.');
     return {
       emirates,
       notServed,

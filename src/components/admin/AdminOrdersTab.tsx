@@ -79,7 +79,9 @@ export const AdminOrdersTab: React.FC<AdminOrdersTabProps> = ({
     // Auto-select smart courier:
     // COD -> Jeebly
     // Prepaid -> Eco Express
-    const defaultProvider: CourierProvider = order.paymentMethod === 'cod'
+    const defaultProvider: CourierProvider = order.deliveryOption === 'same_day'
+      ? 'jeebly' // Eco Express books next-day only
+      : order.paymentMethod === 'cod'
       ? courierSettings.autoAssignRules.codCourier || 'jeebly'
       : courierSettings.autoAssignRules.prepaidCourier || 'echo';
 

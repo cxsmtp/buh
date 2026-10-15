@@ -37,6 +37,10 @@ export async function dispatchOrder(input: {
   if (order.status === 'cancelled' || order.status === 'delivered') {
     throw new HttpError(409, `This order is ${order.status} and cannot be booked.`);
   }
+  // Eco Express books next-day only: a same-day order (the customer paid for it) goes with Jeebly Express.
+  if (order.deliveryOption === 'same_day' && provider === 'echo') {
+    throw new HttpError(400, 'This is a same-day order: Eco Express books next-day only. Book it with Jeebly (Express).');
+  }
   const settings = getSettings('courier');
   const live = settings[provider].isLive;
 

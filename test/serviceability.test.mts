@@ -94,8 +94,12 @@ test('same-day delivery is charged by the server, in fils; refused when not avai
   // The total the customer saw must include the charge.
   assert.equal(statusOf(() => place({ deliveryOption: 'same_day', expectedTotal: fast.subtotal })), 409);
   assert.equal(statusOf(() => place({ deliveryOption: 'same_day' }, { emirate: 'Sharjah' })), 409, 'not offered there');
-  await settings.updateSettings('delivery', { sameDayCutoff: '00:00' });
-  assert.equal(statusOf(() => place({ deliveryOption: 'same_day' })), 409, 'after the cut-off');
+  // The cut-off is now (UAE time): too late for same day. (At exactly 00:00 a cut-off can't be set: skip.)
+  const m = uaeMinutes(Date.now());
+  if (m > 0) {
+    await settings.updateSettings('delivery', { sameDayCutoff: `${String(Math.floor(m / 60)).padStart(2, '0')}:${String(m % 60).padStart(2, '0')}` });
+    assert.equal(statusOf(() => place({ deliveryOption: 'same_day' })), 409, 'after the cut-off');
+  }
 });
 
 test('settings → Delivery: checked', async () => {
@@ -115,4 +119,44 @@ test('settings → Delivery: checked', async () => {
   await settings.updateSettings('delivery', { notServed: 'Sir Bani Yas Island, Delma Island' });
   assert.deepEqual(settings.getSettings('delivery').notServed, ['Sir Bani Yas Island', 'Delma Island']);
   assert.equal(statusOf(() => place({}, { emirate: 'Abu Dhabi', area: 'Delma Island' })), 400);
+});
+
+// ── Review of BUH-02.02.00 ─────────────────────────────────────────────────
+
+test('regression: a paid same-day order is booked for today as Express, never with the next-day-only courier', async () => {
+  await settings.updateSettings('delivery', { sameDayEnabled: true, sameDayFee: 25, sameDayCutoff: '23:59', sameDayEmirates: ['Dubai'] });
+  const o = place({ deliveryOption: 'same_day' });
+  const { uaeDate } = await import('@/lib/delivery');
+  assert.equal(o.courier.serviceType, 'Express');
+  assert.equal(o.courier.pickupDate, uaeDate(Date.now()), 'collected today (UAE date)');
+  assert.equal(place().courier.pickupDate, uaeDate(Date.now(), 1), 'standard: tomorrow');
+  const { dispatchOrder } = await import('@/lib/server/dispatch');
+  await assert.rejects(dispatchOrder({ orderId: o.id, provider: 'echo', rebook: false, actor: 'test' }), (e: { status?: number }) => e.status === 400);
+  await settings.updateSettings('delivery', { sameDayEnabled: false });
+});
+
+test('regression: "areas not served" never blocks more than the area named', async () => {
+  const s = (notServed: string[]) => ({ ...DEFAULT_DELIVERY, notServed });
+  for (const area of ['Al Barsha', 'Palm Jumeirah', 'Dubai Marina']) assert.equal(deliveryCheck({ emirate: 'Dubai', area }, s(['Al'])).serviceable, true, area);
+  assert.equal(deliveryCheck({ emirate: 'Dubai', area: 'Business Bay' }, s(['Bay'])).serviceable, true);
+  assert.equal(deliveryCheck({ emirate: 'Abu Dhabi', area: 'Sir Bani Yas Island, west jetty' }, s(['Sir Bani Yas Island'])).serviceable, false);
+  assert.equal(deliveryCheck({ emirate: 'Abu Dhabi', area: 'Delma' }, s(['Delma'])).serviceable, false);
+  await assert.rejects(settings.updateSettings('delivery', { notServed: ['Al'] }), (e: { status?: number }) => e.status === 400);
+});
+
+test('regression: same-day charges like AED 19.99 can be saved; a 00:00 cut-off is refused', async () => {
+  await settings.updateSettings('delivery', { sameDayFee: 19.99 });
+  assert.equal(settings.getSettings('delivery').sameDayFee, 19.99);
+  await settings.updateSettings('delivery', { sameDayFee: 1.15 });
+  assert.equal(settings.getSettings('delivery').sameDayFee, 1.15);
+  await assert.rejects(settings.updateSettings('delivery', { sameDayEnabled: true, sameDayCutoff: '00:00' }), (e: { status?: number }) => e.status === 400);
+});
+
+test('regression: the courier is not named to customers (Track Order), and Doha is not taken for the UAE', () => {
+  const o = place();
+  const seen = orders.lookupOrder(o.id, o.customer.phone);
+  assert.doesNotMatch(JSON.stringify(seen), /jeebly|"provider"/i);
+  assert.equal(inUAE(25.2854, 51.531), false, 'Doha');
+  assert.equal(inUAE(24.4539, 54.3773), true, 'Abu Dhabi');
+  assert.equal(inUAE(24.1302, 52.5785), true, 'Ruwais (west of Abu Dhabi)');
 });

@@ -2,7 +2,7 @@ import crypto from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
 import type { Customer, Emirate, Order, OrderStatus } from '@/types';
-import { deliveryCheck } from '@/lib/delivery';
+import { deliveryCheck, uaeDate } from '@/lib/delivery';
 import { dataDir } from './dataDir';
 import { getDb, inTransaction } from './db';
 import { HttpError } from './http';
@@ -289,11 +289,12 @@ export function placeOrder(input: unknown): PlaceOrderResult {
       status: 'pending_confirmation',
       courier: {
         provider: provider === 'manual' ? 'jeebly' : provider,
-        serviceType: 'Scheduled',
+        serviceType: deliveryOption === 'same_day' ? 'Express' : 'Scheduled',
         awbNumber: '',
         trackingUrl: '',
         status: 'Order placed – awaiting confirmation',
-        pickupDate: new Date(Date.now() + 86_400_000).toISOString().slice(0, 10),
+        // Same day: collected today (UAE date); otherwise tomorrow.
+        pickupDate: uaeDate(Date.now(), deliveryOption === 'same_day' ? 0 : 1),
         weightKg: Math.min(500, 2.5 * items.reduce((s, i) => s + i.quantity, 0)),
         pieces: items.reduce((s, i) => s + i.quantity, 0),
         labelGenerated: false,
@@ -423,8 +424,8 @@ export function customerView(order: Order) {
 }
 
 function trackingView(order: Order) {
+  // The courier's name is not shown to customers (the tracking link is enough).
   return {
-    provider: order.courier.provider,
     awbNumber: order.courier.simulated ? '' : order.courier.awbNumber,
     trackingUrl: order.courier.simulated ? '' : order.courier.trackingUrl,
     status: order.courier.status,

@@ -357,8 +357,28 @@ test('regression (reported): a laptop that reports Virginia keeps a Dubai addres
   await page.getByText(/Same day · \+AED 25/).click();
   await page.getByText(/incl\. same-day AED 25/).waitFor();
   assert.equal(Math.round(((await total()) - before) * 100), 2500);
+  // A new address: back to standard (no charge carried over without choosing it again).
+  await page.getByPlaceholder('e.g. Dubai Marina, Saadiyat, JVC').fill('JLT');
+  await page.getByText('We deliver to JLT, Dubai').waitFor();
+  assert.equal(await total(), before);
   assert.deepEqual(await overflow(page), []);
   assert.deepEqual(errors, []);
   await ctx.close();
   await api('PUT', '/api/admin/settings/delivery', { settings: { sameDayEnabled: false } });
+});
+
+test('regression: a GPS reading near Sharjah never switches the emirate under an area the customer typed', { skip }, async () => {
+  const ctx = await browser.newContext({ viewport: { width: 375, height: 860 }, geolocation: { latitude: 25.3167, longitude: 55.3722 }, permissions: ['geolocation'] });
+  const page = await ctx.newPage();
+  await page.goto(server.base, { waitUntil: 'domcontentloaded' });
+  const p = (await (await fetch(`${server.base}/api/products`)).json()).products[0];
+  await page.locator('h3, h4').filter({ hasText: p.title }).first().click();
+  await page.getByRole('button', { name: /Add to Bag/ }).click();
+  await page.getByRole('button', { name: /Proceed to Checkout/ }).click();
+  await page.getByPlaceholder('e.g. Dubai Marina, Saadiyat, JVC').fill('Al Barsha');
+  await page.getByRole('button', { name: /Use My GPS/ }).click();
+  await page.getByText(/Your address above is kept/).waitFor();
+  assert.equal(await page.locator('select').first().inputValue(), 'Dubai');
+  await page.getByText('We deliver to Al Barsha, Dubai').waitFor();
+  await ctx.close();
 });

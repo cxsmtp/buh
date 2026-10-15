@@ -62,7 +62,8 @@ export async function createJeeblyShipment(
   
   const payload: JeeblyCreateOrderPayload = {
     pickupDate,
-    serviceType: settings.serviceType || 'Scheduled',
+    // A same-day order (the customer paid for it) is always booked as Express.
+    serviceType: order.deliveryOption === 'same_day' ? 'Express' : settings.serviceType || 'Scheduled',
     consignmetLoadType: 'Non-Document',
     consignmentType: 'FORWARD',
     sender: {
