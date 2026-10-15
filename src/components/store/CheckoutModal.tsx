@@ -42,6 +42,8 @@ interface CheckoutModalProps {
   onOrderPlaced: (order: Order) => void;
   /** Reload the catalogue and the bag (prices changed on the server). */
   onPricesChanged: () => Promise<void>;
+  /** Where international customers email (from the server's settings). */
+  supportEmail?: string;
 }
 
 export const CheckoutModal: React.FC<CheckoutModalProps> = ({
@@ -51,6 +53,7 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
   bank,
   onOrderPlaced,
   onPricesChanged,
+  supportEmail,
 }) => {
   // One checkout attempt = one order, even if "Confirm" is sent twice (double tap, retry).
   const [idempotencyKey] = useState(() => crypto.randomUUID());
@@ -440,6 +443,7 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
               </div>
 
               <PhoneVerification
+                supportEmail={supportEmail}
                 phone={phone}
                 onPhoneChange={setPhone}
                 verified={isPhoneVerified}

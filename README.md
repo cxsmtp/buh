@@ -25,8 +25,10 @@ Open <http://localhost:3000>. The terminal prints the first admin password once;
 **Production:** a Hostinger KVM VPS with Docker Compose. The shop runs behind Caddy, which provides automatic HTTPS. Step by step: [HOSTINGER_DEPLOYMENT_GUIDE.md](HOSTINGER_DEPLOYMENT_GUIDE.md).
 
 ```
-docker compose up -d --build
+docker compose pull app && docker compose up -d
 ```
+
+The image `ghcr.io/cxsmtp/buh:latest` is built, tested and published from main. To try it on your own computer with Podman on Windows, run `scripts\run-local-podman.bat` (test mode, http://localhost:3000).
 
 ## Configure
 

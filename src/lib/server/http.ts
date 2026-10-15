@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server';
 import { logEvent } from './log';
+import { appUrl } from './runtimeConfig';
 
 /**
  * An error whose message is safe to show to the caller. Anything else that
@@ -106,10 +107,10 @@ export function assertSameOrigin(req: Request): void {
   const host = req.headers.get('host');
   const allowed = new Set<string>();
   if (host) allowed.add(host.toLowerCase());
-  const appUrl = process.env.NEXT_PUBLIC_APP_URL;
-  if (appUrl) {
+  const url = appUrl();
+  if (url) {
     try {
-      allowed.add(new URL(appUrl).host.toLowerCase());
+      allowed.add(new URL(url).host.toLowerCase());
     } catch {
       // ignore a malformed APP_URL; Host still applies
     }

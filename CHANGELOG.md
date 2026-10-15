@@ -1,5 +1,16 @@
 # Changelog
 
+## BUH-01.02.00 — 2026-10-15 07:19 UTC · [#3](https://github.com/cxsmtp/buh/pull/3)
+
+- **A ready-made container image.** Every change on main is built, started and checked, then published as `ghcr.io/cxsmtp/buh:latest` (plus a tag per version), so the server and your own computer can pull it instead of building it.
+- **Test it on Windows with Podman.** `scripts\run-local-podman.bat` pulls the image and runs it at http://localhost:3000 in test mode (SMS codes on screen), keeping its data between runs.
+- **The support email and shop address are read when the shop starts.** They were fixed at build time, so the email shown to international customers ignored `.env.production`; now one image works for any shop.
+- **Status.**
+  - **Benchmark:** same host, main vs this branch, 3 rounds each, alternating. Storefront main 750 / 868 / 844 req/s, branch 839 / 891 / 793 (p50 66–77 vs 66–76 ms). Serviceability main 606 / 734 / 663, branch 657 / 621 / 722. Catalogue main 685 / 777 / 773, branch 703 / 787 / 823 (p95 145–169 ms on the branch; main's first round had a 391 ms tail). 0 failed requests in every run.
+  - **Tests:** 120 passed, including a new test that starts the real build with a different support email and shop address (it fails on the previous code).
+  - **Dependency audit:** production 0 vulnerabilities; the same 5 dev-only ESLint findings as main.
+  - **Security scan:** no automated scanner here. The image is smoke-tested in CI running read-only, as a non-root user, with every capability dropped.
+
 ## BUH-01.01.00 — 2026-10-14 19:58 UTC · [#2](https://github.com/cxsmtp/buh/pull/2)
 
 - **Orders are kept on the server.** Every order, product, setting and booking is stored in a database on the server, so the owner sees every customer's order in the Admin Hub on any device. Prices, totals and stock are worked out there; a forged price is ignored, a double tap gives one order, and the last item can't be sold twice.

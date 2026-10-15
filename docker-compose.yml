@@ -4,14 +4,16 @@
 #          receipts, backups, audit log). One instance on purpose.
 #   caddy  HTTPS with automatic Let's Encrypt certificates, in front of the app.
 #
-# Start / update:  docker compose up -d --build
+# Start / update with the published image:  docker compose pull app && docker compose up -d
+# Or build it here instead:                 docker compose up -d --build
 # Logs:            docker compose logs -f app
 services:
   app:
     build:
       context: .
       dockerfile: Dockerfile
-    image: buhome-app:latest
+    # Published by .github/workflows/container.yml from main.
+    image: ghcr.io/cxsmtp/buh:latest
     restart: unless-stopped
     env_file:
       - .env.production
