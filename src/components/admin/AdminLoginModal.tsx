@@ -1,8 +1,13 @@
 'use client';
 
-import React, { useState } from 'react';
-import { Lock, ShieldCheck, ArrowRight, Eye, EyeOff, Check } from 'lucide-react';
-import { postJson } from '@/lib/apiClient';
+import React, { useEffect, useState } from 'react';
+import { Lock, ShieldCheck, ArrowRight, Eye, EyeOff, Check, KeyRound, LifeBuoy } from 'lucide-react';
+import { getJson, postJson } from '@/lib/apiClient';
+import { passkeyErrorMessage, passkeysSupported, webauthnBrowser } from '@/lib/client/passkeys';
+
+const input = 'w-full px-3.5 py-2.5 rounded-xl border border-stone-300 bg-white text-stone-900 placeholder:text-stone-500 focus:outline-none focus:ring-2 focus:ring-[#c5a059] text-xs';
+const primary = 'w-full bg-[#0f1c2e] hover:bg-stone-800 disabled:opacity-60 text-white font-bold py-3.5 rounded-xl shadow-lg flex items-center justify-center gap-2 text-xs mt-2';
+const quiet = 'text-stone-600 hover:text-stone-900 font-semibold py-1 underline-offset-2 hover:underline';
 
 interface AdminLoginModalProps {
   isOpen: boolean;
@@ -32,9 +37,118 @@ export const AdminLoginModal: React.FC<AdminLoginModalProps> = ({
   // "Forgot password?": ask for a link by email.
   const [forgot, setForgot] = useState(false);
   const [notice, setNotice] = useState('');
+  // "Use a recovery code": email + code, then a new password (no current password: it was forgotten).
+  const [recovery, setRecovery] = useState(false);
+  const [code, setCode] = useState('');
+  const [recoveryPending, setRecoveryPending] = useState(false);
+  const [codesLeft, setCodesLeft] = useState<number | null>(null);
+  // Signed in with a code, but the password is set in the server's .env.production: it can't be changed here.
+  const [envManaged, setEnvManaged] = useState(false);
+
+  // Reopened after a recovery-code sign-in (a reload, say): go straight to "choose a new password".
+  useEffect(() => {
+    if (!isOpen || resetToken) return;
+    let cancelled = false;
+    void getJson<{ authenticated?: boolean; recoveryPending?: boolean }>('/api/admin/session').then(({ ok, data }) => {
+      if (!cancelled && ok && data.authenticated && data.recoveryPending) setRecoveryPending(true);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [isOpen, resetToken]);
 
   if (!isOpen) return null;
   const resetting = Boolean(resetToken);
+  const canUsePasskey = passkeysSupported();
+
+  const finish = () => {
+    setPassword('');
+    setCode('');
+    setNewPassword('');
+    setConfirmPassword('');
+    setRecovery(false);
+    setRecoveryPending(false);
+    setEnvManaged(false);
+    setMustChange(false);
+    onLoginSuccess();
+    onClose();
+  };
+
+  const handlePasskey = async () => {
+    setError('');
+    setNotice('');
+    setBusy(true);
+    try {
+      const start = await postJson<{ options?: unknown; message?: string }>('/api/admin/login/passkey/options', {});
+      if (!start.ok || !start.data.options) {
+        setError(start.data.message || 'Passkey sign-in is not available right now.');
+        return;
+      }
+      const { startAuthentication } = await webauthnBrowser();
+      let response: unknown;
+      try {
+        response = await startAuthentication({ optionsJSON: start.data.options as Parameters<typeof startAuthentication>[0]['optionsJSON'] });
+      } catch (err) {
+        setError(passkeyErrorMessage(err, 'sign in'));
+        return;
+      }
+      const { ok, data } = await postJson<{ message?: string }>('/api/admin/login/passkey', { response });
+      if (!ok) {
+        setError(data.message || 'That passkey was not accepted.');
+        return;
+      }
+      finish();
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const handleRecovery = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setError('');
+    setBusy(true);
+    const { ok, data } = await postJson<{ message?: string; mustChangePassword?: boolean; managedByEnv?: boolean; remaining?: number }>('/api/admin/login/recovery', {
+      email: email.trim(),
+      code: code.trim(),
+    });
+    setBusy(false);
+    if (!ok) {
+      setError(data.message || 'Sign-in failed. Please try again.');
+      return;
+    }
+    setCode('');
+    setRecovery(false);
+    setCodesLeft(typeof data.remaining === 'number' ? data.remaining : null);
+    if (data.mustChangePassword) setRecoveryPending(true);
+    else if (data.managedByEnv) setEnvManaged(true);
+    else finish();
+  };
+
+  const handleRecoveryPassword = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setError('');
+    if (newPassword !== confirmPassword) {
+      setError('The new passwords do not match.');
+      return;
+    }
+    setBusy(true);
+    const { ok, data } = await postJson<{ message?: string }>('/api/admin/password', { newPassword });
+    setBusy(false);
+    if (!ok) {
+      setError(data.message || 'Could not change the password.');
+      return;
+    }
+    finish();
+  };
+
+  const codesLeftNote =
+    codesLeft === null ? null : (
+      <p className={`rounded-xl border p-2.5 leading-relaxed ${codesLeft <= 2 ? 'bg-amber-50 border-amber-300 text-amber-900' : 'bg-stone-50 border-stone-200 text-stone-700'}`}>
+        {codesLeft === 0
+          ? 'That was your last recovery code. Create a new set in Settings → Passkeys & recovery codes straight away.'
+          : `You have ${codesLeft} recovery code${codesLeft === 1 ? '' : 's'} left.${codesLeft <= 2 ? ' Create a new set in Settings → Passkeys & recovery codes soon.' : ''}`}
+      </p>
+    );
 
   const handleForgot = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -177,6 +291,71 @@ export const AdminLoginModal: React.FC<AdminLoginModalProps> = ({
               </button>
             )}
           </form>
+        ) : recoveryPending ? (
+          <form onSubmit={handleRecoveryPassword} className="space-y-3.5 text-xs">
+            <p className="text-stone-700 leading-relaxed">
+              <strong>You&apos;re in.</strong> Now choose a new admin password: at least 12 characters, with at least 5 different characters. Every other device has been signed out.
+            </p>
+            {codesLeftNote}
+            <div>
+              <label htmlFor="admin-recovery-new" className="block text-stone-800 font-semibold mb-1">New password</label>
+              <input id="admin-recovery-new" type="password" required minLength={12} maxLength={256} autoComplete="new-password" value={newPassword} onChange={(e) => setNewPassword(e.target.value)} className={input} />
+            </div>
+            <div>
+              <label htmlFor="admin-recovery-confirm" className="block text-stone-800 font-semibold mb-1">Confirm new password</label>
+              <input id="admin-recovery-confirm" type="password" required minLength={12} maxLength={256} autoComplete="new-password" value={confirmPassword} onChange={(e) => setConfirmPassword(e.target.value)} className={input} />
+            </div>
+            <button type="submit" disabled={busy} className={primary}>
+              <Check className="w-4 h-4 text-amber-300" />
+              <span>{busy ? 'Saving…' : 'Save New Password'}</span>
+            </button>
+          </form>
+        ) : envManaged ? (
+          <div className="space-y-3.5 text-xs">
+            <p role="status" className="bg-amber-50 text-amber-900 border border-amber-300 rounded-xl p-3 leading-relaxed">
+              <strong>You&apos;re signed in.</strong> Your password can&apos;t be changed here: it is set on the server (ADMIN_PASSWORD_HASH in .env.production).
+              To choose a new one, make a new hash with <code className="font-mono">npm run hash-password</code>, put it in .env.production and restart the shop (see the deployment guide), or ask whoever runs your server.
+            </p>
+            {codesLeftNote}
+            <button type="button" onClick={finish} className={primary}>
+              <span>Continue to the Admin Hub</span>
+              <ArrowRight className="w-4 h-4 text-amber-300" />
+            </button>
+          </div>
+        ) : recovery ? (
+          <form onSubmit={handleRecovery} className="space-y-3.5 text-xs">
+            <p className="text-stone-700 leading-relaxed">
+              Type your admin email and one of the recovery codes you saved (they look like <span className="font-mono whitespace-nowrap">ABCD-EFGH-JKLM-NPQR</span>). Each code works once.
+              You&apos;ll choose a new password next, and every other device is signed out.
+            </p>
+            <div>
+              <label htmlFor="admin-recovery-email" className="block text-stone-800 font-semibold mb-1">Admin Email</label>
+              <input id="admin-recovery-email" type="email" required maxLength={254} autoComplete="username" value={email} onChange={(e) => setEmail(e.target.value)} className={input} />
+            </div>
+            <div>
+              <label htmlFor="admin-recovery-code" className="block text-stone-800 font-semibold mb-1">Recovery code</label>
+              <input
+                id="admin-recovery-code"
+                type="text"
+                required
+                maxLength={40}
+                autoComplete="off"
+                autoCapitalize="characters"
+                spellCheck={false}
+                placeholder="XXXX-XXXX-XXXX-XXXX"
+                value={code}
+                onChange={(e) => setCode(e.target.value)}
+                className={`${input} font-mono tracking-wider uppercase`}
+              />
+            </div>
+            <button type="submit" disabled={busy} className={primary}>
+              <span>{busy ? 'Checking…' : 'Sign In With Recovery Code'}</span>
+              <ArrowRight className="w-4 h-4 text-amber-300" />
+            </button>
+            <button type="button" onClick={() => { setRecovery(false); setError(''); }} className={`w-full ${quiet}`}>
+              Back to sign-in
+            </button>
+          </form>
         ) : forgot ? (
           <form onSubmit={handleForgot} className="space-y-3.5 text-xs">
             <p className="text-stone-600 leading-relaxed">
@@ -287,9 +466,25 @@ export const AdminLoginModal: React.FC<AdminLoginModalProps> = ({
             <span>{busy ? 'Checking…' : 'Unlock Admin Portal'}</span>
             <ArrowRight className="w-4 h-4 text-amber-300" />
           </button>
-          <button type="button" onClick={() => { setForgot(true); setError(''); setNotice(''); }} className="w-full text-stone-500 hover:text-stone-800 font-semibold py-1">
-            Forgot password?
-          </button>
+          {canUsePasskey && (
+            <button
+              type="button"
+              onClick={() => void handlePasskey()}
+              disabled={busy}
+              className="w-full border border-stone-300 bg-white hover:bg-stone-50 disabled:opacity-60 text-[#0f1c2e] font-bold py-3 rounded-xl flex items-center justify-center gap-2 text-xs"
+            >
+              <KeyRound className="w-4 h-4 text-[#9a7a35]" />
+              <span>Sign in with a passkey</span>
+            </button>
+          )}
+          <div className="flex flex-wrap items-center justify-center gap-x-5 gap-y-1">
+            <button type="button" onClick={() => { setForgot(true); setError(''); setNotice(''); }} className={quiet}>
+              Forgot password?
+            </button>
+            <button type="button" onClick={() => { setRecovery(true); setError(''); setNotice(''); }} className={`${quiet} inline-flex items-center gap-1`}>
+              <LifeBuoy className="w-3.5 h-3.5" aria-hidden="true" /> Use a recovery code
+            </button>
+          </div>
         </form>
         )}
 

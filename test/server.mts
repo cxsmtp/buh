@@ -1,5 +1,6 @@
 import { spawn, type ChildProcess } from 'node:child_process';
 import fs from 'node:fs';
+import net from 'node:net';
 import os from 'node:os';
 import path from 'node:path';
 
@@ -17,7 +18,9 @@ export async function startServer(env: Record<string, string> = {}): Promise<Run
   for (const dir of ['public', '.next/static']) {
     fs.cpSync(dir, path.join('.next/standalone', dir), { recursive: true });
   }
-  const port = 3500 + Math.floor(Math.random() * 400);
+  // A port the system says is free. A random one could belong to a server another test file
+  // (run in parallel) started, and the health check below would then talk to that one instead.
+  const port = await freePort();
   const base = `http://127.0.0.1:${port}`;
   const dataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'buh-e2e-'));
   let log = '';
@@ -28,7 +31,9 @@ export async function startServer(env: Record<string, string> = {}): Promise<Run
   });
   child.stdout!.on('data', (d) => (log += d));
   child.stderr!.on('data', (d) => (log += d));
-  for (let i = 0; i < 150; i++) {
+  let exited = false;
+  child.on('exit', () => (exited = true));
+  for (let i = 0; i < 150 && !exited; i++) {
     if (await fetch(`${base}/api/health`).then((r) => r.ok, () => false)) {
       return { base, log: () => log, stop: () => child.kill() };
     }
@@ -36,4 +41,16 @@ export async function startServer(env: Record<string, string> = {}): Promise<Run
   }
   child.kill();
   throw new Error(`server did not start:\n${log}`);
+}
+
+function freePort(): Promise<number> {
+  return new Promise((resolve, reject) => {
+    const probe = net.createServer();
+    probe.unref();
+    probe.on('error', reject);
+    probe.listen(0, '127.0.0.1', () => {
+      const { port } = probe.address() as net.AddressInfo;
+      probe.close(() => resolve(port));
+    });
+  });
 }

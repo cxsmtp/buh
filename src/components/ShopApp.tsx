@@ -99,12 +99,14 @@ import { AdminBrandingTab } from '@/components/admin/AdminBrandingTab';
 import { AdminSmsTab } from '@/components/admin/AdminSmsTab';
 import { AdminLoginModal } from '@/components/admin/AdminLoginModal';
 import { BackupStatus } from '@/components/admin/BackupStatus';
+import { RestoreNotice } from '@/components/admin/RestoreNotice';
 import { CatalogSettingsCard } from '@/components/admin/settings/CatalogSettingsCard';
 import { SettingsConsole } from '@/components/admin/settings/SettingsConsole';
 import { StoreSettingsCard } from '@/components/admin/settings/StoreSettingsCard';
 import { ThemeSettingsCard } from '@/components/admin/settings/ThemeSettingsCard';
 import { SettingsHistoryCard } from '@/components/admin/settings/SettingsHistoryCard';
 import { EmailSettingsCard } from '@/components/admin/settings/EmailSettingsCard';
+import { SignInRecoveryCard } from '@/components/admin/settings/SignInRecoveryCard';
 import { VersionsCard } from '@/components/admin/settings/VersionsCard';
 import { AssistantSettingsCard } from '@/components/admin/settings/AssistantSettingsCard';
 import { DeliverySettingsCard } from '@/components/admin/settings/DeliverySettingsCard';
@@ -552,6 +554,12 @@ export function ShopApp({ initialProductId }: { initialProductId?: string } = {}
               </div>
             )}
             <BackupStatus />
+            <RestoreNotice
+              onReview={() => {
+                setSettingsOpen((x) => ({ id: 'signin', n: x.n + 1 }));
+                setAdminTab('settings');
+              }}
+            />
             {adminLoadError && (
               <p role="alert" className="text-xs text-red-800 bg-red-50 border border-red-200 rounded-xl px-3 py-2">{adminLoadError}</p>
             )}
@@ -692,6 +700,13 @@ export function ShopApp({ initialProductId }: { initialProductId?: string } = {}
                         auto={autoSaveHooks}
                       />
                     ),
+                  },
+                  {
+                    id: 'signin',
+                    label: 'Passkeys & recovery codes',
+                    icon: '🔑',
+                    hint: 'Ways back in if you forget your password: a passkey on your phone, and one-time recovery codes.',
+                    content: <SignInRecoveryCard />,
                   },
                   {
                     id: 'versions',

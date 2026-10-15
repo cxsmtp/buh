@@ -1,5 +1,18 @@
 # Changelog
 
+## BUH-02.04.00 — 2026-10-15 23:17 UTC · [#10](https://github.com/cxsmtp/buh/pull/10)
+
+- **Sign in with a passkey.** In Settings → Passkeys & recovery codes you can add your fingerprint, face or PIN (Windows Hello, iPhone, Android) and sign in to the Admin Hub without a password; passkeys need the shop on https:// or http://localhost.
+- **Recovery codes if you forget your password.** Create 10 one-time codes, shown once to copy, download or print; each one signs you in once so you can choose a new password, and works even when email is down. You are emailed whenever one is used.
+- **Restoring a backup can't bring back an old way in.** Passkeys and recovery codes that come back with an older backup are switched off until you review them, and the Admin Hub reminds you to make new codes.
+- **Automatic updates with Podman.** Run `scripts\podman-autoupdate.bat` once: Settings → Versions can then update to the latest or switch to any version, and new versions are installed on a timer. Each new version is tried beside the running shop first; if it doesn't answer, the shop keeps running on the old one. The switch pauses the shop for a few seconds. Your container's settings, port and data volume are kept.
+- **You will be asked to sign in once more** after this update (sign-in sessions now survive restores safely).
+- **Status.**
+  - **Benchmark:** same host, main (BUH-02.03.02) vs this branch, 3 alternating rounds, 0 failed requests. Storefront main 842 / 832 / 787 req/s, branch 848 / 834 / 832 (p95 main 148 / 92 / 149 ms, branch 151 / 138 / 142 ms: within main’s own spread); courier check main 718 / 677 / 645, branch 694 / 701 / 716; catalogue main 805 / 779 / 773, branch 820 / 824 / 813. Level.
+  - **Tests:** 303 passed, including passkey sign-in with a virtual authenticator and recovery codes at 375 and 1280 px, a code used once even by two copies of the shop at the same moment, restore of passkeys and codes, and the Podman updater against real Docker and Podman containers.
+  - **Dependency audit:** production 0 vulnerabilities; new: @simplewebauthn/server 14.0.3, @simplewebauthn/browser 14.0.0.
+  - **Security scan:** two independent reviews (sign-in: 6 findings; updater: 7 findings), all fixed with tests; no automated scanner here. The Windows set-up script has not yet run on a real Windows Podman machine.
+
 ## BUH-02.03.02 — 2026-10-15 21:13 UTC · [#9](https://github.com/cxsmtp/buh/pull/9)
 
 - **Settings → Versions shows the Podman update.** On a server without automatic updates, the page now gives the two Podman commands (pull `ghcr.io/cxsmtp/buh:latest`, then restart the container in place with its data volume) instead of a Docker Compose command; the Compose one is folded away for the Hostinger setup.

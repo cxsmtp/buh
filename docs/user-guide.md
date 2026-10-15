@@ -27,9 +27,22 @@
 - **Forgot password?** on the sign-in screen emails a link to the admin email (works once, for 30 minutes); every device is signed out when you choose the new password. It needs email set up (Settings → Email & admin account).
 - No email set up? On the server: `docker compose exec app-blue rm /data/admin.json`, then `docker compose restart app-blue app-green`, then read the new one-time password with `docker compose logs app-blue` (Podman: `podman exec beautifuluaehome rm /data/admin.json`, `podman restart beautifuluaehome`, `podman logs beautifuluaehome`). You can also set `ADMIN_EMAIL` and `ADMIN_PASSWORD_HASH` (from `npm run hash-password`).
 - **Settings → Email & admin account:** your mail server (SMTP), where backups and alerts go, **Send a test email**, and your sign-in email (current password needed).
-- 5 wrong passwords from one place pause sign-in there for 15 minutes; try again later or from another network. **Sign out** signs you out on every device.
+- 5 wrong passwords (or recovery codes) from one place pause sign-in there for 15 minutes; try again later or from another network. **Sign out** signs you out on every device.
+
+### If you forget your password: passkeys and recovery codes
+
+Set these up once, in **Settings → Passkeys & recovery codes**, so you can always get back in, even without email.
+
+- **Passkey:** sign in with your phone's or computer's fingerprint, face or screen lock instead of the password. Type a name (e.g. "My iPhone") and your current password, press **Add a passkey**, and follow your phone or computer. Add one on each device you use; passkeys saved in iCloud Keychain or Google Password Manager follow you to your other devices. To sign in, press **Sign in with a passkey** on the sign-in screen. The list shows each passkey's name, when it was added and last used; **Remove** stops one working at once (do this for a lost phone; it asks for your password, or not if you signed in with a passkey in the last 10 minutes).
+- **Forgot your password but have a passkey?** Sign in with the passkey, then within 10 minutes open Settings → Passkeys & recovery codes → **Forgot your password?** and choose a new one; the old one isn't asked for.
+- Passkeys need the shop's real address: `NEXT_PUBLIC_APP_URL=https://yourdomain.ae` in .env.production (they work only on https://, or on http://localhost while testing). Open the Admin Hub at that address. If you move the shop to a new domain, add your passkeys again.
+- **Recovery codes:** press **Create recovery codes** (current password needed, or not if you signed in with a passkey in the last 10 minutes). You get 10 codes like `ABCD-EFGH-JKLM-NPQR`, shown once: **Copy**, **Download** or **Print** them and keep them somewhere safe (a password manager, or on paper at home). Creating a new set makes the old codes stop working.
+- **Using a code:** on the sign-in screen press **Use a recovery code**, type your admin email and one code. Each code works once. Every other device is signed out, you choose a new password, and the admin email gets a note that a code was used. Settings shows how many codes are left and warns when 2 or fewer remain: create a new set then.
+- If your password is set on the server (`ADMIN_PASSWORD_HASH` in .env.production), a recovery code still signs you in, but the password can only be changed there: `npm run hash-password`, put the new hash in .env.production, restart the shop. In that setup **a recovery code is a full key to the Admin Hub for 30 minutes**, so keep the codes as safe as the password.
+- **After restoring a backup:** the backup may be older than a passkey you removed or your newest codes, so restored recovery codes stop working and restored passkeys are switched off. Sign in with the password, then follow the banner (**Review now**): press **Keep** (password needed) on each passkey you still have, **Remove** the others, and create new recovery codes. Press **Done, hide this** when finished.
 - The version (BUH-xx.xx.xx) shows bottom left on every page. In the Admin Hub, tap it for **Settings → Versions**: every release with what changed, and (with automatic updates on) **Switch to this version** for any release from BUH-02.00.00, or **Update to the latest**. The shop stays open while it switches, and the database is saved first.
 - **Updates** (with the updater turned on, see the deployment guide) install themselves without closing the shop or signing you out. If a new version does not start properly, the shop stays on the one before and an alert is written. A customer in the middle of checkout carries on: their bag, details and SMS code are kept.
+- **One Podman container (Windows):** run `scripts\podman-autoupdate.bat` once in the shop folder (deployment guide, "Podman on Windows") and the same happens, with one difference: at the switch the shop is closed for a few seconds. The new version is tried first beside the running one, and if it does not answer, the old one is put back. Settings → Versions then says "Automatic updates: Podman (one container)". The shop keeps its own settings and port. From then on, update with **Update to the latest**, not with the old Podman commands (stop the updater first if you must). Without it, the page shows the two Podman commands to update by hand. After Windows restarts, start Podman (`podman machine start`, or Podman Desktop); the updater then starts the shop.
 
 ### Orders
 
@@ -82,6 +95,7 @@ On each product, customers see **Ask in chat**, **Ask on WhatsApp** and **Ask on
 - **Chat assistant:** see Chats above.
 - **Delivery:** the emirates you deliver to, areas you don't serve, the delivery time customers see (1–2 days), and same-day delivery: switch it on, set the extra charge, the cut-off time (UAE) and where it's offered. Customers see a green tick for their area and choose standard or same day; the courier is never named to them.
 - **Email & admin account:** the mail server, where backups and alerts go, the mailbox for chat replies, and your sign-in email.
+- **Passkeys & recovery codes:** your ways back in if you forget the password (see above).
 - **Catalogue:** the size presets offered when adding a product (name, measurements, price difference, pieces in the set), the categories shown in the shop, and the **Only N left** level.
 - **Branding & bank:** logo, colours, the scrolling bar, and bank-transfer details.
 - **Festival themes:** see below.
@@ -148,4 +162,4 @@ Enter the Jeebly and Eco Express keys and use **Test connection**. Keys are kept
 
 ### Audit log
 
-`DATA_DIR/audit-YYYY-MM.jsonl` lists sign-ins, refused sign-ins, password changes, courier bookings and tests, and SMS tests. Each line is chained to the one before, so edits are detectable.
+`DATA_DIR/audit-YYYY-MM.jsonl` lists sign-ins (by password, passkey or recovery code), refused sign-ins, password changes, passkeys added or removed, new recovery codes, courier bookings and tests, and SMS tests. Each line is chained to the one before, so edits are detectable.

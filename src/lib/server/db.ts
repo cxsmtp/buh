@@ -182,6 +182,40 @@ const MIGRATIONS: Array<(db: DB) => void> = [
       CREATE INDEX chat_threads_by_status ON chat_threads(status, updated_at);
     `);
   },
+  // 5: ways back into the Admin Hub. Recovery codes are kept only as hashes; a
+  //    code is used up by one UPDATE … WHERE used_at IS NULL, so it works once
+  //    even when two copies of the shop share the database. Passkeys keep only
+  //    the public key. Sign-in challenges are short-lived and single use.
+  (db) => {
+    db.exec(`
+      CREATE TABLE admin_recovery_codes (
+        code_hash   TEXT PRIMARY KEY,
+        set_id      TEXT NOT NULL,
+        created_at  TEXT NOT NULL,
+        used_at     TEXT
+      );
+      CREATE TABLE admin_passkeys (
+        id            TEXT PRIMARY KEY,      -- credential ID, base64url
+        public_key    BLOB NOT NULL,         -- COSE public key
+        counter       INTEGER NOT NULL DEFAULT 0,
+        transports    TEXT NOT NULL DEFAULT '[]',
+        name          TEXT NOT NULL,
+        rp_id         TEXT NOT NULL,         -- the shop's domain it was made for
+        device_type   TEXT NOT NULL DEFAULT '',
+        backed_up     INTEGER NOT NULL DEFAULT 0,
+        created_at    TEXT NOT NULL,
+        last_used_at  TEXT
+      );
+      CREATE TABLE webauthn_challenges (
+        id          TEXT PRIMARY KEY,
+        purpose     TEXT NOT NULL,           -- 'register' or 'sign-in'
+        challenge   TEXT NOT NULL,
+        bound_to    TEXT NOT NULL DEFAULT '',
+        expires_at  INTEGER NOT NULL
+      );
+      CREATE INDEX webauthn_challenges_by_expiry ON webauthn_challenges(expires_at);
+    `);
+  },
 ];
 
 let db: DB | null = null;

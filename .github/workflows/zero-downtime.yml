@@ -1,6 +1,8 @@
 # Proves the blue/green updater (deploy/updater/updater.sh) with real containers:
 # a good update switches with zero failed requests under load, a broken one is
 # rolled back while the old copy keeps serving, and a stopped shop heals itself.
+# The `single` job proves its single-container mode (Podman on Windows), with Docker
+# standing in for Podman's Docker-compatible socket.
 # Runs on every pull request; publishes nothing.
 name: Zero-downtime updates
 
@@ -22,8 +24,8 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Shellcheck the updater and the CI test
-        run: shellcheck --shell=sh deploy/updater/updater.sh deploy/updater/bin/* && shellcheck deploy/ci/zero-downtime-test.sh
+      - name: Shellcheck the updater and the CI tests
+        run: shellcheck --shell=sh deploy/updater/updater.sh deploy/updater/bin/* test/fixtures/fake-docker.sh && shellcheck deploy/ci/zero-downtime-test.sh deploy/ci/single-container-test.sh
 
       - name: Compose file is valid (production, and with the CI override)
         run: |
@@ -86,3 +88,24 @@ jobs:
       - name: Clean up
         if: always()
         run: docker compose -f docker-compose.yml -f deploy/ci/compose.ci.yml --profile autoupdate --profile green down -v || true
+
+  single:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: docker/setup-buildx-action@v3
+
+      - name: Build the shop image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          platforms: linux/amd64
+          load: true
+          tags: buh:test
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Single-container switch, rollback and self-healing under load
+        run: deploy/ci/single-container-test.sh

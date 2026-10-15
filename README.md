@@ -7,7 +7,7 @@
 | **Orders reach you** | Every order is stored on the server with prices and stock checked there, and appears in the Admin Hub: book the courier, follow it to delivery, confirm bank transfers, cancel (stock returns). |
 | **Backed up every 12 hours** | The shop emails itself to you: the full database, Excel-ready CSVs of orders and customers, and receipts, optionally encrypted. Status and **Back up now** in the Admin Hub; tested restore. |
 | **Verified orders only** | Customers confirm their UAE mobile with a 6-digit SMS code (through the shop's SMS gateway or Firebase Phone Auth) before they can order. Other countries are invited to email the shop instead. |
-| **An admin hub only you can open** | Server-checked sign-in with lockout, a one-time first password you replace at first sign-in, and an audit log of every sign-in and courier booking. |
+| **An admin hub only you can open** | Server-checked sign-in with lockout, a one-time first password you replace at first sign-in, passkeys and one-time recovery codes if you forget it, and an audit log of every sign-in and courier booking. |
 | **Inventory for one-of-a-kind pieces** | Stock per size (most designs are one or two pieces), a full product editor that works on a phone, size presets and categories you set yourself. |
 | **Made for Instagram and WhatsApp** | Product links that preview with photo and price, Ask on WhatsApp / Instagram (each switchable), a Meta/Google product feed, and orders that show where the customer came from. |
 | **A chat that answers, then hands over** | The Help button answers sizes, delivery, payment, care and discount questions from what you teach it, hands everything else to you (Admin Hub → Chats, and by email: reply to the email to answer), and tells a waiting customer you'll get back to them. |
@@ -39,6 +39,12 @@ The image `ghcr.io/cxsmtp/buh:latest` is built, tested and published from main. 
 
 ```
 podman pull ghcr.io/cxsmtp/buh:latest && podman run --replace -d --name beautifuluaehome -p 443:3000 -v beautifuluaehome-data:/data -e TZ=Asia/Dubai --read-only --tmpfs /tmp --cap-drop ALL --security-opt no-new-privileges:true ghcr.io/cxsmtp/buh:latest
+```
+
+Automatic updates for that one container (a few seconds' pause at each switch; data volume kept; see the [guide](HOSTINGER_DEPLOYMENT_GUIDE.md#podman-on-windows-one-container)):
+
+```
+scripts\podman-autoupdate.bat beautifuluaehome 443 beautifuluaehome-data
 ```
 
 To try it on your own computer with Podman on Windows, run `scripts\run-local-podman.bat` (test mode, http://localhost:3000).
