@@ -131,7 +131,9 @@ test('international numbers are offered email instead of a code', { skip }, asyn
 
 test('admin: one-time password, forced change, then the hub opens with its version', { skip }, async () => {
   const page = await browser.newPage({ viewport: { width: 1280, height: 900 } });
+  const checked = page.waitForResponse((r) => r.url().endsWith('/api/admin/session'));
   await page.goto(server.base, { waitUntil: 'domcontentloaded' });
+  await checked;
   await page.locator('header button:has-text("Admin Hub")').click();
   await page.locator('input[type=email]').fill('admin@beautifuluaehome.com');
   await page.locator('input[autocomplete=current-password]').fill('definitely-wrong');
@@ -260,7 +262,9 @@ test('the shop and the admin hub share one store: a customer order reaches the o
   // 2. The owner, in a different browser, sees it and books the courier.
   const ctx = await browser.newContext({ viewport: { width: 1280, height: 900 } });
   const admin = await ctx.newPage();
+  const adminChecked = admin.waitForResponse((r) => r.url().endsWith('/api/admin/session'));
   await admin.goto(server.base, { waitUntil: 'domcontentloaded' });
+  await adminChecked; // hydrated: the click opens the sign-in
   await admin.locator('header button:has-text("Admin Hub")').click();
   await admin.locator('input[type=email]').fill('admin@beautifuluaehome.com');
   await admin.locator('input[autocomplete=current-password]').fill('Browser-Owner-Pass-1');

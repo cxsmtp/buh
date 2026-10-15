@@ -209,7 +209,9 @@ test('forgot password on a phone: the same answer for any email; a reset link op
   const page = await browser.newPage({ viewport: { width: 375, height: 800 } });
   const errors: string[] = [];
   page.on('pageerror', (e) => errors.push(e.message));
+  const checked = page.waitForResponse((r) => r.url().endsWith('/api/admin/session'));
   await page.goto(server.base, { waitUntil: 'domcontentloaded' });
+  await checked;
   await page.locator('header button:has-text("Admin Hub")').click();
   await page.getByRole('button', { name: 'Forgot password?' }).click();
   await page.locator('#admin-forgot-email').fill('stranger@example.com');
