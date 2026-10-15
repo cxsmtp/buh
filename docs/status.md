@@ -4,6 +4,7 @@ One row per release. Benchmarks run `npm run test:load` on the same 4 vCPU host,
 
 | Version | Date | Storefront req/s (p50 / p95 ms) | Serviceability API req/s (p50 / p95 ms) | Failed requests | Tests | Audit (production) | Security scan |
 | --- | --- | --- | --- | --- | --- | --- | --- |
+| BUH-02.03.02 | 2026-10-15 | branch 831 / 868 / 854; main 839 / 827 / 810 (p95 95–152 vs 100–160 ms) | branch 738 / 665 / 676; main 664 / 663 / 701 | 0 | 255 passed | 0 vulnerabilities | Text-only admin change; no scanner here |
 | BUH-02.03.01 | 2026-10-15 | not run: no shop code changed | not run | — | CI full suite | no package changes | not applicable (docs only) |
 | BUH-02.03.00 | 2026-10-15 | branch 856 / 832 / 763; main 789 / 792 / 761 (p95 110–180 vs 125–173 ms) | branch 752 / 684 / 698; main 687 / 678 / 643 | 0 | 255 passed | 0 vulnerabilities | Review of autosave and the settings guard, 10 findings fixed with tests; no automated scanner here |
 | BUH-02.02.00 | 2026-10-15 | branch 815 / 870 / 772; main 851 / 837 / 789 (p95 175–182 vs 161–175 ms) | branch 587 / 517 / 743; main 515 / 767 / 674 | 0 | 240 passed | 0 vulnerabilities | Money and correctness review, 8 findings fixed with tests; no automated scanner here |
