@@ -92,7 +92,7 @@ test('the owner adds a one-of-a-kind product on a phone, sets pieces per size, a
   assert.deepEqual(await overflow(page), [], 'editor fits a phone');
   await editor.locator('input[type=file]').setInputFiles({ name: 'sheet.png', mimeType: 'image/png', buffer: png() });
   await editor.getByAltText('Photo 1').waitFor();
-  await editor.getByLabel('Name').fill('Ajrakh Indigo One-Off');
+  await editor.getByLabel('Name', { exact: true }).fill('Ajrakh Indigo One-Off');
   await editor.getByLabel('Price (AED)').fill('420');
   await editor.getByRole('button', { name: /Queen Size Bed/ }).click(); // add the Queen preset
   await editor.getByRole('button', { name: 'One more King Size Bed (Most Popular)' }).click(); // King 1 → 2

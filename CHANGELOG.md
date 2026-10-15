@@ -1,30 +1,19 @@
 # Changelog
 
-## BUH-01.03.00 — 2026-10-15 09:10 UTC · [#4](https://github.com/cxsmtp/buh/pull/4)
+## BUH-02.00.00 — DATE UTC · [#4](https://github.com/cxsmtp/buh/pull/4)
 
-- **Firebase Phone Auth as an SMS option.** In Admin Hub → SMS you can now choose Firebase: Google texts and checks the code, and the shop's server checks Google's signed answer before an order can use the number.
-- **Plain setup steps and costs.** The SMS tab lists the five Firebase steps and says plainly that Firebase only sends SMS on the paid Blaze plan, billed per message.
-- **Same checkout for shoppers.** The six code boxes, resend timer and messages stay the same; Firebase errors (wrong code, too many tries, quota reached) are shown in plain words with the shop's email as the way out.
-- **Only this shop's Firebase project is trusted.** Tokens from another project, expired or forged tokens, and non-UAE numbers are refused, and the route is closed unless Firebase is switched on.
-- **Firebase loads only when used.** Its code is fetched only at checkout when Firebase is on; the security policy now allows Google's reCAPTCHA and Firebase sign-in hosts (see docs/security.md for the trade-off).
+- **Inventory you can fully edit, stock per size.** Every product field (photos, text, prices, colours, sizes) is editable from a phone; stock is kept per size because most designs are one or two pieces, with one-tap + / −, "Only 1 left" and sold-out sizes for shoppers, and Remove (archive) that keeps past orders intact.
+- **A settings console.** Store & contact (WhatsApp number, email, Instagram, TikTok, Facebook, address), Catalogue (size presets, categories, low-stock warning), Branding & bank, Festival themes, Phone verification, Couriers, and System (health, backups, and earlier versions of every setting, restorable in one click).
+- **Festival themes for all of the UAE.** 33 festivals across the UAE's communities (the Eids and Ramadan, National Day, Diwali, Holi, Onam, Christmas, Easter, Lunar New Year, Nowruz, Hanukkah and more) switch the banner and scrolling bar automatically from 3 weeks before to 1 week after, with dates checked online weekly; you can pick a look, switch one off, or turn themes off.
+- **Made for Instagram and WhatsApp.** Every product has its own link that previews with its photo and price; a WhatsApp button and "Ask on WhatsApp" use your number from Settings; a Meta/Google product feed (`/feeds/meta.csv`) and sitemap are served; each order records whether the customer came from Instagram, WhatsApp, TikTok or elsewhere.
+- **Customers carry on where they left off.** The bag and their delivery details are remembered, a bag can be sent as a link (for moving from Instagram's in-app browser to Safari or Chrome), prices outside the UAE show an approximate amount in the visitor's currency next to AED, and stock, prices and settings update on open pages within seconds without a reload.
+- **Firebase as an SMS option.** Google sends and checks the checkout code (paid Blaze plan, billed per SMS); the server verifies Google's signed answer before an order can use the number.
+- **Updates without closing the shop, healing itself.** A new version starts beside the one serving, takes over only when healthy, and is rolled back automatically if not; a database snapshot is taken first; a stuck copy is restarted or replaced by the last version that worked; checkout SMS codes and caches are shared, so a customer mid-checkout carries on. Problems (disk, database, backups, SMS) are emailed, and a summary of yesterday's orders arrives every morning.
 - **Status.**
-  - **Benchmark:** shared 4 vCPU host (load average 3–5 from other work), main vs branch, 3 rounds, alternating. Storefront main 517 / 694 / 567 req/s, branch 508 / 602 / 613 (p95 130–301 vs 179–308 ms). Serviceability main 438 / 558 / 443, branch 444 / 642 / 454. Catalogue main 577 / 639 / 637, branch 606 / 818 / 684. 0 failed requests. Level within the spread; no benchmarked path runs the new code.
-  - **Tests:** 134 passed, 14 of them new (token verifier, settings, public config, route).
-  - **Dependency audit:** production 0 vulnerabilities (firebase 12.19.0, with `@grpc/grpc-js` pinned to 1.13.6 for Firestore's unused server dependency); the same 5 dev-only ESLint findings as main.
-  - **Security scan:** no automated scanner here. A real Firebase project could not be reached from this environment, so sending and confirming a real SMS was not tested.
-## BUH-01.03.00 — 2026-10-15 09:00 UTC · [#NN](https://github.com/cxsmtp/buh/pull/NN)
-
-- **Updates without closing the shop.** The shop now runs as one of two identical copies (blue and green); a new version starts beside the one serving customers and takes over only once it is healthy, while Caddy retries any request caught in the switch on the other copy.
-- **A bad version never goes live.** If the new version does not pass its health check and load the home page within 2 minutes, it is removed, the old one keeps serving, an alert is written, and that version is not tried again until a newer one is published.
-- **The shop heals itself.** With the updater on, a copy that stops answering is restarted; if that does not help, the last version that worked (`buh:last-good`) is started and takes over, and a shop with nothing running is started again.
-- **A database snapshot before every update.** `backups/pre-update-<time>.db` is taken by the running shop before any switch (no snapshot, no update); the newest 5 are kept.
-- **Opt-in auto-updates, rollback in one command.** `COMPOSE_PROFILES=autoupdate` turns on the updater (checks every 15 minutes; alerts in the shop's data folder and, optionally, a webhook); `update-now` and `rollback` switch on demand without downtime. Existing servers move over once, as the deployment guide describes (a second or two while Caddy restarts).
-- **Proven in CI.** Every pull request switches real containers under load with zero failed requests, rolls back two kinds of broken image while the old copy keeps serving, and restarts a stopped shop.
-- **Status.**
-  - **Benchmark:** same host, main vs this branch, 3 rounds each, alternating (the shop's code is unchanged apart from the version). Storefront main 535 / 730 / 554 req/s, branch 561 / 694 / 803. Serviceability main 482 / 576 / 694, branch 511 / 644 / 573. Catalogue main 625 / 757 / 824, branch 704 / 766 / 701. Level within the spread of a busy host; 0 failed requests in every run.
-  - **Tests:** 133 passed, including 10 new updater tests against a fake Docker CLI and 3 for the database snapshot. The switch with real containers and Caddy runs only in CI (no Docker daemon here).
-  - **Dependency audit:** production 0 vulnerabilities; no dependency changes.
-  - **Security scan:** no automated scanner here. The updater holds the Docker socket (root-equivalent), so it is opt-in; why and how it is limited is in docs/security.md.
+  - **Benchmark:** BENCH
+  - **Tests:** TESTS
+  - **Dependency audit:** production 0 vulnerabilities (adds firebase 12.19.0, with `@grpc/grpc-js` pinned for Firestore's unused server dependency); the same 5 dev-only ESLint findings as main.
+  - **Security scan:** SCAN
 
 ## BUH-01.02.00 — 2026-10-15 07:19 UTC · [#3](https://github.com/cxsmtp/buh/pull/3)
 

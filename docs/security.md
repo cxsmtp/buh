@@ -133,6 +133,14 @@ Every 12 hours (see the deployment guide) the shop backs itself up:
 - **Stock edits cannot undo a sale:** the Admin Hub sends the stock it showed, and the server refuses the edit (409) if a sale happened in between.
 - **Bank transfer is hidden until the real account is saved.** The IBAN must be a UAE IBAN that passes the mod-97 check.
 
+## Public data and outbound calls added in BUH-02.00.00
+
+- **Public endpoints show only what the shop shows:** `/p/<id>`, `/feeds/meta.csv` and `/sitemap.xml` list visible products only (hidden and removed ones are left out); `/api/events` sends change counters for the catalogue and settings, never order data (the admin stream `/api/admin/events` needs sign-in).
+- **Fixed outbound URLs only:** exchange rates (open.er-api.com, daily) and public holiday calendars (calendar.google.com, weekly) are fetched from fixed addresses with timeouts and size caps; replies are validated and a bad match is rejected. Nothing a visitor or admin types is fetched.
+- **Settings history never keeps keys:** saved versions have courier and SMS keys blanked; restoring one keeps the keys saved now.
+- **SMS codes** are stored hashed (keyed with the shop's own secret), single use, 10 minutes, in the database, so both copies of the shop during an update check them the same way.
+- **Customer details at checkout** are remembered in the customer's own browser only (never the phone check), with **Not you? Clear them**.
+
 ## Known limits (next steps)
 
 - **One admin account; no staff roles yet.**

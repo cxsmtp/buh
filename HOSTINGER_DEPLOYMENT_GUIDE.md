@@ -58,16 +58,19 @@ Everything the shop stores lives in one Docker volume and is backed up every 12 
 
 ## 2. Go-live checklist (in the Admin Hub)
 
-- [ ] **📱 SMS & Real OTP:** enter your Twilio or Infobip keys, **Send test** to your own mobile, then **Save**.
+- [ ] **⚙️ Settings → Phone verification:** enter your Twilio or Infobip keys, **Send test** to your own mobile, then **Save**.
   - Or choose **Firebase Phone Auth** (Blaze plan, billed per SMS; see docs/user-guide.md) and test with a checkout on your phone.
   - Checkout needs a working SMS gateway: customers cannot order without verifying their number.
   - At start-up, the log warns if none is configured.
-- [ ] **🎨 Logo & Marquee → Bank transfer details:** enter the bank name, account name and real IBAN, and check every digit. Bank transfer is hidden at checkout until they are saved.
-- [ ] **Jeebly & Eco Couriers:**
+- [ ] **⚙️ Settings → Store & contact:** your WhatsApp number, support email and Instagram account.
+- [ ] **⚙️ Settings → Branding & bank → Bank transfer details:** enter the bank name, account name and real IBAN, and check every digit. Bank transfer is hidden at checkout until they are saved.
+- [ ] **⚙️ Settings → Couriers:**
   - enter the keys;
   - press **Test connection**;
   - switch to **live mode** only when you are ready to book real pickups.
-- [ ] **Inventory Stock:** set real prices and stock, and hide any sample products you don't sell.
+- [ ] **Inventory Stock:** add your products with their real pieces per size, and **Remove** the sample products.
+- [ ] **Instagram / Facebook Shopping (optional):** add `https://yourdomain.ae/feeds/meta.csv` as a scheduled feed in Meta Commerce Manager.
+- [ ] **Outbound access:** the server fetches exchange rates (open.er-api.com) daily and festival dates (calendar.google.com) weekly; if they are blocked, built-in festival dates are used and no local currency is shown.
 - [ ] **Backups:** press **Back up now** at the top of the Admin Hub.
   - Check that the email arrives (with `BACKUP_PASSPHRASE`, one encrypted `.tar.gz.enc` file; without it, the CSV files and the `.tar.gz`).
   - The status line should be green.
