@@ -158,3 +158,49 @@ test('restore --replace swaps the data in place, keeps the old data aside and th
   assert.equal(fs.readFileSync(path.join(live, aside, 'shop.db'), 'utf8'), 'old database');
   assert.ok(fs.existsSync(path.join(live, 'backups', 'keep.tar.gz')));
 });
+
+test('passkeys and recovery codes are in the backup, restored by the script, and still open the Admin Hub afterwards', async () => {
+  const { SoftAuthenticator } = await import('./fixtures/soft-authenticator.mjs');
+  const passkeys = await import('@/lib/server/passkeys');
+  const { consumeRecoveryCode, createRecoveryCodes, recoveryCodeStatus } = await import('@/lib/server/recoveryCodes');
+  const { _closeDb, getDb } = await import('@/lib/server/db');
+  const rp = { rpID: 'shop.example', origin: 'https://shop.example' };
+
+  const codes = createRecoveryCodes();
+  assert.ok(consumeRecoveryCode(codes[0]));
+  const phone = new SoftAuthenticator();
+  const reg = await passkeys.startPasskeyRegistration({ rp, email: 'admin@beautifuluaehome.com', boundTo: 'b' });
+  await passkeys.finishPasskeyRegistration({ rp, challengeId: reg.challengeId, boundTo: 'b', response: passkeys.parseRegistrationResponse(phone.register(reg.options as never, rp.origin)), name: 'Owner phone' });
+  await passkeys.startPasskeySignIn({ rp }); // a half-finished sign-in: not worth keeping
+  const before = getDb().prepare('SELECT * FROM admin_passkeys').get() as { public_key: Buffer };
+
+  const result = await backup.createBackup();
+  const target = path.join(os.tmpdir(), `buh-restore-signin-${Date.now()}`);
+  const out = execFileSync(process.execPath, ['scripts/restore-backup.mjs', result.file, target]).toString();
+  assert.match(out, /1 passkey, 9 unused recovery codes/);
+
+  const Database = (await import('better-sqlite3')).default;
+  const restored = new Database(path.join(target, 'shop.db'), { readonly: true });
+  const row = restored.prepare('SELECT * FROM admin_passkeys').get() as { name: string; public_key: Buffer; rp_id: string };
+  assert.equal(row.name, 'Owner phone');
+  assert.equal(Buffer.compare(row.public_key, before.public_key), 0);
+  assert.equal(row.rp_id, 'shop.example');
+  assert.equal((restored.prepare('SELECT COUNT(*) AS n FROM admin_recovery_codes WHERE used_at IS NULL').get() as { n: number }).n, 9);
+  assert.equal((restored.prepare('SELECT COUNT(*) AS n FROM webauthn_challenges').get() as { n: number }).n, 0, 'challenges left out');
+  restored.close();
+
+  // The restored shop: the saved codes and the passkey still work there.
+  _closeDb();
+  process.env.DATA_DIR = target;
+  try {
+    assert.equal(recoveryCodeStatus().remaining, 9);
+    assert.equal(consumeRecoveryCode(codes[0]), false, 'a used code stays used');
+    assert.ok(consumeRecoveryCode(codes[1]));
+    const signIn = await passkeys.startPasskeySignIn({ rp });
+    const used = await passkeys.finishPasskeySignIn({ rp, challengeId: signIn.challengeId, response: passkeys.parseAuthenticationResponse(phone.signIn(signIn.options as never, rp.origin)) });
+    assert.equal(used.name, 'Owner phone');
+  } finally {
+    _closeDb();
+    process.env.DATA_DIR = dir;
+  }
+});

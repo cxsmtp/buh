@@ -105,6 +105,7 @@ import { StoreSettingsCard } from '@/components/admin/settings/StoreSettingsCard
 import { ThemeSettingsCard } from '@/components/admin/settings/ThemeSettingsCard';
 import { SettingsHistoryCard } from '@/components/admin/settings/SettingsHistoryCard';
 import { EmailSettingsCard } from '@/components/admin/settings/EmailSettingsCard';
+import { SignInRecoveryCard } from '@/components/admin/settings/SignInRecoveryCard';
 import { VersionsCard } from '@/components/admin/settings/VersionsCard';
 import { AssistantSettingsCard } from '@/components/admin/settings/AssistantSettingsCard';
 import { DeliverySettingsCard } from '@/components/admin/settings/DeliverySettingsCard';
@@ -692,6 +693,13 @@ export function ShopApp({ initialProductId }: { initialProductId?: string } = {}
                         auto={autoSaveHooks}
                       />
                     ),
+                  },
+                  {
+                    id: 'signin',
+                    label: 'Passkeys & recovery codes',
+                    icon: '🔑',
+                    hint: 'Ways back in if you forget your password: a passkey on your phone, and one-time recovery codes.',
+                    content: <SignInRecoveryCard />,
                   },
                   {
                     id: 'versions',

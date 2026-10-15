@@ -14,7 +14,9 @@
 // DATA_DIR at the new folder (or swap folders), and start it again. Admin
 // sign-in: the first start prints a new one-time password. The admin account
 // is not in backups, and courier / SMS keys are blanked in them, on purpose:
-// re-enter the keys in the Admin Hub after a restore.
+// re-enter the keys in the Admin Hub after a restore. The owner's passkeys and
+// recovery codes are in the database, so they still open the Admin Hub (a
+// recovery code with the sign-in email the restored shop uses).
 import crypto from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
@@ -108,7 +110,12 @@ const db = new Database(path.join(target, 'shop.db'));
 const ok = db.pragma('integrity_check', { simple: true });
 const orders = db.prepare('SELECT COUNT(*) AS n FROM orders').get().n;
 const products = db.prepare('SELECT COUNT(*) AS n FROM products').get().n;
+// Ways back into the Admin Hub (backups from before BUH-02.04 have neither table).
+const hasTable = (name) => Boolean(db.prepare("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ?").get(name));
+const passkeys = hasTable('admin_passkeys') ? db.prepare('SELECT COUNT(*) AS n FROM admin_passkeys').get().n : 0;
+const recoveryCodes = hasTable('admin_recovery_codes') ? db.prepare('SELECT COUNT(*) AS n FROM admin_recovery_codes WHERE used_at IS NULL').get().n : 0;
 db.close();
+const signInWays = `${passkeys} passkey${passkeys === 1 ? '' : 's'}, ${recoveryCodes} unused recovery code${recoveryCodes === 1 ? '' : 's'}`;
 if (ok !== 'ok') {
   console.error(`The restored database failed its integrity check: ${ok}`);
   process.exit(1);
@@ -130,3 +137,4 @@ if (replace) {
   console.log(`Restored to ${target}: ${orders} orders, ${products} products. Integrity check: ok.`);
   console.log('Next: stop the shop, set DATA_DIR to this folder (or swap folders), start it, and sign in with the new one-time password from the log.');
 }
+console.log(`Admin Hub sign-in also works with the restored ${signInWays}.`);

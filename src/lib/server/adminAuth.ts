@@ -161,21 +161,33 @@ function sign(body: string): string {
   return crypto.createHmac('sha256', serverSecret()).update(`session\n${body}`).digest('base64url');
 }
 
+/**
+ * How a session was started: a password, a passkey, or a recovery code. A
+ * recovery-code session can do one thing only, choose a new password (unless
+ * the password is set in the environment), and lasts 30 minutes.
+ */
+export type SignInMethod = 'password' | 'passkey' | 'recovery';
+const METHOD_CODES: Record<SignInMethod, string> = { password: 'pw', passkey: 'pk', recovery: 'rc' };
+export const RECOVERY_SESSION_TTL_MS = 30 * 60 * 1000;
+
 interface SessionPayload {
   e: string;
   g: number;
   h: string;
   iat: number;
   exp: number;
+  /** Sign-in method (absent in sessions from older builds: a password). */
+  m?: string;
 }
 
-export function createSessionToken(account: { email: string; passwordHash: string }, now = Date.now()): string {
+export function createSessionToken(account: { email: string; passwordHash: string }, now = Date.now(), method: SignInMethod = 'password'): string {
   const payload: SessionPayload = {
     e: account.email,
     g: sessionGeneration(),
     h: hashFingerprint(account.passwordHash),
     iat: now,
-    exp: now + SESSION_TTL_MS,
+    exp: now + (method === 'recovery' ? RECOVERY_SESSION_TTL_MS : SESSION_TTL_MS),
+    m: METHOD_CODES[method],
   };
   const body = Buffer.from(JSON.stringify(payload)).toString('base64url');
   return `${body}.${sign(body)}`;
@@ -185,6 +197,10 @@ export interface AdminSession {
   email: string;
   mustChangePassword: boolean;
   expiresAt: number;
+  issuedAt: number;
+  method: SignInMethod;
+  /** Signed in with a recovery code and the password can be changed here: a new one must be chosen. */
+  recoveryPending: boolean;
 }
 
 export async function verifySessionToken(token: string | undefined, now = Date.now()): Promise<AdminSession | null> {
@@ -209,7 +225,16 @@ export async function verifySessionToken(token: string | undefined, now = Date.n
   if (payload.e !== account.email) return null;
   if (payload.g !== sessionGeneration()) return null; // signed out or password changed since
   if (payload.h !== hashFingerprint(account.passwordHash)) return null; // password hash rotated
-  return { email: account.email, mustChangePassword: account.mustChangePassword, expiresAt: payload.exp };
+  const method = (Object.keys(METHOD_CODES) as SignInMethod[]).find((k) => METHOD_CODES[k] === payload.m) ?? 'password';
+  const recoveryPending = method === 'recovery' && !account.managedByEnv;
+  return {
+    email: account.email,
+    mustChangePassword: account.mustChangePassword || recoveryPending,
+    expiresAt: payload.exp,
+    issuedAt: Number(payload.iat) || 0,
+    method,
+    recoveryPending,
+  };
 }
 
 /** Sign out everywhere: every session issued so far stops working. */
@@ -276,6 +301,42 @@ function pausedFor(keys: string[], now: number): number {
   return Math.max(0, ...keys.map((k) => (failStates.get(k)?.pausedUntil ?? 0) - now));
 }
 
+function pauseKeys(emailInput: string, ip: string | null | undefined) {
+  const email = emailInput.trim().toLowerCase();
+  return { email, addressKey: `addr|${email}|${ip ?? 'unknown'}`, accountKey: `acct|${email}` };
+}
+
+/**
+ * Refuse while sign-in is paused for this email (from this address, or
+ * everywhere). Shared by every way in that can be guessed (a password, a
+ * recovery code): their wrong guesses count together, and while paused
+ * nothing is checked, so a pause reveals nothing about a guess.
+ */
+export function assertSignInNotPaused(emailInput: string, ip: string | null | undefined, now = Date.now()) {
+  const { addressKey, accountKey } = pauseKeys(emailInput, ip);
+  const paused = pausedFor([addressKey, accountKey], now);
+  if (paused > 0) {
+    const minutes = Math.ceil(paused / 60000);
+    throw new HttpError(429, `Sign-in is paused for ${minutes} minute${minutes === 1 ? '' : 's'} after repeated wrong passwords or codes.`, {
+      'Retry-After': String(Math.ceil(paused / 1000)),
+    });
+  }
+}
+
+/** Count a wrong password or recovery code towards the pause. */
+export function recordSignInFailure(emailInput: string, ip: string | null | undefined, now = Date.now()) {
+  const { email, addressKey, accountKey } = pauseKeys(emailInput, ip);
+  const addressPaused = recordFailure(addressKey, PER_ADDRESS_FAILS, PER_ADDRESS_WINDOW_MS, now);
+  const accountPaused = recordFailure(accountKey, ACCOUNT_FAILS, ACCOUNT_WINDOW_MS, now);
+  if (addressPaused || accountPaused) {
+    logEvent('warn', 'admin_signin_paused', { email, ip, everywhere: accountPaused });
+  }
+}
+
+function clearAddressFailures(emailInput: string, ip: string | null | undefined) {
+  failStates.delete(pauseKeys(emailInput, ip).addressKey);
+}
+
 /**
  * Check a sign-in. Unknown email or wrong password get the same answer. While
  * sign-in is paused for this email (from this address, or everywhere) the
@@ -285,32 +346,98 @@ export async function signIn(emailInput: string, password: string, options: { ip
   const now = options.now ?? Date.now();
   const account = await loadAccount();
   const email = emailInput.trim().toLowerCase();
-  const addressKey = `addr|${email}|${options.ip ?? 'unknown'}`;
-  const accountKey = `acct|${email}`;
-
-  const paused = pausedFor([addressKey, accountKey], now);
-  if (paused > 0) {
-    const minutes = Math.ceil(paused / 60000);
-    throw new HttpError(429, `Sign-in is paused for ${minutes} minute${minutes === 1 ? '' : 's'} after repeated wrong passwords.`, {
-      'Retry-After': String(Math.ceil(paused / 1000)),
-    });
-  }
+  assertSignInNotPaused(email, options.ip, now);
 
   const ok = email === account.email
     ? await verifyPassword(password, account.passwordHash)
     : (await verifyPassword(password, await dummyPasswordHash()), false);
 
   if (!ok) {
-    const addressPaused = recordFailure(addressKey, PER_ADDRESS_FAILS, PER_ADDRESS_WINDOW_MS, now);
-    const accountPaused = recordFailure(accountKey, ACCOUNT_FAILS, ACCOUNT_WINDOW_MS, now);
-    if (addressPaused || accountPaused) {
-      logEvent('warn', 'admin_signin_paused', { email, ip: options.ip, everywhere: accountPaused });
-    }
+    recordSignInFailure(email, options.ip, now);
     throw new HttpError(401, 'Wrong email or password.');
   }
 
-  failStates.delete(addressKey);
+  clearAddressFailures(email, options.ip);
   return { token: createSessionToken(account, now), mustChangePassword: account.mustChangePassword, email: account.email };
+}
+
+// ── Recovery codes and passkeys ──────────────────────────────────────────────
+
+/**
+ * Sign in with a one-time recovery code. The same pauses as a wrong password
+ * (while paused the code is not even looked at). The code is used up
+ * atomically in the database, so it works once even when two copies of the
+ * shop share it. Every other session ends. The session that comes back can
+ * only choose a new password, when the password can be changed here.
+ */
+export async function signInWithRecoveryCode(emailInput: string, code: string, options: { ip?: string | null; now?: number } = {}) {
+  const now = options.now ?? Date.now();
+  const account = await loadAccount();
+  const email = emailInput.trim().toLowerCase();
+  assertSignInNotPaused(email, options.ip, now);
+  const { consumeRecoveryCode, recoveryCodeStatus } = await import('./recoveryCodes');
+  // A wrong email never reaches the codes, so it can't use one up.
+  if (email !== account.email || !consumeRecoveryCode(code, now)) {
+    recordSignInFailure(email, options.ip, now);
+    throw new HttpError(401, 'Wrong email or recovery code.');
+  }
+  clearAddressFailures(email, options.ip);
+  endAllSessions();
+  return {
+    token: createSessionToken(account, now, 'recovery'),
+    email: account.email,
+    managedByEnv: account.managedByEnv,
+    mustChangePassword: !account.managedByEnv,
+    remaining: recoveryCodeStatus().remaining,
+  };
+}
+
+/** The session for a verified passkey: the same as a password sign-in's. */
+export async function passkeySession(now = Date.now()) {
+  const account = await loadAccount();
+  return { token: createSessionToken(account, now, 'passkey'), email: account.email, mustChangePassword: account.mustChangePassword };
+}
+
+/** For this long after a passkey sign-in the owner has just proved it's them (no password needed for new recovery codes). */
+export const FRESH_PASSKEY_MS = 10 * 60 * 1000;
+
+export function isFreshPasskeySession(session: AdminSession, now = Date.now()): boolean {
+  return session.method === 'passkey' && now >= session.issuedAt && now - session.issuedAt <= FRESH_PASSKEY_MS;
+}
+
+/**
+ * The owner proves it's them again before changing how they can sign in: the
+ * current password (with the same pauses as signing in) or, where allowed, a
+ * passkey sign-in in the last 10 minutes. A wrong password is a 400, not a
+ * 401: the owner is still signed in.
+ */
+export async function confirmOwner(session: AdminSession, currentPassword: string, options: { ip?: string | null; allowFreshPasskey?: boolean } = {}) {
+  if (!currentPassword) {
+    if (options.allowFreshPasskey && isFreshPasskeySession(session)) return;
+    throw new HttpError(400, 'Type your current password.');
+  }
+  const account = await loadAccount();
+  try {
+    await signIn(account.email, currentPassword, { ip: options.ip });
+  } catch (err) {
+    if (err instanceof HttpError && err.status === 401) throw new HttpError(400, 'That is not your current password.');
+    throw err;
+  }
+}
+
+/** After a recovery-code sign-in: choose a new password (the forgotten one is not asked for). Every other session ends. */
+export async function setPasswordAfterRecovery(session: AdminSession, newPassword: string) {
+  const account = await loadAccount();
+  if (account.managedByEnv) {
+    throw new HttpError(409, 'This admin account is managed by ADMIN_PASSWORD_HASH. Change it there.');
+  }
+  if (!session.recoveryPending) throw new HttpError(400, 'Type your current password.');
+  account.passwordHash = await hashPassword(newPassword);
+  account.mustChangePassword = false;
+  persist(account);
+  failStates.clear();
+  endAllSessions();
+  return createSessionToken(account);
 }
 
 export async function changePassword(currentPassword: string, newPassword: string, options: { ip?: string | null } = {}) {

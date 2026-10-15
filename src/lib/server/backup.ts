@@ -21,7 +21,9 @@ import { readTar, writeTar, type TarEntry } from './tar';
  *    with the courier and SMS keys blanked (re-enter them after a restore);
  *  - flat files anyone can open in Excel: orders.csv, order_items.csv,
  *    customers.csv, products.csv, chats.csv;
- *  - the bank-transfer receipts, the product photos and the audit log.
+ *  - the bank-transfer receipts, the product photos and the audit log;
+ *  - the owner's passkeys (public keys only) and recovery codes (hashes
+ *    only), in the database, so they still open the Admin Hub after a restore.
  *
  * All packed in one .tar.gz; with BACKUP_PASSPHRASE set it is encrypted
  * (AES-256-GCM, key from scrypt) to .tar.gz.enc. It is emailed to
@@ -214,6 +216,9 @@ export async function createBackup(now = new Date()): Promise<BackupResult> {
       copy.pragma('journal_mode = DELETE');
       copy.pragma('secure_delete = ON');
       blankSecretsIn(copy);
+      // Passkeys (public keys) and recovery codes (hashes) stay in, so the owner can still get in
+      // after a restore; half-finished passkey sign-ins (5-minute challenges) are left out.
+      copy.exec('DELETE FROM webauthn_challenges');
       copy.exec('VACUUM');
     } finally {
       copy.close();
