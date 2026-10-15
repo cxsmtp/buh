@@ -1,5 +1,18 @@
 # Changelog
 
+## BUH-02.02.00 — 2026-10-15 11:06 UTC · [#6](https://github.com/cxsmtp/buh/pull/6)
+
+- **Fixed: customers whose device reports a far-away location can order again.** Laptops (and phones on a VPN) often report a network location, e.g. in the USA; checkout turned that into "Corniche, Abu Dhabi", called it accurate, and refused the order as outside the UAE. Delivery is now decided by the address the customer chooses; a location outside the UAE is ignored with a plain message, and inside the UAE it only suggests the nearest area.
+- **A simple delivery promise.** Checkout shows a green tick, "We deliver to Al Barsha, Dubai" and "Delivery in 1–2 days, free"; the courier, its hubs and zones are no longer shown to customers (the old "Jeebly API Verified" badge was never a real check: the courier is still booked, and any refusal reported, behind the scenes).
+- **Same-day delivery, if you want it.** Switch it on in Settings → Delivery with your charge, the cut-off time (UAE) and the emirates; customers choose it at checkout, the charge is added to their total by the server, and an order placed after the cut-off is moved back to standard before anything is charged.
+- **Settings → Delivery.** Choose the emirates you deliver to, list areas you don't serve (whole area names, so "Bay" never blocks Business Bay), and the delivery time customers see.
+- **Same-day orders are booked as same day.** They are collected today (UAE date) as Jeebly Express, marked **Same day** in your orders, and can't be booked with Eco Express, which only delivers next day.
+- **Status.**
+  - **Benchmark:** same host, main (BUH-02.01.00) vs this branch, 3 alternating rounds, 0 failed requests. Storefront main 851 / 837 / 789 req/s, branch 815 / 870 / 772. Courier check main 515 / 767 / 674, branch 587 / 517 / 743. Catalogue main 590 / 794 / 810, branch 821 / 709 / 822. Level within run-to-run spread; the review fixes after it change only checkout, order and settings code, not these pages.
+  - **Tests:** 240 passed, including the reported case (a Dubai customer whose laptop reports Virginia), which fails on the previous version and passes now, and real-browser checkout at 375 px with a far-away and a nearby location.
+  - **Dependency audit:** production 0 vulnerabilities; no new packages.
+  - **Security scan:** an independent money and correctness review; all 8 findings fixed with tests (same-day booked for today as Express, whole-name area matching, AED 19.99 charges, no courier name in Track Order, GPS never switches the emirate under a typed area, same day reset when the address changes, a 00:00 cut-off refused, Qatar not taken for the UAE). No automated scanner here.
+
 ## BUH-02.01.00 — 2026-10-15 10:49 UTC · [#5](https://github.com/cxsmtp/buh/pull/5)
 
 - **A chat that answers, then hands over.** The new **Help** button answers sizes (from your size presets), delivery, payment, care, returns and discount questions from what you teach it in Settings → Chat assistant; anything else, an order problem, or "Talk to a person" comes to you, and it never makes up a price, discount or promise.

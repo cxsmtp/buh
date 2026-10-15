@@ -208,9 +208,12 @@ test('public helpers: health, serviceability, API caching headers', { skip: !has
   assert.equal(health.headers.get('cache-control'), 'no-store');
   const svc = await fetch(`${BASE}/api/courier/serviceability?emirate=Sharjah&area=Al%20Nahda`).then((r) => r.json());
   assert.equal(svc.serviceable, true);
-  assert.equal(svc.matchedEmirate, 'Sharjah');
+  assert.equal(svc.message, 'We deliver to Al Nahda, Sharjah');
+  assert.doesNotMatch(JSON.stringify(svc), /jeebly|hub/i, 'no courier details');
+  // The address decides, not a GPS reading (devices often report a far-away network location).
   const london = await post('/api/courier/serviceability', { emirate: 'Dubai', lat: 51.5, lng: -0.12 }).then((r) => r.json());
-  assert.equal(london.serviceable, false);
+  assert.equal(london.serviceable, true);
+  assert.equal((await post('/api/courier/serviceability', { emirate: 'Muscat' }).then((r) => r.json())).serviceable, false);
 });
 
 test('signing out ends the session on the server, so a copied cookie stops working', { skip: !hasBuild }, async () => {

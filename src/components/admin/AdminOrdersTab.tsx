@@ -79,7 +79,9 @@ export const AdminOrdersTab: React.FC<AdminOrdersTabProps> = ({
     // Auto-select smart courier:
     // COD -> Jeebly
     // Prepaid -> Eco Express
-    const defaultProvider: CourierProvider = order.paymentMethod === 'cod'
+    const defaultProvider: CourierProvider = order.deliveryOption === 'same_day'
+      ? 'jeebly' // Eco Express books next-day only
+      : order.paymentMethod === 'cod'
       ? courierSettings.autoAssignRules.codCourier || 'jeebly'
       : courierSettings.autoAssignRules.prepaidCourier || 'echo';
 
@@ -204,6 +206,11 @@ export const AdminOrdersTab: React.FC<AdminOrdersTabProps> = ({
                       <span className="font-mono font-bold text-sm text-[#0f1c2e]">
                         {order.id}
                       </span>
+                      {order.deliveryOption === 'same_day' && (
+                        <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-red-100 text-red-800 border border-red-300" title={`Same-day delivery (customer paid AED ${order.deliveryFee})`}>
+                          Same day
+                        </span>
+                      )}
                       <span
                         className={`text-[10px] font-bold px-2 py-0.5 rounded-full uppercase tracking-wider ${
                           isPending
