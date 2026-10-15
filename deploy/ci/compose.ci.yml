@@ -1,0 +1,7 @@
+# CI only (.github/workflows/zero-downtime.yml), on top of docker-compose.yml:
+# Caddy serves the production site block on plain http :8080 (no certificate).
+services:
+  caddy:
+    command: ["caddy", "run", "--config", "/etc/caddy/ci/Caddyfile", "--adapter", "caddyfile"]
+    ports: !override
+      - "8080:8080"

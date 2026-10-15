@@ -64,6 +64,7 @@ jobs:
           curl -sf http://127.0.0.1:3000/api/settings/public | grep -q 'help@ci.example'
           docker logs buh-test 2>&1 | grep -q 'first admin account created'
           test "$(docker exec buh-test id -u)" = "1001"
+          docker exec buh-test node scripts/backup-now.mjs | grep -E 'pre-update-|nothing to back up'
           docker exec buh-test node -e "require('fs').writeFileSync('/app/x','x')" && exit 1 || echo "app folder is read-only"
           docker rm -f buh-test
 

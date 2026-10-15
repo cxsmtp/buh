@@ -4,9 +4,14 @@ One row per release. Benchmarks run `npm run test:load` on the same 4 vCPU host,
 
 | Version | Date | Storefront req/s (p50 / p95 ms) | Serviceability API req/s (p50 / p95 ms) | Failed requests | Tests | Audit (production) | Security scan |
 | --- | --- | --- | --- | --- | --- | --- | --- |
+| BUH-01.03.00 | 2026-10-15 | branch 561 / 694 / 803; main 535 / 730 / 554 (p50 88–175 vs 121–178 ms; p95 140–231 vs 172–247 ms) | branch 511 / 644 / 573; main 482 / 576 / 694 | 0 | 133 passed | 0 vulnerabilities | No scanner here; the updater's Docker-socket access reviewed in docs/security.md; the real container switch runs only in CI |
 | BUH-01.02.00 | 2026-10-15 | branch 839 / 891 / 793; main 750 / 868 / 844 (p50 66–76 vs 66–77 ms; p95 104–111 vs 108–140 ms) | branch 657 / 621 / 722; main 606 / 734 / 663 | 0 | 120 passed | 0 vulnerabilities | No scanner here; image smoke-tested in CI (read-only, non-root, no capabilities) |
 | BUH-01.01.00 | 2026-10-14 | branch 753 / 662 / 729; main 769 / 729 / 605 (p50 82–88 vs 79–86 ms; p95 139–148 vs 128–210 ms) | branch 568 / 598 / 525; main 591 / 495 / 490 | 0 on the branch (main has no `/api/products`, so its catalogue runs fail by design) | 118 passed | 0 vulnerabilities | Two reviews (security, correctness); no automated scanner here |
 | BUH-01.00.00 | 2026-10-14 | branch 707 / 748 / 757 / 751; main 777 / 746 / 759 / 643 (p50 81–87 ms both; p95 136–170 vs 119–152 ms) | branch 598 / 467 / 501 / 497; main 548 / 547 / 622 / 513 (p50 78–100 vs 74–86 ms) | 0 | 76 passed | 0 vulnerabilities | No new scan (not available here) |
+
+**Notes for BUH-01.03.00**
+- The shop's code is unchanged apart from the version number; the release adds deployment files (blue/green compose, Caddy health checks, the updater) and `scripts/backup-now.mjs`. Three rounds per build, alternating, on a busier shared host than the last release (both builds slower than before). Catalogue: branch 704 / 766 / 701, main 625 / 757 / 824 req/s. Every scenario is level with main within the run-to-run spread; 0 failed requests in every run.
+- Not run here (no Docker daemon, and installing Caddy was not possible): the blue/green switch itself, the rollback of broken images, self-healing with real containers, and `caddy validate`. All are in the `Zero-downtime updates` workflow, which must pass on the pull request before this is merged. The updater's decisions are tested here against a fake Docker CLI (10 tests), and the compose file was checked with `docker compose config`.
 
 **Notes for BUH-01.02.00**
 - Three rounds per build, alternating. All three scenarios are level with main within the run-to-run spread; main's first catalogue round had a 391 ms p95 that did not repeat.

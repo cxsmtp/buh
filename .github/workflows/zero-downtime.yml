@@ -1,0 +1,88 @@
+# Proves the blue/green updater (deploy/updater/updater.sh) with real containers:
+# a good update switches with zero failed requests under load, a broken one is
+# rolled back while the old copy keeps serving, and a stopped shop heals itself.
+# Runs on every pull request; publishes nothing.
+name: Zero-downtime updates
+
+on:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: zero-downtime-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  checks:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Shellcheck the updater and the CI test
+        run: shellcheck --shell=sh deploy/updater/updater.sh deploy/updater/bin/* && shellcheck deploy/ci/zero-downtime-test.sh
+
+      - name: Compose file is valid (production, and with the CI override)
+        run: |
+          touch .env.production
+          docker compose --profile autoupdate --profile green config --quiet
+          docker compose -f docker-compose.yml -f deploy/ci/compose.ci.yml config --quiet
+
+      - name: Caddy accepts both Caddyfiles
+        run: |
+          docker run --rm -v "$PWD/deploy:/etc/caddy:ro" -e DOMAIN=shop.example.com -e ACME_EMAIL=ci@example.com \
+            caddy:2.8.4-alpine caddy validate --config /etc/caddy/Caddyfile --adapter caddyfile
+          docker run --rm -v "$PWD/deploy:/etc/caddy:ro" \
+            caddy:2.8.4-alpine caddy validate --config /etc/caddy/ci/Caddyfile --adapter caddyfile
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Updater logic and database snapshot (unit tests, fake docker)
+        run: npm ci --no-audit --no-fund && node --import tsx --test test/updater.test.mts test/backup-now.test.mts
+
+  switch:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: docker/setup-buildx-action@v3
+
+      - name: Build the shop image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          platforms: linux/amd64
+          load: true
+          tags: buh:test
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Settings for the test stack
+        run: |
+          {
+            echo "DOMAIN=localhost"
+            echo "ACME_EMAIL=ci@example.com"
+            echo "NEXT_PUBLIC_SUPPORT_EMAIL=help@ci.example"
+          } > .env.production
+
+      - name: Blue/green switch, rollback and self-healing under load
+        run: deploy/ci/zero-downtime-test.sh
+
+      - name: Logs
+        if: always()
+        run: |
+          docker compose -f docker-compose.yml -f deploy/ci/compose.ci.yml --profile autoupdate --profile green ps -a || true
+          docker compose -f docker-compose.yml -f deploy/ci/compose.ci.yml logs --no-color caddy | tail -n 200 || true
+          docker compose -f docker-compose.yml -f deploy/ci/compose.ci.yml --profile green logs --no-color app-blue app-green | tail -n 200 || true
+          docker compose -f docker-compose.yml -f deploy/ci/compose.ci.yml --profile autoupdate run --rm -T --entrypoint cat updater /state/updater.log || true
+
+      - name: Clean up
+        if: always()
+        run: docker compose -f docker-compose.yml -f deploy/ci/compose.ci.yml --profile autoupdate --profile green down -v || true

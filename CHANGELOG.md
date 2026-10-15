@@ -1,5 +1,19 @@
 # Changelog
 
+## BUH-01.03.00 — 2026-10-15 09:00 UTC · [#NN](https://github.com/cxsmtp/buh/pull/NN)
+
+- **Updates without closing the shop.** The shop now runs as one of two identical copies (blue and green); a new version starts beside the one serving customers and takes over only once it is healthy, while Caddy retries any request caught in the switch on the other copy.
+- **A bad version never goes live.** If the new version does not pass its health check and load the home page within 2 minutes, it is removed, the old one keeps serving, an alert is written, and that version is not tried again until a newer one is published.
+- **The shop heals itself.** With the updater on, a copy that stops answering is restarted; if that does not help, the last version that worked (`buh:last-good`) is started and takes over, and a shop with nothing running is started again.
+- **A database snapshot before every update.** `backups/pre-update-<time>.db` is taken by the running shop before any switch (no snapshot, no update); the newest 5 are kept.
+- **Opt-in auto-updates, rollback in one command.** `COMPOSE_PROFILES=autoupdate` turns on the updater (checks every 15 minutes; alerts in the shop's data folder and, optionally, a webhook); `update-now` and `rollback` switch on demand without downtime. Existing servers move over once, as the deployment guide describes (a second or two while Caddy restarts).
+- **Proven in CI.** Every pull request switches real containers under load with zero failed requests, rolls back two kinds of broken image while the old copy keeps serving, and restarts a stopped shop.
+- **Status.**
+  - **Benchmark:** same host, main vs this branch, 3 rounds each, alternating (the shop's code is unchanged apart from the version). Storefront main 535 / 730 / 554 req/s, branch 561 / 694 / 803. Serviceability main 482 / 576 / 694, branch 511 / 644 / 573. Catalogue main 625 / 757 / 824, branch 704 / 766 / 701. Level within the spread of a busy host; 0 failed requests in every run.
+  - **Tests:** 133 passed, including 10 new updater tests against a fake Docker CLI and 3 for the database snapshot. The switch with real containers and Caddy runs only in CI (no Docker daemon here).
+  - **Dependency audit:** production 0 vulnerabilities; no dependency changes.
+  - **Security scan:** no automated scanner here. The updater holds the Docker socket (root-equivalent), so it is opt-in; why and how it is limited is in docs/security.md.
+
 ## BUH-01.02.00 — 2026-10-15 07:19 UTC · [#3](https://github.com/cxsmtp/buh/pull/3)
 
 - **A ready-made container image.** Every change on main is built, started and checked, then published as `ghcr.io/cxsmtp/buh:latest` (plus a tag per version), so the server and your own computer can pull it instead of building it.
