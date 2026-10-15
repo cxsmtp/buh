@@ -125,6 +125,14 @@ const MIGRATIONS: Array<(db: DB) => void> = [
         saved_at  TEXT NOT NULL
       );
       CREATE INDEX settings_history_by_key ON settings_history(key, id);
+      -- Older versions (before 2.0.0) reserve stock on products.stock and know nothing of sizes.
+      -- If one ever runs on this database (a rollback, the move from the old setup), its sale
+      -- fails instead of selling a piece the per-size stock no longer has.
+      CREATE TRIGGER products_stock_guard BEFORE UPDATE OF stock ON products
+      WHEN NEW.stock <> (SELECT COALESCE(SUM(qty), 0) FROM product_stock WHERE product_id = NEW.id)
+      BEGIN
+        SELECT RAISE(ABORT, 'stock is kept per size');
+      END;
       -- Checkout SMS codes (hashed), shared by both copies of the shop during an update.
       CREATE TABLE otp_codes (
         phone       TEXT PRIMARY KEY,

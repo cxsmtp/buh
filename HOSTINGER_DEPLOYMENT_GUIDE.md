@@ -193,9 +193,9 @@ To pick up changes to `docker-compose.yml` or the Caddyfile as well, run `git pu
   ```bash
   docker compose exec updater updater-status
   ```
-- Alerts (one JSON line each, kept in the shop's data volume as `updater/alerts.log`):
+- Alerts (one JSON line each, kept in the updater's own volume):
   ```bash
-  docker compose exec updater cat /shopdata/updater/alerts.log
+  docker compose exec updater cat /state/alerts/alerts.log
   ```
 
 ### Self-healing

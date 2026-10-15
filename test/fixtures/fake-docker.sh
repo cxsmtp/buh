@@ -58,7 +58,11 @@ case $cmd in
       inspect)
         fmt=$3
         id=$(resolve "$4") || exit 1
-        case $fmt in '{{.Id}}') echo "$id" ;; *) echo '<no value>' ;; esac
+        case $fmt in
+          '{{.Id}}') echo "$id" ;;
+          *image.version*) cat "$D/versions/$id" 2> /dev/null || echo '<no value>' ;;
+          *) echo '<no value>' ;;
+        esac
         ;;
       prune) ev "prune" ;;
     esac

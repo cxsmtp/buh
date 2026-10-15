@@ -155,10 +155,10 @@ test('settings history: a saved version can be restored, keys are never kept in 
   assert.ok(versions.length >= 1);
   const raw = getDb().prepare('SELECT data FROM settings_history').all() as Array<{ data: string }>;
   assert.ok(!raw.some((r) => r.data.includes('HISTORY-SECRET-KEY-1')), 'no key in history');
-  settings.restoreSettingsVersion(versions[0].id);
+  await settings.restoreSettingsVersion(versions[0].id);
   assert.equal(settings.getSettings('courier').jeebly.pickupLocationName, 'Warehouse A', 'restored');
   assert.equal(settings.getSettings('courier').jeebly.apiKey, 'HISTORY-SECRET-KEY-1', 'the current key stays');
-  assert.equal(statusOf(() => settings.restoreSettingsVersion(999999)), 404);
+  assert.equal(await rejectsStatus(settings.restoreSettingsVersion(999999)), 404);
 });
 
 test('where the customer came from is kept on the order (allow-listed only)', () => {
@@ -258,4 +258,55 @@ test('backups carry the new data (stock per size, history, festival dates) and t
   const csv = backup.openBackup(fs.readFileSync(result.file)).find((e) => e.name === 'products.csv')!.data.toString();
   assert.match(csv, /stock_by_size/);
   assert.match(csv, /king=\d+/);
+});
+
+// ── Security review of BUH-02.00.00 ─────────────────────────────────────────
+
+test('regression: code from before 2.0 (stock on products, no sizes) can no longer sell a piece that is gone', () => {
+  const p = newProduct({ king: 1 });
+  // What 1.2's checkout runs: it would take the piece from the total only, leaving the King on sale.
+  assert.throws(() => getDb().prepare('UPDATE products SET stock = stock - 1 WHERE id = ? AND stock >= 1').run(p.id), /stock is kept per size/);
+  assert.equal(products.getProduct(p.id)!.stockBySize.king, 1, 'nothing was taken');
+  const q = newProduct({ king: 1, queen: 1 });
+  assert.throws(() => getDb().prepare('UPDATE products SET stock = stock - 1 WHERE id = ?').run(q.id), /stock is kept per size/, 'size-blind sales are refused too');
+  assert.equal(products.adjustStock(q.id, 'king', 1).stockCount, 3, 'today’s code still moves stock');
+});
+
+test('regression: restoring an old version never sends today’s key to an older address', async () => {
+  await settings.updateSettings('sms', { provider: 'custom_webhook', customWebhook: { endpointUrl: 'https://93.184.216.34/old', bearerToken: 'TOKEN-FOR-OLD-HOST' } });
+  await settings.updateSettings('sms', { customWebhook: { endpointUrl: 'https://93.184.216.35/new', bearerToken: 'TOKEN-FOR-NEW-HOST' } });
+  const old = settings.settingsHistory().find((v) => v.key === 'sms')!;
+  await settings.restoreSettingsVersion(old.id);
+  const sms = settings.getSettings('sms');
+  assert.equal(sms.customWebhook.endpointUrl, 'https://93.184.216.34/old');
+  assert.notEqual(sms.customWebhook.bearerToken, 'TOKEN-FOR-NEW-HOST', 'the new host’s token is not attached to the old host');
+});
+
+test('regression: exchange rates back off for an hour even when they have never been fetched', async () => {
+  const { kvSet } = await import('@/lib/server/kv');
+  getDb().prepare("DELETE FROM kv WHERE key IN ('fx', 'fx:retry')").run();
+  const fx = await import('@/lib/server/fx');
+  let calls = 0;
+  const failing = async () => {
+    calls++;
+    throw new Error('blocked');
+  };
+  fx.getRates(failing);
+  await fx._fxInFlight();
+  fx.getRates(failing);
+  fx.getRates(failing);
+  assert.equal(calls, 1, 'one attempt, then a pause');
+  kvSet('fx:retry', 0);
+});
+
+test('regression: live streams are capped per address, and closing one frees its place', async () => {
+  const live = await import('@/lib/server/live');
+  const controllers = Array.from({ length: 6 }, () => new AbortController());
+  const responses = controllers.map((c) => live.eventStream(new Request('http://shop.test/api/events', { signal: c.signal }), ['catalog'], '203.0.113.7'));
+  assert.deepEqual(responses.map((r) => r.status), [200, 200, 200, 200, 200, 429]);
+  assert.equal(live.eventStream(new Request('http://shop.test/api/events'), ['catalog'], '203.0.113.8').status, 200, 'another address is fine');
+  controllers[0].abort();
+  await new Promise((r) => setTimeout(r, 10));
+  assert.equal(live.eventStream(new Request('http://shop.test/api/events'), ['catalog'], '203.0.113.7').status, 200);
+  for (const c of controllers) c.abort();
 });

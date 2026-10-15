@@ -33,7 +33,7 @@ set -u
 
 PROJECT_DIR=${PROJECT_DIR:-/project}
 STATE_DIR=${STATE_DIR:-/state}
-ALERT_DIR=${ALERT_DIR:-/shopdata/updater}
+ALERT_DIR=${ALERT_DIR:-/state/alerts}
 DEFAULT_IMAGE=ghcr.io/cxsmtp/buh:latest
 IMAGE=${IMAGE:-$DEFAULT_IMAGE}
 ONE_SHOT=${ONE_SHOT:-0}
@@ -44,7 +44,6 @@ UNHEALTHY_LIMIT=${UNHEALTHY_LIMIT:-3}
 STOP_TIMEOUT=${STOP_TIMEOUT:-25}
 LAST_GOOD=buh:last-good
 PREVIOUS=buh:previous
-APP_UID=1001
 IMAGE_SOURCE_LABEL=org.opencontainers.image.source=https://github.com/cxsmtp/buh
 LOCK_STALE_SECONDS=900
 PROJECT=
@@ -107,16 +106,17 @@ alert() {
   alert_msg="$*"
   log "ALERT [$alert_level] $alert_msg"
   alert_json="{\"at\":\"$(stamp)\",\"level\":\"$alert_level\",\"message\":\"$(json_escape "$alert_msg")\"}"
-  if mkdir -p "$ALERT_DIR" 2>/dev/null; then
+  # The updater's own volume (never the shop's, which the shop's user controls).
+  # Links are refused anyway, so nothing can redirect a write elsewhere.
+  if mkdir -p "$ALERT_DIR" 2>/dev/null && [ ! -L "$ALERT_DIR" ]; then
     alert_file="$ALERT_DIR/alerts.log"
-    if [ -f "$alert_file" ] && [ "$(wc -c < "$alert_file")" -gt 1048576 ]; then
-      tail -n 1000 "$alert_file" > "$alert_file.tmp" && mv "$alert_file.tmp" "$alert_file"
+    if [ ! -L "$alert_file" ] && [ ! -L "$alert_file.tmp" ]; then
+      if [ -f "$alert_file" ] && [ "$(wc -c < "$alert_file")" -gt 1048576 ]; then
+        tail -n 1000 "$alert_file" > "$alert_file.tmp" && mv "$alert_file.tmp" "$alert_file"
+      fi
+      printf '%s\n' "$alert_json" >> "$alert_file"
+      chmod 600 "$alert_file" 2>/dev/null || true
     fi
-    printf '%s\n' "$alert_json" >> "$alert_file"
-    # The shop's own user reads it; nobody else.
-    chown "$APP_UID:$APP_UID" "$ALERT_DIR" "$alert_file" 2>/dev/null || true
-    chmod 700 "$ALERT_DIR" 2>/dev/null || true
-    chmod 600 "$alert_file" 2>/dev/null || true
   fi
   send_webhook "$alert_level" "$alert_msg"
 }
@@ -635,6 +635,17 @@ main() {
       rb_ref=${2:-$PREVIOUS}
       # A published version (ghcr.io/cxsmtp/buh:1.2.0) is fetched first if it is not here yet.
       image_id "$rb_ref" > /dev/null || docker pull -q "$rb_ref" > /dev/null 2>&1 || true
+      # Versions before 2.0.0 keep stock as one number per product, not per size: on today's
+      # database they would refuse orders (stock guard). Refuse them unless forced.
+      rb_version=$(docker image inspect -f '{{index .Config.Labels "org.opencontainers.image.version"}}' "$rb_ref" 2>/dev/null || true)
+      case $rb_version in
+        0.* | 1.*)
+          if [ "${FORCE_OLD_SCHEMA:-0}" != 1 ]; then
+            log "refusing to roll back to $rb_version: versions before 2.0.0 cannot run on this database (restore the pre-update snapshot instead, or set FORCE_OLD_SCHEMA=1)"
+            exit 2
+          fi
+          ;;
+      esac
       rb_active=$(running_colour)
       if [ -n "$rb_active" ]; then
         rb_current=$(container_image "$(cid_of "$rb_active")")

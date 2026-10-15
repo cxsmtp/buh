@@ -19,7 +19,7 @@ export async function POST(req: Request) {
     const session = await requireAdmin(req);
     const body = await readJsonBody(req, 256);
     if (!Number.isInteger(body.id) || (body.id as number) < 1) throw new HttpError(400, 'Give the version id.');
-    const key = restoreSettingsVersion(body.id as number);
+    const key = await restoreSettingsVersion(body.id as number);
     audit('settings.restored', { by: session.email, key, versionId: body.id });
     return json({ success: true, key });
   } catch (err) {

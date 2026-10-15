@@ -125,14 +125,15 @@ export function settingsHistory(limit = 60): SettingsVersion[] {
  * Put an earlier version back. Keys are not in history, so the keys saved now
  * stay. The version replaced by this restore is itself kept, so it can be undone.
  */
-export function restoreSettingsVersion(id: number): SettingsKey {
+export async function restoreSettingsVersion(id: number): Promise<SettingsKey> {
   const row = getDb().prepare('SELECT key, data FROM settings_history WHERE id = ?').get(id) as { key: SettingsKey; data: string } | undefined;
   if (!row || !(row.key in DEFAULTS)) throw new HttpError(404, 'That version is no longer kept.');
   const key = row.key;
+  // Saved like any other change: validated, and keys follow their host (a key saved for
+  // today's address is not sent to an older one). Blank keys mean "keep the saved key".
   const restored = deepMerge(DEFAULTS[key], JSON.parse(row.data)) as Obj;
-  const current = getSettings(key) as unknown as Obj;
-  for (const p of SECRETS[key]) setPath(restored, p, getPath(current, p) ?? '');
-  save(key, restored as unknown as SettingsMap[typeof key]);
+  for (const p of SECRETS[key]) setPath(restored, p, '');
+  await updateSettings(key, restored);
   return key;
 }
 

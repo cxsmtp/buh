@@ -142,9 +142,8 @@ docker exec "$(cid_of blue)" ls -l /data/backups
 [ "$(docker exec "$(cid_of blue)" sh -c 'ls /data/backups/pre-update-*.db | wc -l')" -ge 2 ] || fail "no pre-update snapshots"
 docker exec -i "$(cid_of blue)" node --input-type=module - < scripts/backup-now.mjs | grep -q pre-update- || fail "backup-now.mjs fed on stdin did not run"
 
-step "alerts are in the shop's volume, readable by the shop"
-docker exec "$(cid_of blue)" cat /data/updater/alerts.log
-docker exec "$(cid_of blue)" grep -q '"level":"error"' /data/updater/alerts.log || fail "no alert for the broken images"
+step "alerts are in the updater's own volume"
+"${COMPOSE[@]}" --profile autoupdate run --rm -T --entrypoint sh updater -c 'cat /state/alerts/alerts.log && grep -q "\"level\":\"error\"" /state/alerts/alerts.log' || fail "no alert for the broken images"
 
 step "self-healing: nothing running → started from buh:last-good"
 docker stop -t 25 "$(cid_of blue)"

@@ -37,9 +37,8 @@ async function refresh(fetcher: (url: string) => Promise<unknown>): Promise<void
     kvSet('fx', { base: 'AED', rates, fetchedAt: new Date().toISOString() } satisfies Rates);
   } catch (err) {
     logEvent('warn', 'fx_refresh_failed', { error: err instanceof Error ? err.message : String(err) });
-    // Keep the old rates; try again in an hour rather than on every request.
-    const old = kvGet<Rates>('fx')?.data;
-    if (old) kvSet('fx', { ...old, retryAfter: Date.now() + 3600_000 });
+    // Keep the old rates (if any); try again in an hour rather than on every request.
+    kvSet('fx:retry', Date.now() + 3600_000);
   }
 }
 
@@ -53,9 +52,10 @@ const defaultFetcher = async (url: string) => {
 
 /** The current rates (refreshing in the background when a day old). */
 export function getRates(fetcher: (url: string) => Promise<unknown> = defaultFetcher): Rates | null {
-  const stored = kvGet<Rates & { retryAfter?: number }>('fx')?.data ?? null;
+  const stored = kvGet<Rates>('fx')?.data ?? null;
   const stale = !stored || Date.now() - Date.parse(stored.fetchedAt) > MAX_AGE_MS;
-  const waiting = stored?.retryAfter && Date.now() < stored.retryAfter;
+  const retryAt = kvGet<number>('fx:retry')?.data ?? 0;
+  const waiting = Date.now() < retryAt;
   if (stale && !waiting && !inFlight && process.env.FX_DISABLED !== 'true') {
     inFlight = refresh(fetcher).finally(() => (inFlight = null));
   }

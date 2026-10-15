@@ -202,6 +202,33 @@ test('both copies running (a stray `docker compose up`): the recorded one is kep
   assert.equal(statusOf(e, 'green'), 'running');
 });
 
+test('regression: no rollback to a version before 2.0.0 (it keeps stock per product, not per size)', () => {
+  const e = setup();
+  running(e);
+  publish(e, NEW);
+  run(e, ['once']);
+  fs.mkdirSync(path.join(e.fake, 'versions'), { recursive: true });
+  fs.writeFileSync(path.join(e.fake, 'versions', OLD), '1.2.0\n');
+  fs.rmSync(path.join(e.fake, 'events'));
+  const r = run(e, ['rollback']);
+  assert.equal(r.code, 2, r.out);
+  assert.match(r.out, /refusing to roll back to 1\.2\.0/);
+  assert.ok(!events(e).some((l) => l.startsWith('up ') || l.startsWith('stop ')), 'nothing switched');
+  assert.equal(run(e, ['rollback'], { FORCE_OLD_SCHEMA: '1' }).code, 0, 'possible when forced');
+});
+
+test('regression: alerts never follow a link planted in the alert folder', () => {
+  const e = setup();
+  fs.mkdirSync(e.alerts, { recursive: true });
+  const target = path.join(path.dirname(e.alerts), 'precious');
+  fs.writeFileSync(target, 'keep me\n');
+  fs.chmodSync(target, 0o644);
+  fs.symlinkSync(target, path.join(e.alerts, 'alerts.log'));
+  run(e, ['heal']); // nothing running: an alert is written
+  assert.equal(fs.readFileSync(target, 'utf8'), 'keep me\n', 'the link target is untouched');
+  assert.equal(fs.statSync(target).mode & 0o777, 0o644, 'and keeps its permissions');
+});
+
 test('rollback goes back to the previous image without downtime, and keeps auto-update from re-applying the new one', () => {
   const e = setup();
   running(e);

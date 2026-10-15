@@ -28,63 +28,115 @@ export function versions(): Record<Channel, number> {
 
 /**
  * A text/event-stream that sends the counters (and the app's version) when
- * they change, checking every 2 seconds, with a heartbeat. It ends after
- * 10 minutes; the browser reconnects by itself.
+ * they change, with a heartbeat. One poller per process checks the database
+ * every 2 seconds and tells every open stream, so 500 open pages cost one
+ * query, not 500. Streams are capped (in total and per address) and end
+ * after 10 minutes; the browser reconnects by itself.
  */
-export function eventStream(req: Request, channels: Channel[]): Response {
+const MAX_STREAMS = Number(process.env.LIVE_MAX_STREAMS) || 2000;
+const MAX_PER_IP = 5;
+
+interface Subscriber {
+  channels: Channel[];
+  ip: string;
+  send: (text: string) => void;
+  last: string;
+}
+const subscribers = new Set<Subscriber>();
+let poller: NodeJS.Timeout | undefined;
+
+function payloadFor(sub: Subscriber, all: Record<Channel, number>): string {
+  return JSON.stringify({ ...Object.fromEntries(sub.channels.map((c) => [c, all[c]])), app: process.env.NEXT_PUBLIC_APP_VERSION ?? '' });
+}
+
+function poll() {
+  let all: Record<Channel, number>;
+  try {
+    all = versions();
+  } catch {
+    return;
+  }
+  for (const sub of subscribers) {
+    const payload = payloadFor(sub, all);
+    if (payload !== sub.last) {
+      sub.last = payload;
+      sub.send(`data: ${payload}\n\n`);
+    }
+  }
+}
+
+function subscribe(sub: Subscriber) {
+  subscribers.add(sub);
+  if (!poller) {
+    poller = setInterval(poll, 2000);
+    poller.unref?.();
+  }
+}
+
+function unsubscribe(sub: Subscriber) {
+  subscribers.delete(sub);
+  if (subscribers.size === 0 && poller) {
+    clearInterval(poller);
+    poller = undefined;
+  }
+}
+
+/** Test hook: how many streams are open. */
+export function _openStreams() {
+  return subscribers.size;
+}
+
+export function eventStream(req: Request, channels: Channel[], ip = 'unknown'): Response {
+  let fromIp = 0;
+  for (const s of subscribers) if (s.ip === ip) fromIp++;
+  if (subscribers.size >= MAX_STREAMS || fromIp >= MAX_PER_IP) {
+    // The page simply doesn't get live updates; it still works and reloads data as usual.
+    return new Response('Too many live connections.', { status: 429, headers: { 'Retry-After': '60', 'Cache-Control': 'no-store' } });
+  }
   const encoder = new TextEncoder();
-  let timer: NodeJS.Timeout | undefined;
   let beat: NodeJS.Timeout | undefined;
   let end: NodeJS.Timeout | undefined;
+  let sub: Subscriber | undefined;
   const stop = () => {
-    clearInterval(timer);
     clearInterval(beat);
     clearTimeout(end);
+    if (sub) unsubscribe(sub);
   };
   const stream = new ReadableStream<Uint8Array>({
     start(controller) {
-      let last = '';
-      const send = (text: string) => {
-        try {
-          controller.enqueue(encoder.encode(text));
-        } catch {
-          stop();
-        }
-      };
-      const check = () => {
-        let v: Record<string, number>;
-        try {
-          const all = versions();
-          v = Object.fromEntries(channels.map((c) => [c, all[c]]));
-        } catch {
-          return;
-        }
-        const payload = JSON.stringify({ ...v, app: process.env.NEXT_PUBLIC_APP_VERSION ?? '' });
-        if (payload !== last) {
-          last = payload;
-          send(`data: ${payload}\n\n`);
-        }
-      };
-      send('retry: 5000\n\n');
-      check();
-      timer = setInterval(check, 2000);
-      beat = setInterval(() => send(': keep-alive\n\n'), 25_000);
-      end = setTimeout(() => {
+      const close = () => {
         stop();
         try {
           controller.close();
         } catch {
           // already closed
         }
-      }, 10 * 60_000);
-      req.signal.addEventListener('abort', () => {
-        stop();
-        try {
-          controller.close();
-        } catch {
-          // already closed
-        }
-      });
+      };
+      sub = {
+        channels,
+        ip,
+        last: '',
+        send: (text: string) => {
+          try {
+            controller.enqueue(encoder.encode(text));
+          } catch {
+            stop();
+          }
+        },
+      };
+      sub.send('retry: 5000\n\n');
+      try {
+        sub.last = payloadFor(sub, versions());
+        sub.send(`data: ${sub.last}\n\n`);
+      } catch {
+        // the poller will send it
+      }
+      subscribe(sub);
+      beat = setInterval(() => sub?.send(': keep-alive\n\n'), 25_000);
+      beat.unref?.();
+      end = setTimeout(close, 10 * 60_000);
+      end.unref?.();
+      req.signal.addEventListener('abort', close);
     },
     cancel: stop,
   });

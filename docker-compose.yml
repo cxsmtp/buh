@@ -113,20 +113,14 @@ services:
       # The compose project, read-only: the updater starts app-blue / app-green from it.
       - .:/project:ro
       - ./deploy/updater:/updater:ro
-      # Its own state (last good image, rejected images, log).
+      # Its own state (last good image, rejected images, log, alerts): nothing of the shop's.
       - updater-state:/state
-      # Alerts for the Admin Hub: /data/updater/alerts.log in the shop's volume.
-      - buhome-data:/shopdata
     read_only: true
     tmpfs:
       - /tmp
+    # No capabilities: it only talks to the Docker socket and writes its own volume.
     cap_drop:
       - ALL
-    cap_add:
-      # Write the alert log into the shop's volume (owned by the shop's user) and hand it over.
-      - CHOWN
-      - DAC_OVERRIDE
-      - FOWNER
     security_opt:
       - no-new-privileges:true
     pids_limit: 128
