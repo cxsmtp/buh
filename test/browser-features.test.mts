@@ -278,8 +278,13 @@ test('chat on a phone: the assistant answers sizes; "Talk to a person" reaches t
   await shopper.goto(server.base, { waitUntil: 'domcontentloaded' });
   await shopper.getByRole('button', { name: 'Help and chat' }).click();
   const panel = shopper.getByRole('dialog', { name: 'Chat with the shop' });
+  // Keyboard: typing goes straight into the chat; Escape closes it and returns to the Help button.
+  await shopper.waitForFunction(() => document.activeElement?.id === 'chat-input');
+  await shopper.keyboard.press('Escape');
+  await shopper.waitForFunction(() => document.activeElement?.getAttribute('aria-label') === 'Help and chat');
+  await shopper.keyboard.press('Enter');
   await panel.getByRole('button', { name: 'Sizes & measurements' }).click();
-  await panel.getByText(/Here are our measurements/).waitFor();
+  await panel.getByText(/Our sizes \(by mattress\)/).waitFor();
   await panel.getByText(/King Size Bed/).first().waitFor();
   assert.deepEqual(await overflow(shopper), []);
 

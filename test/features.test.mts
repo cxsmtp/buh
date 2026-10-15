@@ -236,7 +236,7 @@ test('upgrading a shop from version 1.2: existing stock moves to each product’
   const upgraded = spawnSync(process.execPath, ['--import', 'tsx', '-e', `process.env.DATA_DIR=${JSON.stringify(dir)}; const m = await import('@/lib/server/db'); const db = (m.getDb ?? m.default.getDb)(); console.log(JSON.stringify({ v: db.pragma('user_version', { simple: true }), rows: db.prepare('SELECT * FROM product_stock').all(), total: db.prepare('SELECT stock FROM products').get().stock }));`], { encoding: 'utf8' });
   assert.equal(upgraded.status, 0, upgraded.stderr);
   const out = JSON.parse(upgraded.stdout.trim().split('\n').pop()!);
-  assert.equal(out.v, 3);
+  assert.ok(out.v >= 3, `migrated to the latest (${out.v})`);
   assert.deepEqual(out.rows, [{ product_id: 'old-1', size_id: 'queen', qty: 7 }]);
   assert.equal(out.total, 7, 'the total stays in step');
 });

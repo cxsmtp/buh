@@ -1,5 +1,5 @@
 import { customerAskPerson, customerContact, customerPoll, customerSend } from '@/lib/server/chat';
-import { enforceIpLimit } from '@/lib/server/guard';
+import { enforceIpLimit, enforceLimit } from '@/lib/server/guard';
 import { assertSameOrigin, handleRouteError, HttpError, json, readJsonBody } from '@/lib/server/http';
 
 /**
@@ -23,14 +23,16 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
     assertSameOrigin(req);
     const { id } = await params;
     enforceIpLimit(req, 'chat-send', 40, 10 * 60 * 1000, 'You are sending messages very quickly. Wait a moment, please.');
+    // Per chat as well (applies even when the client's address is unknown).
+    enforceLimit(`chat-send:${String(id).slice(0, 40)}`, 40, 10 * 60 * 1000, 'You are sending messages very quickly. Wait a moment, please.');
     const body = await readJsonBody(req, 4 * 1024);
     switch (body.action) {
       case 'send':
-        return json(customerSend(id, body.token, body.message));
+        return json(customerSend(id, body.token, body.message, body.after));
       case 'person':
-        return json(customerAskPerson(id, body.token));
+        return json(customerAskPerson(id, body.token, body.after));
       case 'contact':
-        return json(customerContact(id, body.token, { name: body.name, contact: body.contact }));
+        return json(customerContact(id, body.token, { name: body.name, contact: body.contact }, body.after));
       default:
         throw new HttpError(400, 'Unknown action.');
     }

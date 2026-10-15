@@ -4,10 +4,15 @@ One row per release. Benchmarks run `npm run test:load` on the same 4 vCPU host,
 
 | Version | Date | Storefront req/s (p50 / p95 ms) | Serviceability API req/s (p50 / p95 ms) | Failed requests | Tests | Audit (production) | Security scan |
 | --- | --- | --- | --- | --- | --- | --- | --- |
+| BUH-02.01.00 | 2026-10-15 | branch 813 / 778 / 796 / 795 / 878 / 867; main 922 / 855 / 860 / 791 / 801 / 751 (p50 70–119 vs 73–105 ms; p95 110–204 vs 114–159 ms) | branch 638 / 640 / 601 / 671 / 646 / 668; main 671 / 652 / 614 / 672 / 725 / 826 | 0 | 231 passed | 0 vulnerabilities | Security and correctness review, 9 findings fixed with tests; no automated scanner here |
 | BUH-02.00.00 | 2026-10-15 | branch 681 / 885 / 653 / 796 / 751 / 751; main 824 / 819 / 855 / 803 / 721 / 890 (p50 75–129 vs 72–125 ms; p95 135–272 vs 106–212 ms) | branch 579 / 795 / 586 / 702 / 655 / 699; main 626 / 681 / 727 / 628 / 710 / 717 | 0 | 212 passed | 0 vulnerabilities | Three reviews (security, correctness, email/reset/versions); no automated scanner here |
 | BUH-01.02.00 | 2026-10-15 | branch 839 / 891 / 793; main 750 / 868 / 844 (p50 66–76 vs 66–77 ms; p95 104–111 vs 108–140 ms) | branch 657 / 621 / 722; main 606 / 734 / 663 | 0 | 120 passed | 0 vulnerabilities | No scanner here; image smoke-tested in CI (read-only, non-root, no capabilities) |
 | BUH-01.01.00 | 2026-10-14 | branch 753 / 662 / 729; main 769 / 729 / 605 (p50 82–88 vs 79–86 ms; p95 139–148 vs 128–210 ms) | branch 568 / 598 / 525; main 591 / 495 / 490 | 0 on the branch (main has no `/api/products`, so its catalogue runs fail by design) | 118 passed | 0 vulnerabilities | Two reviews (security, correctness); no automated scanner here |
 | BUH-01.00.00 | 2026-10-14 | branch 707 / 748 / 757 / 751; main 777 / 746 / 759 / 643 (p50 81–87 ms both; p95 136–170 vs 119–152 ms) | branch 598 / 467 / 501 / 497; main 548 / 547 / 622 / 513 (p50 78–100 vs 74–86 ms) | 0 | 76 passed | 0 vulnerabilities | No new scan (not available here) |
+
+**Notes for BUH-02.01.00**
+- Two sets of three rounds, alternating, against main at BUH-02.00.00. The storefront is level (first set main ahead, second set the branch); courier check and catalogue are within run-to-run spread. Chat itself is only polled while a shopper has it open.
+- Reading replies from a real mailbox is tested against a fake IMAP server over TLS; a real Hostinger or Gmail mailbox was not available here.
 
 **Notes for BUH-02.00.00**
 - Two sets of three rounds per build, alternating. Courier check and catalogue are level with main. The storefront median is about 8% lower: the home page now also renders the festival theme, the live-update connection and the version badge. The spread is wide on this shared host (main alone 721–890 req/s). Branch rounds 1 and 3 of the first set had the longest tails (p95 up to 272 ms storefront, 365 ms catalogue); neither repeated in the second set.

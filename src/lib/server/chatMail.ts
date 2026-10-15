@@ -5,7 +5,8 @@ import { logEvent } from './log';
 import { assertPublicMailHost, emailConfigured, mailConfig, ownerEmail, sender, transport } from './mail';
 import { getSettings } from './settings';
 import { adminAccountInfo } from './adminAuth';
-import { adminReply, customerEmailReply, markEmailed, setChatNotifiers, threadByReplyKey, threadRow, transcript } from './chat';
+import { adminReply, claimMail, claimOwnerEmail, customerEmailReply, setChatNotifiers, threadByReplyKey, threadRow, transcript } from './chat';
+import { kvBump } from './kv';
 
 /**
  * Chat by email.
@@ -22,6 +23,10 @@ import { adminReply, customerEmailReply, markEmailed, setChatNotifiers, threadBy
  */
 
 const OWNER_EMAIL_EVERY_MS = 5 * 60 * 1000;
+/** Owner emails per hour, shop-wide: a flood of new chats can't spam the owner or hurt the mail account. */
+const OWNER_EMAILS_PER_HOUR = 30;
+/** On every email the shop sends, so it never takes its own email for a reply. */
+const OWN_HEADER = 'X-BUH-Chat';
 const KEY_RE = /\[Chat #([A-HJ-NP-Z2-9]{10})\]/;
 
 const shopName = () => getSettings('brand').storeName || 'Beautiful UAE Home';
@@ -40,9 +45,21 @@ export function mailboxConfig(): MailboxConfig | null {
   const host = e.imapHost || process.env.IMAP_HOST || '';
   if (!host) return null;
   const user = e.imapHost ? e.imapUser || e.smtpUser : process.env.IMAP_USER || process.env.SMTP_USER || '';
-  const pass = e.imapHost ? e.imapPass || (user === e.smtpUser ? e.smtpPass : '') : process.env.IMAP_PASS || process.env.SMTP_PASS || '';
+  // The sending password is reused only for the same provider (imap.x.com / smtp.x.com): typing another
+  // server must not hand that password to it.
+  const pass = e.imapHost ? e.imapPass || (user === e.smtpUser && sameProvider(e.imapHost, e.smtpHost) ? e.smtpPass : '') : process.env.IMAP_PASS || process.env.SMTP_PASS || '';
   if (!user || !pass) return null;
   return { host, port: e.imapHost ? e.imapPort || 993 : Number(process.env.IMAP_PORT) || 993, user, pass, source: e.imapHost ? 'settings' : 'environment' };
+}
+
+/** imap.hostinger.com and smtp.hostinger.com: the same registered domain (co.uk-style endings included). */
+export function sameProvider(a: string, b: string): boolean {
+  const base = (h: string) => {
+    const parts = h.toLowerCase().split('.').filter(Boolean);
+    const n = parts.length >= 3 && parts.at(-1)!.length === 2 && /^(co|com|net|org|gov|ac|edu)$/.test(parts.at(-2)!) ? 3 : 2;
+    return parts.length >= n ? parts.slice(-n).join('.') : '';
+  };
+  return Boolean(a && b && base(a) && base(a) === base(b));
 }
 
 /** Where replies should go: the mailbox the shop reads, when that is an address. */
@@ -64,12 +81,16 @@ export function newText(text: string): string {
   return out.join('\n').trim();
 }
 
-async function emailOwner(threadId: string, force = false) {
+async function emailOwner(threadId: string) {
   const r = threadRow(threadId);
   const to = ownerEmail();
   if (!r || !to || !emailConfigured()) return;
-  if (!force && r.emailed_at && Date.now() - Date.parse(r.emailed_at) < OWNER_EMAIL_EVERY_MS) return;
-  markEmailed(threadId);
+  if (!claimOwnerEmail(threadId, OWNER_EMAIL_EVERY_MS)) return;
+  const hour = new Date().toISOString().slice(0, 13);
+  if (kvBump(`chat:owner-emails:${hour}`) > OWNER_EMAILS_PER_HOUR) {
+    logEvent('warn', 'chat_owner_email_capped', { perHour: OWNER_EMAILS_PER_HOUR });
+    return; // still in Admin Hub → Chats
+  }
   const who = [r.customer_name, r.contact].filter(Boolean).join(' · ') || 'A customer (no contact details yet)';
   const canReply = Boolean(mailboxConfig());
   try {
@@ -77,6 +98,7 @@ async function emailOwner(threadId: string, force = false) {
       from: sender(),
       to,
       replyTo: replyTo(),
+      headers: { [OWN_HEADER]: '1', 'Auto-Submitted': 'auto-generated' },
       subject: `[Chat #${r.reply_key}] ${who} is waiting for an answer`,
       text: [
         `${who} would like to talk to someone at ${shopName()}.`,
@@ -105,6 +127,7 @@ async function emailCustomer(threadId: string, body: string) {
       from: sender(),
       to: r.contact,
       replyTo: replyTo(),
+      headers: { [OWN_HEADER]: '1', 'Auto-Submitted': 'auto-replied' },
       subject: `[Chat #${r.reply_key}] ${shopName()} replied to your message`,
       text: `${body}\n\n—\n${shopName()}. ${mailboxConfig() ? 'Reply to this email to continue the conversation.' : ''}`.trim(),
     });
@@ -134,33 +157,41 @@ export interface IncomingMail {
   text: string;
   /** The receiving server's verdict (Authentication-Results), when present. */
   authResults: string;
+  /** Sent by this shop (our marker header): never a reply. */
+  ownMail?: boolean;
+  /** Auto-Submitted header (out-of-office replies say auto-replied). */
+  autoSubmitted?: string;
 }
+
+const AUTO_SUBJECT = /^(auto(matic)?( reply| response)?:|out of (the )?office|autoreply|automatische antwort|réponse automatique)/i;
 
 /** Post one email into its chat. Returns what happened, for the log and tests. */
 export async function acceptMail(mail: IncomingMail): Promise<'owner' | 'customer' | 'ignored'> {
   const key = mail.subject.match(KEY_RE)?.[1];
   const r = key ? threadByReplyKey(key) : undefined;
   if (!r) return 'ignored';
-  const seen = new Set(kvGet<string[]>('chat:mail-seen')?.data ?? []);
-  if (mail.messageId && seen.has(mail.messageId)) return 'ignored';
-  // A forged sender is refused when the receiving server says so.
-  if (/\bdmarc=fail\b/i.test(mail.authResults) || (/\bspf=fail\b/i.test(mail.authResults) && /\bdkim=(fail|none)\b/i.test(mail.authResults))) {
-    logEvent('warn', 'chat_mail_refused', { reason: 'sender not verified' });
-    return 'ignored';
-  }
+  // Our own notification (single-mailbox setups receive it), and out-of-office replies, are never replies.
+  if (mail.ownMail || (mail.autoSubmitted && !/^no$/i.test(mail.autoSubmitted.trim())) || AUTO_SUBJECT.test(mail.subject.replace(/^(re|fwd?):\s*/i, ''))) return 'ignored';
   const text = newText(mail.text);
   if (!text) return 'ignored';
   const from = mail.from.toLowerCase();
-  let result: 'owner' | 'customer' | 'ignored' = 'ignored';
-  if ((await ownerAddresses()).has(from)) {
-    adminReply(r.id, text, 'email', from);
-    result = 'owner';
-  } else if (r.contact && from === r.contact.toLowerCase()) {
-    customerEmailReply(r.id, text);
-    result = 'customer';
+  const isOwner = (await ownerAddresses()).has(from);
+  const isCustomer = Boolean(r.contact) && from === r.contact.toLowerCase();
+  if (!isOwner && !isCustomer) return 'ignored';
+  // Speaking as the shop needs proof the mail came from the owner's mail server: anyone can type the
+  // owner's address as the sender. Without a passing DKIM or DMARC verdict it is refused.
+  if (isOwner && !(/\bdkim=pass\b/i.test(mail.authResults) || /\bdmarc=pass\b/i.test(mail.authResults))) {
+    logEvent('warn', 'chat_mail_refused', { reason: 'owner address not verified by the receiving server' });
+    return 'ignored';
   }
-  if (mail.messageId) kvSet('chat:mail-seen', [...seen, mail.messageId].slice(-500));
-  return result;
+  // Once, even if both copies of the shop read the mailbox at the same moment.
+  if (!claimMail(mail.messageId || `${from}:${mail.subject}:${text.slice(0, 200)}`)) return 'ignored';
+  if (isOwner) {
+    adminReply(r.id, text, 'email', from);
+    return 'owner';
+  }
+  customerEmailReply(r.id, text);
+  return 'customer';
 }
 
 let polling = false;
@@ -199,6 +230,8 @@ export async function checkMailbox(): Promise<number> {
         const parsed = await simpleParser(msg.source, { skipHtmlToText: false, skipImageLinks: true });
         const auth = parsed.headers.get('authentication-results');
         const outcome = await acceptMail({
+          ownMail: parsed.headers.has(OWN_HEADER.toLowerCase()),
+          autoSubmitted: String(parsed.headers.get('auto-submitted') ?? ''),
           messageId: parsed.messageId || `uid:${uid}`,
           subject: parsed.subject || '',
           from: parsed.from?.value[0]?.address || '',

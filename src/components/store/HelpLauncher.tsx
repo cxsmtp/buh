@@ -52,6 +52,8 @@ export function HelpLauncher() {
   const lastId = useRef(0);
   const end = useRef<HTMLDivElement>(null);
   const input = useRef<HTMLTextAreaElement>(null);
+  const launcher = useRef<HTMLButtonElement>(null);
+  const wasOpen = useRef(false);
 
   const wa = askWhatsAppLink(store, store.whatsappGreeting);
   const ig = instagramLink(store);
@@ -60,7 +62,7 @@ export function HelpLauncher() {
   const merge = useCallback((next: View) => {
     setView((v) => {
       const known = new Set((v?.messages ?? []).map((m) => m.id));
-      const all = [...(v?.messages ?? []), ...next.messages.filter((m) => !known.has(m.id))];
+      const all = [...(v?.messages ?? []), ...next.messages.filter((m) => !known.has(m.id))].sort((a, b) => a.id - b.id);
       lastId.current = all.length ? all[all.length - 1].id : lastId.current;
       return { ...next, messages: all };
     });
@@ -104,6 +106,13 @@ export function HelpLauncher() {
     return () => clearInterval(t);
   }, [open, view, poll]);
 
+  // Keyboard: focus the message box when the chat opens, and the Help button again when it closes.
+  useEffect(() => {
+    if (open) input.current?.focus();
+    else if (wasOpen.current) launcher.current?.focus();
+    wasOpen.current = open;
+  }, [open]);
+
   useEffect(() => {
     if (open) end.current?.scrollIntoView({ block: 'nearest' });
   }, [open, view?.messages.length, view?.needsContact]);
@@ -143,7 +152,7 @@ export function HelpLauncher() {
     setError('');
     const s = saved.current;
     const res = s
-      ? await postJson<View>(`/api/chat/${encodeURIComponent(s.id)}`, { token: s.token, ...body })
+      ? await postJson<View>(`/api/chat/${encodeURIComponent(s.id)}`, { token: s.token, after: lastId.current, ...body })
       : await postJson<View>('/api/chat', { message: body.message, page: window.location.pathname });
     setBusy(false);
     if (!res.ok) {
@@ -192,6 +201,7 @@ export function HelpLauncher() {
     <>
       {!open && (
         <button
+          ref={launcher}
           type="button"
           onClick={() => {
             setOpen(true);

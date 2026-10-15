@@ -18,7 +18,11 @@ import { getSettings } from './settings';
  */
 
 const MAX_BODY = 1000;
+/** Customer and assistant messages per chat; the owner can always answer (up to the hard cap). */
 const MAX_MESSAGES_PER_THREAD = 300;
+const HARD_CAP = 500;
+/** Chats only the assistant answered are kept this long (nothing for a person to follow up). */
+const BOT_ONLY_KEEP_MS = 30 * 24 * 60 * 60 * 1000;
 /** A customer who hasn't looked at the chat for this long gets the owner's reply by email (when they left an email). */
 export const CUSTOMER_AWAY_MS = 2 * 60 * 1000;
 
@@ -77,7 +81,8 @@ function own(id: unknown, token: unknown): Row {
 function addMessage(threadId: string, author: ChatMessage['author'], body: string, via: ChatMessage['via'], now = Date.now()): ChatMessage {
   const db = getDb();
   const count = (db.prepare('SELECT COUNT(*) AS n FROM chat_messages WHERE thread_id = ?').get(threadId) as { n: number }).n;
-  if (count >= MAX_MESSAGES_PER_THREAD) throw new HttpError(429, 'This chat is full. Please start a new one, or message us on WhatsApp.');
+  const cap = author === 'customer' || author === 'bot' ? MAX_MESSAGES_PER_THREAD : HARD_CAP;
+  if (count >= cap) throw new HttpError(429, 'This chat is full. Please start a new one, or message us on WhatsApp.');
   const at = nowIso(now);
   const info = db.prepare('INSERT INTO chat_messages (thread_id, at, author, body, via) VALUES (?, ?, ?, ?, ?)').run(threadId, at, author, body, via);
   db.prepare('UPDATE chat_threads SET updated_at = ? WHERE id = ?').run(at, threadId);
@@ -156,36 +161,36 @@ export function startChat(input: { message: unknown; name?: unknown; contact?: u
   return { ...customerView(row(id)!), token };
 }
 
-export function customerSend(id: unknown, token: unknown, message: unknown, now = Date.now()): CustomerView {
+/** `after`: the last message id the customer's page has, so nothing written meanwhile (an owner reply) is skipped. */
+const afterId = (v: unknown) => (Number.isInteger(Number(v)) && Number(v) > 0 ? Number(v) : 0);
+
+export function customerSend(id: unknown, token: unknown, message: unknown, after: unknown = 0, now = Date.now()): CustomerView {
   const r = own(id, token);
   const body = cleanBody(message);
   if (r.status === 'closed') getDb().prepare("UPDATE chat_threads SET status = 'bot' WHERE id = ?").run(r.id);
-  const last = (getDb().prepare('SELECT MAX(id) AS id FROM chat_messages WHERE thread_id = ?').get(r.id) as { id: number | null }).id ?? 0;
   getDb().prepare('UPDATE chat_threads SET customer_seen_at = ? WHERE id = ?').run(nowIso(now), r.id);
   onCustomerMessage(row(r.id)!, body, now);
   bump('chats');
-  return customerView(r, last);
+  return customerView(r, afterId(after));
 }
 
 /** "Talk to a person" button. */
-export function customerAskPerson(id: unknown, token: unknown, now = Date.now()): CustomerView {
+export function customerAskPerson(id: unknown, token: unknown, after: unknown = 0, now = Date.now()): CustomerView {
   const r = own(id, token);
-  const last = (getDb().prepare('SELECT MAX(id) AS id FROM chat_messages WHERE thread_id = ?').get(r.id) as { id: number | null }).id ?? 0;
   handOver(r, 'asked', now);
   bump('chats');
-  return customerView(r, last);
+  return customerView(r, afterId(after));
 }
 
-export function customerContact(id: unknown, token: unknown, input: { name?: unknown; contact: unknown }, now = Date.now()): CustomerView {
+export function customerContact(id: unknown, token: unknown, input: { name?: unknown; contact: unknown }, after: unknown = 0, now = Date.now()): CustomerView {
   const r = own(id, token);
   const contact = cleanContact(input.contact);
   const name = typeof input.name === 'string' && input.name.trim() ? input.name.replace(/[\u0000-\u001f\u007f<>]+/g, ' ').trim().slice(0, 80) : r.customer_name;
-  const last = (getDb().prepare('SELECT MAX(id) AS id FROM chat_messages WHERE thread_id = ?').get(r.id) as { id: number | null }).id ?? 0;
   getDb().prepare('UPDATE chat_threads SET contact = ?, customer_name = ? WHERE id = ?').run(contact, name, r.id);
   addMessage(r.id, 'system', `Thank you${name ? `, ${name.split(' ')[0]}` : ''}. If you leave before we reply, we’ll get back to you at ${contact}.`, 'web', now);
   notifyOwner?.(r.id);
   bump('chats');
-  return customerView(r, last);
+  return customerView(r, afterId(after));
 }
 
 /** New messages since `after` (the customer's page asks every few seconds while the chat is open). */
@@ -193,7 +198,7 @@ export function customerPoll(id: unknown, token: unknown, after: unknown, now = 
   const r = own(id, token);
   getDb().prepare('UPDATE chat_threads SET customer_seen_at = ? WHERE id = ?').run(nowIso(now), r.id);
   reassureIfWaiting(row(r.id)!, now);
-  return customerView(r, Number.isInteger(Number(after)) ? Math.max(0, Number(after)) : 0);
+  return customerView(r, afterId(after));
 }
 
 /**
@@ -224,7 +229,28 @@ export function sweepChats(now = Date.now()): number {
   const rows = getDb().prepare("SELECT * FROM chat_threads WHERE status = 'waiting' AND reassured_at IS NULL").all() as Row[];
   let n = 0;
   for (const r of rows) if (reassureIfWaiting(r, now)) n++;
+  purgeOldBotChats(now);
   return n;
+}
+
+/** Chats that never reached a person, untouched for 30 days, are removed (the database doesn't grow forever). */
+export function purgeOldBotChats(now = Date.now()): number {
+  const db = getDb();
+  const cutoff = nowIso(now - BOT_ONLY_KEEP_MS);
+  return db.transaction(() => {
+    db.prepare("DELETE FROM chat_messages WHERE thread_id IN (SELECT id FROM chat_threads WHERE status = 'bot' AND handed_over_at IS NULL AND updated_at < ?)").run(cutoff);
+    return db.prepare("DELETE FROM chat_threads WHERE status = 'bot' AND handed_over_at IS NULL AND updated_at < ?").run(cutoff).changes;
+  })();
+}
+
+/** Claim the owner email for a chat (at most one every `everyMs`, even with two copies of the shop). */
+export function claimOwnerEmail(id: string, everyMs: number, now = Date.now()): boolean {
+  return getDb().prepare('UPDATE chat_threads SET emailed_at = ? WHERE id = ? AND (emailed_at IS NULL OR emailed_at < ?)').run(nowIso(now), id, nowIso(now - everyMs)).changes === 1;
+}
+
+/** Claim an email (by Message-ID) once, across both copies of the shop. */
+export function claimMail(messageId: string, now = Date.now()): boolean {
+  return getDb().prepare('INSERT OR IGNORE INTO chat_mail_seen (message_id, at) VALUES (?, ?)').run(messageId.slice(0, 300), nowIso(now)).changes === 1;
 }
 
 // ── Admin Hub → Chats ─────────────────────────────────────────────────────────

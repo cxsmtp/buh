@@ -173,6 +173,13 @@ const MIGRATIONS: Array<(db: DB) => void> = [
         via        TEXT NOT NULL DEFAULT 'web'
       );
       CREATE INDEX chat_messages_by_thread ON chat_messages(thread_id, id);
+      -- Emails already turned into chat messages (claimed atomically: two copies of the shop
+      -- may read the mailbox at the same moment during an update).
+      CREATE TABLE chat_mail_seen (
+        message_id  TEXT PRIMARY KEY,
+        at          TEXT NOT NULL
+      );
+      CREATE INDEX chat_threads_by_status ON chat_threads(status, updated_at);
     `);
   },
 ];

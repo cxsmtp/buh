@@ -21,6 +21,8 @@ const PERSON = /\b(human|person|someone|somebody|agent|staff|owner|manager|real|
 const GREETING = /^(hi|hello|hey|salam|salaam|assalam[ou] ?alaikum|marhaba|good (morning|afternoon|evening))\b[\s!.]*$/;
 /** Things only a person can promise: made-to-measure, bulk, wholesale. */
 const BESPOKE = /\b(custom|customi[sz]ed?|bespoke|made to (measure|order)|tailor(ed)?|round bed|special size|bulk|wholesale|hotel order)\b/;
+/** A problem with an order: a person, never a stock answer. */
+const COMPLAINT = /\b(charged|overcharged|double charged|refund|late|delayed|not (arrived|received|delivered)|(didn|hasn|haven|hasnt|didnt|havent)t? (arrive|come|received?)|missing|damaged|broken|torn|stain(ed)?|wrong (item|size|colou?r|product)|complain|complaint|cancel|my order|order (no|number|#)?\s*\d{3,}|tracking|where is my)\b/;
 const THANKS = /^(thanks?|thank you|thx|shukran|ok(ay)?( thanks?)?|great|perfect|got it)\b[\s!.]*$/;
 
 export function normalise(text: string): string {
@@ -94,7 +96,7 @@ export function reply(text: string, settings: Pick<AssistantSettings, 'entries' 
   const n = normalise(text);
   if (!n) return { kind: 'handover', reason: 'unsure' };
   if (PERSON.test(n)) return { kind: 'handover', reason: 'asked' };
-  if (BESPOKE.test(n)) return { kind: 'handover', reason: 'unsure' };
+  if (BESPOKE.test(n) || COMPLAINT.test(n)) return { kind: 'handover', reason: 'unsure' };
   if (GREETING.test(n)) return { kind: 'smalltalk', text: settings.greeting || 'Hello! How can I help?' };
   if (THANKS.test(n)) return { kind: 'smalltalk', text: 'You’re welcome! Anything else I can help with?' };
 
@@ -109,7 +111,8 @@ export function reply(text: string, settings: Pick<AssistantSettings, 'entries' 
   }
   // Measurements come from the size presets (always up to date) unless an entry fits better.
   const sizes_ = settings.answerSizes ? sizeAnswer(text, sizes) : null;
-  if (sizes_ && bestScore < 4) return { kind: 'answer', text: sizes_, entryId: 'sizes' };
+  // An answer the owner wrote (returns, care…) beats the size table; sizes answer the rest.
   if (best && bestScore >= 2) return { kind: 'answer', text: best.answer, entryId: best.id };
+  if (sizes_) return { kind: 'answer', text: sizes_, entryId: 'sizes' };
   return { kind: 'handover', reason: 'unsure' };
 }

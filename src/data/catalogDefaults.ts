@@ -64,7 +64,7 @@ export const DEFAULT_ASSISTANT: AssistantSettings = {
     {
       id: 'delivery',
       question: 'How long does delivery take?',
-      keywords: ['delivery', 'deliver', 'shipping', 'ship', 'arrive', 'courier', 'when'],
+      keywords: ['delivery', 'deliver', 'shipping', 'ship', 'courier', 'how long'],
       answer: 'We deliver across all seven emirates, usually within 24 to 48 hours of confirming your order. You get a tracking number as soon as the courier collects it.',
     },
     {
@@ -88,7 +88,7 @@ export const DEFAULT_ASSISTANT: AssistantSettings = {
     {
       id: 'returns',
       question: 'Can I return or exchange?',
-      keywords: ['return', 'exchange', 'refund', 'damaged', 'wrong'],
+      keywords: ['return', 'exchange', 'swap'],
       answer: 'If something arrives damaged or wrong, message us within 48 hours with a photo and we will make it right. Tap "Talk to a person" and we will take it from there.',
     },
   ],
