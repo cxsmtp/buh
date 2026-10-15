@@ -1,5 +1,15 @@
 # Changelog
 
+## BUH-02.03.01 — 2026-10-15 20:50 UTC · [#8](https://github.com/cxsmtp/buh/pull/8)
+
+- **Podman update command in the README.** One line pulls the newest shop and restarts it in place, keeping your data; it uses the image's real name, `ghcr.io/cxsmtp/buh` (pulling `ghcr.io/cxsmtp/beautifuluaehome` fails with "manifest unknown").
+- **Project notes:** containers are run with Podman, and every change is merged to main rather than left on a branch.
+- **Status.**
+  - **Benchmark:** not run; no shop code changed (notes, README and version number only).
+  - **Tests:** full suite in CI on this pull request.
+  - **Dependency audit:** no package changes.
+  - **Security scan:** not applicable (no code changed).
+
 ## BUH-02.03.00 — 2026-10-15 13:41 UTC · [#7](https://github.com/cxsmtp/buh/pull/7)
 
 - **Fixed: text you couldn't read.** On a phone or laptop set to dark mode, labels on the white cards (for example in Settings → Store & contact) turned almost white; the shop now has one look on every device. Every screen (shop, product, bag, checkout, chat, sign-in, every Admin Hub tab and settings section) is measured in light and dark mode at phone and desktop width, and faint gold and grey text was darkened until all of it reads clearly.
