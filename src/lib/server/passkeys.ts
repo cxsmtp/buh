@@ -11,7 +11,7 @@ import {
   type RegistrationResponseJSON,
 } from '@simplewebauthn/server';
 import { audit } from './audit';
-import { getDb } from './db';
+import { getDb, inTransaction } from './db';
 import { HttpError } from './http';
 import { logEvent } from './log';
 import { appUrl } from './runtimeConfig';
@@ -38,7 +38,7 @@ import { getSettings } from './settings';
 
 export const CHALLENGE_COOKIE = 'buh_webauthn';
 const CHALLENGE_TTL_MS = 5 * 60 * 1000;
-const MAX_LIVE_CHALLENGES = 500;
+export const MAX_LIVE_CHALLENGES = 10_000;
 export const MAX_PASSKEYS = 20;
 const CEREMONY_TIMEOUT_MS = 2 * 60 * 1000;
 
@@ -90,13 +90,23 @@ export function requireRelyingParty(hostHeader?: string | null): RelyingParty {
 
 type Purpose = 'register' | 'sign-in';
 
+/**
+ * Keep a challenge. The table is bounded, but a full table never refuses: the
+ * oldest sign-in challenges make room (no shop-wide counter that a stranger
+ * could use up to block passkey sign-in; to push out the owner's own challenge
+ * in the few seconds of a sign-in they would have to start thousands).
+ */
 function saveChallenge(purpose: Purpose, challenge: string, boundTo: string, now: number): string {
   const db = getDb();
-  db.prepare('DELETE FROM webauthn_challenges WHERE expires_at <= ?').run(now);
-  const live = (db.prepare('SELECT COUNT(*) AS n FROM webauthn_challenges').get() as { n: number }).n;
-  if (live >= MAX_LIVE_CHALLENGES) throw new HttpError(429, 'Too many passkey requests right now. Wait a few minutes.', { 'Retry-After': '300' });
   const id = crypto.randomBytes(24).toString('base64url');
-  db.prepare('INSERT INTO webauthn_challenges (id, purpose, challenge, bound_to, expires_at) VALUES (?, ?, ?, ?, ?)').run(id, purpose, challenge, boundTo, now + CHALLENGE_TTL_MS);
+  inTransaction(() => {
+    db.prepare('DELETE FROM webauthn_challenges WHERE expires_at <= ?').run(now);
+    const live = (db.prepare('SELECT COUNT(*) AS n FROM webauthn_challenges').get() as { n: number }).n;
+    if (live >= MAX_LIVE_CHALLENGES) {
+      db.prepare("DELETE FROM webauthn_challenges WHERE id IN (SELECT id FROM webauthn_challenges WHERE purpose = 'sign-in' ORDER BY expires_at LIMIT ?)").run(live - MAX_LIVE_CHALLENGES + 1);
+    }
+    db.prepare('INSERT INTO webauthn_challenges (id, purpose, challenge, bound_to, expires_at) VALUES (?, ?, ?, ?, ?)').run(id, purpose, challenge, boundTo, now + CHALLENGE_TTL_MS);
+  });
   return id;
 }
 
@@ -177,9 +187,11 @@ export interface PasskeyInfo {
   synced: boolean;
   /** Made for another address of the shop: it won't work here until added again. */
   otherAddress: boolean;
+  /** Came back with a restored backup: switched off until the owner confirms it. */
+  suspended: boolean;
 }
 
-function info(row: PasskeyRow, rpID?: string): PasskeyInfo {
+function info(row: PasskeyRow, rpID?: string, suspended = suspendedPasskeyIds()): PasskeyInfo {
   return {
     id: row.id,
     name: row.name,
@@ -187,16 +199,85 @@ function info(row: PasskeyRow, rpID?: string): PasskeyInfo {
     lastUsedAt: row.last_used_at,
     synced: row.backed_up === 1,
     otherAddress: Boolean(rpID && row.rp_id !== rpID),
+    suspended: suspended.has(row.id),
   };
 }
 
 export function listPasskeys(rpID?: string): PasskeyInfo[] {
-  return (getDb().prepare('SELECT * FROM admin_passkeys ORDER BY created_at').all() as PasskeyRow[]).map((r) => info(r, rpID));
+  const suspended = suspendedPasskeyIds();
+  return (getDb().prepare('SELECT * FROM admin_passkeys ORDER BY created_at').all() as PasskeyRow[]).map((r) => info(r, rpID, suspended));
 }
 
 export function removePasskey(id: string): PasskeyInfo | null {
   const row = getDb().prepare('DELETE FROM admin_passkeys WHERE id = ? RETURNING *').get(id) as PasskeyRow | undefined;
-  return row ? info(row) : null;
+  if (!row) return null;
+  const result = info(row);
+  setSuspended([...suspendedPasskeyIds()].filter((x) => x !== id));
+  return { ...result, suspended: false };
+}
+
+// ── After a restore ──────────────────────────────────────────────────────────
+//
+// A backup can be older than the owner's last "Remove" (a lost phone) or new
+// set of recovery codes, and nothing in the restored data can say so. So the
+// restore script (scripts/restore-backup.mjs) voids every restored recovery
+// code and lists every restored passkey here: they stay switched off until the
+// owner, signed in with the password (a restore always leaves one: a fresh
+// one-time password in the log, or ADMIN_PASSWORD_HASH), confirms or removes
+// each. The Admin Hub shows a banner until the owner has reviewed them.
+
+const SUSPENDED_KEY = 'admin:passkeys-suspended';
+const RESTORED_KEY = 'admin:restored';
+
+export function suspendedPasskeyIds(): Set<string> {
+  const row = getDb().prepare('SELECT data FROM kv WHERE key = ?').get(SUSPENDED_KEY) as { data: string } | undefined;
+  try {
+    const list = row ? (JSON.parse(row.data) as unknown) : [];
+    return new Set(Array.isArray(list) ? list.filter((x): x is string => typeof x === 'string') : []);
+  } catch {
+    return new Set();
+  }
+}
+
+function setSuspended(ids: string[]) {
+  const db = getDb();
+  if (!ids.length) db.prepare('DELETE FROM kv WHERE key = ?').run(SUSPENDED_KEY);
+  else db.prepare('INSERT INTO kv (key, data, updated_at) VALUES (?, ?, ?) ON CONFLICT(key) DO UPDATE SET data = excluded.data, updated_at = excluded.updated_at').run(SUSPENDED_KEY, JSON.stringify(ids), new Date().toISOString());
+}
+
+/** The owner keeps a restored passkey: it works again. */
+export function confirmPasskey(id: string): PasskeyInfo | null {
+  const row = getDb().prepare('SELECT * FROM admin_passkeys WHERE id = ?').get(id) as PasskeyRow | undefined;
+  if (!row) return null;
+  setSuspended([...suspendedPasskeyIds()].filter((x) => x !== id));
+  return info(row);
+}
+
+export interface RestoreNotice {
+  restoredAt: string;
+  backup: string;
+  suspendedPasskeys: number;
+}
+
+/** Set by the restore script; shown as a banner in the Admin Hub until dismissed. */
+export function restoreNotice(): RestoreNotice | null {
+  const row = getDb().prepare('SELECT data FROM kv WHERE key = ?').get(RESTORED_KEY) as { data: string } | undefined;
+  if (!row) return null;
+  try {
+    const data = JSON.parse(row.data) as { at?: unknown; backup?: unknown };
+    const live = new Set((getDb().prepare('SELECT id FROM admin_passkeys').all() as Array<{ id: string }>).map((r) => r.id));
+    return {
+      restoredAt: typeof data.at === 'string' ? data.at : '',
+      backup: typeof data.backup === 'string' ? data.backup.slice(0, 200) : '',
+      suspendedPasskeys: [...suspendedPasskeyIds()].filter((id) => live.has(id)).length,
+    };
+  } catch {
+    return null;
+  }
+}
+
+export function dismissRestoreNotice() {
+  getDb().prepare('DELETE FROM kv WHERE key = ?').run(RESTORED_KEY);
 }
 
 /** A passkey's name: printable, one line, at most 60 characters. */
@@ -338,16 +419,8 @@ export async function finishPasskeySignIn(opts: { rp: RelyingParty; challengeId:
   if (!row || row.rp_id !== opts.rp.rpID) throw refused;
   const handle = opts.response.response.userHandle;
   if (handle && handle !== ownerUserId().toString('base64url')) throw refused;
-
-  // A counter that does not go up (when the authenticator keeps one) means two copies of the key exist.
-  const authData = Buffer.from(opts.response.response.authenticatorData, 'base64url');
-  if (authData.length >= 37) {
-    const counter = authData.readUInt32BE(33);
-    if ((counter > 0 || row.counter > 0) && counter <= row.counter) {
-      logEvent('warn', 'passkey_counter_went_back', { device: row.name, stored: row.counter, given: counter });
-      audit('admin.passkey_counter_went_back', { device: row.name, stored: row.counter, given: counter });
-      throw new PasskeyCloneSuspected(row.name);
-    }
+  if (suspendedPasskeyIds().has(row.id)) {
+    throw new HttpError(401, 'This passkey came back with a restored backup and is switched off until you confirm it. Sign in with your password, then check it in Settings → Passkeys & recovery codes.');
   }
 
   let result: Awaited<ReturnType<typeof verifyAuthenticationResponse>>;
@@ -357,7 +430,9 @@ export async function finishPasskeySignIn(opts: { rp: RelyingParty; challengeId:
       expectedChallenge: challenge,
       expectedOrigin: opts.rp.origin,
       expectedRPID: opts.rp.rpID,
-      credential: { id: row.id, publicKey: new Uint8Array(row.public_key), counter: row.counter, transports: JSON.parse(row.transports) },
+      // Counter 0 here: the library's own counter check would run on an unchecked answer's say-so;
+      // ours below runs only once the signature is proven.
+      credential: { id: row.id, publicKey: new Uint8Array(row.public_key), counter: 0, transports: JSON.parse(row.transports) },
       requireUserVerification: true,
     });
   } catch (err) {
@@ -365,6 +440,15 @@ export async function finishPasskeySignIn(opts: { rp: RelyingParty; challengeId:
     throw refused;
   }
   if (!result.verified) throw refused;
+
+  // Signed by this passkey, yet a counter that did not go up (when the authenticator keeps one):
+  // two copies of the key exist.
+  const counter = result.authenticationInfo.newCounter;
+  if ((counter > 0 || row.counter > 0) && counter <= row.counter) {
+    logEvent('warn', 'passkey_counter_went_back', { device: row.name, stored: row.counter, given: counter });
+    audit('admin.passkey_counter_went_back', { device: row.name, stored: row.counter, given: counter });
+    throw new PasskeyCloneSuspected(row.name);
+  }
   const at = new Date(now).toISOString();
   getDb()
     .prepare('UPDATE admin_passkeys SET counter = MAX(counter, ?), last_used_at = ?, backed_up = ? WHERE id = ?')

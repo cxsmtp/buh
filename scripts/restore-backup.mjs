@@ -15,8 +15,9 @@
 // sign-in: the first start prints a new one-time password. The admin account
 // is not in backups, and courier / SMS keys are blanked in them, on purpose:
 // re-enter the keys in the Admin Hub after a restore. The owner's passkeys and
-// recovery codes are in the database, so they still open the Admin Hub (a
-// recovery code with the sign-in email the restored shop uses).
+// recovery codes are in the database, but the backup may predate a revocation:
+// restored recovery codes are voided and restored passkeys are switched off
+// until the owner confirms them in the Admin Hub (see below).
 import crypto from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
@@ -110,16 +111,29 @@ const db = new Database(path.join(target, 'shop.db'));
 const ok = db.pragma('integrity_check', { simple: true });
 const orders = db.prepare('SELECT COUNT(*) AS n FROM orders').get().n;
 const products = db.prepare('SELECT COUNT(*) AS n FROM products').get().n;
-// Ways back into the Admin Hub (backups from before BUH-02.04 have neither table).
-const hasTable = (name) => Boolean(db.prepare("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ?").get(name));
-const passkeys = hasTable('admin_passkeys') ? db.prepare('SELECT COUNT(*) AS n FROM admin_passkeys').get().n : 0;
-const recoveryCodes = hasTable('admin_recovery_codes') ? db.prepare('SELECT COUNT(*) AS n FROM admin_recovery_codes WHERE used_at IS NULL').get().n : 0;
-db.close();
-const signInWays = `${passkeys} passkey${passkeys === 1 ? '' : 's'}, ${recoveryCodes} unused recovery code${recoveryCodes === 1 ? '' : 's'}`;
 if (ok !== 'ok') {
+  db.close();
   console.error(`The restored database failed its integrity check: ${ok}`);
   process.exit(1);
 }
+// Ways back into the Admin Hub (backups from before BUH-02.04 have neither table). The backup
+// may be older than the owner's last "Remove" of a lost phone's passkey or last new set of
+// recovery codes, and nothing in it can tell. So: every restored recovery code is voided, and
+// every restored passkey is switched off until the owner confirms it in the Admin Hub (signed
+// in with the password: a restore always gives a fresh one-time password in the log, or the
+// ADMIN_PASSWORD_HASH one, so this can't lock the owner out).
+const hasTable = (name) => Boolean(db.prepare("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ?").get(name));
+const passkeyIds = hasTable('admin_passkeys') ? db.prepare('SELECT id FROM admin_passkeys').all().map((r) => r.id) : [];
+const voidedCodes = hasTable('admin_recovery_codes') ? db.prepare('DELETE FROM admin_recovery_codes WHERE used_at IS NULL').run().changes : 0;
+if (hasTable('admin_recovery_codes')) db.prepare('DELETE FROM admin_recovery_codes').run();
+if (hasTable('kv')) {
+  const put = db.prepare('INSERT INTO kv (key, data, updated_at) VALUES (?, ?, ?) ON CONFLICT(key) DO UPDATE SET data = excluded.data, updated_at = excluded.updated_at');
+  const now = new Date().toISOString();
+  if (passkeyIds.length) put.run('admin:passkeys-suspended', JSON.stringify(passkeyIds), now);
+  put.run('admin:restored', JSON.stringify({ at: now, backup: path.basename(file) }), now);
+}
+db.close();
+const passkeys = passkeyIds.length;
 if (replace) {
   // Move the current data aside (kept), then the restored files into place.
   const aside = path.join(finalTarget, `replaced-${new Date().toISOString().replace(/[:.]/g, '-')}`);
@@ -137,4 +151,11 @@ if (replace) {
   console.log(`Restored to ${target}: ${orders} orders, ${products} products. Integrity check: ok.`);
   console.log('Next: stop the shop, set DATA_DIR to this folder (or swap folders), start it, and sign in with the new one-time password from the log.');
 }
-console.log(`Admin Hub sign-in also works with the restored ${signInWays}.`);
+if (passkeys || voidedCodes) {
+  console.log('');
+  console.log('!!! IMPORTANT: Admin Hub passkeys and recovery codes from this backup are switched off !!!');
+  console.log('This backup may be older than a passkey you removed (a lost phone) or a new set of recovery codes, so:');
+  console.log(`  - ${voidedCodes} unused recovery code${voidedCodes === 1 ? ' was' : 's were'} voided: create a new set in Settings → Passkeys & recovery codes.`);
+  console.log(`  - ${passkeys} passkey${passkeys === 1 ? ' is' : 's are'} switched off until you confirm ${passkeys === 1 ? 'it' : 'each'} there ("Keep") or remove ${passkeys === 1 ? 'it' : 'them'}.`);
+  console.log('Sign in with the password first; the Admin Hub shows a reminder until you have reviewed them.');
+}

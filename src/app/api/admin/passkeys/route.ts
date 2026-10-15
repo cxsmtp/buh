@@ -1,4 +1,5 @@
 import { cookies } from 'next/headers';
+import { isFreshPasskeySession } from '@/lib/server/adminAuth';
 import { emailAdmin, readableUtc } from '@/lib/server/adminAlerts';
 import { audit } from '@/lib/server/audit';
 import { clientIp, enforceIpLimit, requireAdmin } from '@/lib/server/guard';
@@ -19,12 +20,14 @@ import {
 /** The owner's passkeys (name, added, last used), and whether passkeys can work at this address. */
 export async function GET(req: Request) {
   try {
-    await requireAdmin(req);
+    const session = await requireAdmin(req);
     const rp = relyingParty(req.headers.get('host'));
     return json({
       passkeys: listPasskeys('problem' in rp ? undefined : rp.rpID),
       available: !('problem' in rp),
       problem: 'problem' in rp ? rp.problem : undefined,
+      // Signed in with a passkey in the last 10 minutes: no password needed to remove or keep one.
+      freshPasskey: isFreshPasskeySession(session),
     });
   } catch (err) {
     return handleRouteError(err, 'admin/passkeys');

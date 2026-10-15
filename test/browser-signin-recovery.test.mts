@@ -118,6 +118,11 @@ for (const width of [375, 1280]) {
     assert.equal(codes.length, 10);
     for (const c of codes) assert.match(c, /^[2-9A-HJ-NP-Z]{4}(-[2-9A-HJ-NP-Z]{4}){3}$/);
     assert.deepEqual(await overflow(page), [], 'the codes fit');
+    // Screen readers hear one short line, not ten codes read aloud.
+    const announced = (await page.locator('#codes-announcement').textContent()) || '';
+    assert.match(announced, /^10 new recovery codes are shown below\./);
+    for (const c of codes) assert.ok(!announced.includes(c));
+    assert.equal(await page.locator('[aria-live]').filter({ hasText: codes[0] }).count(), 0, 'the codes are not in a live region');
 
     const downloading = page.waitForEvent('download');
     await page.getByRole('button', { name: 'Download' }).click();
@@ -228,11 +233,33 @@ test('passkey round trip (virtual authenticator): add at desktop width, sign in 
   await passkeys.getByText('Test laptop').waitFor();
   assert.equal(await passkeys.getByText(/Last used never/).count(), 0, 'last used is recorded');
   // Just signed in with a passkey: new recovery codes without typing the password.
-  await page.getByText('You signed in with a passkey a moment ago').waitFor();
+  await page.getByText('You signed in with a passkey a moment ago, so your password isn’t needed').or(page.getByText("You signed in with a passkey a moment ago, so your password isn't needed")).waitFor();
   assert.deepEqual(await overflow(page), []);
 
-  // Remove it (asks first); then it no longer opens the Admin Hub.
+  // Forgot the password? Just signed in with a passkey: choose a new one without the old.
+  await page.getByRole('heading', { name: 'Forgot your password?' }).waitFor();
+  password = 'Chosen-After-Passkey-8';
+  await page.locator('#passkey-new-password').fill(password);
+  await page.locator('#passkey-new-password-again').fill(password);
+  await page.getByRole('button', { name: 'Set new password' }).click();
+  await page.getByText('Password changed. Other devices are signed out.').waitFor();
+  assert.deepEqual(await overflow(page), []);
+  await signInByApi();
+
+  // Removing a passkey needs the password (a session alone is not enough).
+  const bare = await fetch(`${server.base}/api/admin/passkeys/someid`, { method: 'DELETE', headers: { ...h(), cookie } , body: '{}' });
+  assert.equal(bare.status, 400);
+  assert.match((await bare.json()).message, /current password/);
+
+  // Remove it (asks first, with the password: this session came from the new password); then it no longer opens the Admin Hub.
+  await page.reload({ waitUntil: 'domcontentloaded' });
+  await page.locator('header button:has-text("Admin Hub")').click();
+  await openSettingsSection(page);
   await page.getByRole('button', { name: 'Remove passkey Test laptop' }).click();
+  await passkeys.getByLabel('Current password').fill('wrong-password');
+  await page.getByRole('button', { name: 'Yes, remove' }).click();
+  await page.getByText('That is not your current password.').waitFor();
+  await passkeys.getByLabel('Current password').fill(password);
   await page.getByRole('button', { name: 'Yes, remove' }).click();
   await page.getByText('No passkeys yet.').waitFor();
   await ctx.clearCookies();
@@ -241,4 +268,68 @@ test('passkey round trip (virtual authenticator): add at desktop width, sign in 
   await page.getByText(/That passkey was not accepted/).waitFor();
   assert.deepEqual(errors, []);
   await ctx.close();
+});
+
+test('after a restore the Admin Hub says to review passkeys and make new codes; a restored passkey can be kept (375 and 1280 px)', { skip }, async () => {
+  const os = await import('node:os');
+  const path = await import('node:path');
+  const Database = (await import('better-sqlite3')).default;
+  const dataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'buh-restored-ui-'));
+  // First start of this "restored" shop: the one-time password, then our own.
+  let shop = await startServer({ DATA_DIR: dataDir });
+  const hh = () => ({ 'content-type': 'application/json', origin: shop.base });
+  await fetch(`${shop.base}/api/admin/login`, { method: 'POST', headers: hh(), body: JSON.stringify({ email: 'x@y.z', password: 'x' }) });
+  await new Promise((r) => setTimeout(r, 300));
+  const once = shop.log().match(/Password: (\S+)/)![1];
+  const first = await fetch(`${shop.base}/api/admin/login`, { method: 'POST', headers: hh(), body: JSON.stringify({ email: EMAIL, password: once }) });
+  const pw = 'Restored-Shop-Pass-1';
+  await fetch(`${shop.base}/api/admin/password`, { method: 'POST', headers: { ...hh(), cookie: (first.headers.get('set-cookie') || '').split(';')[0] }, body: JSON.stringify({ currentPassword: once, newPassword: pw }) });
+  shop.stop();
+  await new Promise((r) => setTimeout(r, 500));
+  // What scripts/restore-backup.mjs leaves behind: a restored passkey, switched off, and the reminder.
+  const db = new Database(path.join(dataDir, 'shop.db'));
+  db.prepare("INSERT INTO admin_passkeys (id, public_key, name, rp_id, created_at) VALUES ('restoredKey1', x'00', 'Old phone', 'localhost', '2026-01-01T00:00:00Z')").run();
+  const put = db.prepare('INSERT INTO kv (key, data, updated_at) VALUES (?, ?, ?)');
+  put.run('admin:passkeys-suspended', JSON.stringify(['restoredKey1']), new Date().toISOString());
+  put.run('admin:restored', JSON.stringify({ at: new Date().toISOString(), backup: 'buh-backup-20260101-1200.tar.gz' }), new Date().toISOString());
+  db.close();
+  shop = await startServer({ DATA_DIR: dataDir });
+  try {
+    const login = await fetch(`${shop.base}/api/admin/login`, { method: 'POST', headers: { 'content-type': 'application/json', origin: shop.base }, body: JSON.stringify({ email: EMAIL, password: pw }) });
+    const [name, value] = (login.headers.get('set-cookie') || '').split(';')[0].split('=');
+    for (const width of [375, 1280]) {
+      const ctx = await browser.newContext({ viewport: { width, height: 900 } });
+      await ctx.addCookies([{ name, value, url: shop.base }]);
+      const page = await ctx.newPage();
+      const errors: string[] = [];
+      page.on('pageerror', (e) => errors.push(e.message));
+      const checked = page.waitForResponse((r) => r.url().endsWith('/api/admin/session'));
+      await page.goto(shop.base, { waitUntil: 'domcontentloaded' });
+      await checked;
+      await page.locator('header button:has-text("Admin Hub")').click();
+      const banner = page.getByRole('alert').filter({ hasText: 'restored from a backup' });
+      await banner.getByText(/Review your passkeys and create new recovery codes/).waitFor();
+      await banner.getByText(/1 restored passkey is switched off/).waitFor();
+      assert.deepEqual(await overflow(page), []);
+      await banner.getByRole('button', { name: 'Review now' }).click();
+      await page.getByRole('heading', { name: 'Recovery codes', exact: true }).waitFor();
+      await page.getByText(/Switched off after a restore/).waitFor();
+      assert.deepEqual(await overflow(page), []);
+      if (width === 1280) {
+        await page.getByRole('button', { name: 'Keep passkey Old phone' }).click();
+        await page.getByRole('list', { name: 'Your passkeys' }).getByLabel('Current password').fill(pw);
+        await page.getByRole('button', { name: 'Yes, keep it' }).click();
+        await page.getByText(/Passkey “Old phone” kept/).waitFor();
+        assert.equal(await page.getByText(/Switched off after a restore/).count(), 0);
+        await banner.getByRole('button', { name: 'Done, hide this' }).click();
+        await banner.waitFor({ state: 'detached' });
+      }
+      assert.deepEqual(errors, []);
+      await ctx.close();
+    }
+    const after = await fetch(`${shop.base}/api/admin/restore-notice`, { headers: { cookie: `${name}=${value}` } });
+    assert.equal((await after.json()).notice, null, 'the reminder stays hidden');
+  } finally {
+    shop.stop();
+  }
 });

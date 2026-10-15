@@ -46,6 +46,25 @@ test('a recovery code still signs in to an environment-managed account, but the 
   assert.equal(session.recoveryPending, false);
   assert.equal(session.mustChangePassword, false);
   await assert.rejects(auth.setPasswordAfterRecovery(session, 'Another-Passphrase-1'), (e: { status?: number }) => e.status === 409);
+  // Review fix: that session can't change the ways in without the password (removing or keeping a passkey).
+  await assert.rejects(auth.confirmOwner(session, '', { allowFreshPasskey: true }), (e: { status?: number }) => e.status === 400);
+});
+
+test('review fix: a restored data folder (no session-state.json) does not bring back sessions from before, even with the same SESSION_SECRET and password hash', async () => {
+  const fs = await import('node:fs');
+  const path = await import('node:path');
+  const previous = process.env.DATA_DIR;
+  tempDataDir(); // a brand-new shop: nobody has signed out yet
+  try {
+    const before = await auth.signIn('owner@shop.ae', 'Rotated-Env-Passphrase');
+    assert.ok(await auth.verifySessionToken(before.token));
+    // A restore brings back shop.db, never session-state.json.
+    fs.rmSync(path.join(process.env.DATA_DIR!, 'session-state.json'), { force: true });
+    assert.equal(await auth.verifySessionToken(before.token), null);
+    assert.ok(await auth.verifySessionToken((await auth.signIn('owner@shop.ae', 'Rotated-Env-Passphrase')).token), 'new sign-ins work');
+  } finally {
+    process.env.DATA_DIR = previous;
+  }
 });
 
 test('a short SESSION_SECRET is refused rather than used', async () => {

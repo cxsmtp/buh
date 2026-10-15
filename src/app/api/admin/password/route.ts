@@ -1,4 +1,4 @@
-import { changePassword, sessionCookie, setPasswordAfterRecovery } from '@/lib/server/adminAuth';
+import { canSetPasswordWithoutCurrent, changePassword, sessionCookie, setPasswordAfterRecovery } from '@/lib/server/adminAuth';
 import { audit } from '@/lib/server/audit';
 import { clientIp, enforceIpLimit, requireAdmin } from '@/lib/server/guard';
 import { allowFields, handleRouteError, HttpError, json, readJsonBody, str } from '@/lib/server/http';
@@ -6,7 +6,8 @@ import { passwordProblem } from '@/lib/server/password';
 
 /**
  * Change the admin password: { currentPassword, newPassword }. Right after a
- * recovery-code sign-in the forgotten password is not asked for: { newPassword }.
+ * recovery-code sign-in, or within 10 minutes of a passkey sign-in, the
+ * forgotten password is not asked for: { newPassword }.
  */
 export async function POST(req: Request) {
   try {
@@ -20,11 +21,12 @@ export async function POST(req: Request) {
     if (problem) throw new HttpError(400, problem);
 
     let token: string;
-    if (session.recoveryPending) {
+    const current = str(body.currentPassword, 'Current password', 256, { trim: false, required: false });
+    if (session.recoveryPending || (!current && canSetPasswordWithoutCurrent(session))) {
       token = await setPasswordAfterRecovery(session, next);
-      audit('admin.password_changed', { email: session.email, ip: clientIp(req), after: 'recovery code' });
+      audit('admin.password_changed', { email: session.email, ip: clientIp(req), after: session.recoveryPending ? 'recovery code' : 'passkey sign-in' });
     } else {
-      const current = str(body.currentPassword, 'Current password', 256, { trim: false });
+      if (!current) throw new HttpError(400, 'Current password is required.');
       token = await changePassword(current, next, { ip: clientIp(req) });
       audit('admin.password_changed', { email: session.email, ip: clientIp(req) });
     }

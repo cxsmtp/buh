@@ -24,6 +24,7 @@ interface Passkey {
   lastUsedAt: string | null;
   synced: boolean;
   otherAddress: boolean;
+  suspended: boolean;
 }
 
 interface CodeStatus {
@@ -60,14 +61,17 @@ function PasskeysSection() {
   const [name, setName] = useState('');
   const [password, setPassword] = useState('');
   const [busy, setBusy] = useState(false);
-  const [confirming, setConfirming] = useState<string | null>(null);
+  const [confirming, setConfirming] = useState<{ id: string; action: 'remove' | 'keep' } | null>(null);
+  const [confirmPassword, setConfirmPassword] = useState('');
+  const [fresh, setFresh] = useState(false);
   const [status, setStatus] = useState<Status>(null);
   const supported = passkeysSupported();
 
   const load = useCallback(async () => {
-    const { ok, data } = await getJson<{ passkeys: Passkey[]; available: boolean; problem?: string }>('/api/admin/passkeys');
+    const { ok, data } = await getJson<{ passkeys: Passkey[]; available: boolean; problem?: string; freshPasskey?: boolean }>('/api/admin/passkeys');
     if (!ok) return;
     setList(data.passkeys);
+    setFresh(Boolean(data.freshPasskey));
     setProblem(data.available ? null : data.problem || 'Passkeys are not available at this address.');
   }, []);
 
@@ -107,14 +111,25 @@ function PasskeysSection() {
     }
   };
 
-  const remove = async (passkey: Passkey) => {
+  const act = async (e: React.FormEvent, passkey: Passkey, action: 'remove' | 'keep') => {
+    e.preventDefault();
     setStatus(null);
     setBusy(true);
-    const { ok, data } = await sendJson<{ message?: string; passkeys?: Passkey[] }>('DELETE', `/api/admin/passkeys/${encodeURIComponent(passkey.id)}`);
+    const { ok, data } = await sendJson<{ message?: string; passkeys?: Passkey[] }>(action === 'remove' ? 'DELETE' : 'POST', `/api/admin/passkeys/${encodeURIComponent(passkey.id)}`, {
+      currentPassword: confirmPassword,
+    });
     setBusy(false);
+    setConfirmPassword('');
+    if (!ok) {
+      setStatus({ ok: false, text: data.message || 'Could not do that.' });
+      return;
+    }
     setConfirming(null);
-    if (ok && data.passkeys) setList(data.passkeys);
-    setStatus(ok ? { ok: true, text: `Passkey “${passkey.name}” removed: it no longer opens the Admin Hub.` } : { ok: false, text: data.message || 'Could not remove it.' });
+    if (data.passkeys) setList(data.passkeys);
+    setStatus({
+      ok: true,
+      text: action === 'remove' ? `Passkey “${passkey.name}” removed: it no longer opens the Admin Hub.` : `Passkey “${passkey.name}” kept: it opens the Admin Hub again.`,
+    });
   };
 
   return (
@@ -140,17 +155,35 @@ function PasskeysSection() {
                   {p.synced ? ' · Synced to your other devices' : ''}
                 </p>
                 {p.otherAddress && <p className="text-xs text-amber-800">Made for another address of the shop: it won&apos;t work here.</p>}
+                {p.suspended && (
+                  <p className="text-xs text-amber-900 font-semibold">Switched off after a restore. Keep it only if you still have this phone or computer.</p>
+                )}
               </div>
-              {confirming === p.id ? (
-                <div className="flex flex-wrap items-center gap-2">
-                  <span className="text-xs text-stone-800">Remove “{p.name}”?</span>
-                  <button type="button" disabled={busy} onClick={() => void remove(p)} className="px-3 py-1.5 rounded-lg bg-red-700 text-white text-xs font-bold disabled:opacity-60">Yes, remove</button>
-                  <button type="button" onClick={() => setConfirming(null)} className="px-3 py-1.5 rounded-lg border border-stone-300 text-stone-800 text-xs font-bold">Keep it</button>
-                </div>
+              {confirming?.id === p.id ? (
+                <form onSubmit={(e) => void act(e, p, confirming.action)} className="w-full flex flex-wrap items-end gap-2">
+                  <p className="w-full text-xs text-stone-800">{confirming.action === 'remove' ? `Remove “${p.name}”?` : `Keep “${p.name}” and switch it back on?`}</p>
+                  {!fresh && (
+                    <div className="min-w-0 flex-1 basis-48">
+                      <label className={label} htmlFor={`passkey-confirm-${p.id}`}>Current password</label>
+                      <input id={`passkey-confirm-${p.id}`} className={field} type="password" required autoComplete="current-password" maxLength={256} value={confirmPassword} onChange={(e) => setConfirmPassword(e.target.value)} />
+                    </div>
+                  )}
+                  <button type="submit" disabled={busy} className={`px-3 py-2 rounded-lg text-white text-xs font-bold disabled:opacity-60 ${confirming.action === 'remove' ? 'bg-red-700' : 'bg-[#0f1c2e]'}`}>
+                    {confirming.action === 'remove' ? 'Yes, remove' : 'Yes, keep it'}
+                  </button>
+                  <button type="button" onClick={() => { setConfirming(null); setConfirmPassword(''); }} className="px-3 py-2 rounded-lg border border-stone-300 text-stone-800 text-xs font-bold">Cancel</button>
+                </form>
               ) : (
-                <button type="button" onClick={() => setConfirming(p.id)} aria-label={`Remove passkey ${p.name}`} className="px-3 py-1.5 rounded-lg border border-stone-300 text-stone-800 text-xs font-bold flex items-center gap-1 hover:bg-stone-50">
-                  <Trash2 className="w-3.5 h-3.5" /> Remove
-                </button>
+                <div className="flex flex-wrap gap-2">
+                  {p.suspended && (
+                    <button type="button" onClick={() => setConfirming({ id: p.id, action: 'keep' })} aria-label={`Keep passkey ${p.name}`} className="px-3 py-1.5 rounded-lg border border-stone-300 text-stone-800 text-xs font-bold hover:bg-stone-50">
+                      Keep
+                    </button>
+                  )}
+                  <button type="button" onClick={() => setConfirming({ id: p.id, action: 'remove' })} aria-label={`Remove passkey ${p.name}`} className="px-3 py-1.5 rounded-lg border border-stone-300 text-stone-800 text-xs font-bold flex items-center gap-1 hover:bg-stone-50">
+                    <Trash2 className="w-3.5 h-3.5" /> Remove
+                  </button>
+                </div>
               )}
             </li>
           ))}
@@ -289,7 +322,7 @@ function RecoveryCodesSection() {
       )}
 
       {codes && (
-        <div className="rounded-xl border-2 border-[#c5a059] bg-amber-50/60 p-3 space-y-3" aria-live="polite">
+        <div className="rounded-xl border-2 border-[#c5a059] bg-amber-50/60 p-3 space-y-3">
           <p className="text-xs font-bold text-stone-900">Save these codes now: this is the only time they are shown.</p>
           <ol className="grid grid-cols-1 min-[420px]:grid-cols-2 gap-x-6 gap-y-1 font-mono text-sm text-stone-900" aria-label="Your new recovery codes">
             {codes.map((c, i) => (
@@ -324,6 +357,55 @@ function RecoveryCodesSection() {
         </form>
       )}
       {status && <p role="status" className={`text-xs font-semibold ${status.ok ? 'text-emerald-800' : 'text-red-700'}`}>{status.text}</p>}
+      {/* Always present, so screen readers announce this short line, not the ten codes. */}
+      <p role="status" className="sr-only" id="codes-announcement">
+        {codes ? `${codes.length} new recovery codes are shown below. Save them now: this is the only time they are shown.` : ''}
+      </p>
+      {info?.freshPasskey && !info.managedByEnv && <NewPasswordAfterPasskey />}
     </section>
+  );
+}
+
+/** Forgot the password but signed in with a passkey a moment ago: choose a new one without the old. */
+function NewPasswordAfterPasskey() {
+  const [next, setNext] = useState('');
+  const [again, setAgain] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [status, setStatus] = useState<Status>(null);
+
+  const save = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (next !== again) {
+      setStatus({ ok: false, text: 'The new passwords do not match.' });
+      return;
+    }
+    setBusy(true);
+    setStatus(null);
+    const { ok, data } = await postJson<{ message?: string }>('/api/admin/password', { newPassword: next });
+    setBusy(false);
+    setNext('');
+    setAgain('');
+    setStatus(ok ? { ok: true, text: 'Password changed. Other devices are signed out.' } : { ok: false, text: data.message || 'Could not change the password.' });
+  };
+
+  return (
+    <form onSubmit={(e) => void save(e)} className="grid grid-cols-1 sm:grid-cols-2 gap-3 border-t border-stone-200 pt-5" aria-labelledby="new-password-title">
+      <h3 id="new-password-title" className="sm:col-span-2 font-bold text-[#0f1c2e]">Forgot your password?</h3>
+      <p className="sm:col-span-2 text-xs text-stone-700">You signed in with a passkey a moment ago, so you can choose a new password without the old one (for 10 minutes after signing in).</p>
+      <div>
+        <label className={label} htmlFor="passkey-new-password">New password</label>
+        <input id="passkey-new-password" className={field} type="password" required minLength={12} maxLength={256} autoComplete="new-password" value={next} onChange={(e) => setNext(e.target.value)} />
+      </div>
+      <div>
+        <label className={label} htmlFor="passkey-new-password-again">Confirm new password</label>
+        <input id="passkey-new-password-again" className={field} type="password" required minLength={12} maxLength={256} autoComplete="new-password" value={again} onChange={(e) => setAgain(e.target.value)} />
+      </div>
+      <div className="sm:col-span-2">
+        <button type="submit" disabled={busy} className={darkButton}>
+          {busy && <Loader2 className="w-3.5 h-3.5 animate-spin" />} Set new password
+        </button>
+      </div>
+      {status && <p role="status" className={`sm:col-span-2 text-xs font-semibold ${status.ok ? 'text-emerald-800' : 'text-red-700'}`}>{status.text}</p>}
+    </form>
   );
 }

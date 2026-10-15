@@ -155,7 +155,10 @@ test('admin: one-time password, forced change, then the hub opens with its versi
   assert.ok(!keys.includes('buh_admin_auth') && !keys.includes('buh_admin_creds'));
 
   // A reload keeps the session (HttpOnly cookie checked by the server).
+  // (Wait for the page's own session check first: clicking before it answers opens the sign-in, a race under load.)
+  const rechecked = page.waitForResponse((r) => r.url().endsWith('/api/admin/session'));
   await page.reload({ waitUntil: 'domcontentloaded' });
+  await rechecked;
   await page.locator('header button:has-text("Admin Hub")').click();
   await page.getByText(/Orders & Dispatches/).first().waitFor();
   await page.close();

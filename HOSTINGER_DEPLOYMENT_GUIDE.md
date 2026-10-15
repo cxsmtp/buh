@@ -131,7 +131,7 @@ On the server (this replaces the live data; the current data is kept aside in `r
    docker compose start updater
    ```
 
-Then sign in with the new one-time password from `docker compose logs app-blue` (or with a passkey, or a recovery code and your admin email: they are in the backup), and re-enter the courier and SMS keys. Keys and the admin account are deliberately not in backups.
+Then sign in with the new one-time password from `docker compose logs app-blue`, and re-enter the courier and SMS keys. Restored passkeys are switched off and old recovery codes no longer work (the backup may be older than a passkey you removed): follow the banner in the Admin Hub to keep your passkeys and create new codes. Keys and the admin account are deliberately not in backups.
 
 To check a backup on your own computer (Node 20+, in a checkout of this repository after `npm ci`):
 

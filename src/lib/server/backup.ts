@@ -23,7 +23,8 @@ import { readTar, writeTar, type TarEntry } from './tar';
  *    customers.csv, products.csv, chats.csv;
  *  - the bank-transfer receipts, the product photos and the audit log;
  *  - the owner's passkeys (public keys only) and recovery codes (hashes
- *    only), in the database, so they still open the Admin Hub after a restore.
+ *    only), in the database; a restore switches them off until reviewed,
+ *    since the backup may predate a revocation.
  *
  * All packed in one .tar.gz; with BACKUP_PASSPHRASE set it is encrypted
  * (AES-256-GCM, key from scrypt) to .tar.gz.enc. It is emailed to
@@ -216,8 +217,8 @@ export async function createBackup(now = new Date()): Promise<BackupResult> {
       copy.pragma('journal_mode = DELETE');
       copy.pragma('secure_delete = ON');
       blankSecretsIn(copy);
-      // Passkeys (public keys) and recovery codes (hashes) stay in, so the owner can still get in
-      // after a restore; half-finished passkey sign-ins (5-minute challenges) are left out.
+      // Passkeys (public keys) and recovery codes (hashes) stay in (the restore script switches
+      // them off until the owner reviews them); half-finished passkey sign-ins are left out.
       copy.exec('DELETE FROM webauthn_challenges');
       copy.exec('VACUUM');
     } finally {

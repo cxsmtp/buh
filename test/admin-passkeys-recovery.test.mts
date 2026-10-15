@@ -302,3 +302,76 @@ test('only WebAuthn fields are accepted from the browser', () => {
   assert.deepEqual(parsed, { id: 'a', rawId: 'a', type: 'public-key', response: { clientDataJSON: 'a', authenticatorData: 'a', signature: 'a' }, clientExtensionResults: {} });
   assert.ok(fs.existsSync(path.join(dir, 'shop.db')));
 });
+
+// ── Review fixes ─────────────────────────────────────────────────────────────
+
+const cloneAlerts = () =>
+  fs
+    .readdirSync(dir)
+    .filter((f) => f.startsWith('audit-'))
+    .reduce((n, f) => n + fs.readFileSync(path.join(dir, f), 'utf8').split('\n').filter((l) => l.includes('passkey_counter_went_back')).length, 0);
+
+test('review fix: a forged counter without a valid signature is just refused (no "copied passkey" alert)', async () => {
+  const key = new SoftAuthenticator({ countsUses: true });
+  await addPasskey(key, 'Counting key');
+  await (await passkeySignIn(key)).finish();
+  await (await passkeySignIn(key)).finish(); // stored counter: 2
+  const before = cloneAlerts();
+
+  // A stranger replays the shape of an answer with the counter set back, but can't sign it.
+  const attempt = await passkeySignIn(key); // counter 3, correctly signed…
+  const authData = Buffer.from(attempt.answer.response.authenticatorData, 'base64url');
+  authData.writeUInt32BE(1, 33); // …then the counter is changed without re-signing
+  attempt.answer.response.authenticatorData = authData.toString('base64url');
+  await assert.rejects(attempt.finish(), (e: unknown) => !(e instanceof passkeys.PasskeyCloneSuspected) && (e as { status?: number }).status === 401);
+  assert.equal(cloneAlerts(), before, 'nothing audited or emailed');
+
+  // A properly signed answer whose counter went back is still caught.
+  key.counter = 0;
+  await assert.rejects((await passkeySignIn(key)).finish(), (e: unknown) => e instanceof passkeys.PasskeyCloneSuspected);
+  assert.equal(cloneAlerts(), before + 1);
+});
+
+test('review fix: a flood of passkey sign-in starts never refuses one; the oldest challenges make room', async () => {
+  const db = getDb();
+  const now = Date.now();
+  const insert = db.prepare("INSERT INTO webauthn_challenges (id, purpose, challenge, bound_to, expires_at) VALUES (?, 'sign-in', 'x', '', ?)");
+  db.transaction(() => {
+    for (let i = 0; i < passkeys.MAX_LIVE_CHALLENGES; i++) insert.run(`flood-${i}`, now + 60_000 + i);
+  })();
+  const phone = new SoftAuthenticator();
+  await addPasskey(phone, 'During a flood');
+  const attempt = await passkeySignIn(phone);
+  const count = (db.prepare('SELECT COUNT(*) AS n FROM webauthn_challenges').get() as { n: number }).n;
+  assert.ok(count <= passkeys.MAX_LIVE_CHALLENGES, `bounded (${count})`);
+  assert.equal(db.prepare("SELECT 1 FROM webauthn_challenges WHERE id = 'flood-0'").get(), undefined, 'the oldest went');
+  assert.equal((await attempt.finish()).name, 'During a flood');
+
+  // The route has no shop-wide counter: hundreds of starts in a row, no 429 (no trusted proxy here).
+  const { POST } = await import('@/app/api/admin/login/passkey/options/route');
+  for (let i = 0; i < 350; i++) {
+    const res = await POST(new Request('http://localhost:3000/api/admin/login/passkey/options', { method: 'POST', headers: { 'content-type': 'application/json', origin: 'http://localhost:3000', host: 'localhost:3000' }, body: '{}' }));
+    assert.equal(res.status, 200, `start ${i}`);
+  }
+  db.prepare('DELETE FROM webauthn_challenges').run();
+});
+
+test('review fix: just signed in with a passkey, the owner can choose a new password without the old one', async () => {
+  const viaPasskey = (await auth.verifySessionToken((await auth.passkeySession()).token))!;
+  const token = await auth.setPasswordAfterRecovery(viaPasskey, 'Passkey-Chosen-Pass-44');
+  assert.ok(await auth.verifySessionToken(token));
+  assert.ok((await auth.signIn(EMAIL, 'Passkey-Chosen-Pass-44', { ip: '198.51.100.30' })).token);
+  // Ten minutes later, the old password is needed again.
+  const stale = { ...(await auth.verifySessionToken((await auth.passkeySession()).token))! };
+  stale.issuedAt -= 11 * 60 * 1000;
+  assert.equal(await statusOf(auth.setPasswordAfterRecovery(stale, 'Too-Late-Passphrase-1')), 400);
+  // A password session never could.
+  const pw = (await auth.verifySessionToken((await auth.signIn(EMAIL, 'Passkey-Chosen-Pass-44', { ip: '198.51.100.30' })).token))!;
+  assert.equal(await statusOf(auth.setPasswordAfterRecovery(pw, 'Not-Allowed-Pass-55')), 400);
+  await auth.changePassword('Passkey-Chosen-Pass-44', PW, { ip: '198.51.100.30' });
+});
+
+test('review fix: a new or restored data folder never starts the session generation at 1', () => {
+  const state = JSON.parse(fs.readFileSync(path.join(dir, 'session-state.json'), 'utf8'));
+  assert.ok(state.generation > 1_000_000, String(state.generation));
+});

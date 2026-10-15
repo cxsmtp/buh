@@ -159,7 +159,7 @@ test('restore --replace swaps the data in place, keeps the old data aside and th
   assert.ok(fs.existsSync(path.join(live, 'backups', 'keep.tar.gz')));
 });
 
-test('passkeys and recovery codes are in the backup, restored by the script, and still open the Admin Hub afterwards', async () => {
+test('passkeys and recovery codes are in the backup and restored, but switched off until reviewed (the backup may predate a revocation)', async () => {
   const { SoftAuthenticator } = await import('./fixtures/soft-authenticator.mjs');
   const passkeys = await import('@/lib/server/passkeys');
   const { consumeRecoveryCode, createRecoveryCodes, recoveryCodeStatus } = await import('@/lib/server/recoveryCodes');
@@ -176,29 +176,45 @@ test('passkeys and recovery codes are in the backup, restored by the script, and
 
   const result = await backup.createBackup();
   const target = path.join(os.tmpdir(), `buh-restore-signin-${Date.now()}`);
+  // After the backup the owner loses that phone: removes its passkey, makes new codes.
+  passkeys.removePasskey(phone.id);
+  createRecoveryCodes();
+
   const out = execFileSync(process.execPath, ['scripts/restore-backup.mjs', result.file, target]).toString();
-  assert.match(out, /1 passkey, 9 unused recovery codes/);
+  assert.match(out, /IMPORTANT: Admin Hub passkeys and recovery codes from this backup are switched off/);
+  assert.match(out, /9 unused recovery codes were voided/);
+  assert.match(out, /1 passkey is switched off until you confirm it/);
 
   const Database = (await import('better-sqlite3')).default;
   const restored = new Database(path.join(target, 'shop.db'), { readonly: true });
   const row = restored.prepare('SELECT * FROM admin_passkeys').get() as { name: string; public_key: Buffer; rp_id: string };
-  assert.equal(row.name, 'Owner phone');
+  assert.equal(row.name, 'Owner phone', 'the passkey is restored (to review), not lost');
   assert.equal(Buffer.compare(row.public_key, before.public_key), 0);
   assert.equal(row.rp_id, 'shop.example');
-  assert.equal((restored.prepare('SELECT COUNT(*) AS n FROM admin_recovery_codes WHERE used_at IS NULL').get() as { n: number }).n, 9);
+  assert.equal((restored.prepare('SELECT COUNT(*) AS n FROM admin_recovery_codes').get() as { n: number }).n, 0, 'old codes voided');
   assert.equal((restored.prepare('SELECT COUNT(*) AS n FROM webauthn_challenges').get() as { n: number }).n, 0, 'challenges left out');
   restored.close();
 
-  // The restored shop: the saved codes and the passkey still work there.
+  // The restored shop: the lost phone's passkey and the old codes don't open it.
   _closeDb();
   process.env.DATA_DIR = target;
   try {
-    assert.equal(recoveryCodeStatus().remaining, 9);
-    assert.equal(consumeRecoveryCode(codes[0]), false, 'a used code stays used');
-    assert.ok(consumeRecoveryCode(codes[1]));
-    const signIn = await passkeys.startPasskeySignIn({ rp });
-    const used = await passkeys.finishPasskeySignIn({ rp, challengeId: signIn.challengeId, response: passkeys.parseAuthenticationResponse(phone.signIn(signIn.options as never, rp.origin)) });
-    assert.equal(used.name, 'Owner phone');
+    assert.equal(recoveryCodeStatus().remaining, 0);
+    assert.equal(consumeRecoveryCode(codes[1]), false, 'an old code is void');
+    const notice = passkeys.restoreNotice()!;
+    assert.equal(notice.suspendedPasskeys, 1);
+    assert.equal(notice.backup, path.basename(result.file));
+    assert.deepEqual(passkeys.listPasskeys(rp.rpID).map((p) => p.suspended), [true]);
+    const tryIt = async () => {
+      const signIn = await passkeys.startPasskeySignIn({ rp });
+      return passkeys.finishPasskeySignIn({ rp, challengeId: signIn.challengeId, response: passkeys.parseAuthenticationResponse(phone.signIn(signIn.options as never, rp.origin)) });
+    };
+    await assert.rejects(tryIt(), /restored backup/);
+    // The owner (signed in with the password) keeps it: it works again. Or removes it.
+    passkeys.confirmPasskey(phone.id);
+    assert.equal((await tryIt()).name, 'Owner phone');
+    passkeys.dismissRestoreNotice();
+    assert.equal(passkeys.restoreNotice(), null);
   } finally {
     _closeDb();
     process.env.DATA_DIR = dir;

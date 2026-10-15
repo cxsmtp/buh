@@ -142,13 +142,32 @@ export async function ensureAdminAccount(): Promise<void> {
   await loadAccount();
 }
 
-/** The session generation: bumped to end every existing session. */
+/**
+ * The session generation: bumped to end every existing session. A data folder
+ * without one (a new shop, or one just restored from a backup, which never
+ * carries this file) starts from a random number, not 1, so a session cookie
+ * from before the restore can't match it again even when SESSION_SECRET and
+ * ADMIN_PASSWORD_HASH stayed the same.
+ */
 function sessionGeneration(): number {
   try {
     const n = Number(JSON.parse(fs.readFileSync(SESSION_STATE_FILE(), 'utf8')).generation);
-    return Number.isSafeInteger(n) && n > 0 ? n : 1;
+    if (Number.isSafeInteger(n) && n > 0) return n;
+  } catch (err) {
+    if ((err as NodeJS.ErrnoException).code !== 'ENOENT') return 1;
+  }
+  const fresh = crypto.randomInt(1_000_000, 2 ** 47);
+  try {
+    // wx: if another copy of the shop wrote one first, use theirs.
+    fs.writeFileSync(SESSION_STATE_FILE(), JSON.stringify({ generation: fresh }), { mode: 0o600, flag: 'wx' });
+    return fresh;
   } catch {
-    return 1;
+    try {
+      const n = Number(JSON.parse(fs.readFileSync(SESSION_STATE_FILE(), 'utf8')).generation);
+      return Number.isSafeInteger(n) && n > 0 ? n : 1;
+    } catch {
+      return 1;
+    }
   }
 }
 
@@ -430,13 +449,22 @@ export async function confirmOwner(session: AdminSession, currentPassword: strin
   }
 }
 
-/** After a recovery-code sign-in: choose a new password (the forgotten one is not asked for). Every other session ends. */
+/** Whether this session may choose a new password without typing the old one. */
+export function canSetPasswordWithoutCurrent(session: AdminSession, now = Date.now()): boolean {
+  return session.recoveryPending || isFreshPasskeySession(session, now);
+}
+
+/**
+ * Choose a new password without the forgotten one: right after a recovery-code
+ * sign-in, or within 10 minutes of a passkey sign-in (the passkey's
+ * fingerprint/face/PIN check just proved it's the owner). Every other session ends.
+ */
 export async function setPasswordAfterRecovery(session: AdminSession, newPassword: string) {
   const account = await loadAccount();
   if (account.managedByEnv) {
     throw new HttpError(409, 'This admin account is managed by ADMIN_PASSWORD_HASH. Change it there.');
   }
-  if (!session.recoveryPending) throw new HttpError(400, 'Type your current password.');
+  if (!canSetPasswordWithoutCurrent(session)) throw new HttpError(400, 'Type your current password.');
   account.passwordHash = await hashPassword(newPassword);
   account.mustChangePassword = false;
   persist(account);
