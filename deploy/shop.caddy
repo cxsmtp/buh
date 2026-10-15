@@ -1,0 +1,45 @@
+# The shop's site block, imported by deploy/Caddyfile (production) and by
+# deploy/ci/Caddyfile (the zero-downtime test in CI). Not a Caddyfile on its own.
+encode zstd gzip
+
+# Product photos are uploaded through the admin hub (max ~12 MB per request).
+request_body {
+	max_size 12MB
+}
+
+# Two copies of the shop (app-blue / app-green in docker-compose.yml); normally one runs.
+# Every request goes to the first healthy copy. While they switch during an update, a
+# request that cannot reach one copy is retried on the other instead of failing.
+reverse_proxy app-blue:3000 app-green:3000 {
+	lb_policy first
+	# Keep trying for up to 30 s (covers a restart), every 250 ms. A request that never
+	# reached a copy is always retried; one that did is retried only if it is a GET.
+	lb_try_duration 30s
+	lb_try_interval 250ms
+
+	# Active health checks: a copy gets traffic once /api/health has answered 200 twice.
+	health_uri /api/health
+	health_interval 2s
+	health_timeout 2s
+	health_status 200
+	health_passes 2
+	health_fails 1
+
+	# Passive: a copy that refuses a connection is skipped for 10 s at once,
+	# without waiting for the next health check.
+	fail_duration 10s
+
+	# The real visitor address, for per-address limits (the app trusts it with TRUST_PROXY=1).
+	# Set here, so a visitor cannot fake it.
+	header_up X-Real-IP {remote_host}
+}
+
+header {
+	-Server
+	-X-Powered-By
+}
+
+log {
+	output stdout
+	format console
+}

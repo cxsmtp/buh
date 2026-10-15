@@ -1,21 +1,22 @@
 # Hostinger Deployment Guide: Beautiful UAE Home
 
-**Recommended model: one Hostinger KVM VPS running Docker Compose.** Two containers run on it:
+**Recommended model: one Hostinger KVM VPS running Docker Compose.** These containers run on it:
 
-- the shop;
-- Caddy, which gets and renews the free HTTPS certificate.
+- the shop, as `app-blue` or `app-green`: two identical copies of one definition, of which one runs (both run for about a minute during an update);
+- Caddy, which gets and renews the free HTTPS certificate and sends visitors to the copy that is healthy;
+- optionally, the **updater**, which installs new versions without downtime, rolls back a version that does not start, and restarts the shop if it stops answering (section 5).
 
 Everything the shop stores lives in one Docker volume and is backed up every 12 hours, by email.
 
 | Option | Use it? | Why |
 | --- | --- | --- |
-| **KVM VPS + Docker Compose** (this guide) | ✅ Recommended | One command to start or update. HTTPS is automatic. The database, photos and receipts persist in a volume. Backups run on their own. Rollback means starting the previous version. The containers run read-only, as non-root, with no extra privileges. |
+| **KVM VPS + Docker Compose** (this guide) | ✅ Recommended | One command to start. Updates switch between two copies without closing the shop, and a version that fails is rolled back on its own. HTTPS is automatic. The database, photos and receipts persist in a volume. Backups run on their own. The shop containers run read-only, as non-root, with no extra privileges. |
 | KVM VPS + PM2 + nginx | Possible | It works (see the end of this guide), but you look after Node, nginx, certbot and the data folder yourself. |
 | Shared / Cloud hosting (hPanel Node.js) | ❌ Not for this shop | The shop needs a persistent data folder for its database, a native SQLite module, and a process that keeps running for the 12-hourly backups. hPanel Node.js hosting is not built for that. |
 
 **Size:** KVM 2 (2 vCPU, 8 GB) is comfortable. KVM 1 is enough to start. Choose the data centre region closest to the UAE that Hostinger offers.
 
-**Run one copy of the shop only.** Phone codes and limits are kept in that one process's memory, and the database is a single file. Don't put a second copy behind a load balancer.
+**One copy of the shop serves at a time.** Phone codes and limits are kept in that process's memory, and the database is a single file. During an update the new copy starts beside the old one on the same database (safe on one server), Caddy moves visitors over, and the old copy stops. Don't run more copies, and don't put the shop behind another load balancer.
 
 ---
 
@@ -46,12 +47,12 @@ Everything the shop stores lives in one Docker volume and is backed up every 12 
    - Set a `BACKUP_PASSPHRASE` of at least 12 characters, and store it in your password manager. Without it, customer data is emailed unencrypted.
 6. **Start** (pulls the ready-made image `ghcr.io/cxsmtp/buh:latest`):
    ```bash
-   docker compose pull app && docker compose up -d
+   docker compose pull app-blue && docker compose up -d
    ```
    Then <https://yourdomain.ae> shows the shop with a valid certificate. To build the image on the server instead, use `docker compose up -d --build` (a few minutes).
 7. **First admin sign-in.** The one-time password is in the log:
    ```bash
-   docker compose logs app | grep -A3 "first admin"
+   docker compose logs app-blue | grep -A3 "first admin"
    ```
    Open the shop and click **Admin Hub**. Sign in with that email and password, then choose your own password.
 
@@ -73,6 +74,7 @@ Everything the shop stores lives in one Docker volume and is backed up every 12 
 - [ ] **Restore drill:** restore that backup on your computer (section 4), so you know it works before you need it.
 - [ ] **A real test order:** place it from your phone, then confirm, book and cancel it in the Admin Hub.
 - [ ] **Uptime monitor:** use a free service (e.g. UptimeRobot) on `https://yourdomain.ae/api/health`.
+- [ ] **Automatic updates** (recommended): turn on the updater (section 5).
 
 ## 3. Backups (automatic, every 12 hours)
 
@@ -88,36 +90,42 @@ The shop backs itself up every 12 hours, and straight after a restart if one is 
 
 **If something is wrong**, the status line at the top of the Admin Hub turns amber (taken but not emailed) or red (failed or overdue), and a failure is also emailed. **Back up now** runs one immediately.
 
-Before an update, press **Back up now**.
+Before every update, the updater also saves a copy of the database on the server, as `backups/pre-update-<time>.db` (the newest 5 are kept).
 
-Copy the server's backups to your computer:
+Copy the server's backups to your computer (use `app-green` if that is the copy `docker compose ps` shows running):
 
 ```bash
-docker compose cp app:/data/backups ./backups
+docker compose cp app-blue:/data/backups ./backups
 ```
 
 ## 4. Restore
 
 On the server (this replaces the live data; the current data is kept aside in `replaced-<time>/`):
 
-1. Stop the shop:
+1. Stop the updater first (otherwise it restarts the shop it finds stopped), then the shop:
    ```bash
-   docker compose stop app
+   docker compose stop updater
    ```
-2. Restore a backup kept on the server (`docker compose run --rm --no-deps app ls /data/backups` lists them):
    ```bash
-   docker compose run --rm --no-deps app node scripts/restore-backup.mjs /data/backups/buh-backup-20261014-1200.tar.gz.enc /data --replace
+   docker compose stop app-blue app-green
+   ```
+2. Restore a backup kept on the server (`docker compose run --rm --no-deps app-blue ls /data/backups` lists them):
+   ```bash
+   docker compose run --rm --no-deps app-blue node scripts/restore-backup.mjs /data/backups/buh-backup-20261014-1200.tar.gz.enc /data --replace
    ```
    For a backup from your email, first make it readable and copy it in:
    ```bash
-   chmod 644 buh-backup-….tar.gz.enc && docker compose cp buh-backup-….tar.gz.enc app:/data/backups/
+   chmod 644 buh-backup-….tar.gz.enc && docker compose cp buh-backup-….tar.gz.enc app-blue:/data/backups/
    ```
-3. Start it again:
+3. Start it again, then the updater (if you use it):
    ```bash
-   docker compose start app
+   docker compose up -d --no-deps app-blue
+   ```
+   ```bash
+   docker compose start updater
    ```
 
-Then sign in with the new one-time password from `docker compose logs app`, and re-enter the courier and SMS keys. Keys and the admin account are deliberately not in backups.
+Then sign in with the new one-time password from `docker compose logs app-blue`, and re-enter the courier and SMS keys. Keys and the admin account are deliberately not in backups.
 
 To check a backup on your own computer (Node 20+, in a checkout of this repository after `npm ci`):
 
@@ -127,39 +135,142 @@ BACKUP_PASSPHRASE='your passphrase' node scripts/restore-backup.mjs buh-backup-�
 
 Plain `.tar.gz` backups also open with any archive tool (`tar -xzf`).
 
-## 5. Updates and rollback
+## 5. Updates without downtime, and rollback
 
-1. Press **Back up now**.
-2. Update:
-   ```bash
-   cd /opt/buhome && git pull && docker compose pull app && docker compose up -d
-   ```
+The shop runs as one of two identical copies, `app-blue` or `app-green`. An update starts the new version as the copy that is not running, beside the one serving customers, and switches over only when the new one is healthy:
 
-The shop stops for a few seconds while the new version starts. In-flight requests get up to 20 seconds to finish. The version (`BUH-xx.xx.xx`) shows next to the Admin Hub title.
+1. The database is saved to `backups/pre-update-<time>.db`. If that fails, nothing changes.
+2. The new version starts as the idle copy. It must pass its health check and load the home page within 2 minutes.
+3. **Healthy:** Caddy sends visitors to it, the old copy finishes the requests it is serving (up to 25 s) and stops. The new version is remembered as `buh:last-good`, the one before as `buh:previous`.
+4. **Not healthy:** it is removed, the old copy never stopped serving, and an alert is written. That image is not tried again; the next published version is.
 
-**Roll back:**
+While the copies switch, Caddy retries a request that cannot reach a copy on the other one, so customers and the Admin Hub see no error page. A customer who asked for an SMS code in that minute may need to tap **Send code** again: codes are held by the copy that sent them.
+
+### Turn on automatic updates (recommended)
+
+The updater is off unless you turn it on. It checks for a new version every 15 minutes and keeps the shop running (see "Self-healing" below).
 
 ```bash
-git checkout <previous version tag or commit> && docker compose up -d --build
+cd /opt/buhome && echo COMPOSE_PROFILES=autoupdate >> .env && docker compose up -d updater
 ```
 
-Or run a previous published image: every version is kept as `ghcr.io/cxsmtp/buh:<version>` (for example `1.1.0`); set it as the `image:` in docker-compose.yml and run `docker compose up -d`.
+Optional settings in `.env.production`, then `docker compose restart updater`:
 
-If a release changed the database, restore the backup taken before the update.
+- `UPDATE_CHECK_MINUTES=15`: how often to look for a new version; `0` means only when you ask.
+- `ALERT_WEBHOOK_URL=https://…`: a Slack, Discord or similar webhook that gets a short message when an update succeeds or fails, or the shop is restarted.
+
+If the image is private (pulling it asks for a password), give the updater a read-only GitHub token once:
+
+```bash
+docker compose exec updater docker login ghcr.io
+```
+
+The updater can control Docker on the server; [docs/security.md](docs/security.md) explains why that is acceptable and how it is limited.
+
+### Update now
+
+- With automatic updates on:
+  ```bash
+  docker compose exec updater update-now
+  ```
+- Without them (the same zero-downtime switch, once):
+  ```bash
+  docker compose run --rm updater update-now
+  ```
+
+To pick up changes to `docker-compose.yml` or the Caddyfile as well, run `git pull` first, then `docker compose up -d caddy updater` (Caddy restarts for a second only when its own settings changed). Use `docker compose up -d` without service names only for the first start: it also starts `app-blue` when `app-green` is the copy serving (the updater then stops one of them again).
+
+### See what it did
+
+- The updater's log:
+  ```bash
+  docker compose logs -f updater
+  ```
+- Which copy runs, the last good and previous versions, rejected versions:
+  ```bash
+  docker compose exec updater updater-status
+  ```
+- Alerts (one JSON line each, kept in the shop's data volume as `updater/alerts.log`):
+  ```bash
+  docker compose exec updater cat /shopdata/updater/alerts.log
+  ```
+
+### Self-healing
+
+Every 30 seconds the updater checks the copy that is serving:
+
+- unhealthy for 3 checks in a row: it is restarted;
+- still unhealthy after the restart: the other copy is started from `buh:last-good` and takes over, and the broken one is stopped (its log stays: `docker compose logs app-blue`);
+- no copy running at all: one is started from `buh:last-good`.
+
+Each of these writes an alert. To stop the shop on purpose (for a restore, section 4), stop the updater first: `docker compose stop updater`.
+
+### Roll back
+
+Automatic: a new version that does not become healthy is never switched to (above). To go back yourself, also without downtime:
+
+- To the version before the current one:
+  ```bash
+  docker compose exec updater rollback
+  ```
+- To the last version that passed its checks:
+  ```bash
+  docker compose exec updater rollback buh:last-good
+  ```
+- To any published version (every version is kept as `ghcr.io/cxsmtp/buh:<version>`):
+  ```bash
+  docker compose exec updater rollback ghcr.io/cxsmtp/buh:1.2.0
+  ```
+
+Without automatic updates, use `docker compose run --rm updater rollback` the same way. A rolled-back version is not re-installed automatically; the next published one is.
+
+Without the updater at all: start the copy that is not running from the last good image, wait until `docker compose ps` shows it `healthy`, then stop the other one (here green was running):
+
+```bash
+BUH_IMAGE=buh:last-good docker compose up -d --no-deps app-blue
+```
+```bash
+docker compose stop app-green
+```
+
+**Database changes.** For a minute the old and new versions share the database, and a rollback runs the old version on it, so a release may only add to the database (new tables or columns), never remove or rename. To go back to the database exactly as it was before an update (orders placed since are lost), stop the updater and the shop as in section 4, then:
+
+```bash
+docker compose run --rm --no-deps app-blue sh -c 'cp /data/backups/pre-update-<time>.db /data/shop.db && rm -f /data/shop.db-wal /data/shop.db-shm'
+```
+
+### Moving from the older setup (one `app` container, before BUH-01.03.00)
+
+Once, at a quiet time. The shop keeps serving except for a second or two while Caddy restarts with its new settings:
+
+1. Get the new files:
+   ```bash
+   cd /opt/buhome && git pull
+   ```
+2. Start the new copy beside the old one:
+   ```bash
+   docker compose pull app-blue && docker compose up -d --no-deps app-blue
+   ```
+3. When `docker compose ps` shows `app-blue` as `healthy`, switch Caddy over and remove the old container:
+   ```bash
+   docker compose up -d --remove-orphans
+   ```
+
+The version (`BUH-xx.xx.xx`) shows next to the Admin Hub title.
 
 ## 6. Logs and health
 
 - Logs:
   ```bash
-  docker compose logs -f app
+  docker compose logs -f app-blue app-green
   ```
   Errors are logged with secrets redacted, and phone numbers and emails masked.
 - State:
   ```bash
   docker compose ps
   ```
-  The app shows `healthy` when `/api/health` answers.
-- Audit log: `docker compose exec app ls /data` lists the `audit-YYYY-MM.jsonl` files (one line per sign-in, order change, booking, setting change and backup).
+  The running copy shows `healthy` when `/api/health` answers.
+- Audit log: `docker compose exec app-blue ls /data` (or `app-green`, whichever runs) lists the `audit-YYYY-MM.jsonl` files (one line per sign-in, order change, booking, setting change and backup).
 
 ---
 
@@ -191,4 +302,4 @@ What is built in, and what you must do, is in [docs/security.md](docs/security.m
 2. **Prices, stock and totals are computed on the server** from the catalogue. Every order carries a phone number proven by an SMS code.
 3. **Every admin action is checked on the server** and audited. Courier and SMS keys are write-only: they never reach a browser.
 4. **Security headers on every page:** a Content Security Policy, `X-Frame-Options: DENY`, `nosniff`, HSTS and a tight `Permissions-Policy`.
-5. **Containers** run read-only, as non-root, with every Linux capability dropped. Only Caddy is reachable from outside.
+5. **Containers:** the shop runs read-only, as non-root, with every Linux capability dropped. Only Caddy is reachable from outside. The optional updater can control Docker on the server and has no network listener.

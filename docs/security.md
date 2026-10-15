@@ -79,8 +79,17 @@ Every page sends:
 ## Deployment
 
 - **Docker:** non-root, `read_only`, `tmpfs /tmp`, `cap_drop: ALL`, `no-new-privileges`, bound to `127.0.0.1`, data in a volume, healthcheck on `/api/health`.
+- **Two copies, one serving.** `app-blue` and `app-green` share one definition (same image, settings, volume and hardening). Caddy health-checks both every 2 s and sends traffic to the first healthy one; both run only for the minute of an update, on the same SQLite database (WAL mode, one host: safe for two processes).
+- **The updater is opt-in and powerful.** It is off unless the owner enables the compose profile `autoupdate`. It mounts the Docker socket, which gives it root-equivalent control of the host: whoever controls the updater controls the server. That is acceptable because it:
+  - runs no network listener and talks only to the Docker socket and the registry (`ghcr.io`), plus the alert webhook if one is set (https only, 10 s timeout);
+  - runs a fixed, pinned image (`docker:27.3.1-cli`) and the script from this repository, mounted read-only; nothing it pulls is executed by it, only started as the shop;
+  - reads only `UPDATE_CHECK_MINUTES` and `ALERT_WEBHOOK_URL` from `.env.production`, so the shop's secrets are not in its environment (it can still read the file: the project folder is mounted read-only, because `docker compose` needs it);
+  - has a read-only root filesystem, `no-new-privileges`, and only the `CHOWN`, `DAC_OVERRIDE` and `FOWNER` capabilities (to write its alert log into the shop's volume for the shop's user).
+  The protection that matters is the server's: SSH keys only, and nobody else with access to Docker on it.
+- **Updates never skip the safety checks.** The database is snapshotted before a switch (no snapshot, no switch); a new version must pass its health check and render the home page before it gets traffic from the old one; a version that fails is removed, remembered and not retried. Alerts go to `DATA_DIR/updater/alerts.log` (readable only by the shop's user) and, optionally, the webhook. No secrets are written to either.
+- **Database changes must be additive.** During a switch the old version runs against the new version's database, and a rollback runs it there for good: migrations add tables or columns, never drop or rename.
 - **Published image** (`ghcr.io/cxsmtp/buh`): built by GitHub Actions from main only, after a smoke test that starts it read-only, as user 1001, with every capability dropped. Pull requests build and test it but never publish. No secrets are baked in: the support email and shop address are read from the environment at start-up.
-- **PM2:** one instance. Codes and limits live in process memory; move them to Redis before running more.
+- **PM2:** one instance. Codes and limits live in process memory; move them to Redis (or the database) before running more. For the same reason, an SMS code sent in the minute of a blue/green switch may have to be requested again.
 - **`TRUST_PROXY=1`** only behind nginx, which sets `X-Real-IP`. Without a trusted proxy, per-address limits are skipped (not shared by everyone); the per-number, per-account and shop-wide limits still apply.
 - **Back up `DATA_DIR`.** It holds the database, uploaded photos, receipts, backups, the admin account, session key and audit log, with owner-only permissions (an existing folder is tightened to 700 at start).
 

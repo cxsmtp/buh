@@ -1,0 +1,9 @@
+# CI only (.github/workflows/zero-downtime.yml): the production site block
+# (../shop.caddy) on plain http, port 8080, so no certificate is requested.
+{
+	auto_https off
+}
+
+:8080 {
+	import ../shop.caddy
+}

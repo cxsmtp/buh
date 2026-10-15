@@ -1,0 +1,3 @@
+#!/bin/sh
+# docker compose exec updater updater-status: what runs, the last good image, the recent log.
+exec /bin/sh /updater/updater.sh status "$@"
