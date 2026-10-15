@@ -277,7 +277,7 @@ export function emailConfigured(): boolean {
   return Boolean(process.env.SMTP_HOST && process.env.BACKUP_EMAIL);
 }
 
-async function transport() {
+export async function transport() {
   const nodemailer = (await import('nodemailer')).default;
   const port = Number(process.env.SMTP_PORT || 587);
   return nodemailer.createTransport({
@@ -293,7 +293,7 @@ async function transport() {
   });
 }
 
-function sender(): string {
+export function sender(): string {
   return process.env.SMTP_FROM || process.env.SMTP_USER || 'backups@localhost';
 }
 

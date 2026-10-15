@@ -1,6 +1,7 @@
 import { ensureAdminAccount } from './adminAuth';
 import { MIN_PASSPHRASE_LENGTH, emailConfigured, startBackupSchedule } from './backup';
 import { getDb } from './db';
+import { startMonitor } from './monitor';
 import { startFestivalRefresh } from './theme';
 import { logEvent } from './log';
 import { liveGateways } from '@/lib/otpService';
@@ -17,6 +18,7 @@ export async function onStartup() {
     getDb(); // open (and migrate) the database now, not on the first customer's request
     startBackupSchedule();
     startFestivalRefresh();
+    startMonitor();
   } catch (err) {
     logEvent('error', 'startup_failed', { error: err instanceof Error ? err.message : String(err) });
   }

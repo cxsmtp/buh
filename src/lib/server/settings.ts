@@ -81,12 +81,56 @@ export function getSettings<K extends SettingsKey>(key: K): SettingsMap[K] {
   return merged;
 }
 
+const HISTORY_KEEP = 30;
+
+/** The value without its secrets (history never keeps keys). */
+function withoutSecrets(key: SettingsKey, value: unknown): Obj {
+  const copy = structuredClone(value) as Obj;
+  for (const p of SECRETS[key]) if (getPath(copy, p) !== undefined) setPath(copy, p, '');
+  return copy;
+}
+
 function save<K extends SettingsKey>(key: K, value: SettingsMap[K]) {
+  // Keep the version being replaced, so it can be restored (Settings → System → History).
+  const db = getDb();
+  const before = db.prepare('SELECT data, updated_at FROM settings WHERE key = ?').get(key) as { data: string; updated_at: string } | undefined;
+  if (before) {
+    db.prepare('INSERT INTO settings_history (key, data, saved_at) VALUES (?, ?, ?)').run(key, JSON.stringify(withoutSecrets(key, JSON.parse(before.data))), before.updated_at);
+    db.prepare('DELETE FROM settings_history WHERE key = ? AND id NOT IN (SELECT id FROM settings_history WHERE key = ? ORDER BY id DESC LIMIT ?)').run(key, key, HISTORY_KEEP);
+  }
   getDb()
     .prepare('INSERT INTO settings (key, data, updated_at) VALUES (?, ?, ?) ON CONFLICT(key) DO UPDATE SET data = excluded.data, updated_at = excluded.updated_at')
     .run(key, JSON.stringify(value), new Date().toISOString());
   cache.set(key, value);
   bump('settings');
+}
+
+export interface SettingsVersion {
+  id: number;
+  key: SettingsKey;
+  savedAt: string;
+}
+
+/** Earlier versions, newest first (for Settings → System). */
+export function settingsHistory(limit = 60): SettingsVersion[] {
+  return (getDb().prepare('SELECT id, key, saved_at FROM settings_history ORDER BY id DESC LIMIT ?').all(Math.min(200, limit)) as Array<{ id: number; key: SettingsKey; saved_at: string }>).map(
+    (r) => ({ id: r.id, key: r.key, savedAt: r.saved_at })
+  );
+}
+
+/**
+ * Put an earlier version back. Keys are not in history, so the keys saved now
+ * stay. The version replaced by this restore is itself kept, so it can be undone.
+ */
+export function restoreSettingsVersion(id: number): SettingsKey {
+  const row = getDb().prepare('SELECT key, data FROM settings_history WHERE id = ?').get(id) as { key: SettingsKey; data: string } | undefined;
+  if (!row || !(row.key in DEFAULTS)) throw new HttpError(404, 'That version is no longer kept.');
+  const key = row.key;
+  const restored = deepMerge(DEFAULTS[key], JSON.parse(row.data)) as Obj;
+  const current = getSettings(key) as unknown as Obj;
+  for (const p of SECRETS[key]) setPath(restored, p, getPath(current, p) ?? '');
+  save(key, restored as unknown as SettingsMap[typeof key]);
+  return key;
 }
 
 /** What the admin hub may see: secrets blanked, with which ones are saved. */

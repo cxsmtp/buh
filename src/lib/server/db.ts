@@ -117,6 +117,21 @@ const MIGRATIONS: Array<(db: DB) => void> = [
         key    TEXT PRIMARY KEY,
         value  TEXT NOT NULL
       );
+      -- Earlier versions of each settings group, to restore a known-good one (keys blanked).
+      CREATE TABLE settings_history (
+        id        INTEGER PRIMARY KEY,
+        key       TEXT NOT NULL,
+        data      TEXT NOT NULL,
+        saved_at  TEXT NOT NULL
+      );
+      CREATE INDEX settings_history_by_key ON settings_history(key, id);
+      -- Checkout SMS codes (hashed), shared by both copies of the shop during an update.
+      CREATE TABLE otp_codes (
+        phone       TEXT PRIMARY KEY,
+        hash        TEXT NOT NULL,
+        expires_at  INTEGER NOT NULL,
+        attempts    INTEGER NOT NULL DEFAULT 0
+      );
     `);
   },
 ];

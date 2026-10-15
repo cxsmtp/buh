@@ -5,6 +5,8 @@ import { logEvent, maskPhone } from '@/lib/server/log';
 import { assertPublicHttpsUrl, safeFetch } from '@/lib/server/outbound';
 import { takeAll, type LimitRule } from '@/lib/server/rateLimit';
 import { audit } from '@/lib/server/audit';
+import { getDb } from '@/lib/server/db';
+import { mac } from '@/lib/server/secrets';
 import { contactEmail as supportEmail } from '@/lib/server/settings';
 
 /**
@@ -20,7 +22,9 @@ import { contactEmail as supportEmail } from '@/lib/server/settings';
  *   environment. A code is returned to the browser only when no gateway is
  *   configured and this is not production (or OTP_DEV_MODE=true).
  *
- * State is per process: run a single instance (see ecosystem.config.cjs).
+ * Codes are kept hashed in the database (otp_codes), so a customer's code
+ * still works when the shop switches to a new version mid-checkout. Rate
+ * limits are per process.
  */
 
 export const OTP_LENGTH = 6;
@@ -34,19 +38,39 @@ interface StoredOtpRecord {
   attempts: number;
 }
 
-const otpStore = new Map<string, StoredOtpRecord>();
-const otpKey = crypto.randomBytes(32);
+/** The code store, in the database (see db.ts migration 3). */
+const otpStore = {
+  get(phone: string): StoredOtpRecord | undefined {
+    const r = getDb().prepare('SELECT hash, expires_at, attempts FROM otp_codes WHERE phone = ?').get(phone) as
+      | { hash: string; expires_at: number; attempts: number }
+      | undefined;
+    return r ? { hash: r.hash, expiresAt: r.expires_at, attempts: r.attempts } : undefined;
+  },
+  set(phone: string, r: StoredOtpRecord) {
+    const db = getDb();
+    db.prepare(
+      'INSERT INTO otp_codes (phone, hash, expires_at, attempts) VALUES (?, ?, ?, ?) ON CONFLICT(phone) DO UPDATE SET hash = excluded.hash, expires_at = excluded.expires_at, attempts = excluded.attempts'
+    ).run(phone, r.hash, r.expiresAt, r.attempts);
+    // Expired codes go; and a hard cap so a flood cannot fill the disk.
+    db.prepare('DELETE FROM otp_codes WHERE expires_at < ?').run(Date.now());
+    db.prepare('DELETE FROM otp_codes WHERE phone IN (SELECT phone FROM otp_codes ORDER BY expires_at LIMIT MAX(0, (SELECT COUNT(*) FROM otp_codes) - ?))').run(MAX_RECORDS);
+  },
+  /** One more attempt, atomically; returns the new count. */
+  attempt(phone: string): number {
+    getDb().prepare('UPDATE otp_codes SET attempts = attempts + 1 WHERE phone = ?').run(phone);
+    return (getDb().prepare('SELECT attempts FROM otp_codes WHERE phone = ?').get(phone) as { attempts: number } | undefined)?.attempts ?? MAX_ATTEMPTS;
+  },
+  delete(phone: string) {
+    getDb().prepare('DELETE FROM otp_codes WHERE phone = ?').run(phone);
+  },
+  clear() {
+    getDb().prepare('DELETE FROM otp_codes').run();
+  },
+};
 
-const sweeper = setInterval(() => {
-  const now = Date.now();
-  for (const [phone, record] of otpStore) {
-    if (now > record.expiresAt) otpStore.delete(phone);
-  }
-}, 5 * 60 * 1000);
-sweeper.unref?.();
-
+/** Keyed with the shop's own secret, so both copies of the shop can check a code. */
 function codeHash(phone: string, code: string): string {
-  return crypto.createHmac('sha256', otpKey).update(`${phone}\n${code}`).digest('base64url');
+  return mac('otp', `${phone}\n${code}`);
 }
 
 /**
@@ -224,12 +248,7 @@ export async function sendRealSmsOtp(
   }
 
   const code = crypto.randomInt(0, 10 ** OTP_LENGTH).toString().padStart(OTP_LENGTH, '0');
-  otpStore.delete(phone);
   otpStore.set(phone, { hash: codeHash(phone, code), expiresAt: Date.now() + OTP_TTL_MS, attempts: 0 });
-  if (otpStore.size > MAX_RECORDS) {
-    const oldest = otpStore.keys().next().value;
-    if (oldest !== undefined) otpStore.delete(oldest);
-  }
 
   const smsText = `Beautiful UAE Home: Your verification code is ${code}. Valid for 10 minutes. Please do not share this code.`;
 
@@ -363,7 +382,11 @@ export function verifyRealSmsOtp(rawPhone: string, inputCode: string): { valid: 
     return { valid: false, message: 'The verification code has expired. Please request a new code.' };
   }
 
-  record.attempts += 1;
+  const attempts = otpStore.attempt(phone);
+  if (attempts > MAX_ATTEMPTS) {
+    otpStore.delete(phone);
+    return { valid: false, message: 'Too many incorrect attempts. Please request a new code.' };
+  }
   const given = Buffer.from(codeHash(phone, toAsciiDigits(String(inputCode)).replace(/\s+/g, '')));
   const expected = Buffer.from(record.hash);
   if (given.length === expected.length && crypto.timingSafeEqual(given, expected)) {
@@ -371,11 +394,11 @@ export function verifyRealSmsOtp(rawPhone: string, inputCode: string): { valid: 
     return { valid: true, message: 'Mobile number successfully verified.' };
   }
 
-  if (record.attempts >= MAX_ATTEMPTS) {
+  if (attempts >= MAX_ATTEMPTS) {
     otpStore.delete(phone);
     return { valid: false, message: 'Too many incorrect attempts. Please request a new code.' };
   }
-  const left = MAX_ATTEMPTS - record.attempts;
+  const left = MAX_ATTEMPTS - attempts;
   return { valid: false, message: `Incorrect verification code (${left} attempt${left === 1 ? '' : 's'} remaining).` };
 }
 

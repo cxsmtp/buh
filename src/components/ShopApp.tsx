@@ -100,6 +100,8 @@ import { CatalogSettingsCard } from '@/components/admin/settings/CatalogSettings
 import { SettingsConsole } from '@/components/admin/settings/SettingsConsole';
 import { StoreSettingsCard } from '@/components/admin/settings/StoreSettingsCard';
 import { ThemeSettingsCard } from '@/components/admin/settings/ThemeSettingsCard';
+import { SettingsHistoryCard } from '@/components/admin/settings/SettingsHistoryCard';
+import { SystemHealthCard } from '@/components/admin/settings/SystemHealthCard';
 
 import { Sparkles, Palette, ShieldCheck, Heart, Search, X } from 'lucide-react';
 
@@ -157,6 +159,8 @@ export function ShopApp({ initialProductId }: { initialProductId?: string } = {}
   // (not after the owner's own save, which would wipe the "Saved" message, nor on every refresh).
   const [publicSettingsLoaded, setPublicSettingsLoaded] = useState(false);
   const [adminSettingsLoaded, setAdminSettingsLoaded] = useState(false);
+  // Bumped after a settings version is restored, so the forms show the restored values.
+  const [settingsEpoch, setSettingsEpoch] = useState(0);
 
   // Modals & Drawers
   const [cart, setCart] = useState<CartItem[]>([]);
@@ -540,14 +544,14 @@ export function ShopApp({ initialProductId }: { initialProductId?: string } = {}
                     label: 'Store & contact',
                     icon: '🏬',
                     hint: 'WhatsApp, email, social accounts, address and currency display.',
-                    content: <StoreSettingsCard key={`store-${adminSettingsLoaded}`} value={adminSettings.store.value} onSave={(v) => saveSettings('store', v)} />,
+                    content: <StoreSettingsCard key={`store-${adminSettingsLoaded}-${settingsEpoch}`} value={adminSettings.store.value} onSave={(v) => saveSettings('store', v)} />,
                   },
                   {
                     id: 'catalog',
                     label: 'Catalogue',
                     icon: '📐',
                     hint: 'Size presets, categories and the low-stock warning.',
-                    content: <CatalogSettingsCard key={`catalog-${adminSettingsLoaded}`} value={adminSettings.catalog.value} onSave={(v) => saveSettings('catalog', v)} />,
+                    content: <CatalogSettingsCard key={`catalog-${adminSettingsLoaded}-${settingsEpoch}`} value={adminSettings.catalog.value} onSave={(v) => saveSettings('catalog', v)} />,
                   },
                   {
                     id: 'branding',
@@ -556,7 +560,7 @@ export function ShopApp({ initialProductId }: { initialProductId?: string } = {}
                     hint: 'Logo, colours, the marquee and bank-transfer details.',
                     content: (
                       <AdminBrandingTab
-                        key={`branding-${publicSettingsLoaded}`}
+                        key={`branding-${publicSettingsLoaded}-${settingsEpoch}`}
                         brandSettings={brandSettings}
                         onUpdateBrandSettings={handleUpdateBrandSettings}
                         bank={bankDetails}
@@ -569,7 +573,7 @@ export function ShopApp({ initialProductId }: { initialProductId?: string } = {}
                     label: 'Festival themes',
                     icon: '🎉',
                     hint: 'Eid, Diwali, Christmas, Lunar New Year and 30 more: picked automatically, or chosen by you.',
-                    content: <ThemeSettingsCard key={`theme-${adminSettingsLoaded}`} value={adminSettings.theme.value} onSave={(v) => saveSettings('theme', v)} />,
+                    content: <ThemeSettingsCard key={`theme-${adminSettingsLoaded}-${settingsEpoch}`} value={adminSettings.theme.value} onSave={(v) => saveSettings('theme', v)} />,
                   },
                   {
                     id: 'sms',
@@ -578,7 +582,7 @@ export function ShopApp({ initialProductId }: { initialProductId?: string } = {}
                     hint: 'The SMS gateway that sends checkout codes.',
                     content: (
                       <AdminSmsTab
-                        key={`sms-${adminSettingsLoaded}`}
+                        key={`sms-${adminSettingsLoaded}-${settingsEpoch}`}
                         smsSettings={adminSettings.sms.value}
                         secretsSet={adminSettings.sms.secretsSet}
                         onUpdateSmsSettings={handleUpdateSmsSettings}
@@ -592,7 +596,7 @@ export function ShopApp({ initialProductId }: { initialProductId?: string } = {}
                     hint: 'Jeebly and Eco Express keys, pickup details and routing.',
                     content: (
                       <AdminCouriersTab
-                        key={`couriers-${adminSettingsLoaded}`}
+                        key={`couriers-${adminSettingsLoaded}-${settingsEpoch}`}
                         settings={adminSettings.courier.value}
                         secretsSet={adminSettings.courier.secretsSet}
                         onUpdateSettings={handleUpdateSettings}
@@ -603,10 +607,16 @@ export function ShopApp({ initialProductId }: { initialProductId?: string } = {}
                     id: 'system',
                     label: 'System & backups',
                     icon: '🛡️',
-                    hint: 'Backups, version and health.',
+                    hint: 'Backups, earlier versions of the settings, version and health.',
                     content: (
                       <div className="space-y-3 text-xs text-stone-700">
+                        <SystemHealthCard />
                         <BackupStatus />
+                        <SettingsHistoryCard
+                          onRestored={() =>
+                            void Promise.all([loadAdminData(), loadCatalog()]).then(() => setSettingsEpoch((n) => n + 1))
+                          }
+                        />
                         <p>
                           Version <strong>{process.env.NEXT_PUBLIC_APP_VERSION}</strong>. Health check:{' '}
                           <a className="underline" href="/api/health" target="_blank" rel="noopener noreferrer">/api/health</a>
