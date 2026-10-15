@@ -116,7 +116,7 @@ export const AdminInventoryTab: React.FC<AdminInventoryTabProps> = ({ products, 
           </button>
         ))}
         <label className="relative ml-auto min-w-0 flex-1 sm:flex-none sm:w-56">
-          <Search className="w-3.5 h-3.5 absolute left-2.5 top-1/2 -translate-y-1/2 text-stone-400" />
+          <Search className="w-3.5 h-3.5 absolute left-2.5 top-1/2 -translate-y-1/2 text-stone-500" />
           <input value={query} onChange={(e) => setQuery(e.target.value)} placeholder="Search products" aria-label="Search products" className="w-full pl-8 pr-2 py-1.5 rounded-full border border-stone-300 bg-white" />
         </label>
       </div>

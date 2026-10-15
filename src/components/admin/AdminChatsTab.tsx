@@ -21,7 +21,7 @@ const STATUS: Record<ChatThread['status'], { label: string; cls: string }> = {
   waiting: { label: 'Waiting for you', cls: 'bg-red-100 text-red-800' },
   human: { label: 'You replied', cls: 'bg-emerald-100 text-emerald-800' },
   bot: { label: 'Assistant', cls: 'bg-stone-100 text-stone-600' },
-  closed: { label: 'Closed', cls: 'bg-stone-100 text-stone-400' },
+  closed: { label: 'Closed', cls: 'bg-stone-100 text-stone-500' },
 };
 
 const time = (iso: string) => new Date(iso).toLocaleString(undefined, { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' });
@@ -82,7 +82,7 @@ export function AdminChatsTab({ refreshKey }: { refreshKey: number }) {
                 {c.unread > 0 && <span className="ml-auto w-5 h-5 rounded-full bg-red-500 text-white text-[10px] font-bold flex items-center justify-center">{c.unread}</span>}
               </div>
               <p className="text-xs text-stone-600 line-clamp-2">{c.lastMessage}</p>
-              <p className="text-[10px] text-stone-400">{time(c.updatedAt)}{c.contact && c.customerName ? ` · ${c.contact}` : ''}</p>
+              <p className="text-[10px] text-stone-500">{time(c.updatedAt)}{c.contact && c.customerName ? ` · ${c.contact}` : ''}</p>
             </button>
           ))}
         </div>
@@ -91,7 +91,7 @@ export function AdminChatsTab({ refreshKey }: { refreshKey: number }) {
           {open ? (
             <Conversation key={open.id} thread={open} refreshKey={refreshKey} onBack={() => setOpenId(null)} onChanged={(t) => setChats((list) => (list ?? []).map((x) => (x.id === t.id ? { ...x, ...t } : x)))} />
           ) : (
-            <div className="hidden lg:flex h-full min-h-60 items-center justify-center text-sm text-stone-400 bg-white rounded-2xl border border-dashed border-stone-300">Choose a chat</div>
+            <div className="hidden lg:flex h-full min-h-60 items-center justify-center text-sm text-stone-500 bg-white rounded-2xl border border-dashed border-stone-300">Choose a chat</div>
           )}
         </div>
       </div>

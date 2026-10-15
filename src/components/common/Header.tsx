@@ -74,7 +74,7 @@ export const Header: React.FC<HeaderProps> = ({
         {/* Desktop Centered Navigation Links (Laptop and Desktop view) */}
         {!isAdminMode && (
           <nav className="hidden lg:flex items-center gap-6 text-xs font-semibold text-stone-700">
-            <span className="text-[#c5a059] hover:text-[#9f7e38] cursor-pointer transition-colors">
+            <span className="text-[#8a6a2c] hover:text-[#6f5523] cursor-pointer transition-colors">
               Block Print Editions
             </span>
             <span className="hover:text-stone-900 cursor-pointer transition-colors">

@@ -148,7 +148,7 @@ export function VersionsCard() {
                         {busy === e.version ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <RotateCcw className="w-3.5 h-3.5" />} Switch to this version
                       </button>
                     )}
-                    {!isRunning && tooOld && <span className="text-stone-400">Can&apos;t run on today&apos;s database</span>}
+                    {!isRunning && tooOld && <span className="text-stone-500">Can&apos;t run on today&apos;s database</span>}
                   </span>
                 </summary>
                 <div className="mt-2 leading-relaxed">

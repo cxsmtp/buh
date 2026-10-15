@@ -10,8 +10,8 @@ import { logEvent } from './log';
  *
  * Two layers:
  *  1. OFFLINE, always available: Islamic dates from the Umm al-Qura calendar
- *     built into Intl, Lunar New Year from Intl's Chinese calendar, Hanukkah
- *     from the Hebrew calendar, Nowruz from the Persian calendar, Easter by
+ *     built into Intl, Lunar New Year from Intl's Chinese calendar, Nowruz
+ *     from the Persian calendar, Easter by
  *     the Gregorian and Julian computus, fixed dates for the rest, and a
  *     researched table (2026–2032) for the Hindu and Sikh lunisolar festivals.
  *  2. FETCHED, refreshed from Google's public holiday calendars (iCalendar, no
@@ -61,7 +61,6 @@ function partsFormatter(calendar: string, month: 'numeric' | 'long') {
 // 10 Shawwal, 12 Dhu al-Hijjah. Chinese leap months come back as e.g. '6bis'.
 const islamicDay = partsFormatter('islamic-umalqura', 'numeric');
 const chineseDay = partsFormatter('chinese', 'numeric');
-const hebrewDay = partsFormatter('hebrew', 'long');
 const persianDay = partsFormatter('persian', 'numeric');
 
 /**
@@ -258,9 +257,8 @@ export function offlineFestivalDates(year: number): CalendarEntry[] {
   out.push(span('mawlid', islamic(year, 3, 12)));
   out.push(span('isra-miraj', islamic(year, 7, 27)));
 
-  // Chinese, Hebrew, Persian calendars
+  // Chinese and Persian calendars
   out.push(span('lunar-new-year', LUNAR_NEW_YEAR_FIX[year] ?? firstDayOfYear(year, (d) => { const x = chineseDay(d); return x.month === '1' && x.day === 1; })));
-  out.push(span('hanukkah', firstDayOfYear(year, (d) => { const x = hebrewDay(d); return x.month === 'Kislev' && x.day === 25; })));
   out.push(span('nowruz', firstDayOfYear(year, (d) => { const x = persianDay(d); return x.month === '1' && x.day === 1; })));
 
   // Easter
@@ -460,12 +458,6 @@ export const FESTIVAL_FEEDS: Array<{ name: string; url: string; rules: MatchRule
     name: 'google:china',
     url: 'https://calendar.google.com/calendar/ical/en.china%23holiday%40group.v.calendar.google.com/public/basic.ics',
     rules: [{ id: 'lunar-new-year', re: /\b(chinese|lunar) new year\b|\bspring festival\b/i, not: /\beve\b/i, startOffset: 0 }],
-  },
-  {
-    // Calendar id not verified from the build machine; an unreachable feed is harmless.
-    name: 'google:jewish',
-    url: 'https://calendar.google.com/calendar/ical/en.judaism%23holiday%40group.v.calendar.google.com/public/basic.ics',
-    rules: [{ id: 'hanukkah', re: /\b(hanukk?ah|chanukk?ah)\b/i, not: /\beve\b/i, startOffset: 0 }],
   },
   {
     // UAE official dates: last, so they override the others for Islamic festivals.

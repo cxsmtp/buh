@@ -3,6 +3,7 @@
 import React, { useEffect, useState } from 'react';
 import { Loader2, Mail, Send, UserCog } from 'lucide-react';
 import type { EmailSettings } from '@/types';
+import { useAutoSave, type AutoSaveHooks } from './useAutoSave';
 import { getJson, postJson, sendJson } from '@/lib/apiClient';
 
 /**
@@ -20,10 +21,12 @@ export function EmailSettingsCard({
   passwordSaved,
   imapPasswordSaved = false,
   onSave,
+  auto,
 }: {
   value: EmailSettings;
   passwordSaved: boolean;
   imapPasswordSaved?: boolean;
+  auto?: AutoSaveHooks;
   onSave: (v: EmailSettings) => Promise<string | null>;
 }) {
   const [d, setD] = useState<EmailSettings>(value);
@@ -31,8 +34,11 @@ export function EmailSettingsCard({
   const [testing, setTesting] = useState(false);
   const [status, setStatus] = useState<{ ok: boolean; text: string } | null>(null);
   const set = <K extends keyof EmailSettings>(k: K, v: EmailSettings[K]) => setD((x) => ({ ...x, [k]: v }));
+  // Passwords are never autosaved (half-typed ones would replace working ones): Save sends them.
+  const autosave = useAutoSave({ settingsKey: 'email', value: { ...d, smtpPass: '', imapPass: '' }, enabled: Boolean(auto), ...auto });
 
   const save = async () => {
+    autosave.cancel();
     setSaving(true);
     setStatus(null);
     const problem = await onSave(d);
@@ -137,6 +143,7 @@ export function EmailSettingsCard({
           <button type="button" onClick={() => void save()} disabled={saving} className="px-4 py-2 rounded-xl bg-[#0f1c2e] text-white text-xs font-bold flex items-center gap-1.5 disabled:opacity-60">
             {saving && <Loader2 className="w-3.5 h-3.5 animate-spin" />} Save email settings
           </button>
+        {auto && autosave.bar}
           <button type="button" onClick={() => void test()} disabled={testing} className="px-4 py-2 rounded-xl border border-stone-300 text-xs font-bold flex items-center gap-1.5 disabled:opacity-60">
             {testing ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Send className="w-3.5 h-3.5" />} Send a test email
           </button>

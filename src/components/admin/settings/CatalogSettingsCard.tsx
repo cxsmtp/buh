@@ -2,6 +2,7 @@
 
 import React, { useState } from 'react';
 import { ArrowDown, ArrowUp, Loader2, Plus, Trash2 } from 'lucide-react';
+import { useAutoSave, type AutoSaveHooks } from './useAutoSave';
 import type { BedProfileMeasurement, CatalogSettings } from '@/types';
 
 /**
@@ -15,8 +16,9 @@ const field = 'w-full px-2.5 py-1.5 rounded-lg border border-stone-300 bg-white 
 
 const slug = (s: string) => s.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '').slice(0, 30);
 
-export function CatalogSettingsCard({ value, onSave }: { value: CatalogSettings; onSave: (v: CatalogSettings) => Promise<string | null> }) {
+export function CatalogSettingsCard({ value, onSave, auto }: { value: CatalogSettings; onSave: (v: CatalogSettings) => Promise<string | null>; auto?: AutoSaveHooks }) {
   const [draft, setDraft] = useState<CatalogSettings>(value);
+  const autosave = useAutoSave({ settingsKey: 'catalog', value: draft, enabled: Boolean(auto), ...auto });
   const [open, setOpen] = useState<number | null>(null);
   const [saving, setSaving] = useState(false);
   const [status, setStatus] = useState<{ ok: boolean; text: string } | null>(null);
@@ -43,6 +45,7 @@ export function CatalogSettingsCard({ value, onSave }: { value: CatalogSettings;
   };
 
   const save = async () => {
+    autosave.cancel();
     setSaving(true);
     setStatus(null);
     const problem = await onSave(draft);
@@ -148,6 +151,7 @@ export function CatalogSettingsCard({ value, onSave }: { value: CatalogSettings;
         <button type="button" onClick={() => void save()} disabled={saving} className="px-4 py-2 rounded-xl bg-[#0f1c2e] text-white font-bold text-xs disabled:opacity-50 flex items-center gap-1.5">
           {saving && <Loader2 className="w-3.5 h-3.5 animate-spin" />} Save catalogue settings
         </button>
+        {auto && autosave.bar}
         {status && <span role="status" className={status.ok ? 'text-emerald-700 font-semibold' : 'text-red-700 font-semibold'}>{status.text}</span>}
       </div>
     </div>

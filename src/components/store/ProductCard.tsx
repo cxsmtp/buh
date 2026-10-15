@@ -94,7 +94,7 @@ export const ProductCard: React.FC<ProductCardProps> = ({ product, onSelect }) =
               </span>
             ))}
             {product.profiles.length > 3 && (
-              <span className="text-[8px] text-stone-400">+{product.profiles.length - 3}</span>
+              <span className="text-[8px] text-stone-500">+{product.profiles.length - 3}</span>
             )}
           </div>
         </div>
@@ -103,7 +103,7 @@ export const ProductCard: React.FC<ProductCardProps> = ({ product, onSelect }) =
         <div className="pt-1.5 border-t border-stone-100 flex items-center justify-between gap-1 mt-1">
           <div>
             <div className="flex items-baseline gap-1">
-              <span className="text-[10px] text-stone-400">From</span>
+              <span className="text-[10px] text-stone-500">From</span>
               <span className="text-xs sm:text-sm md:text-base font-bold text-[#0f1c2e]">
                 AED {product.price}
               </span>

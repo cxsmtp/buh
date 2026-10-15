@@ -3,6 +3,7 @@
 import React, { useState } from 'react';
 import { Loader2, Truck } from 'lucide-react';
 import type { DeliverySettings, Emirate } from '@/types';
+import { useAutoSave, type AutoSaveHooks } from './useAutoSave';
 import { EMIRATES_LIST } from '@/lib/delivery';
 
 /**
@@ -15,15 +16,17 @@ import { EMIRATES_LIST } from '@/lib/delivery';
 const field = 'w-full px-3 py-2 rounded-xl border border-stone-300 bg-white text-stone-900 text-sm focus:outline-none focus:ring-2 focus:ring-[#c5a059]';
 const label = 'block text-xs font-semibold text-stone-700 mb-1';
 
-export function DeliverySettingsCard({ value, onSave }: { value: DeliverySettings; onSave: (v: DeliverySettings) => Promise<string | null> }) {
+export function DeliverySettingsCard({ value, onSave, auto }: { value: DeliverySettings; onSave: (v: DeliverySettings) => Promise<string | null>; auto?: AutoSaveHooks }) {
   const [d, setD] = useState<DeliverySettings>(value);
   const [notServed, setNotServed] = useState(value.notServed.join('\n'));
   const [saving, setSaving] = useState(false);
   const [status, setStatus] = useState<{ ok: boolean; text: string } | null>(null);
   const set = <K extends keyof DeliverySettings>(k: K, v: DeliverySettings[K]) => setD((x) => ({ ...x, [k]: v }));
+  const autosave = useAutoSave({ settingsKey: 'delivery', value: { ...d, notServed: notServed.split(/[\n,]/).map((s) => s.trim()).filter(Boolean) }, enabled: Boolean(auto), ...auto });
   const toggle = (k: 'emirates' | 'sameDayEmirates', e: Emirate) => set(k, d[k].includes(e) ? d[k].filter((x) => x !== e) : [...d[k], e]);
 
   const save = async () => {
+    autosave.cancel();
     setSaving(true);
     setStatus(null);
     const problem = await onSave({ ...d, notServed: notServed.split(/[\n,]/).map((s) => s.trim()).filter(Boolean) });
@@ -93,6 +96,7 @@ export function DeliverySettingsCard({ value, onSave }: { value: DeliverySetting
         <button type="button" onClick={() => void save()} disabled={saving} className="px-4 py-2 rounded-xl bg-[#0f1c2e] text-white text-xs font-bold flex items-center gap-1.5 disabled:opacity-60">
           {saving && <Loader2 className="w-3.5 h-3.5 animate-spin" />} Save delivery settings
         </button>
+        {auto && autosave.bar}
         {status && <p role="status" className={`text-xs font-semibold ${status.ok ? 'text-emerald-700' : 'text-red-700'}`}>{status.text}</p>}
       </div>
     </div>

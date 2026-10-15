@@ -382,3 +382,24 @@ test('regression: a GPS reading near Sharjah never switches the emirate under an
   await page.getByText('We deliver to Al Barsha, Dubai').waitFor();
   await ctx.close();
 });
+
+test('settings save themselves; a bad value is not saved (the working one stays); Undo puts the previous one back', { skip }, async () => {
+  await api('PUT', '/api/admin/settings/store', { settings: { whatsappNumber: '+971501110000' } });
+  const { ctx, page, errors } = await adminPage(375);
+  await page.getByRole('navigation', { name: 'Admin sections' }).getByRole('button', { name: /Settings/ }).click();
+  await page.getByRole('navigation', { name: 'Settings sections' }).getByRole('button', { name: 'Store & contact' }).click();
+  const wa = page.getByLabel('WhatsApp number');
+  await wa.fill('call me maybe');
+  await page.getByText(/WhatsApp number: use the international form/).waitFor();
+  const saved = async () => (await (await api('GET', '/api/admin/settings')).json()).store.value.whatsappNumber;
+  assert.equal(await saved(), '+971501110000', 'the bad value was not stored');
+
+  await wa.fill('050 222 3333');
+  await page.getByText('Saved automatically.').waitFor();
+  assert.equal(await saved(), '+971502223333');
+  await page.getByRole('button', { name: 'Undo' }).click();
+  await page.waitForFunction(() => (document.getElementById('st-wa') as HTMLInputElement | null)?.value === '+971501110000');
+  assert.equal(await saved(), '+971501110000');
+  assert.deepEqual(errors, []);
+  await ctx.close();
+});

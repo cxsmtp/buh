@@ -55,7 +55,7 @@ export const CartDrawer: React.FC<CartDrawerProps> = ({
             </div>
             <button
               onClick={onClose}
-              className="p-1.5 text-stone-400 hover:text-stone-700 rounded-full hover:bg-stone-200 transition-colors"
+              className="p-1.5 text-stone-500 hover:text-stone-700 rounded-full hover:bg-stone-200 transition-colors"
             >
               <X className="w-5 h-5" />
             </button>
@@ -72,15 +72,15 @@ export const CartDrawer: React.FC<CartDrawerProps> = ({
           {/* Cart Items List */}
           <div className="flex-1 overflow-y-auto p-4 space-y-3">
             {items.length === 0 ? (
-              <div className="py-16 text-center text-stone-400 space-y-3">
+              <div className="py-16 text-center text-stone-500 space-y-3">
                 <ShoppingBag className="w-12 h-12 mx-auto text-stone-300 stroke-1" />
                 <p className="text-sm font-medium text-stone-600">Your shopping bag is empty.</p>
-                <p className="text-xs text-stone-400 max-w-xs mx-auto">
+                <p className="text-xs text-stone-500 max-w-xs mx-auto">
                   Browse our luxury bed sheet collections tailored for UAE homes and add to your bag.
                 </p>
                 <button
                   onClick={onClose}
-                  className="mt-2 inline-flex items-center gap-1 text-xs font-bold text-[#c5a059] hover:underline"
+                  className="mt-2 inline-flex items-center gap-1 text-xs font-bold text-[#8a6a2c] hover:underline"
                 >
                   Explore Bed Sheet Sets →
                 </button>
@@ -110,11 +110,11 @@ export const CartDrawer: React.FC<CartDrawerProps> = ({
                         <h4 className="font-serif font-bold text-xs text-stone-900 truncate">
                           {item.product.title}
                         </h4>
-                        <div className="flex items-center gap-1 text-[11px] text-[#c5a059] font-semibold mt-0.5">
+                        <div className="flex items-center gap-1 text-[11px] text-[#8a6a2c] font-semibold mt-0.5">
                           <span>{item.selectedProfile.name}</span>
                           {item.selectedColor && (
                             <>
-                              <span className="text-stone-300">•</span>
+                              <span className="text-stone-300" aria-hidden="true">•</span>
                               <span className="text-stone-500 font-normal">{item.selectedColor}</span>
                             </>
                           )}
@@ -165,7 +165,7 @@ export const CartDrawer: React.FC<CartDrawerProps> = ({
                     {/* Remove Item */}
                     <button
                       onClick={() => onRemoveItem(idx)}
-                      className="absolute top-2 right-2 text-stone-400 hover:text-red-500 p-1 transition-colors"
+                      className="absolute top-2 right-2 text-stone-500 hover:text-red-500 p-1 transition-colors"
                       title="Remove item"
                     >
                       <Trash2 className="w-3.5 h-3.5" />

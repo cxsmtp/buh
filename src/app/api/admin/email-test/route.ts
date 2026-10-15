@@ -3,12 +3,16 @@ import { enforceIpLimit, requireAdmin } from '@/lib/server/guard';
 import { handleRouteError, HttpError, json } from '@/lib/server/http';
 import { logEvent } from '@/lib/server/log';
 import { mailConfig, sender, transport } from '@/lib/server/mail';
+import { markWorking } from '@/lib/server/settingsGuard';
+import { getSettings } from '@/lib/server/settings';
 
 /** "Send a test email" with the saved settings, to the Send-to address(es). */
 export async function POST(req: Request) {
   try {
     const session = await requireAdmin(req);
     enforceIpLimit(req, 'email-test', 10, 60 * 60 * 1000, 'Too many test emails. Try again later.');
+    // The exact settings this test uses (an autosave landing meanwhile must not be marked as working).
+    const tested = getSettings('email');
     const config = mailConfig();
     if (!config) throw new HttpError(400, 'Save a mail server first (or set SMTP_* in .env.production).');
     if (!config.to) throw new HttpError(400, 'Add a "Send to" address first.');
@@ -25,6 +29,8 @@ export async function POST(req: Request) {
       // The mail server's own answer helps (wrong password, blocked port); it holds no secrets of ours.
       throw new HttpError(502, `The mail server refused: ${message.slice(0, 200)}`);
     }
+    // These settings demonstrably work: a later failing change won't replace them.
+    markWorking('email', tested);
     audit('settings.email_tested', { by: session.email });
     return json({ success: true, message: `Test email sent to ${config.to}.` });
   } catch (err) {

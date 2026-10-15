@@ -122,7 +122,6 @@ import { Sparkles, Palette, ShieldCheck, Heart, Search, X } from 'lucide-react';
  */
 export function ShopApp({ initialProductId }: { initialProductId?: string } = {}) {
   // Theme state based on device settings
-  const [isDarkMode, setIsDarkMode] = useState(false);
 
   // App Navigation & Modes
   const [isAdminMode, setIsAdminMode] = useState(false);
@@ -185,6 +184,8 @@ export function ShopApp({ initialProductId }: { initialProductId?: string } = {}
   const [adminSettingsLoaded, setAdminSettingsLoaded] = useState(false);
   // Bumped after a settings version is restored, so the forms show the restored values.
   const [settingsEpoch, setSettingsEpoch] = useState(0);
+  // Bumped per settings group by Undo, so only that form shows the restored values.
+  const [undone, setUndone] = useState<Record<string, number>>({});
 
   // Modals & Drawers
   const [cart, setCart] = useState<CartItem[]>([]);
@@ -194,20 +195,6 @@ export function ShopApp({ initialProductId }: { initialProductId?: string } = {}
   const [selectedProduct, setSelectedProduct] = useState<Product | null>(null);
   const [searchOpen, setSearchOpen] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
-
-  // 1. Device Theme Detection (Listen to OS preference)
-  useEffect(() => {
-    if (typeof window !== 'undefined') {
-      const mediaQuery = window.matchMedia('(prefers-color-scheme: dark)');
-      setIsDarkMode(mediaQuery.matches);
-
-      const handler = (e: MediaQueryListEvent) => {
-        setIsDarkMode(e.matches);
-      };
-      mediaQuery.addEventListener('change', handler);
-      return () => mediaQuery.removeEventListener('change', handler);
-    }
-  }, []);
 
   // 2. Load the catalogue and branding, and check the admin session, on mount
   const applyCatalog = useCallback(({ products: res, settings }: Awaited<ReturnType<typeof fetchCatalog>>) => {
@@ -380,6 +367,15 @@ export function ShopApp({ initialProductId }: { initialProductId?: string } = {}
     return null;
   };
 
+  // Settings save themselves (autosave): reload what the hub and the shop show; after Undo, re-create the forms.
+  const autoSaveHooks = {
+    onSaved: async () => {
+      await Promise.all([loadAdminData(), loadCatalog()]);
+    },
+    // Only the section whose settings were restored is re-created (others may hold unsaved typing).
+    onUndone: (key: string) => setUndone((u) => ({ ...u, [key]: (u[key] ?? 0) + 1 })),
+  };
+
   const handleUpdateBrandSettings = (newSettings: BrandSettings) => saveSettings('brand', newSettings);
   const handleUpdateBank = (bank: BankTransferDetails) => saveSettings('bank', bank);
   const handleUpdateSmsSettings = (newSettings: SmsGatewaySettings) => saveSettings('sms', newSettings);
@@ -482,7 +478,7 @@ export function ShopApp({ initialProductId }: { initialProductId?: string } = {}
 
   return (
     <ShopProvider value={shopInfo}>
-    <div className={`min-h-screen flex flex-col font-sans transition-colors duration-300 ${isDarkMode ? 'dark' : ''}`}>
+    <div className="min-h-screen flex flex-col font-sans">
       {updateReady && (
         <div role="status" className="bg-[#0f1c2e] text-white text-xs px-3 py-1.5 flex items-center justify-center gap-3">
           <span>The shop has been updated.</span>
@@ -597,14 +593,14 @@ export function ShopApp({ initialProductId }: { initialProductId?: string } = {}
                     label: 'Store & contact',
                     icon: '🏬',
                     hint: 'WhatsApp, email, social accounts, address and currency display.',
-                    content: <StoreSettingsCard key={`store-${adminSettingsLoaded}-${settingsEpoch}`} value={adminSettings.store.value} onSave={(v) => saveSettings('store', v)} />,
+                    content: <StoreSettingsCard key={`store-${adminSettingsLoaded}-${settingsEpoch}-${undone['store'] ?? 0}`} value={adminSettings.store.value} onSave={(v) => saveSettings('store', v)} auto={autoSaveHooks} />,
                   },
                   {
                     id: 'catalog',
                     label: 'Catalogue',
                     icon: '📐',
                     hint: 'Size presets, categories and the low-stock warning.',
-                    content: <CatalogSettingsCard key={`catalog-${adminSettingsLoaded}-${settingsEpoch}`} value={adminSettings.catalog.value} onSave={(v) => saveSettings('catalog', v)} />,
+                    content: <CatalogSettingsCard key={`catalog-${adminSettingsLoaded}-${settingsEpoch}-${undone['catalog'] ?? 0}`} value={adminSettings.catalog.value} onSave={(v) => saveSettings('catalog', v)} auto={autoSaveHooks} />,
                   },
                   {
                     id: 'branding',
@@ -613,11 +609,12 @@ export function ShopApp({ initialProductId }: { initialProductId?: string } = {}
                     hint: 'Logo, colours, the marquee and bank-transfer details.',
                     content: (
                       <AdminBrandingTab
-                        key={`branding-${publicSettingsLoaded}-${settingsEpoch}`}
+                        key={`branding-${publicSettingsLoaded}-${settingsEpoch}-${undone['brand'] ?? 0}-${undone['bank'] ?? 0}`}
                         brandSettings={brandSettings}
                         onUpdateBrandSettings={handleUpdateBrandSettings}
                         bank={bankDetails}
                         onUpdateBank={handleUpdateBank}
+                        auto={autoSaveHooks}
                       />
                     ),
                   },
@@ -635,10 +632,11 @@ export function ShopApp({ initialProductId }: { initialProductId?: string } = {}
                     hint: 'The SMS gateway that sends checkout codes.',
                     content: (
                       <AdminSmsTab
-                        key={`sms-${adminSettingsLoaded}-${settingsEpoch}`}
+                        key={`sms-${adminSettingsLoaded}-${settingsEpoch}-${undone['sms'] ?? 0}`}
                         smsSettings={adminSettings.sms.value}
                         secretsSet={adminSettings.sms.secretsSet}
                         onUpdateSmsSettings={handleUpdateSmsSettings}
+                        auto={autoSaveHooks}
                       />
                     ),
                   },
@@ -649,10 +647,11 @@ export function ShopApp({ initialProductId }: { initialProductId?: string } = {}
                     hint: 'Jeebly and Eco Express keys, pickup details and routing.',
                     content: (
                       <AdminCouriersTab
-                        key={`couriers-${adminSettingsLoaded}-${settingsEpoch}`}
+                        key={`couriers-${adminSettingsLoaded}-${settingsEpoch}-${undone['courier'] ?? 0}`}
                         settings={adminSettings.courier.value}
                         secretsSet={adminSettings.courier.secretsSet}
                         onUpdateSettings={handleUpdateSettings}
+                        auto={autoSaveHooks}
                       />
                     ),
                   },
@@ -661,7 +660,7 @@ export function ShopApp({ initialProductId }: { initialProductId?: string } = {}
                     label: 'Delivery',
                     icon: '📦',
                     hint: 'Where you deliver, the time customers see, and same-day delivery with its charge.',
-                    content: <DeliverySettingsCard key={`delivery-${adminSettingsLoaded}-${settingsEpoch}`} value={adminSettings.delivery.value} onSave={(v) => saveSettings('delivery', v)} />,
+                    content: <DeliverySettingsCard key={`delivery-${adminSettingsLoaded}-${settingsEpoch}-${undone['delivery'] ?? 0}`} value={adminSettings.delivery.value} onSave={(v) => saveSettings('delivery', v)} auto={autoSaveHooks} />,
                   },
                   {
                     id: 'assistant',
@@ -670,10 +669,11 @@ export function ShopApp({ initialProductId }: { initialProductId?: string } = {}
                     hint: 'What the shop’s chat answers by itself (its memory), and when it hands over to you.',
                     content: (
                       <AssistantSettingsCard
-                        key={`assistant-${adminSettingsLoaded}-${settingsEpoch}`}
+                        key={`assistant-${adminSettingsLoaded}-${settingsEpoch}-${undone['assistant'] ?? 0}`}
                         value={adminSettings.assistant.value}
                         sizes={adminSettings.catalog.value.sizes}
                         onSave={(v) => saveSettings('assistant', v)}
+                        auto={autoSaveHooks}
                       />
                     ),
                   },
@@ -684,11 +684,12 @@ export function ShopApp({ initialProductId }: { initialProductId?: string } = {}
                     hint: 'The mail server for backups, alerts and password resets; your sign-in email.',
                     content: (
                       <EmailSettingsCard
-                        key={`email-${adminSettingsLoaded}-${settingsEpoch}`}
+                        key={`email-${adminSettingsLoaded}-${settingsEpoch}-${undone['email'] ?? 0}`}
                         value={adminSettings.email.value}
                         passwordSaved={Boolean(adminSettings.email.secretsSet.smtpPass)}
                         imapPasswordSaved={Boolean(adminSettings.email.secretsSet.imapPass)}
                         onSave={(v) => saveSettings('email', v)}
+                        auto={autoSaveHooks}
                       />
                     ),
                   },
@@ -787,7 +788,7 @@ export function ShopApp({ initialProductId }: { initialProductId?: string } = {}
               </span>
               <button
                 onClick={() => setSearchOpen(false)}
-                className="p-1 text-stone-400 hover:text-stone-700"
+                className="p-1 text-stone-500 hover:text-stone-700"
               >
                 <X className="w-5 h-5" />
               </button>

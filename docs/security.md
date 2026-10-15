@@ -28,6 +28,12 @@ What protects the shop, how it works, and what the owner must do. Each item has 
 - The updater first moves the request into a new folder only it can open, so it can't be swapped for a link or a pipe while being read; it then accepts only a small plain file whose line matches `rollback N.N.N` or `update` exactly, and refuses versions before 2.0.0. Anything else is dropped unread and never echoed. The folder is sticky and not listable, so the shop can't remove or read anything else there.
 - The updater's status comes back through a second folder the shop mounts read-only; it holds versions and messages, no secrets. The updater writes it to a new file and renames it, so a planted link is replaced, never followed. The shop reads it defensively (size cap, links refused, fields checked).
 
+## Settings: autosave and the last good configuration
+
+- Every save (typed or automatic) is validated on the server; an invalid change is refused and the stored settings are unchanged. Autosave never sends passwords or keys (blank means "keep the saved one"); only Save does.
+- New mail settings are tried (SMTP login) before they are stored; if that fails while the current settings are known to work (a passing trial or test email), the change is refused (409). Known-good is kept as a hash, never a copy of the password.
+- Autosaves within 2 minutes of each other are one history entry; Undo restores the entry before the session, and the restore itself is kept, so it can be undone.
+
 ## Delivery charges
 
 - Whether we deliver, and any same-day charge, are decided on the server from the address and Settings → Delivery, in fils; a GPS reading never decides it (devices often report a network location). The browser's total must match the server's or the order is refused before anything is charged; a same-day order after the cut-off is refused (409) and checkout moves back to standard.

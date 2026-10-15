@@ -121,7 +121,7 @@ export const AdminCrmTab: React.FC<AdminCrmTabProps> = ({ customers, orders }) =
             </div>
             <button
               onClick={() => setSelectedCustomer(null)}
-              className="text-stone-400 hover:text-stone-700 font-bold"
+              className="text-stone-500 hover:text-stone-700 font-bold"
             >
               ✕
             </button>
