@@ -44,11 +44,11 @@ Everything the shop stores lives in one Docker volume and is backed up every 12 
    - Fill in `DOMAIN`, `ACME_EMAIL`, `NEXT_PUBLIC_APP_URL` and `NEXT_PUBLIC_SUPPORT_EMAIL`.
    - **Fill in the backup email (`SMTP_*`, `BACKUP_EMAIL`).**
    - Set a `BACKUP_PASSPHRASE` of at least 12 characters, and store it in your password manager. Without it, customer data is emailed unencrypted.
-6. **Start:**
+6. **Start** (pulls the ready-made image `ghcr.io/cxsmtp/buh:latest`):
    ```bash
-   docker compose up -d --build
+   docker compose pull app && docker compose up -d
    ```
-   The first build takes a few minutes. Then <https://yourdomain.ae> shows the shop with a valid certificate.
+   Then <https://yourdomain.ae> shows the shop with a valid certificate. To build the image on the server instead, use `docker compose up -d --build` (a few minutes).
 7. **First admin sign-in.** The one-time password is in the log:
    ```bash
    docker compose logs app | grep -A3 "first admin"
@@ -131,7 +131,7 @@ Plain `.tar.gz` backups also open with any archive tool (`tar -xzf`).
 1. Press **Back up now**.
 2. Update:
    ```bash
-   cd /opt/buhome && git pull && docker compose up -d --build
+   cd /opt/buhome && git pull && docker compose pull app && docker compose up -d
    ```
 
 The shop stops for a few seconds while the new version starts. In-flight requests get up to 20 seconds to finish. The version (`BUH-xx.xx.xx`) shows next to the Admin Hub title.
@@ -141,6 +141,8 @@ The shop stops for a few seconds while the new version starts. In-flight request
 ```bash
 git checkout <previous version tag or commit> && docker compose up -d --build
 ```
+
+Or run a previous published image: every version is kept as `ghcr.io/cxsmtp/buh:<version>` (for example `1.1.0`); set it as the `image:` in docker-compose.yml and run `docker compose up -d`.
 
 If a release changed the database, restore the backup taken before the update.
 

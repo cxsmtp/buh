@@ -1,0 +1,94 @@
+# Builds the shop's container image, proves it starts with the hardened run
+# options, and publishes it to GitHub Container Registry:
+#
+#   ghcr.io/cxsmtp/buh:latest    newest main
+#   ghcr.io/cxsmtp/buh:1.2.0     the version in package.json (BUH-01.02.00)
+#   ghcr.io/cxsmtp/buh:sha-…     every commit on main
+#
+# Pull requests build and test the image but do not publish it.
+name: Container image
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  packages: write
+
+concurrency:
+  group: container-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  IMAGE: ghcr.io/${{ github.repository_owner }}/buh
+
+jobs:
+  image:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Version from package.json
+        id: version
+        run: echo "version=$(node -p "require('./package.json').version")" >> "$GITHUB_OUTPUT"
+
+      - uses: docker/setup-buildx-action@v3
+
+      - name: Build
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          platforms: linux/amd64
+          load: true
+          tags: buh:test
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Smoke test (read-only, no capabilities, non-root)
+        run: |
+          docker run -d --name buh-test -p 3000:3000 -v buh-test-data:/data \
+            --read-only --tmpfs /tmp --cap-drop ALL --security-opt no-new-privileges:true \
+            -e NEXT_PUBLIC_SUPPORT_EMAIL=help@ci.example buh:test
+          for i in $(seq 1 60); do
+            if curl -sf http://127.0.0.1:3000/api/health > /dev/null; then break; fi
+            sleep 1
+          done
+          docker logs buh-test
+          curl -sf http://127.0.0.1:3000/api/health
+          curl -sf http://127.0.0.1:3000/ | grep -q '<html'
+          curl -sf http://127.0.0.1:3000/api/products | grep -q '"products"'
+          curl -sf http://127.0.0.1:3000/api/settings/public | grep -q 'help@ci.example'
+          docker logs buh-test 2>&1 | grep -q 'first admin account created'
+          test "$(docker exec buh-test id -u)" = "1001"
+          docker exec buh-test node -e "require('fs').writeFileSync('/app/x','x')" && exit 1 || echo "app folder is read-only"
+          docker rm -f buh-test
+
+      - name: Sign in to GitHub Container Registry
+        if: github.event_name != 'pull_request'
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Publish
+        if: github.event_name != 'pull_request'
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          platforms: linux/amd64
+          push: true
+          tags: |
+            ${{ env.IMAGE }}:latest
+            ${{ env.IMAGE }}:${{ steps.version.outputs.version }}
+            ${{ env.IMAGE }}:sha-${{ github.sha }}
+          labels: |
+            org.opencontainers.image.source=https://github.com/${{ github.repository }}
+            org.opencontainers.image.title=Beautiful UAE Home
+            org.opencontainers.image.version=${{ steps.version.outputs.version }}
+            org.opencontainers.image.revision=${{ github.sha }}
+          cache-from: type=gha

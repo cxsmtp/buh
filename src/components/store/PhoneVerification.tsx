@@ -4,7 +4,8 @@ import React, { useEffect, useRef, useState } from 'react';
 import { BadgeCheck, Globe2, Loader2, Mail, MessageSquareText, Pencil, RotateCcw, ShieldCheck, Smartphone } from 'lucide-react';
 import { postJson } from '@/lib/apiClient';
 
-export const SUPPORT_EMAIL = process.env.NEXT_PUBLIC_SUPPORT_EMAIL || 'orders@beautifuluaehome.com';
+/** Shown until the shop's settings load (the real address comes from the server at runtime). */
+export const DEFAULT_SUPPORT_EMAIL = 'orders@beautifuluaehome.com';
 
 const CODE_LENGTH = 6;
 const RESEND_SECONDS = 30;
@@ -57,6 +58,8 @@ interface PhoneVerificationProps {
   onVerifiedChange: (verified: boolean, token?: string) => void;
   /** Used to pre-fill the email for international customers. */
   orderSummary: string;
+  /** Where international customers email (from the server's settings). */
+  supportEmail?: string;
 }
 
 export const PhoneVerification: React.FC<PhoneVerificationProps> = ({
@@ -65,6 +68,7 @@ export const PhoneVerification: React.FC<PhoneVerificationProps> = ({
   verified,
   onVerifiedChange,
   orderSummary,
+  supportEmail = DEFAULT_SUPPORT_EMAIL,
 }) => {
   const [stage, setStage] = useState<'enter' | 'code'>('enter');
   const [digits, setDigits] = useState<string[]>(() => Array(CODE_LENGTH).fill(''));
@@ -205,7 +209,7 @@ export const PhoneVerification: React.FC<PhoneVerificationProps> = ({
     );
   }
 
-  const mailto = `mailto:${SUPPORT_EMAIL}?subject=${encodeURIComponent('International order request')}&body=${encodeURIComponent(
+  const mailto = `mailto:${supportEmail}?subject=${encodeURIComponent('International order request')}&body=${encodeURIComponent(
     `Hello Beautiful UAE Home,\n\nI would like to order:\n${orderSummary}\n\nMy phone number: ${phone}\nDelivery country/city: \n\nThank you!`
   )}`;
 
@@ -303,7 +307,7 @@ export const PhoneVerification: React.FC<PhoneVerificationProps> = ({
                   className="flex items-center justify-center gap-2 w-full bg-[#0f1c2e] hover:bg-stone-800 text-white font-bold text-[11px] py-2.5 rounded-xl transition-colors"
                 >
                   <Mail className="w-3.5 h-3.5 text-amber-300" />
-                  Email {SUPPORT_EMAIL}
+                  Email {supportEmail}
                 </a>
               </div>
             )}

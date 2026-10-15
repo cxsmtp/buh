@@ -19,7 +19,7 @@ interface AdminSettings {
 async function fetchCatalog() {
   const [products, settings] = await Promise.all([
     getJson<{ products: Product[] }>('/api/products'),
-    getJson<{ brand: BrandSettings; bank: BankTransferDetails }>('/api/settings/public'),
+    getJson<{ brand: BrandSettings; bank: BankTransferDetails; supportEmail?: string }>('/api/settings/public'),
   ]);
   return { products, settings };
 }
@@ -106,6 +106,7 @@ export default function HomePage() {
   const [catalogError, setCatalogError] = useState('');
   const [brandSettings, setBrandSettings] = useState<BrandSettings>(INITIAL_BRAND_SETTINGS);
   const [bankDetails, setBankDetails] = useState<BankTransferDetails>(INITIAL_BANK_DETAILS);
+  const [supportEmail, setSupportEmail] = useState<string | undefined>(undefined);
   // Pre-fills Track Order (only rendered once opened, so no server/client mismatch).
   const [lastOrderId, setLastOrderId] = useState(() => {
     try {
@@ -162,6 +163,7 @@ export default function HomePage() {
     if (settings.ok) {
       setBrandSettings(settings.data.brand);
       setBankDetails(settings.data.bank);
+      if (settings.data.supportEmail) setSupportEmail(settings.data.supportEmail);
       setPublicSettingsLoaded(true);
     }
     return res.ok ? res.data.products : null;
@@ -574,6 +576,7 @@ export default function HomePage() {
         onClose={() => setIsCheckoutOpen(false)}
         items={cart}
         bank={bankDetails}
+        supportEmail={supportEmail}
         onOrderPlaced={handleOrderPlaced}
         onPricesChanged={async () => {
           const list = await loadCatalog();
