@@ -97,3 +97,34 @@ export function eventStream(req: Request, channels: Channel[]): Response {
     },
   });
 }
+
+/**
+ * Cached data (the catalogue, the settings) is dropped when another copy of
+ * the shop changed it: the counter in the database moved since this copy last
+ * looked. Checked at most every 2 seconds, so it costs one tiny query.
+ */
+const seen: Partial<Record<Channel, number>> = {};
+let checkedAt = 0;
+let lastVersions: Record<Channel, number> | null = null;
+
+export function changedElsewhere(channel: Channel): boolean {
+  const now = Date.now();
+  if (!lastVersions || now - checkedAt > 2000) {
+    try {
+      lastVersions = versions();
+    } catch {
+      return false;
+    }
+    checkedAt = now;
+  }
+  const v = lastVersions[channel];
+  if (seen[channel] === undefined) {
+    seen[channel] = v;
+    return false;
+  }
+  if (v !== seen[channel]) {
+    seen[channel] = v;
+    return true;
+  }
+  return false;
+}

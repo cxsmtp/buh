@@ -4,7 +4,7 @@ import { INITIAL_PRODUCTS } from '@/data/initialData';
 import { getDb, inTransaction } from './db';
 import { HttpError } from './http';
 import { acceptImageRef } from './images';
-import { bump } from './live';
+import { bump, changedElsewhere } from './live';
 import { getSettings } from './settings';
 
 /**
@@ -86,6 +86,7 @@ function fromRow(r: Row, stock: Record<string, number>): StoredProduct {
 }
 
 export function listProducts({ includeHidden = false, includeArchived = false } = {}): StoredProduct[] {
+  if (cache && changedElsewhere('catalog')) cache = null;
   if (!cache) {
     seedIfEmpty();
     const stock = stockMap();

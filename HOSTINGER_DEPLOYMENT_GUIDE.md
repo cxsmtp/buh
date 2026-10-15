@@ -144,7 +144,7 @@ The shop runs as one of two identical copies, `app-blue` or `app-green`. An upda
 3. **Healthy:** Caddy sends visitors to it, the old copy finishes the requests it is serving (up to 25 s) and stops. The new version is remembered as `buh:last-good`, the one before as `buh:previous`.
 4. **Not healthy:** it is removed, the old copy never stopped serving, and an alert is written. That image is not tried again; the next published version is.
 
-While the copies switch, Caddy retries a request that cannot reach a copy on the other one, so customers and the Admin Hub see no error page. A customer who asked for an SMS code in that minute may need to tap **Send code** again: codes are held by the copy that sent them.
+While the copies switch, Caddy retries a request that cannot reach a copy on the other one, so customers and the Admin Hub see no error page. SMS codes, the catalogue and settings are shared through the database, so a code sent by one copy is accepted by the other.
 
 ### Turn on automatic updates (recommended)
 

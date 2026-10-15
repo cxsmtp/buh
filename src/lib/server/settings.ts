@@ -4,7 +4,7 @@ import { DEFAULT_CATALOG, DEFAULT_STORE, DEFAULT_THEME_SETTINGS } from '@/data/c
 import { INITIAL_BANK_DETAILS, INITIAL_BRAND_SETTINGS, INITIAL_COURIER_SETTINGS, INITIAL_SMS_SETTINGS } from '@/data/initialData';
 import { getDb } from './db';
 import { FIREBASE_PROJECT_ID } from './firebaseAuth';
-import { bump } from './live';
+import { bump, changedElsewhere } from './live';
 import { envGateways } from '@/lib/otpService';
 import { HttpError } from './http';
 import { acceptImageRef } from './images';
@@ -75,6 +75,7 @@ const SECRETS: Record<SettingsKey, string[]> = {
 const cache = new Map<SettingsKey, unknown>();
 
 export function getSettings<K extends SettingsKey>(key: K): SettingsMap[K] {
+  if (cache.size && changedElsewhere('settings')) cache.clear();
   if (cache.has(key)) return cache.get(key) as SettingsMap[K];
   const row = getDb().prepare('SELECT data FROM settings WHERE key = ?').get(key) as { data: string } | undefined;
   const stored = row ? JSON.parse(row.data) : {};

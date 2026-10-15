@@ -136,4 +136,4 @@ Every 12 hours (see the deployment guide) the shop backs itself up:
 ## Known limits (next steps)
 
 - **One admin account; no staff roles yet.**
-- **One server process.** Phone codes and limits live in memory. Run a single instance (the provided setups do).
+- **One server process, except briefly during an update.** Phone codes are stored hashed in the database, so both copies accept them; rate limits are per process, so during the overlap of an update a limit can briefly allow up to twice its count.

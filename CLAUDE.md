@@ -21,7 +21,8 @@ Read AGENTS.md first: this is Next.js 16, check `node_modules/next/dist/docs/` b
   body with `readJsonBody` (size-capped) and validates fields against an allow-list. Errors go through
   `handleRouteError`, so nothing internal leaks.
 - **Data lives on the server** (SQLite in `DATA_DIR/shop.db`, via src/lib/server/db.ts). Schema changes are a new
-  numbered migration at the end of `MIGRATIONS`; never edit one that has shipped. Money is computed in fils (AED × 100)
+  numbered migration at the end of `MIGRATIONS`; never edit one that has shipped. Migrations only add (tables, columns,
+  indexes): during an update the old and new versions share the database for a minute, and a rollback runs the old one. Money is computed in fils (AED × 100)
   on the server; never trust a price, total or phone number from the browser.
 - **Backups are critical:** any new data (table, folder) must be included in `createBackup` and restored by
   scripts/restore-backup.mjs, with a test that restores it.
