@@ -9,7 +9,8 @@
 | **Verified orders only** | Customers confirm their UAE mobile with a 6-digit SMS code (through the shop's SMS gateway or Firebase Phone Auth) before they can order. Other countries are invited to email the shop instead. |
 | **An admin hub only you can open** | Server-checked sign-in with lockout, a one-time first password you replace at first sign-in, and an audit log of every sign-in and courier booking. |
 | **Inventory for one-of-a-kind pieces** | Stock per size (most designs are one or two pieces), a full product editor that works on a phone, size presets and categories you set yourself. |
-| **Made for Instagram and WhatsApp** | Product links that preview with photo and price, a WhatsApp button with your number, a Meta/Google product feed, and orders that show where the customer came from. |
+| **Made for Instagram and WhatsApp** | Product links that preview with photo and price, Ask on WhatsApp / Instagram (each switchable), a Meta/Google product feed, and orders that show where the customer came from. |
+| **A chat that answers, then hands over** | The Help button answers sizes, delivery, payment, care and discount questions from what you teach it, hands everything else to you (Admin Hub → Chats, and by email: reply to the email to answer), and tells a waiting customer you'll get back to them. |
 | **Festival themes for everyone** | 33 UAE festivals (the Eids, National Day, Diwali, Christmas, Lunar New Year and more) switch the look automatically from 3 weeks before to a week after. |
 | **Runs itself** | Live updates on open pages, updates without downtime and automatic rollback, settings history, problem alerts and a daily summary email. |
 | **Real courier bookings** | Jeebly and Eco Express AWBs come from the carrier. A failed booking says so; it never invents a tracking number. |

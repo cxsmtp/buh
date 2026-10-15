@@ -46,7 +46,8 @@ test('the assistant answers only from its memory and the size presets, and hands
   assert.equal(king.kind, 'answer');
   assert.match((king as { text: string }).text, /King/);
   assert.match((king as { text: string }).text, /\d+ x \d+/, 'real measurements from Settings → Catalogue');
-  assert.doesNotMatch((king as { text: string }).text, /Single/, 'only the size asked about');
+  assert.doesNotMatch((king as { text: string }).text, /Single|Super King/, 'only the size asked about');
+  assert.doesNotMatch((reply('measurements please', DEFAULT_ASSISTANT, sizes) as { text: string }).text, /Custom/, 'no made-up measurements for the custom preset');
   assert.deepEqual(reply('Do you have a discount code?', DEFAULT_ASSISTANT, sizes), { kind: 'answer', text: DEFAULT_ASSISTANT.entries.find((e) => e.id === 'discounts')!.answer, entryId: 'discounts' });
   assert.equal(reply('Is the fabric organic cotton from Jaipur?', DEFAULT_ASSISTANT, sizes).kind, 'handover', 'no answer: a person, not a guess');
   assert.deepEqual(reply('can I talk to a person please', DEFAULT_ASSISTANT, sizes), { kind: 'handover', reason: 'asked' });

@@ -58,24 +58,36 @@ export function score(entry: AssistantEntry, text: string): number {
   return s;
 }
 
-function sizeAnswer(text: string, sizes: BedProfileMeasurement[]): string | null {
+function sizeAnswer(text: string, all: BedProfileMeasurement[]): string | null {
   const ws = new Set(words(text));
   const asksSize = [...ws].some((w) => SIZE_WORDS.has(w));
-  const named = sizes.filter((s) => words(`${s.name} ${s.badge} ${s.id}`).some((w) => ws.has(w) && !STOP.has(w) && !SIZE_WORDS.has(w) && w.length > 2));
-  if (!asksSize && !named.length) return null;
-  if (!sizes.length) return null;
-  const line = (s: BedProfileMeasurement) =>
-    [
-      `• ${s.name}: mattress ${s.mattressSize}`,
-      s.fittedSheet && `fitted sheet ${s.fittedSheet}`,
-      s.flatSheet && `flat sheet ${s.flatSheet}`,
-      s.pillowcases && `pillowcases ${s.pillowcases}`,
-      s.duvetCover && `duvet cover ${s.duvetCover}`,
-    ]
-      .filter(Boolean)
-      .join(', ');
-  const list = (named.length && named.length < sizes.length ? named : sizes).map(line).join('\n');
-  return `Here are our measurements:\n${list}\nEach product shows which of these sizes it comes in. Not sure which fits your mattress? Measure its width and length, and tell me.`;
+  // Only presets with real measurements (a "custom" preset is a person's job).
+  const sizes = all.filter((s) => /\d/.test(s.mattressSize));
+  // The size(s) named: most matching words, then the fewest extra ones ("king" is King, not Super King).
+  const ranked = sizes
+    .map((s) => {
+      const own = [...new Set(words(`${s.name} ${s.id}`))].filter((w) => !SIZE_WORDS.has(w) && w.length > 2 && !['bed', 'most', 'popular'].includes(w));
+      return { s, hits: own.filter((w) => ws.has(w)).length, extra: own.filter((w) => !ws.has(w)).length };
+    })
+    .filter((x) => x.hits > 0)
+    .sort((a, b) => b.hits - a.hits || a.extra - b.extra);
+  const named = ranked.filter((x) => x.hits === ranked[0]?.hits && x.extra === ranked[0]?.extra).map((x) => x.s);
+  if ((!asksSize && !named.length) || !sizes.length) return null;
+  if (named.length && named.length <= 2) {
+    const detail = (s: BedProfileMeasurement) =>
+      [
+        `${s.name}:`,
+        `• mattress ${s.mattressSize}`,
+        s.fittedSheet && `• fitted sheet ${s.fittedSheet}`,
+        s.flatSheet && `• flat sheet ${s.flatSheet}`,
+        s.pillowcases && `• pillowcases ${s.pillowcases}`,
+        s.duvetCover && `• duvet cover ${s.duvetCover}`,
+      ]
+        .filter(Boolean)
+        .join('\n');
+    return `${named.map(detail).join('\n\n')}\n\nEach product shows which sizes it comes in.`;
+  }
+  return `Our sizes (by mattress):\n${sizes.map((s) => `• ${s.name}: ${s.mattressSize}`).join('\n')}\n\nAsk me about one (e.g. "king size") for the sheet and pillowcase measurements. Need a size that isn't listed? Tap "Talk to a person".`;
 }
 
 export function reply(text: string, settings: Pick<AssistantSettings, 'entries' | 'answerSizes' | 'greeting'>, sizes: BedProfileMeasurement[]): Reply {
