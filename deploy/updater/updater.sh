@@ -588,23 +588,29 @@ last_result=''
 last_message=''
 last_at=''
 
-# One request at most, taken (and deleted) only if it is a small regular file with a known line.
+# One request at most. It is first moved into a new folder only root can open (same
+# filesystem, so the move is a rename), so the shop can't swap it for a link or a pipe
+# while it is read; then it must be a small plain file holding one known line.
 take_request() {
   [ -d "$CONTROL_DIR" ] && [ ! -L "$CONTROL_DIR" ] || return 0
-  rq_file="$CONTROL_DIR/request"
-  [ -e "$rq_file" ] || [ -L "$rq_file" ] || return 0
-  if [ -L "$rq_file" ] || [ ! -f "$rq_file" ] || [ "$(wc -c < "$rq_file")" -gt 64 ]; then
-    rm -rf "$rq_file"
-    log "ignored a request that was not a small plain file"
+  [ -e "$CONTROL_DIR/request" ] || [ -L "$CONTROL_DIR/request" ] || return 0
+  rq_dir=$(mktemp -d "$CONTROL_DIR/.taken.XXXXXX") || return 0
+  if ! mv "$CONTROL_DIR/request" "$rq_dir/request" 2> /dev/null; then
+    rm -rf "$rq_dir"
     return 0
   fi
-  rq_line=$(head -n 1 "$rq_file" | tr -d '\r')
-  rm -f "$rq_file"
+  rq_line=''
+  if [ ! -L "$rq_dir/request" ] && [ -f "$rq_dir/request" ] && [ "$(wc -c < "$rq_dir/request")" -le 64 ]; then
+    rq_line=$(head -c 64 "$rq_dir/request" | head -n 1 | tr -d '\r')
+  fi
+  rm -rf "$rq_dir"
   last_at=$(stamp)
-  last_request=$rq_line
   if printf '%s' "$rq_line" | grep -Eqx 'rollback [0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}'; then
+    last_request=$rq_line
     rq_version=${rq_line#rollback }
     log "Admin Hub asked to switch to version $rq_version"
+    last_result=working last_message="Switching to $rq_version…"
+    publish_status
     rq_rc=0
     rollback_to "$(image_repo):$rq_version" || rq_rc=$?
     case $rq_rc in
@@ -613,7 +619,10 @@ take_request() {
       *) last_result=refused last_message="$rq_version could not be used (not published, or older than 2.0.0, which cannot run on this database). See the updater log." ;;
     esac
   elif [ "$rq_line" = update ]; then
+    last_request=update
     log "Admin Hub asked for the latest version"
+    last_result=working last_message="Fetching and starting the latest version…"
+    publish_status
     docker pull -q "$IMAGE" > /dev/null 2>&1 || true
     # Asked for by a person: give an image that was rolled back from another chance.
     if rq_latest=$(image_id "$IMAGE"); then
@@ -630,7 +639,9 @@ take_request() {
       *) last_result=failed last_message="The latest version could not be fetched. See the updater log." ;;
     esac
   else
-    log "ignored an unknown request"
+    # Never echo what was there: it was not one of ours.
+    log "ignored a request that was not a known line in a small plain file"
+    last_request='(not understood)'
     last_result=refused
     last_message="Unknown request."
   fi

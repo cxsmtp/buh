@@ -51,8 +51,8 @@ test('the changelog in this repository parses: every release, newest first, with
 test('no updater (or a stale status): switching is refused with the command shown instead', () => {
   assert.equal(v.updaterStatus(), null);
   assert.equal(statusOf(() => v.requestSwitch('2.0.0')), 409);
-  writeStatus({ updatedAt: new Date(Date.now() - 10 * 60 * 1000).toISOString() });
-  assert.equal(v.updaterStatus(), null, 'a status 10 minutes old means the updater stopped');
+  writeStatus({ updatedAt: new Date(Date.now() - 11 * 60 * 1000).toISOString() });
+  assert.equal(v.updaterStatus(), null, 'a status 11 minutes old means the updater stopped');
   assert.equal(statusOf(() => v.requestSwitch('latest')), 409);
 });
 
@@ -93,4 +93,11 @@ test('a switch request: checked, one at a time, never older than 2.0.0, never th
 
   assert.equal(v.requestSwitch('latest'), 'update');
   assert.equal(request(), 'update\n');
+  fs.rmSync(path.join(controlDir, 'request'));
+});
+
+test('during a switch (which can take minutes) the updater still counts as running, and a second switch waits', () => {
+  writeStatus({ updatedAt: new Date(Date.now() - 6 * 60 * 1000).toISOString(), lastRequest: { request: 'rollback 2.0.1', result: 'working', message: 'Switching to 2.0.1…', at: '' } });
+  assert.ok(v.updaterStatus(), 'a 6-minute-old status is not "stopped"');
+  assert.equal(statusOf(() => v.requestSwitch('latest')), 409);
 });

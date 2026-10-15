@@ -352,6 +352,19 @@ test('Settings → Versions: the daemon takes a "rollback X.Y.Z" request, switch
     assert.ok(!fs.existsSync(path.join(control, 'request')), 'the linked request was removed');
     assert.deepEqual(status().onServer.sort(), ['2.0.0', '2.1.0']);
 
+    // A pipe as the request would block a reader forever: it is moved aside unread, and the loop goes on.
+    spawnSync('mkfifo', [path.join(control, 'request')]);
+    await until(() => !fs.existsSync(path.join(control, 'request')) && status()?.lastRequest.request === '(not understood)');
+    // A link to a file holding a valid line is not obeyed, and what the file says is never shown.
+    const secret = path.join(path.dirname(e.state), 'secret');
+    fs.writeFileSync(secret, 'rollback 2.0.0\n');
+    fs.symlinkSync(secret, path.join(control, 'request'));
+    const before = status().updatedAt;
+    await until(() => !fs.existsSync(path.join(control, 'request')) && status()?.updatedAt !== before);
+    assert.equal(statusOf(e, 'green'), 'running', 'not switched');
+    assert.equal(status().lastRequest.request, '(not understood)');
+    assert.deepEqual(fs.readdirSync(control).filter((f) => f.startsWith('.taken')), [], 'nothing left behind');
+
     // Not a version: ignored, nothing switched.
     fs.writeFileSync(path.join(control, 'request'), 'rollback 2.0.0; rm -rf /\n');
     await until(() => status()?.lastRequest.result === 'refused');
@@ -359,6 +372,7 @@ test('Settings → Versions: the daemon takes a "rollback X.Y.Z" request, switch
 
     fs.writeFileSync(path.join(control, 'request'), 'rollback 2.0.0\n');
     await until(() => status()?.lastRequest.result === 'ok' && status()?.running === '2.0.0');
+    assert.match(out, /Admin Hub asked to switch to version 2\.0\.0/);
     assert.equal(statusOf(e, 'blue'), 'running');
     assert.equal(statusOf(e, 'green'), 'exited');
 

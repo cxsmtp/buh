@@ -17,15 +17,15 @@ What protects the shop, how it works, and what the owner must do. Each item has 
 
 ## Admin password reset and email settings
 
-- **Forgot password?** gives the same answer for any email (the admin email can't be discovered) and is limited to 5 an hour per address and 20 an hour in all. The link holds a random 256-bit token; only its SHA-256 is stored, it works once, for 30 minutes, and a new request replaces it. Using it ends every session and clears sign-in pauses. Accounts set by `ADMIN_EMAIL` get no link.
-- The token is removed from the address bar as soon as the page opens.
+- **Forgot password?** gives the same answer, just as fast, for any email: the email is sent after answering, so neither the words nor the timing reveal the admin email. Limited to 5 an hour per address, and at most 3 links an hour are sent for the account; asking again never cancels a link already sent, so a stranger can't lock the owner out of recovery. Each link holds a random 256-bit token; only its SHA-256 is stored, it works for 30 minutes, and using any one ends the others, every session and any sign-in pause. Accounts set by `ADMIN_EMAIL` get no link.
+- The token is in the link's fragment (`/#reset=…`), which browsers never send to a server, so it stays out of access logs; the page removes it from the address bar at once.
 - Changing the sign-in email needs the current password (counted like a sign-in attempt) and ends other sessions.
 - The SMTP password is write-only, and is dropped when the server changes. A mail server typed in Settings must resolve to a public address (no loopback, private or cloud-metadata ranges), the shop connects to the address it checked, and the certificate is checked against the name. Ports: 25, 465, 587, 2525.
 
 ## Version switching from the Admin Hub
 
 - The shop never controls Docker. It writes one line (`rollback 2.0.1` or `update`) to a request folder shared only with the updater, creating the file new (no overwrite, no links) and only one at a time. Admins only, 10 an hour, written to the audit log.
-- The updater accepts only a small plain file whose line matches `rollback N.N.N` or `update` exactly, deletes it, and refuses versions before 2.0.0. The folder is sticky and not listable, so the shop can't remove or read anything else there.
+- The updater first moves the request into a new folder only it can open, so it can't be swapped for a link or a pipe while being read; it then accepts only a small plain file whose line matches `rollback N.N.N` or `update` exactly, and refuses versions before 2.0.0. Anything else is dropped unread and never echoed. The folder is sticky and not listable, so the shop can't remove or read anything else there.
 - The updater's status comes back through a second folder the shop mounts read-only; it holds versions and messages, no secrets. The updater writes it to a new file and renames it, so a planted link is replaced, never followed. The shop reads it defensively (size cap, links refused, fields checked).
 
 ## Checkout phone verification

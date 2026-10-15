@@ -55,12 +55,16 @@ test('two uses of one reset link at the same moment: only one succeeds', async (
   assert.deepEqual(results.sort(), [0, 400]);
 });
 
-test('a reset link expires after 30 minutes, and a new request replaces the old link', async (t) => {
+test('a reset link expires after 30 minutes; asking again keeps earlier links valid; at most 3 an hour', async (t) => {
   const first = (await auth.startPasswordReset('admin@beautifuluaehome.com'))!;
   const second = (await auth.startPasswordReset('admin@beautifuluaehome.com'))!;
-  assert.equal(await statusOf(auth.completePasswordReset(first, 'Replaced-Passphrase-1')), 400);
+  const third = (await auth.startPasswordReset('admin@beautifuluaehome.com'))!;
+  assert.ok(first && second && third);
+  // A stranger who knows the email can't flood the owner or cancel the owner's link.
+  assert.equal(await auth.startPasswordReset('admin@beautifuluaehome.com'), null, 'no fourth link within the hour');
   t.mock.timers.enable({ apis: ['Date'], now: Date.now() + 31 * 60 * 1000 });
-  assert.equal(await statusOf(auth.completePasswordReset(second, 'Expired-Passphrase-1')), 400);
+  assert.equal(await statusOf(auth.completePasswordReset(second, 'Expired-Passphrase-1')), 400, 'expired');
+  assert.ok(await auth.startPasswordReset('admin@beautifuluaehome.com'), 'a new link once the old ones expired');
   t.mock.timers.reset();
 });
 
@@ -116,4 +120,29 @@ test('email settings: public mail server only, known ports, password write-only,
   assert.equal(mail.ownerEmail(), 'env@example.com');
   delete process.env.SMTP_HOST;
   delete process.env.BACKUP_EMAIL;
+});
+
+test('regression: the answer to "Forgot password?" is as quick for the admin email as for any other (a slow mail server can\'t reveal it)', async () => {
+  const net = await import('node:net');
+  // A mail server that accepts the connection and never says a word.
+  const silent = net.createServer(() => {});
+  await new Promise<void>((r) => silent.listen(0, '127.0.0.1', r));
+  const port = (silent.address() as { port: number }).port;
+  process.env.SMTP_HOST = '127.0.0.1';
+  process.env.SMTP_PORT = String(port);
+  process.env.BACKUP_EMAIL = 'owner@shop.ae';
+  process.env.NEXT_PUBLIC_APP_URL = 'https://shop.example';
+  await settings.updateSettings('email', { smtpHost: '', sendTo: '' });
+  const { POST } = await import('@/app/api/admin/password/forgot/route');
+  const ask = async (email: string) => {
+    const started = Date.now();
+    const res = await POST(new Request('https://shop.example/api/admin/password/forgot', { method: 'POST', headers: { 'content-type': 'application/json', origin: 'https://shop.example', host: 'shop.example' }, body: JSON.stringify({ email }) }));
+    return { ms: Date.now() - started, body: await res.json() };
+  };
+  const stranger = await ask('stranger@example.com');
+  const owner = await ask('owner@shop.ae');
+  assert.equal(owner.body.message, stranger.body.message, 'the same answer');
+  assert.ok(owner.ms < 1000, `answered in ${owner.ms} ms, not after the mail server`);
+  silent.close();
+  for (const k of ['SMTP_HOST', 'SMTP_PORT', 'BACKUP_EMAIL', 'NEXT_PUBLIC_APP_URL']) delete process.env[k];
 });

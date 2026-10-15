@@ -122,7 +122,7 @@ export function ShopApp({ initialProductId }: { initialProductId?: string } = {}
   const [isAdminMode, setIsAdminMode] = useState(false);
   const [isAdminAuthenticated, setIsAdminAuthenticated] = useState(false);
   const [isAdminLoginOpen, setIsAdminLoginOpen] = useState(false);
-  // From a password-reset email link (?reset=…).
+  // From a password-reset email link (#reset=…).
   const [resetToken, setResetToken] = useState<string | null>(null);
 
   const [storeTab, setStoreTab] = useState<'home' | 'catalog'>('home');
@@ -226,7 +226,7 @@ export function ShopApp({ initialProductId }: { initialProductId?: string } = {}
 
   useEffect(() => {
     // A password-reset link: take the token out of the address bar at once, then ask for the new password.
-    const reset = new URLSearchParams(window.location.search).get('reset');
+    const reset = new URLSearchParams(window.location.hash.slice(1)).get('reset') || new URLSearchParams(window.location.search).get('reset');
     if (reset) {
       window.history.replaceState(null, '', window.location.pathname);
       void Promise.resolve().then(() => {

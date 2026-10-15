@@ -91,7 +91,7 @@ export function VersionsCard() {
             {running !== info.current && <> · the server now runs <strong className="font-mono">{label(running)}</strong> (reload to see it)</>}
           </span>
           {managed && (
-            <button type="button" onClick={() => void switchTo('latest')} disabled={Boolean(busy) || Boolean(info.pending)} className="ml-auto px-3 py-1.5 rounded-lg bg-[#0f1c2e] text-white font-bold flex items-center gap-1 disabled:opacity-50">
+            <button type="button" onClick={() => void switchTo('latest')} disabled={Boolean(busy) || Boolean(info.pending) || info.updater?.lastRequest.result === 'working'} className="ml-auto px-3 py-1.5 rounded-lg bg-[#0f1c2e] text-white font-bold flex items-center gap-1 disabled:opacity-50">
               {busy === 'latest' ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Sparkles className="w-3.5 h-3.5" />} Update to the latest
             </button>
           )}
@@ -101,7 +101,10 @@ export function VersionsCard() {
             Automatic updates: {info.updater!.autoUpdateMinutes > 0 ? `checked every ${info.updater!.autoUpdateMinutes} minutes` : 'only when you ask'}.
             {info.pending && <strong className="text-amber-700"> A switch is waiting to start (within a minute).</strong>}
             {info.updater!.lastRequest.at && !info.pending && (
-              <span className={info.updater!.lastRequest.result === 'ok' ? 'text-emerald-700' : 'text-red-700'}> Last request: {info.updater!.lastRequest.message}</span>
+              <span className={info.updater!.lastRequest.result === 'ok' ? 'text-emerald-700' : info.updater!.lastRequest.result === 'working' ? 'text-amber-700 font-semibold' : 'text-red-700'}>
+                {' '}
+                {info.updater!.lastRequest.result === 'working' ? info.updater!.lastRequest.message : `Last request: ${info.updater!.lastRequest.message}`}
+              </span>
             )}
           </p>
         ) : (
@@ -138,7 +141,7 @@ export function VersionsCard() {
                           ev.preventDefault();
                           void switchTo(e.version);
                         }}
-                        disabled={Boolean(busy) || Boolean(info.pending)}
+                        disabled={Boolean(busy) || Boolean(info.pending) || info.updater?.lastRequest.result === 'working'}
                         className="px-2.5 py-1 rounded-lg border border-stone-300 font-semibold inline-flex items-center gap-1 disabled:opacity-50"
                         aria-label={`Switch to ${e.label}`}
                       >

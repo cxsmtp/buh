@@ -8,7 +8,7 @@ interface AdminLoginModalProps {
   isOpen: boolean;
   onClose: () => void;
   onLoginSuccess: () => void;
-  /** A one-time token from a password-reset email link (?reset=…): opens "Choose a new password". */
+  /** A one-time token from a password-reset email link (#reset=…): opens "Choose a new password". */
   resetToken?: string | null;
   onResetDone?: () => void;
 }
@@ -163,6 +163,19 @@ export const AdminLoginModal: React.FC<AdminLoginModalProps> = ({
               <Check className="w-4 h-4 text-amber-300" />
               <span>{busy ? 'Saving…' : 'Set New Password'}</span>
             </button>
+            {error && (
+              <button
+                type="button"
+                onClick={() => {
+                  onResetDone?.();
+                  setError('');
+                  setForgot(true);
+                }}
+                className="w-full text-stone-500 hover:text-stone-800 font-semibold py-1"
+              >
+                Ask for a new link
+              </button>
+            )}
           </form>
         ) : forgot ? (
           <form onSubmit={handleForgot} className="space-y-3.5 text-xs">

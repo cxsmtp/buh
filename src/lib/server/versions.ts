@@ -34,10 +34,14 @@ export interface UpdaterStatus {
 }
 
 const VERSION_RE = /^\d{1,3}\.\d{1,3}\.\d{1,3}$/;
-/** Versions before this keep stock per product; they cannot run on today's database. */
+/** Versions before this keep stock per product, so they cannot run on today's database (and lack this page, which first shipped in 2.0.0, so any version offered has a way back). */
 export const OLDEST_ROLLBACK = '2.0.0';
-/** The updater checks its folders every 30 s; a status older than this means it is not running. */
-const STALE_MS = 3 * 60 * 1000;
+/**
+ * The updater writes its status every 30 s, and just before a switch, which can take
+ * up to about 5 minutes (download, snapshot, 2-minute health wait). Older than this:
+ * it is not running.
+ */
+const STALE_MS = 10 * 60 * 1000;
 
 const statusDir = () => process.env.UPDATER_STATUS_DIR || '/updater-status';
 const controlDir = () => process.env.UPDATER_CONTROL_DIR || '/updater-control';
@@ -135,6 +139,7 @@ export function requestSwitch(target: string, now = Date.now()): string {
     if (status.running === target) throw new HttpError(409, `The shop already runs ${labelOf(target)}.`);
     line = `rollback ${target}`;
   }
+  if (status.lastRequest.result === 'working') throw new HttpError(409, 'A version switch is in progress. Wait for it to finish.');
   if (pendingRequest()) throw new HttpError(409, 'A version switch is already waiting. It starts within a minute.');
   try {
     fs.writeFileSync(path.join(controlDir(), 'request'), `${line}\n`, { flag: 'wx', mode: 0o644 });

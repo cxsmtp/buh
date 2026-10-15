@@ -353,19 +353,36 @@ export async function changeAdminEmail(currentPassword: string, newEmail: string
 const RESET_TTL_MS = 30 * 60 * 1000;
 const RESET_KEY = 'admin:password-reset';
 
+const RESET_PER_HOUR = 3;
+interface ResetLink {
+  hash: string;
+  expires: number;
+  email: string;
+}
+
 /**
  * A reset link for the admin email (anything else gets nothing, and the caller
  * answers the same either way, so the admin email can't be discovered). The
- * token is random, kept only as a hash, single use, valid 30 minutes; a new
- * request replaces the old one.
+ * token is random, kept only as a hash, single use, valid 30 minutes. Earlier
+ * links stay valid (a stranger asking again can't cancel the owner's link), and
+ * at most 3 are sent an hour (null after that: the owner already has them).
  */
 export async function startPasswordReset(emailInput: string): Promise<string | null> {
   const account = await loadAccount();
   if (account.managedByEnv || emailInput.trim().toLowerCase() !== account.email) return null;
+  const { kvGet, kvSet } = await import('./kv');
+  const now = Date.now();
+  const live = resetLinks(kvGet<unknown>(RESET_KEY)?.data).filter((l) => l.expires > now && l.email === account.email);
+  if (live.filter((l) => l.expires > now + RESET_TTL_MS - 60 * 60 * 1000).length >= RESET_PER_HOUR) return null;
   const token = crypto.randomBytes(32).toString('base64url');
-  const { kvSet } = await import('./kv');
-  kvSet(RESET_KEY, { hash: crypto.createHash('sha256').update(token).digest('base64url'), expires: Date.now() + RESET_TTL_MS, email: account.email });
+  kvSet(RESET_KEY, [...live, { hash: crypto.createHash('sha256').update(token).digest('base64url'), expires: now + RESET_TTL_MS, email: account.email }]);
   return token;
+}
+
+/** Stored links (an older build kept one object, not a list). */
+function resetLinks(raw: unknown): ResetLink[] {
+  const list = Array.isArray(raw) ? raw : raw ? [raw] : [];
+  return list.filter((l): l is ResetLink => Boolean(l) && typeof l.hash === 'string' && typeof l.expires === 'number' && typeof l.email === 'string');
 }
 
 /** Set a new password with a reset token. Every session ends. */
@@ -373,16 +390,12 @@ export async function completePasswordReset(token: string, newPassword: string):
   const { kvGet, kvSet } = await import('./kv');
   const account = await loadAccount();
   // From here to kvSet(null) nothing awaits, so two requests can't both use one link.
-  const stored = kvGet<{ hash: string; expires: number; email: string } | null>(RESET_KEY)?.data;
+  const links = resetLinks(kvGet<unknown>(RESET_KEY)?.data);
   const given = Buffer.from(crypto.createHash('sha256').update(String(token)).digest('base64url'));
-  const valid =
-    stored &&
-    Date.now() < stored.expires &&
-    given.length === Buffer.from(stored.hash).length &&
-    crypto.timingSafeEqual(given, Buffer.from(stored.hash));
-  if (!valid) throw new HttpError(400, 'This reset link has expired or was already used. Ask for a new one.');
+  const stored = links.find((l) => Date.now() < l.expires && given.length === Buffer.from(l.hash).length && crypto.timingSafeEqual(given, Buffer.from(l.hash)));
+  if (!stored) throw new HttpError(400, 'This reset link has expired or was already used. Ask for a new one.');
   if (account.managedByEnv || stored.email !== account.email) throw new HttpError(400, 'This reset link is no longer valid. Ask for a new one.');
-  kvSet(RESET_KEY, null); // single use
+  kvSet(RESET_KEY, null); // single use: the new password makes every other link void too
   account.passwordHash = await hashPassword(newPassword);
   account.mustChangePassword = false;
   persist(account);

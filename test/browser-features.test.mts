@@ -221,13 +221,16 @@ test('forgot password on a phone: the same answer for any email; a reset link op
   await page.close();
 
   const reset = await browser.newPage({ viewport: { width: 375, height: 800 } });
-  await reset.goto(`${server.base}/?reset=not-a-real-token`, { waitUntil: 'domcontentloaded' });
+  await reset.goto(`${server.base}/#reset=not-a-real-token`, { waitUntil: 'domcontentloaded' });
   await reset.locator('#admin-reset-password').waitFor();
   assert.ok(!reset.url().includes('reset='), 'the token leaves the address bar at once');
   await reset.locator('#admin-reset-password').fill('Another-Long-Passphrase-9');
   await reset.locator('#admin-reset-confirm').fill('Another-Long-Passphrase-9');
   await reset.getByRole('button', { name: 'Set New Password' }).click();
   await reset.getByText(/expired or was already used/).waitFor();
+  // A dead link is not a dead end.
+  await reset.getByRole('button', { name: 'Ask for a new link' }).click();
+  await reset.locator('#admin-forgot-email').waitFor();
   assert.deepEqual(errors, []);
   await reset.close();
 });
