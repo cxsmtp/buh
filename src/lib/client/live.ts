@@ -10,11 +10,11 @@ import { useEffect, useRef } from 'react';
  * is called once. EventSource reconnects by itself.
  */
 
-type Versions = { catalog?: number; settings?: number; orders?: number; app?: string };
+type Versions = { catalog?: number; settings?: number; orders?: number; chats?: number; app?: string };
 
 export function useLiveUpdates(
   url: string | null,
-  handlers: { onCatalog?: () => void; onSettings?: () => void; onOrders?: () => void; onNewVersion?: () => void }
+  handlers: { onCatalog?: () => void; onSettings?: () => void; onOrders?: () => void; onChats?: () => void; onNewVersion?: () => void }
 ) {
   const ref = useRef(handlers);
   useEffect(() => {
@@ -55,6 +55,7 @@ export function useLiveUpdates(
         if (v.catalog !== last.catalog) ref.current.onCatalog?.();
         if (v.settings !== last.settings) ref.current.onSettings?.();
         if (v.orders !== undefined && v.orders !== last.orders) ref.current.onOrders?.();
+        if (v.chats !== undefined && v.chats !== last.chats) ref.current.onChats?.();
       }
       if (v.app && ownVersion && v.app !== ownVersion && !told) {
         told = true;

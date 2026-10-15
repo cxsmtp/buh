@@ -22,6 +22,8 @@ export interface ShopInfo {
   lowStockThreshold: number;
   supportEmail: string;
   festival: FestivalView | null;
+  /** The shop's chat (Settings → Chat assistant), null when switched off. */
+  chat: { name: string; greeting: string } | null;
 }
 
 const ShopContext = createContext<ShopInfo>({
@@ -29,6 +31,7 @@ const ShopContext = createContext<ShopInfo>({
   lowStockThreshold: DEFAULT_CATALOG.lowStockThreshold,
   supportEmail: 'orders@beautifuluaehome.com',
   festival: null,
+  chat: null,
 });
 
 export const ShopProvider = ShopContext.Provider;
@@ -44,6 +47,23 @@ export function whatsappLink(store: StoreSettings, message: string): string | nu
   const digits = store.whatsappNumber.replace(/\D/g, '');
   if (!digits) return null;
   return `https://wa.me/${digits}?text=${encodeURIComponent(message)}`;
+}
+
+/** "Ask on WhatsApp": only when switched on in Settings → Store & contact and a number is set. */
+export function askWhatsAppLink(store: StoreSettings, message: string): string | null {
+  return store.askOnWhatsApp === false ? null : whatsappLink(store, message);
+}
+
+/** "Ask on Instagram": a direct message to the shop's account (Instagram can't pre-fill the text). */
+export function instagramLink(store: StoreSettings): string | null {
+  if (store.askOnInstagram === false || !/^[A-Za-z0-9._]{1,30}$/.test(store.instagramHandle || '')) return null;
+  return `https://ig.me/m/${store.instagramHandle}`;
+}
+
+/** Ask the chat panel to open, optionally with a first message typed in. */
+export const OPEN_CHAT_EVENT = 'buh:open-chat';
+export function openChat(text = '') {
+  window.dispatchEvent(new CustomEvent(OPEN_CHAT_EVENT, { detail: { text } }));
 }
 
 /**

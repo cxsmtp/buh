@@ -136,6 +136,7 @@ test('settings console: WhatsApp number and a festival theme show on the storefr
 
   const shopper = await browser.newPage({ viewport: { width: 375, height: 800 } });
   await shopper.goto(server.base, { waitUntil: 'domcontentloaded' });
+  await shopper.getByRole('button', { name: 'Help and chat' }).click(); // WhatsApp sits in the Help panel next to the chat
   const wa = shopper.getByRole('link', { name: 'Chat with us on WhatsApp' });
   await wa.waitFor();
   assert.match((await wa.getAttribute('href')) || '', /^https:\/\/wa\.me\/971507654321\?text=/);
@@ -239,7 +240,7 @@ test('settings → Email & admin account: a private mail server is refused; the 
   const { ctx, page, errors } = await adminPage(375);
   await page.getByRole('navigation', { name: 'Admin sections' }).getByRole('button', { name: /Settings/ }).click();
   await page.getByRole('navigation', { name: 'Settings sections' }).getByRole('button', { name: 'Email & admin account' }).click();
-  await page.getByLabel('Server').fill('10.0.0.5');
+  await page.getByLabel('Server', { exact: true }).fill('10.0.0.5');
   await page.getByRole('button', { name: 'Save email settings' }).click();
   await page.getByText('The mail server must be a public address.').waitFor();
   assert.equal(await page.getByLabel('Sign-in email').inputValue(), 'admin@beautifuluaehome.com');
@@ -268,4 +269,59 @@ test('version badge: bottom left for everyone; for the owner it opens Settings �
     assert.deepEqual(errors, []);
     await ctx.close();
   }
+});
+
+test('chat on a phone: the assistant answers sizes; "Talk to a person" reaches the owner, whose reply appears in the shopper’s chat', { skip }, async () => {
+  const shopper = await browser.newPage({ viewport: { width: 375, height: 800 } });
+  const errors: string[] = [];
+  shopper.on('pageerror', (e) => errors.push(e.message));
+  await shopper.goto(server.base, { waitUntil: 'domcontentloaded' });
+  await shopper.getByRole('button', { name: 'Help and chat' }).click();
+  const panel = shopper.getByRole('dialog', { name: 'Chat with the shop' });
+  await panel.getByRole('button', { name: 'Sizes & measurements' }).click();
+  await panel.getByText(/Here are our measurements/).waitFor();
+  await panel.getByText(/King Size Bed/).first().waitFor();
+  assert.deepEqual(await overflow(shopper), []);
+
+  await panel.getByRole('button', { name: /Talk to a person/ }).click();
+  await panel.getByText(/asked the team to join this chat/).waitFor();
+  await panel.getByLabel('Your name').fill('Browser Shopper');
+  await panel.getByLabel('Phone (WhatsApp) or email').fill('050 765 0000');
+  await panel.getByRole('button', { name: 'Save my details' }).click();
+  await panel.getByText(/we’ll get back to you at \+971507650000/).waitFor();
+
+  // The owner, on a computer: the waiting chat is first, with a badge.
+  const { ctx, page } = await adminPage(1280);
+  await page.getByRole('button', { name: /^Chats/ }).first().click();
+  await page.getByRole('button', { name: /Browser Shopper/ }).click();
+  await page.getByText('Waiting for you').first().waitFor();
+  await page.getByRole('link', { name: 'WhatsApp' }).waitFor();
+  await page.getByLabel('Your reply').fill('Hello! Yes, the queen comes back on Monday.');
+  await page.getByRole('button', { name: 'Send' }).click();
+  await page.getByText('You replied').first().waitFor();
+  assert.deepEqual(await overflow(page), []);
+  await ctx.close();
+
+  await panel.getByText('Hello! Yes, the queen comes back on Monday.').waitFor({ timeout: 10_000 });
+  // The chat survives a reload.
+  await shopper.reload({ waitUntil: 'domcontentloaded' });
+  await shopper.getByRole('button', { name: 'Help and chat' }).click();
+  await shopper.getByText('Hello! Yes, the queen comes back on Monday.').waitFor();
+  assert.deepEqual(errors, []);
+  await shopper.close();
+});
+
+test('Ask on Instagram / WhatsApp show only when switched on in Settings', { skip }, async () => {
+  await api('PUT', '/api/admin/settings/store', { settings: { instagramHandle: 'beautifuluaehome', whatsappNumber: '+971507654321', askOnInstagram: true, askOnWhatsApp: false } });
+  const page = await browser.newPage({ viewport: { width: 375, height: 800 } });
+  await page.goto(server.base, { waitUntil: 'domcontentloaded' });
+  const p = (await (await fetch(`${server.base}/api/products`)).json()).products[0];
+  await page.locator('h3, h4').filter({ hasText: p.title }).first().click();
+  const ig = page.getByRole('link', { name: 'Ask on Instagram' });
+  await ig.waitFor();
+  assert.equal(await ig.getAttribute('href'), 'https://ig.me/m/beautifuluaehome');
+  assert.equal(await page.getByRole('link', { name: 'Ask on WhatsApp' }).count(), 0, 'switched off');
+  await page.getByRole('button', { name: 'Ask in chat' }).waitFor();
+  await page.close();
+  await api('PUT', '/api/admin/settings/store', { settings: { askOnWhatsApp: true } });
 });

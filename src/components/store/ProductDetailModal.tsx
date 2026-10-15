@@ -3,9 +3,10 @@
 import React, { useState } from 'react';
 import { Product, BedProfileMeasurement } from '@/types';
 import { formatAed, toFils } from '@/lib/money';
-import { piecesLeft, useShop, whatsappLink } from '@/lib/client/shop';
+import { askWhatsAppLink, instagramLink, openChat, piecesLeft, useShop } from '@/lib/client/shop';
+import { InstagramIcon } from '@/components/common/InstagramIcon';
 import { LocalPrice } from '@/lib/client/currency';
-import { X, Sparkles, Check, Truck, ShieldCheck, Ruler, Layers, ChevronRight, MessageCircle, Share2 } from 'lucide-react';
+import { X, Sparkles, Check, Truck, ShieldCheck, Ruler, Layers, ChevronRight, MessageCircle, MessagesSquare, Share2 } from 'lucide-react';
 
 interface ProductDetailModalProps {
   product: Product | null;
@@ -26,7 +27,7 @@ const ProductDetailContent: React.FC<ProductDetailModalProps & { product: Produc
   onAddToCart,
 }) => {
 
-  const { store, lowStockThreshold, supportEmail } = useShop();
+  const { store, lowStockThreshold, supportEmail, chat } = useShop();
   // Start on the default size if it is in stock, else the first size that is.
   const inStock = (id: string) => piecesLeft(product, id) > 0;
   const initialProfile =
@@ -61,12 +62,23 @@ const ProductDetailContent: React.FC<ProductDetailModalProps & { product: Produc
     onClose();
   };
 
-  const inquiry = whatsappLink(
+  const inquiry = askWhatsAppLink(
     store,
     soldOut
       ? `Hello! ${product.title} in ${selectedProfile.name} shows as sold out. Will it come back, or is there something similar?`
       : `Hello! I have a question about ${product.title} in ${selectedProfile.name} (AED ${unitPrice}).`
   );
+  const instagram = instagramLink(store);
+  const [igNote, setIgNote] = useState('');
+  // Instagram can't pre-fill a message: copy the product's link so the customer can paste it.
+  const copyLinkForInstagram = async () => {
+    try {
+      await navigator.clipboard.writeText(`${window.location.origin}/p/${encodeURIComponent(product.id)}`);
+      setIgNote('Link to this product copied: paste it in your Instagram message.');
+    } catch {
+      setIgNote('Tell us the product name in your Instagram message.');
+    }
+  };
   // Share this product: the phone's share sheet, or WhatsApp.
   const share = async () => {
     const url = `${window.location.origin}/p/${encodeURIComponent(product.id)}`;
@@ -372,16 +384,52 @@ const ProductDetailContent: React.FC<ProductDetailModalProps & { product: Produc
                   <span>Share</span>
                 </button>
 
-                {/* WhatsApp Quick Ask (the shop's number from Settings), else email */}
-                <a
-                  href={inquiry ?? emailInquiry}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="flex items-center gap-1.5 text-xs text-emerald-700 bg-emerald-50 hover:bg-emerald-100 border border-emerald-300 px-3.5 py-2 rounded-xl transition-colors font-medium"
-                >
-                  <MessageCircle className="w-3.5 h-3.5" />
-                  <span>{inquiry ? 'Ask on WhatsApp' : 'Ask by email'}</span>
-                </a>
+                {/* Ask: the chat, WhatsApp, Instagram (each only when switched on in Settings); email if none */}
+                {chat && (
+                  <button
+                    type="button"
+                    onClick={() => openChat(`About ${product.title} (${selectedProfile.name}): `)}
+                    className="flex items-center gap-1.5 text-xs text-[#0f1c2e] bg-amber-50 hover:bg-amber-100 border border-amber-300 px-3.5 py-2 rounded-xl transition-colors font-medium"
+                  >
+                    <MessagesSquare className="w-3.5 h-3.5" />
+                    <span>Ask in chat</span>
+                  </button>
+                )}
+                {inquiry && (
+                  <a
+                    href={inquiry}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="flex items-center gap-1.5 text-xs text-emerald-700 bg-emerald-50 hover:bg-emerald-100 border border-emerald-300 px-3.5 py-2 rounded-xl transition-colors font-medium"
+                  >
+                    <MessageCircle className="w-3.5 h-3.5" />
+                    <span>Ask on WhatsApp</span>
+                  </a>
+                )}
+                {instagram && (
+                  <a
+                    href={instagram}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    onClick={() => void copyLinkForInstagram()}
+                    className="flex items-center gap-1.5 text-xs text-pink-800 bg-pink-50 hover:bg-pink-100 border border-pink-300 px-3.5 py-2 rounded-xl transition-colors font-medium"
+                  >
+                    <InstagramIcon className="w-3.5 h-3.5" />
+                    <span>Ask on Instagram</span>
+                  </a>
+                )}
+                {!chat && !inquiry && !instagram && (
+                  <a
+                    href={emailInquiry}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="flex items-center gap-1.5 text-xs text-emerald-700 bg-emerald-50 hover:bg-emerald-100 border border-emerald-300 px-3.5 py-2 rounded-xl transition-colors font-medium"
+                  >
+                    <MessageCircle className="w-3.5 h-3.5" />
+                    <span>Ask by email</span>
+                  </a>
+                )}
+                {igNote && <p role="status" className="basis-full text-[11px] text-pink-800">{igNote}</p>}
               </div>
 
               {/* Delivery Note */}
@@ -407,14 +455,24 @@ const ProductDetailContent: React.FC<ProductDetailModalProps & { product: Produc
               </div>
 
               {soldOut ? (
-                <a
-                  href={inquiry ?? emailInquiry}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="flex-1 bg-stone-200 text-stone-700 font-bold text-sm py-3.5 px-6 rounded-xl flex items-center justify-center gap-2"
-                >
-                  <span>{selectedProfile.name.split(' ')[0]} sold out · Ask us</span>
-                </a>
+                !inquiry && chat ? (
+                  <button
+                    type="button"
+                    onClick={() => openChat(`${product.title} in ${selectedProfile.name} shows as sold out. Will it come back? `)}
+                    className="flex-1 bg-stone-200 text-stone-700 font-bold text-sm py-3.5 px-6 rounded-xl flex items-center justify-center gap-2"
+                  >
+                    <span>{selectedProfile.name.split(' ')[0]} sold out · Ask us</span>
+                  </button>
+                ) : (
+                  <a
+                    href={inquiry ?? emailInquiry}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="flex-1 bg-stone-200 text-stone-700 font-bold text-sm py-3.5 px-6 rounded-xl flex items-center justify-center gap-2"
+                  >
+                    <span>{selectedProfile.name.split(' ')[0]} sold out · Ask us</span>
+                  </a>
+                )
               ) : (
                 <button
                   type="button"

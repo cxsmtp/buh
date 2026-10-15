@@ -1,8 +1,8 @@
 'use client';
 
 import React, { useState, useEffect, useMemo, useCallback, useRef } from 'react';
-import { Product, Order, Customer, CourierSettings, CartItem, BedProfileMeasurement, BrandSettings, SmsGatewaySettings, BankTransferDetails, CatalogSettings, StoreSettings, ThemeSettings, EmailSettings, PhoneVerificationConfig } from '@/types';
-import { DEFAULT_CATALOG, DEFAULT_EMAIL_SETTINGS, DEFAULT_STORE, DEFAULT_THEME_SETTINGS } from '@/data/catalogDefaults';
+import { Product, Order, Customer, CourierSettings, CartItem, BedProfileMeasurement, BrandSettings, SmsGatewaySettings, BankTransferDetails, CatalogSettings, StoreSettings, ThemeSettings, EmailSettings, AssistantSettings, PhoneVerificationConfig } from '@/types';
+import { DEFAULT_ASSISTANT, DEFAULT_CATALOG, DEFAULT_EMAIL_SETTINGS, DEFAULT_STORE, DEFAULT_THEME_SETTINGS } from '@/data/catalogDefaults';
 import { piecesLeft, refreshCart, ShopProvider, type FestivalView, type ShopInfo } from '@/lib/client/shop';
 import { captureLanding, decodeBag, type BagLine, type Landing } from '@/lib/client/landing';
 import { useLiveUpdates } from '@/lib/client/live';
@@ -21,28 +21,30 @@ interface AdminSettings {
   store: AdminSetting<StoreSettings>;
   theme: AdminSetting<ThemeSettings>;
   email: AdminSetting<EmailSettings>;
+  assistant: AdminSetting<AssistantSettings>;
 }
 
-type AdminTab = 'orders' | 'add-product' | 'inventory' | 'crm' | 'settings';
+type AdminTab = 'orders' | 'add-product' | 'inventory' | 'crm' | 'settings' | 'chats';
 
 /** Catalogue + public settings from the server (no React state here). */
 async function fetchCatalog() {
   const [products, settings] = await Promise.all([
     getJson<{ products: Product[] }>('/api/products'),
-    getJson<{ brand: BrandSettings; bank: BankTransferDetails; supportEmail?: string; store?: StoreSettings; catalog?: { categories: CatalogSettings['categories']; lowStockThreshold: number }; festival?: FestivalView | null; phoneVerification?: PhoneVerificationConfig }>('/api/settings/public'),
+    getJson<{ brand: BrandSettings; bank: BankTransferDetails; supportEmail?: string; store?: StoreSettings; catalog?: { categories: CatalogSettings['categories']; lowStockThreshold: number }; festival?: FestivalView | null; phoneVerification?: PhoneVerificationConfig; chat?: { name: string; greeting: string } | null }>('/api/settings/public'),
   ]);
   return { products, settings };
 }
 
 /** Everything the admin hub shows (no React state here). */
 async function fetchAdminData() {
-  const [orders, customers, products, settings] = await Promise.all([
+  const [orders, customers, products, settings, chats] = await Promise.all([
     getJson<{ orders: Order[] }>('/api/admin/orders'),
     getJson<{ customers: Customer[] }>('/api/admin/customers'),
     getJson<{ products: Product[] }>('/api/admin/products'),
     getJson<AdminSettings>('/api/admin/settings'),
+    getJson<{ waiting: number }>('/api/admin/chats'),
   ]);
-  return { orders, customers, products, settings };
+  return { orders, customers, products, settings, chats };
 }
 
 const CART_KEY = 'buh_cart_v2';
@@ -79,7 +81,6 @@ function loadCart(products: Product[], lines?: BagLine[]): CartItem[] {
 import { Header } from '@/components/common/Header';
 import { BottomNav } from '@/components/common/BottomNav';
 import { HeroBanner } from '@/components/store/HeroBanner';
-import { WhatsAppButton } from '@/components/store/WhatsAppButton';
 import { CategoryFilter, CategoryOption } from '@/components/store/CategoryFilter';
 import { ProductCard } from '@/components/store/ProductCard';
 import { ProductDetailModal } from '@/components/store/ProductDetailModal';
@@ -104,6 +105,9 @@ import { ThemeSettingsCard } from '@/components/admin/settings/ThemeSettingsCard
 import { SettingsHistoryCard } from '@/components/admin/settings/SettingsHistoryCard';
 import { EmailSettingsCard } from '@/components/admin/settings/EmailSettingsCard';
 import { VersionsCard } from '@/components/admin/settings/VersionsCard';
+import { AssistantSettingsCard } from '@/components/admin/settings/AssistantSettingsCard';
+import { AdminChatsTab } from '@/components/admin/AdminChatsTab';
+import { HelpLauncher } from '@/components/store/HelpLauncher';
 import { VersionBadge } from '@/components/common/VersionBadge';
 import { SystemHealthCard } from '@/components/admin/settings/SystemHealthCard';
 
@@ -143,6 +147,10 @@ export function ShopApp({ initialProductId }: { initialProductId?: string } = {}
   const [lowStockThreshold, setLowStockThreshold] = useState(DEFAULT_CATALOG.lowStockThreshold);
   const [categories, setCategories] = useState(DEFAULT_CATALOG.categories);
   const [festival, setFestival] = useState<FestivalView | null>(null);
+  const [chatInfo, setChatInfo] = useState<{ name: string; greeting: string } | null>(null);
+  // Admin Hub → Chats: conversations waiting for a person (badge), and a counter that reloads the tab.
+  const [chatsWaiting, setChatsWaiting] = useState(0);
+  const [chatsKey, setChatsKey] = useState(0);
   // Where this visitor first came from (Instagram, WhatsApp…), sent with the order.
   const [landing] = useState<Landing | null>(() => (typeof window === 'undefined' ? null : captureLanding()));
   // Pre-fills Track Order (only rendered once opened, so no server/client mismatch).
@@ -164,6 +172,7 @@ export function ShopApp({ initialProductId }: { initialProductId?: string } = {}
     store: { value: DEFAULT_STORE, secretsSet: {} },
     theme: { value: DEFAULT_THEME_SETTINGS, secretsSet: {} },
     email: { value: DEFAULT_EMAIL_SETTINGS, secretsSet: {} },
+    assistant: { value: DEFAULT_ASSISTANT, secretsSet: {} },
   });
   const [adminLoadError, setAdminLoadError] = useState('');
   // Settings forms copy their values once; they are re-created when the server's values first arrive
@@ -213,6 +222,7 @@ export function ShopApp({ initialProductId }: { initialProductId?: string } = {}
       if (settings.data.phoneVerification) setPhoneVerification(settings.data.phoneVerification);
       if (settings.data.store) setStoreSettings(settings.data.store);
       setFestival(settings.data.festival ?? null);
+      setChatInfo(settings.data.chat ?? null);
       if (settings.data.catalog) {
         setLowStockThreshold(settings.data.catalog.lowStockThreshold);
         setCategories(settings.data.catalog.categories);
@@ -289,12 +299,13 @@ export function ShopApp({ initialProductId }: { initialProductId?: string } = {}
   }, [cart, products.length]);
 
   // 3. Admin hub data, loaded once signed in and refreshed every minute while open.
-  const applyAdminData = useCallback(({ orders: o, customers: c, products: p, settings: st }: Awaited<ReturnType<typeof fetchAdminData>>) => {
+  const applyAdminData = useCallback(({ orders: o, customers: c, products: p, settings: st, chats: ch }: Awaited<ReturnType<typeof fetchAdminData>>) => {
+    if (ch.ok) setChatsWaiting(ch.data.waiting);
     if (o.ok) setOrders(o.data.orders);
     if (c.ok) setCustomers(c.data.customers);
     if (p.ok) setAdminProducts(p.data.products);
     if (st.ok) {
-      setAdminSettings({ courier: st.data.courier, sms: st.data.sms, catalog: st.data.catalog, store: st.data.store, theme: st.data.theme, email: st.data.email });
+      setAdminSettings({ courier: st.data.courier, sms: st.data.sms, catalog: st.data.catalog, store: st.data.store, theme: st.data.theme, email: st.data.email, assistant: st.data.assistant });
       setAdminSettingsLoaded(true);
     }
     setAdminLoadError(o.ok && c.ok && p.ok && st.ok ? '' : 'Some admin data could not be loaded. Check your connection and refresh.');
@@ -324,6 +335,14 @@ export function ShopApp({ initialProductId }: { initialProductId?: string } = {}
       setNewOrderNotice(true);
       debounced('admin', () => void loadAdminData());
     },
+    onChats: () => {
+      setChatsKey((n) => n + 1);
+      debounced('chats', () =>
+        void getJson<{ waiting: number }>('/api/admin/chats').then(({ ok, data }) => {
+          if (ok) setChatsWaiting(data.waiting);
+        })
+      );
+    },
     onNewVersion: () => setUpdateReady(true),
   });
   // A new version of the shop was installed: switch over unnoticed when the page is in the
@@ -349,10 +368,10 @@ export function ShopApp({ initialProductId }: { initialProductId?: string } = {}
   }, [isAdminAuthenticated, isAdminMode, applyAdminData]);
 
   /** Save one settings group on the server; resolves to an error message or null. */
-  const saveSettings = async (key: 'brand' | 'bank' | 'courier' | 'sms' | 'catalog' | 'store' | 'theme' | 'email', settings: unknown): Promise<string | null> => {
+  const saveSettings = async (key: 'brand' | 'bank' | 'courier' | 'sms' | 'catalog' | 'store' | 'theme' | 'email' | 'assistant', settings: unknown): Promise<string | null> => {
     const { ok, data } = await sendJson<{ message?: string }>('PUT', `/api/admin/settings/${key}`, { settings });
     if (!ok) return data.message || 'Could not save. Please try again.';
-    await Promise.all([loadAdminData(), key === 'brand' || key === 'bank' || key === 'catalog' || key === 'store' || key === 'theme' ? loadCatalog() : Promise.resolve(null)]);
+    await Promise.all([loadAdminData(), key === 'brand' || key === 'bank' || key === 'catalog' || key === 'store' || key === 'theme' || key === 'assistant' ? loadCatalog() : Promise.resolve(null)]);
     return null;
   };
 
@@ -436,8 +455,8 @@ export function ShopApp({ initialProductId }: { initialProductId?: string } = {}
   };
 
   const shopInfo = useMemo<ShopInfo>(
-    () => ({ store: storeSettings, lowStockThreshold, supportEmail: supportEmail || 'orders@beautifuluaehome.com', festival }),
-    [storeSettings, lowStockThreshold, supportEmail, festival]
+    () => ({ store: storeSettings, lowStockThreshold, supportEmail: supportEmail || 'orders@beautifuluaehome.com', festival, chat: chatInfo }),
+    [storeSettings, lowStockThreshold, supportEmail, festival, chatInfo]
   );
 
   // Filtered Products for Storefront
@@ -498,6 +517,7 @@ export function ShopApp({ initialProductId }: { initialProductId?: string } = {}
             <div className="hidden sm:flex items-center gap-2 border-b border-stone-200 pb-2 overflow-x-auto no-scrollbar">
               {[
                 { id: 'orders', label: 'Orders & Dispatches', badge: pendingOrdersCount },
+                { id: 'chats', label: 'Chats', badge: chatsWaiting },
                 { id: 'add-product', label: '+ Add Product' },
                 { id: 'inventory', label: 'Inventory Stock' },
                 { id: 'crm', label: 'Customers & CRM' },
@@ -555,6 +575,8 @@ export function ShopApp({ initialProductId }: { initialProductId?: string } = {}
                 }}
               />
             )}
+
+            {adminTab === 'chats' && <AdminChatsTab refreshKey={chatsKey} />}
 
             {adminTab === 'crm' && (
               <AdminCrmTab customers={customers} orders={orders} />
@@ -630,6 +652,20 @@ export function ShopApp({ initialProductId }: { initialProductId?: string } = {}
                     ),
                   },
                   {
+                    id: 'assistant',
+                    label: 'Chat assistant',
+                    icon: '💬',
+                    hint: 'What the shop’s chat answers by itself (its memory), and when it hands over to you.',
+                    content: (
+                      <AssistantSettingsCard
+                        key={`assistant-${adminSettingsLoaded}-${settingsEpoch}`}
+                        value={adminSettings.assistant.value}
+                        sizes={adminSettings.catalog.value.sizes}
+                        onSave={(v) => saveSettings('assistant', v)}
+                      />
+                    ),
+                  },
+                  {
                     id: 'email',
                     label: 'Email & admin account',
                     icon: '✉️',
@@ -639,6 +675,7 @@ export function ShopApp({ initialProductId }: { initialProductId?: string } = {}
                         key={`email-${adminSettingsLoaded}-${settingsEpoch}`}
                         value={adminSettings.email.value}
                         passwordSaved={Boolean(adminSettings.email.secretsSet.smtpPass)}
+                        imapPasswordSaved={Boolean(adminSettings.email.secretsSet.imapPass)}
                         onSave={(v) => saveSettings('email', v)}
                       />
                     ),
@@ -818,6 +855,7 @@ export function ShopApp({ initialProductId }: { initialProductId?: string } = {}
         onOpenTrack={() => setIsTrackerOpen(true)}
         onToggleAdminMode={handleToggleAdminMode}
         pendingOrdersCount={pendingOrdersCount}
+        chatsWaiting={chatsWaiting}
       />
 
       {/* Admin Login Modal */}
@@ -831,7 +869,7 @@ export function ShopApp({ initialProductId }: { initialProductId?: string } = {}
         resetToken={resetToken}
         onResetDone={() => setResetToken(null)}
       />
-      {!isAdminMode && <WhatsAppButton />}
+      {!isAdminMode && <HelpLauncher />}
       <VersionBadge
         raised={isAdminMode}
         onOpen={

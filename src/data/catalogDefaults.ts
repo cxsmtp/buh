@@ -1,4 +1,4 @@
-import type { CatalogSettings, EmailSettings, StoreSettings, ThemeSettings } from '@/types';
+import type { AssistantSettings, CatalogSettings, EmailSettings, StoreSettings, ThemeSettings } from '@/types';
 import { ALL_BED_PROFILES_LIST } from './bedProfiles';
 
 /** Settings → Catalogue before the owner changes anything. */
@@ -25,6 +25,8 @@ export const DEFAULT_STORE: StoreSettings = {
   tiktokHandle: '',
   storeAddress: '',
   showLocalCurrency: true,
+  askOnWhatsApp: true,
+  askOnInstagram: true,
 };
 
 /** Settings → Themes before the owner changes anything: festivals picked automatically. */
@@ -44,5 +46,50 @@ export const DEFAULT_EMAIL_SETTINGS: EmailSettings = {
   smtpUser: '',
   smtpPass: '',
   fromAddress: '',
+  imapHost: '',
+  imapPort: 993,
+  imapUser: '',
+  imapPass: '',
   sendTo: '',
+};
+
+/** The chat's starting "memory": the owner edits, adds and removes entries in Settings → Chat assistant. */
+export const DEFAULT_ASSISTANT: AssistantSettings = {
+  enabled: true,
+  name: 'Shop assistant',
+  greeting: 'Hello! I can help with sizes, delivery, payment and care. Ask me anything, or tap "Talk to a person".',
+  answerSizes: true,
+  waitSeconds: 150,
+  entries: [
+    {
+      id: 'delivery',
+      question: 'How long does delivery take?',
+      keywords: ['delivery', 'deliver', 'shipping', 'ship', 'arrive', 'courier', 'when'],
+      answer: 'We deliver across all seven emirates, usually within 24 to 48 hours of confirming your order. You get a tracking number as soon as the courier collects it.',
+    },
+    {
+      id: 'payment',
+      question: 'How can I pay?',
+      keywords: ['pay', 'payment', 'cash', 'cod', 'card', 'transfer', 'bank'],
+      answer: 'You can pay cash on delivery, or by bank transfer when the bank details show at checkout.',
+    },
+    {
+      id: 'discounts',
+      question: 'Do you have a discount or offer?',
+      keywords: ['discount', 'offer', 'sale', 'coupon', 'code', 'promo', 'deal', 'cheaper'],
+      answer: 'Our prices are already as low as we can make them for these handmade pieces. Festival offers are announced on the shop banner and on Instagram. For a bulk order, tap "Talk to a person".',
+    },
+    {
+      id: 'care',
+      question: 'How do I wash it?',
+      keywords: ['wash', 'care', 'clean', 'iron', 'shrink', 'fade', 'laundry'],
+      answer: 'Hand-block-printed cotton: wash cold, gently, with mild detergent, apart from other colours for the first few washes, and dry in the shade. Iron on medium heat.',
+    },
+    {
+      id: 'returns',
+      question: 'Can I return or exchange?',
+      keywords: ['return', 'exchange', 'refund', 'damaged', 'wrong'],
+      answer: 'If something arrives damaged or wrong, message us within 48 hours with a photo and we will make it right. Tap "Talk to a person" and we will take it from there.',
+    },
+  ],
 };

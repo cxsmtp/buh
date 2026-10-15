@@ -1,14 +1,16 @@
 'use client';
 
 import React from 'react';
-import { Home, Package, ShoppingBag, Truck, Camera, Users, Settings, Store, Sparkles, ClipboardList } from 'lucide-react';
+import { Home, Package, ShoppingBag, Truck, Camera, Users, Settings, Store, Sparkles, ClipboardList, MessagesSquare } from 'lucide-react';
 
 interface BottomNavProps {
   isAdminMode: boolean;
   storeTab: 'home' | 'catalog';
   onSetStoreTab: (tab: 'home' | 'catalog') => void;
-  adminTab: 'orders' | 'add-product' | 'inventory' | 'crm' | 'settings';
-  onSetAdminTab: (tab: 'orders' | 'add-product' | 'inventory' | 'crm' | 'settings') => void;
+  adminTab: 'orders' | 'add-product' | 'inventory' | 'crm' | 'settings' | 'chats';
+  onSetAdminTab: (tab: 'orders' | 'add-product' | 'inventory' | 'crm' | 'settings' | 'chats') => void;
+  /** Chats waiting for a person. */
+  chatsWaiting?: number;
   cartCount: number;
   onOpenCart: () => void;
   onOpenTrack: () => void;
@@ -27,6 +29,7 @@ export const BottomNav: React.FC<BottomNavProps> = ({
   onOpenTrack,
   onToggleAdminMode,
   pendingOrdersCount = 0,
+  chatsWaiting = 0,
 }) => {
   if (isAdminMode) {
     return (
@@ -43,6 +46,22 @@ export const BottomNav: React.FC<BottomNavProps> = ({
           {pendingOrdersCount > 0 && (
             <span className="absolute -top-1 right-0 bg-red-500 text-white text-[9px] w-3.5 h-3.5 rounded-full flex items-center justify-center font-bold">
               {pendingOrdersCount}
+            </span>
+          )}
+        </button>
+
+        {/* Chats from the shop (badge: waiting for a person) */}
+        <button
+          onClick={() => onSetAdminTab('chats')}
+          className={`flex flex-col items-center py-1 px-1.5 rounded-lg text-xs relative ${
+            adminTab === 'chats' ? 'text-[#c5a059] font-bold' : 'text-stone-500'
+          }`}
+        >
+          <MessagesSquare className="w-4 h-4" />
+          <span className="text-[9px] mt-0.5">Chats</span>
+          {chatsWaiting > 0 && (
+            <span className="absolute -top-1 right-0 bg-red-500 text-white text-[9px] w-3.5 h-3.5 rounded-full flex items-center justify-center font-bold" aria-label={`${chatsWaiting} waiting`}>
+              {chatsWaiting}
             </span>
           )}
         </button>
