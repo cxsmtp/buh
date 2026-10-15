@@ -23,7 +23,7 @@ export async function onStartup() {
     logEvent('error', 'startup_failed', { error: err instanceof Error ? err.message : String(err) });
   }
   if (process.env.NODE_ENV === 'production' && !emailConfigured()) {
-    console.error('!! Backups are not emailed: set SMTP_HOST, SMTP_USER, SMTP_PASS and BACKUP_EMAIL (see HOSTINGER_DEPLOYMENT_GUIDE.md).');
+    console.error('!! Backups are not emailed: set up email in Admin Hub → Settings → Email (or SMTP_HOST, SMTP_USER, SMTP_PASS and BACKUP_EMAIL in .env.production).');
   }
   const passphrase = process.env.BACKUP_PASSPHRASE || '';
   if (process.env.NODE_ENV === 'production' && passphrase.length < MIN_PASSPHRASE_LENGTH) {

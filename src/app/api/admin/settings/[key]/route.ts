@@ -3,7 +3,7 @@ import { requireAdmin } from '@/lib/server/guard';
 import { handleRouteError, HttpError, json, readJsonBody } from '@/lib/server/http';
 import { adminView, updateSettings, type SettingsKey } from '@/lib/server/settings';
 
-const KEYS: SettingsKey[] = ['brand', 'bank', 'courier', 'sms', 'catalog', 'store', 'theme'];
+const KEYS: SettingsKey[] = ['brand', 'bank', 'courier', 'sms', 'catalog', 'store', 'theme', 'email'];
 
 export async function PUT(req: Request, { params }: { params: Promise<{ key: string }> }) {
   try {

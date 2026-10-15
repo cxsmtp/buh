@@ -236,6 +236,21 @@ export interface StoreSettings {
   showLocalCurrency: boolean;
 }
 
+/** Settings → Email: the mail server for backups, alerts, the daily summary and password resets. */
+export interface EmailSettings {
+  /** Empty: use SMTP_* from .env.production. */
+  smtpHost: string;
+  smtpPort: number;
+  /** starttls (port 587/25/2525, upgrade required) or tls (port 465). */
+  smtpSecurity: 'starttls' | 'tls';
+  smtpUser: string;
+  /** Write-only. */
+  smtpPass: string;
+  fromAddress: string;
+  /** Where backups, alerts and the daily summary go (comma-separated); empty uses BACKUP_EMAIL. */
+  sendTo: string;
+}
+
 /** Settings → Themes: festival looks, picked automatically or by the admin. */
 export interface ThemeSettings {
   /** auto: by the festival calendar; manual: always themeId; off: the everyday look. */

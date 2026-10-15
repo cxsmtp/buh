@@ -14,6 +14,7 @@ export async function GET(req: Request) {
       catalog: adminView('catalog'),
       store: adminView('store'),
       theme: adminView('theme'),
+      email: adminView('email'),
     });
   } catch (err) {
     return handleRouteError(err, 'admin/settings');

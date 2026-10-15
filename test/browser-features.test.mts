@@ -204,3 +204,41 @@ test('a product link opens the shop with that product, ready to share', { skip }
   assert.deepEqual(await overflow(page), []);
   await page.close();
 });
+
+test('forgot password on a phone: the same answer for any email; a reset link opens "choose a new password" and is tidied away', { skip }, async () => {
+  const page = await browser.newPage({ viewport: { width: 375, height: 800 } });
+  const errors: string[] = [];
+  page.on('pageerror', (e) => errors.push(e.message));
+  await page.goto(server.base, { waitUntil: 'domcontentloaded' });
+  await page.locator('header button:has-text("Admin Hub")').click();
+  await page.getByRole('button', { name: 'Forgot password?' }).click();
+  await page.locator('#admin-forgot-email').fill('stranger@example.com');
+  await page.getByRole('button', { name: 'Email Me a Reset Link' }).click();
+  await page.getByRole('status').filter({ hasText: /If that is the admin email/ }).waitFor();
+  assert.deepEqual(await overflow(page), []);
+  await page.close();
+
+  const reset = await browser.newPage({ viewport: { width: 375, height: 800 } });
+  await reset.goto(`${server.base}/?reset=not-a-real-token`, { waitUntil: 'domcontentloaded' });
+  await reset.locator('#admin-reset-password').waitFor();
+  assert.ok(!reset.url().includes('reset='), 'the token leaves the address bar at once');
+  await reset.locator('#admin-reset-password').fill('Another-Long-Passphrase-9');
+  await reset.locator('#admin-reset-confirm').fill('Another-Long-Passphrase-9');
+  await reset.getByRole('button', { name: 'Set New Password' }).click();
+  await reset.getByText(/expired or was already used/).waitFor();
+  assert.deepEqual(errors, []);
+  await reset.close();
+});
+
+test('settings → Email & admin account: a private mail server is refused; the sign-in email is shown', { skip }, async () => {
+  const { ctx, page, errors } = await adminPage(375);
+  await page.getByRole('navigation', { name: 'Admin sections' }).getByRole('button', { name: /Settings/ }).click();
+  await page.getByRole('navigation', { name: 'Settings sections' }).getByRole('button', { name: 'Email & admin account' }).click();
+  await page.getByLabel('Server').fill('10.0.0.5');
+  await page.getByRole('button', { name: 'Save email settings' }).click();
+  await page.getByText('The mail server must be a public address.').waitFor();
+  assert.equal(await page.getByLabel('Sign-in email').inputValue(), 'admin@beautifuluaehome.com');
+  assert.deepEqual(await overflow(page), []);
+  assert.deepEqual(errors, []);
+  await ctx.close();
+});

@@ -15,6 +15,13 @@ What protects the shop, how it works, and what the owner must do. Each item has 
 | **Every admin route checks it** | Courier dispatch and test, SMS test and the AI studio all call `requireAdmin` on the server. |
 | **Cross-site requests refused** | State-changing calls must come from this site (Origin / Referer / Sec-Fetch-Site, compared with the `Host` header; `X-Forwarded-Host` is never trusted), in addition to `SameSite=Strict`. |
 
+## Admin password reset and email settings
+
+- **Forgot password?** gives the same answer for any email (the admin email can't be discovered) and is limited to 5 an hour per address and 20 an hour in all. The link holds a random 256-bit token; only its SHA-256 is stored, it works once, for 30 minutes, and a new request replaces it. Using it ends every session and clears sign-in pauses. Accounts set by `ADMIN_EMAIL` get no link.
+- The token is removed from the address bar as soon as the page opens.
+- Changing the sign-in email needs the current password (counted like a sign-in attempt) and ends other sessions.
+- The SMTP password is write-only, and is dropped when the server changes. A mail server typed in Settings must resolve to a public address (no loopback, private or cloud-metadata ranges), the shop connects to the address it checked, and the certificate is checked against the name. Ports: 25, 465, 587, 2525.
+
 ## Checkout phone verification
 
 - **UAE mobiles only** (50, 52, 54, 55, 56, 58; `OTP_ALLOWED_PREFIXES`, default `+971`). Every way of writing a number (spaces, `00971`, `+971 0…`, Arabic digits) maps to one number and one set of limits. Other countries are shown the support email instead.

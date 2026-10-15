@@ -1,8 +1,10 @@
-import type { BankTransferDetails, BedProfileMeasurement, BrandSettings, CatalogSettings, CourierSettings, FirebaseWebConfig, PhoneVerificationConfig, SmsGatewaySettings, StoreSettings, ThemeSettings } from '@/types';
+import net from 'node:net';
+import type { BankTransferDetails, BedProfileMeasurement, BrandSettings, CatalogSettings, CourierSettings, EmailSettings, FirebaseWebConfig, PhoneVerificationConfig, SmsGatewaySettings, StoreSettings, ThemeSettings } from '@/types';
 import { FESTIVALS } from '@/lib/festivals/catalog';
-import { DEFAULT_CATALOG, DEFAULT_STORE, DEFAULT_THEME_SETTINGS } from '@/data/catalogDefaults';
+import { DEFAULT_CATALOG, DEFAULT_EMAIL_SETTINGS, DEFAULT_STORE, DEFAULT_THEME_SETTINGS } from '@/data/catalogDefaults';
 import { INITIAL_BANK_DETAILS, INITIAL_BRAND_SETTINGS, INITIAL_COURIER_SETTINGS, INITIAL_SMS_SETTINGS } from '@/data/initialData';
 import { getDb } from './db';
+import { SMTP_PORTS, assertPublicMailHost } from './mail';
 import { FIREBASE_PROJECT_ID } from './firebaseAuth';
 import { bump, changedElsewhere } from './live';
 import { envGateways } from '@/lib/otpService';
@@ -29,6 +31,7 @@ export interface SettingsMap {
   catalog: CatalogSettings;
   store: StoreSettings;
   theme: ThemeSettings;
+  email: EmailSettings;
 }
 export type SettingsKey = keyof SettingsMap;
 
@@ -54,6 +57,7 @@ const DEFAULTS: SettingsMap = {
   catalog: DEFAULT_CATALOG,
   store: DEFAULT_STORE,
   theme: DEFAULT_THEME_SETTINGS,
+  email: DEFAULT_EMAIL_SETTINGS,
 };
 
 /** Where customers are asked to email: Settings → Store first, then NEXT_PUBLIC_SUPPORT_EMAIL. */
@@ -70,6 +74,7 @@ const SECRETS: Record<SettingsKey, string[]> = {
   catalog: [],
   store: [],
   theme: [],
+  email: ['smtpPass'],
 };
 
 const cache = new Map<SettingsKey, unknown>();
@@ -161,6 +166,11 @@ export async function updateSettings<K extends SettingsKey>(key: K, input: unkno
     else setPath(next, p, getPath(current as unknown as Record<string, unknown>, p) ?? '');
   }
   // A secret follows its host: a new host without a new secret drops the old one.
+  if (key === 'email') {
+    const e = next as unknown as EmailSettings;
+    const i = input as { smtpPass?: unknown };
+    if (e.smtpHost.toLowerCase() !== (current as EmailSettings).smtpHost.toLowerCase() && !nonEmpty(i.smtpPass)) e.smtpPass = '';
+  }
   if (key === 'sms') {
     const sms = next as unknown as SmsGatewaySettings;
     const was = current as SmsGatewaySettings;
@@ -221,6 +231,7 @@ const SECRET_HOSTS: Record<SettingsKey, Record<string, string>> = {
   catalog: {},
   store: {},
   theme: {},
+  email: {},
 };
 
 /**
@@ -430,6 +441,23 @@ const VALIDATORS: { [K in SettingsKey]: (input: Obj, current: SettingsMap[K]) =>
       storeAddress: text(input.storeAddress, 'Store address', 300, current.storeAddress),
       showLocalCurrency: bool(input.showLocalCurrency, current.showLocalCurrency),
     };
+  },
+
+  async email(input, current) {
+    const host = text(input.smtpHost, 'Mail server', 253, current.smtpHost).toLowerCase();
+    if (host && !net.isIPv4(host) && !/^(?=.{3,253}$)(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z]{2,63}$/.test(host)) throw new HttpError(400, 'Mail server: a host name such as smtp.gmail.com.');
+    if (host && host !== current.smtpHost) await assertPublicMailHost(host);
+    const port = input.smtpPort === undefined ? current.smtpPort : Number(input.smtpPort);
+    if (!SMTP_PORTS.includes(port)) throw new HttpError(400, `Mail server port: one of ${SMTP_PORTS.join(', ')}.`);
+    const security = input.smtpSecurity === undefined ? current.smtpSecurity : input.smtpSecurity;
+    if (security !== 'starttls' && security !== 'tls') throw new HttpError(400, 'Security must be STARTTLS or TLS.');
+    const emailRe = /^[^\s@<>",]+@[^\s@<>",]+\.[^\s@<>",]+$/;
+    const user = text(input.smtpUser, 'Mail user', 254, current.smtpUser);
+    const from = text(input.fromAddress, 'From address', 254, current.fromAddress);
+    if (from && !emailRe.test(from)) throw new HttpError(400, 'Please check the From address.');
+    const sendTo = text(input.sendTo, 'Send to', 600, current.sendTo).split(',').map((x) => x.trim()).filter(Boolean);
+    if (sendTo.length > 5 || sendTo.some((x) => !emailRe.test(x))) throw new HttpError(400, 'Send to: up to 5 email addresses, separated by commas.');
+    return { smtpHost: host, smtpPort: port, smtpSecurity: security, smtpUser: user, smtpPass: '', fromAddress: from, sendTo: sendTo.join(', ') };
   },
 
   async theme(input, current) {

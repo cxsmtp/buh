@@ -8,12 +8,17 @@ interface AdminLoginModalProps {
   isOpen: boolean;
   onClose: () => void;
   onLoginSuccess: () => void;
+  /** A one-time token from a password-reset email link (?reset=…): opens "Choose a new password". */
+  resetToken?: string | null;
+  onResetDone?: () => void;
 }
 
 export const AdminLoginModal: React.FC<AdminLoginModalProps> = ({
   isOpen,
   onClose,
   onLoginSuccess,
+  resetToken = null,
+  onResetDone,
 }) => {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
@@ -24,8 +29,46 @@ export const AdminLoginModal: React.FC<AdminLoginModalProps> = ({
   const [mustChange, setMustChange] = useState(false);
   const [newPassword, setNewPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
+  // "Forgot password?": ask for a link by email.
+  const [forgot, setForgot] = useState(false);
+  const [notice, setNotice] = useState('');
 
   if (!isOpen) return null;
+  const resetting = Boolean(resetToken);
+
+  const handleForgot = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setError('');
+    setBusy(true);
+    const { ok, data } = await postJson<{ message?: string }>('/api/admin/password/forgot', { email: email.trim() });
+    setBusy(false);
+    if (!ok) {
+      setError(data.message || 'Could not send the link. Please try again.');
+      return;
+    }
+    setNotice(data.message || 'If that is the admin email, a reset link is on its way.');
+    setForgot(false);
+  };
+
+  const handleReset = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setError('');
+    if (newPassword !== confirmPassword) {
+      setError('The new passwords do not match.');
+      return;
+    }
+    setBusy(true);
+    const { ok, data } = await postJson<{ message?: string }>('/api/admin/password/reset', { token: resetToken, newPassword });
+    setBusy(false);
+    if (!ok) {
+      setError(data.message || 'Could not change the password.');
+      return;
+    }
+    setNewPassword('');
+    setConfirmPassword('');
+    setNotice(data.message || 'Password changed. Sign in with the new password.');
+    onResetDone?.();
+  };
 
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -97,7 +140,47 @@ export const AdminLoginModal: React.FC<AdminLoginModalProps> = ({
           </div>
         )}
 
-        {mustChange ? (
+        {notice && !error && (
+          <div role="status" className="bg-emerald-50 text-emerald-800 text-xs p-3 rounded-xl border border-emerald-200 font-medium">
+            {notice}
+          </div>
+        )}
+
+        {resetting ? (
+          <form onSubmit={handleReset} className="space-y-3.5 text-xs">
+            <p className="text-stone-600 leading-relaxed">
+              Choose a new admin password: at least 12 characters, with at least 5 different characters. Every device is signed out.
+            </p>
+            <div>
+              <label htmlFor="admin-reset-password" className="block text-stone-800 font-semibold mb-1">New password</label>
+              <input id="admin-reset-password" type="password" required minLength={12} maxLength={256} autoComplete="new-password" value={newPassword} onChange={(e) => setNewPassword(e.target.value)} className="w-full px-3.5 py-2.5 rounded-xl border border-stone-300 bg-white text-stone-900 focus:outline-none focus:ring-2 focus:ring-[#c5a059] text-xs" />
+            </div>
+            <div>
+              <label htmlFor="admin-reset-confirm" className="block text-stone-800 font-semibold mb-1">Confirm new password</label>
+              <input id="admin-reset-confirm" type="password" required minLength={12} maxLength={256} autoComplete="new-password" value={confirmPassword} onChange={(e) => setConfirmPassword(e.target.value)} className="w-full px-3.5 py-2.5 rounded-xl border border-stone-300 bg-white text-stone-900 focus:outline-none focus:ring-2 focus:ring-[#c5a059] text-xs" />
+            </div>
+            <button type="submit" disabled={busy} className="w-full bg-[#0f1c2e] hover:bg-stone-800 disabled:opacity-60 text-white font-bold py-3.5 rounded-xl shadow-lg flex items-center justify-center gap-2 text-xs mt-2">
+              <Check className="w-4 h-4 text-amber-300" />
+              <span>{busy ? 'Saving…' : 'Set New Password'}</span>
+            </button>
+          </form>
+        ) : forgot ? (
+          <form onSubmit={handleForgot} className="space-y-3.5 text-xs">
+            <p className="text-stone-600 leading-relaxed">
+              Type the admin email. If it matches, we email a link to choose a new password (it works once, for 30 minutes).
+            </p>
+            <div>
+              <label htmlFor="admin-forgot-email" className="block text-stone-800 font-semibold mb-1">Admin Email</label>
+              <input id="admin-forgot-email" type="email" required maxLength={254} autoComplete="username" value={email} onChange={(e) => setEmail(e.target.value)} className="w-full px-3.5 py-2.5 rounded-xl border border-stone-300 bg-white text-stone-900 focus:outline-none focus:ring-2 focus:ring-[#c5a059] text-xs" />
+            </div>
+            <button type="submit" disabled={busy} className="w-full bg-[#0f1c2e] hover:bg-stone-800 disabled:opacity-60 text-white font-bold py-3.5 rounded-xl shadow-lg flex items-center justify-center gap-2 text-xs mt-2">
+              <span>{busy ? 'Sending…' : 'Email Me a Reset Link'}</span>
+            </button>
+            <button type="button" onClick={() => { setForgot(false); setError(''); }} className="w-full text-stone-500 hover:text-stone-800 font-semibold py-1">
+              Back to sign-in
+            </button>
+          </form>
+        ) : mustChange ? (
           <form onSubmit={handleChangePassword} className="space-y-3.5 text-xs">
             <p className="text-stone-600 leading-relaxed">
               Choose your own admin password to finish signing in: at least 12 characters, with at least 5 different characters.
@@ -190,6 +273,9 @@ export const AdminLoginModal: React.FC<AdminLoginModalProps> = ({
           >
             <span>{busy ? 'Checking…' : 'Unlock Admin Portal'}</span>
             <ArrowRight className="w-4 h-4 text-amber-300" />
+          </button>
+          <button type="button" onClick={() => { setForgot(true); setError(''); setNotice(''); }} className="w-full text-stone-500 hover:text-stone-800 font-semibold py-1">
+            Forgot password?
           </button>
         </form>
         )}

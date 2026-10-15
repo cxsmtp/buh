@@ -1,4 +1,4 @@
-import type { CatalogSettings, StoreSettings, ThemeSettings } from '@/types';
+import type { CatalogSettings, EmailSettings, StoreSettings, ThemeSettings } from '@/types';
 import { ALL_BED_PROFILES_LIST } from './bedProfiles';
 
 /** Settings → Catalogue before the owner changes anything. */
@@ -34,4 +34,15 @@ export const DEFAULT_THEME_SETTINGS: ThemeSettings = {
   disabledFestivals: [],
   showBanner: true,
   showMarquee: true,
+};
+
+/** Settings → Email before the owner fills it in (then .env.production applies). */
+export const DEFAULT_EMAIL_SETTINGS: EmailSettings = {
+  smtpHost: '',
+  smtpPort: 587,
+  smtpSecurity: 'starttls',
+  smtpUser: '',
+  smtpPass: '',
+  fromAddress: '',
+  sendTo: '',
 };

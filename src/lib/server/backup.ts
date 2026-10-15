@@ -8,6 +8,7 @@ import { audit } from './audit';
 import { dataDir, dataFile, writePrivateFile } from './dataDir';
 import { backupTo, getDb } from './db';
 import { logEvent } from './log';
+import { emailConfigured, ownerEmail, sender, transport } from './mail';
 import { allOrders, listCustomers } from './orders';
 import { blankSecretsIn } from './settings';
 import { listProducts } from './products';
@@ -273,29 +274,7 @@ export function openBackup(payload: Buffer, passphrase = ''): TarEntry[] {
 
 // ── Email ───────────────────────────────────────────────────────────────────
 
-export function emailConfigured(): boolean {
-  return Boolean(process.env.SMTP_HOST && process.env.BACKUP_EMAIL);
-}
-
-export async function transport() {
-  const nodemailer = (await import('nodemailer')).default;
-  const port = Number(process.env.SMTP_PORT || 587);
-  return nodemailer.createTransport({
-    host: process.env.SMTP_HOST,
-    port,
-    secure: process.env.SMTP_SECURE ? process.env.SMTP_SECURE === 'true' : port === 465,
-    // Encrypt the connection (and so the SMTP password). SMTP_REQUIRE_TLS=false is for local testing only.
-    requireTLS: port !== 465 && process.env.SMTP_REQUIRE_TLS !== 'false',
-    auth: process.env.SMTP_USER ? { user: process.env.SMTP_USER, pass: process.env.SMTP_PASS || '' } : undefined,
-    tls: { rejectUnauthorized: process.env.SMTP_REJECT_UNAUTHORIZED !== 'false' },
-    connectionTimeout: 20_000,
-    socketTimeout: 60_000,
-  });
-}
-
-export function sender(): string {
-  return process.env.SMTP_FROM || process.env.SMTP_USER || 'backups@localhost';
-}
+export { emailConfigured, sender, transport } from './mail';
 
 async function emailBackup(result: BackupResult) {
   const name = path.basename(result.file);
@@ -319,7 +298,7 @@ async function emailBackup(result: BackupResult) {
 
   await (await transport()).sendMail({
     from: sender(),
-    to: process.env.BACKUP_EMAIL,
+    to: ownerEmail(),
     subject: `[Backup] Beautiful UAE Home — ${new Date().toISOString().slice(0, 16).replace('T', ' ')} UTC — ${result.summary}`,
     text: lines.join('\n'),
     attachments,
@@ -331,7 +310,7 @@ async function emailFailure(error: string) {
   try {
     await (await transport()).sendMail({
       from: sender(),
-      to: process.env.BACKUP_EMAIL,
+      to: ownerEmail(),
       subject: '[Backup FAILED] Beautiful UAE Home',
       text: `The scheduled backup failed at ${new Date().toUTCString()}:\n\n${error}\n\nOpen the Admin Hub and press "Back up now" once fixed.`,
     });
@@ -369,7 +348,7 @@ export function runBackup(reason: 'scheduled' | 'manual' | 'startup'): Promise<B
           patch.lastEmailError = err instanceof Error ? err.message : String(err);
         }
       } else {
-        patch.lastEmailError = 'Backup email is not set up (SMTP_HOST and BACKUP_EMAIL): the backup is only on this server.';
+        patch.lastEmailError = 'Backup email is not set up (Settings → Email, or SMTP_HOST and BACKUP_EMAIL): the backup is only on this server.';
       }
       writeBackupState(patch);
       audit('backup.taken', { reason, file: patch.lastFile, size: result.size, encrypted: result.encrypted, emailed: Boolean(patch.lastEmailedAt && !patch.lastEmailError), emailError: patch.lastEmailError });

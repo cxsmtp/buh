@@ -22,7 +22,9 @@
 
 - **Docker / PM2:** the first start prints a one-time password in the log (`docker compose logs app-blue` or `pm2 logs buhome-app`).
 - Sign in from **Admin Hub** with that email and password, then choose your own password: at least 12 characters, with at least 5 different characters.
-- Lost the password? Stop the app, delete `admin.json` from `DATA_DIR`, and start it again. A new one-time password is printed. You can also set `ADMIN_EMAIL` and `ADMIN_PASSWORD_HASH` (from `npm run hash-password`).
+- **Forgot password?** on the sign-in screen emails a link to the admin email (works once, for 30 minutes); every device is signed out when you choose the new password. It needs email set up (Settings → Email & admin account).
+- No email set up? On the server: `docker compose exec app-blue rm /data/admin.json`, then `docker compose restart app-blue app-green`, then read the new one-time password with `docker compose logs app-blue` (Podman: `podman exec beautifuluaehome rm /data/admin.json`, `podman restart beautifuluaehome`, `podman logs beautifuluaehome`). You can also set `ADMIN_EMAIL` and `ADMIN_PASSWORD_HASH` (from `npm run hash-password`).
+- **Settings → Email & admin account:** your mail server (SMTP), where backups and alerts go, **Send a test email**, and your sign-in email (current password needed).
 - 5 wrong passwords from one place pause sign-in there for 15 minutes; try again later or from another network. **Sign out** signs you out on every device.
 - The build version (BUH-xx.xx.xx) shows next to the hub's title.
 - **Updates** (with the updater turned on, see the deployment guide) install themselves without closing the shop or signing you out. If a new version does not start properly, the shop stays on the one before and an alert is written. A customer in the middle of checkout carries on: their bag, details and SMS code are kept.

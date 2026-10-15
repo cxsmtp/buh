@@ -1,8 +1,8 @@
 'use client';
 
 import React, { useState, useEffect, useMemo, useCallback, useRef } from 'react';
-import { Product, Order, Customer, CourierSettings, CartItem, BedProfileMeasurement, BrandSettings, SmsGatewaySettings, BankTransferDetails, CatalogSettings, StoreSettings, ThemeSettings, PhoneVerificationConfig } from '@/types';
-import { DEFAULT_CATALOG, DEFAULT_STORE, DEFAULT_THEME_SETTINGS } from '@/data/catalogDefaults';
+import { Product, Order, Customer, CourierSettings, CartItem, BedProfileMeasurement, BrandSettings, SmsGatewaySettings, BankTransferDetails, CatalogSettings, StoreSettings, ThemeSettings, EmailSettings, PhoneVerificationConfig } from '@/types';
+import { DEFAULT_CATALOG, DEFAULT_EMAIL_SETTINGS, DEFAULT_STORE, DEFAULT_THEME_SETTINGS } from '@/data/catalogDefaults';
 import { piecesLeft, refreshCart, ShopProvider, type FestivalView, type ShopInfo } from '@/lib/client/shop';
 import { captureLanding, decodeBag, type BagLine, type Landing } from '@/lib/client/landing';
 import { useLiveUpdates } from '@/lib/client/live';
@@ -20,6 +20,7 @@ interface AdminSettings {
   catalog: AdminSetting<CatalogSettings>;
   store: AdminSetting<StoreSettings>;
   theme: AdminSetting<ThemeSettings>;
+  email: AdminSetting<EmailSettings>;
 }
 
 type AdminTab = 'orders' | 'add-product' | 'inventory' | 'crm' | 'settings';
@@ -101,6 +102,7 @@ import { SettingsConsole } from '@/components/admin/settings/SettingsConsole';
 import { StoreSettingsCard } from '@/components/admin/settings/StoreSettingsCard';
 import { ThemeSettingsCard } from '@/components/admin/settings/ThemeSettingsCard';
 import { SettingsHistoryCard } from '@/components/admin/settings/SettingsHistoryCard';
+import { EmailSettingsCard } from '@/components/admin/settings/EmailSettingsCard';
 import { SystemHealthCard } from '@/components/admin/settings/SystemHealthCard';
 
 import { Sparkles, Palette, ShieldCheck, Heart, Search, X } from 'lucide-react';
@@ -118,6 +120,8 @@ export function ShopApp({ initialProductId }: { initialProductId?: string } = {}
   const [isAdminMode, setIsAdminMode] = useState(false);
   const [isAdminAuthenticated, setIsAdminAuthenticated] = useState(false);
   const [isAdminLoginOpen, setIsAdminLoginOpen] = useState(false);
+  // From a password-reset email link (?reset=…).
+  const [resetToken, setResetToken] = useState<string | null>(null);
 
   const [storeTab, setStoreTab] = useState<'home' | 'catalog'>('home');
   const [adminTab, setAdminTab] = useState<AdminTab>('orders');
@@ -155,6 +159,7 @@ export function ShopApp({ initialProductId }: { initialProductId?: string } = {}
     catalog: { value: DEFAULT_CATALOG, secretsSet: {} },
     store: { value: DEFAULT_STORE, secretsSet: {} },
     theme: { value: DEFAULT_THEME_SETTINGS, secretsSet: {} },
+    email: { value: DEFAULT_EMAIL_SETTINGS, secretsSet: {} },
   });
   const [adminLoadError, setAdminLoadError] = useState('');
   // Settings forms copy their values once; they are re-created when the server's values first arrive
@@ -216,6 +221,15 @@ export function ShopApp({ initialProductId }: { initialProductId?: string } = {}
   const loadCatalog = useCallback(async () => applyCatalog(await fetchCatalog()), [applyCatalog]);
 
   useEffect(() => {
+    // A password-reset link: take the token out of the address bar at once, then ask for the new password.
+    const reset = new URLSearchParams(window.location.search).get('reset');
+    if (reset) {
+      window.history.replaceState(null, '', window.location.pathname);
+      void Promise.resolve().then(() => {
+        setResetToken(reset);
+        setIsAdminLoginOpen(true);
+      });
+    }
     void fetchCatalog().then((result) => {
       const list = applyCatalog(result);
       if (!list) return;
@@ -276,7 +290,7 @@ export function ShopApp({ initialProductId }: { initialProductId?: string } = {}
     if (c.ok) setCustomers(c.data.customers);
     if (p.ok) setAdminProducts(p.data.products);
     if (st.ok) {
-      setAdminSettings({ courier: st.data.courier, sms: st.data.sms, catalog: st.data.catalog, store: st.data.store, theme: st.data.theme });
+      setAdminSettings({ courier: st.data.courier, sms: st.data.sms, catalog: st.data.catalog, store: st.data.store, theme: st.data.theme, email: st.data.email });
       setAdminSettingsLoaded(true);
     }
     setAdminLoadError(o.ok && c.ok && p.ok && st.ok ? '' : 'Some admin data could not be loaded. Check your connection and refresh.');
@@ -331,7 +345,7 @@ export function ShopApp({ initialProductId }: { initialProductId?: string } = {}
   }, [isAdminAuthenticated, isAdminMode, applyAdminData]);
 
   /** Save one settings group on the server; resolves to an error message or null. */
-  const saveSettings = async (key: 'brand' | 'bank' | 'courier' | 'sms' | 'catalog' | 'store' | 'theme', settings: unknown): Promise<string | null> => {
+  const saveSettings = async (key: 'brand' | 'bank' | 'courier' | 'sms' | 'catalog' | 'store' | 'theme' | 'email', settings: unknown): Promise<string | null> => {
     const { ok, data } = await sendJson<{ message?: string }>('PUT', `/api/admin/settings/${key}`, { settings });
     if (!ok) return data.message || 'Could not save. Please try again.';
     await Promise.all([loadAdminData(), key === 'brand' || key === 'bank' || key === 'catalog' || key === 'store' || key === 'theme' ? loadCatalog() : Promise.resolve(null)]);
@@ -610,6 +624,20 @@ export function ShopApp({ initialProductId }: { initialProductId?: string } = {}
                     ),
                   },
                   {
+                    id: 'email',
+                    label: 'Email & admin account',
+                    icon: '✉️',
+                    hint: 'The mail server for backups, alerts and password resets; your sign-in email.',
+                    content: (
+                      <EmailSettingsCard
+                        key={`email-${adminSettingsLoaded}-${settingsEpoch}`}
+                        value={adminSettings.email.value}
+                        passwordSaved={Boolean(adminSettings.email.secretsSet.smtpPass)}
+                        onSave={(v) => saveSettings('email', v)}
+                      />
+                    ),
+                  },
+                  {
                     id: 'system',
                     label: 'System & backups',
                     icon: '🛡️',
@@ -787,6 +815,8 @@ export function ShopApp({ initialProductId }: { initialProductId?: string } = {}
           setIsAdminAuthenticated(true);
           setIsAdminMode(true);
         }}
+        resetToken={resetToken}
+        onResetDone={() => setResetToken(null)}
       />
       {!isAdminMode && <WhatsAppButton />}
     </div>

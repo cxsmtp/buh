@@ -45,6 +45,7 @@ interface AdminAccount {
 }
 
 let cached: AdminAccount | null = null;
+let cachedMtime = 0;
 
 const ACCOUNT_FILE = () => dataFile('admin.json');
 const SESSION_STATE_FILE = () => dataFile('session-state.json');
@@ -58,9 +59,21 @@ function persist(account: AdminAccount) {
   cached = account;
   if (account.managedByEnv) return;
   writePrivateFile(ACCOUNT_FILE(), serialize(account));
+  cachedMtime = fs.statSync(ACCOUNT_FILE()).mtimeMs;
 }
 
 async function loadAccount(): Promise<AdminAccount> {
+  if (cached && !cached.managedByEnv) {
+    // Re-read when the file changed (a password reset or email change made by the other running copy).
+    let mtime = 0;
+    try {
+      mtime = fs.statSync(ACCOUNT_FILE()).mtimeMs;
+    } catch {
+      mtime = 0;
+    }
+    if (mtime === cachedMtime) return cached;
+    cached = null;
+  }
   if (cached) return cached;
 
   const envEmail = process.env.ADMIN_EMAIL?.trim().toLowerCase();
@@ -79,6 +92,7 @@ async function loadAccount(): Promise<AdminAccount> {
       mustChangePassword: stored.mustChangePassword === true,
       managedByEnv: false,
     };
+    cachedMtime = fs.statSync(file).mtimeMs;
     return cached;
   } catch (err) {
     if ((err as NodeJS.ErrnoException).code !== 'ENOENT') throw err;
@@ -315,9 +329,71 @@ export async function changePassword(currentPassword: string, newPassword: strin
   return createSessionToken(account);
 }
 
+/** The sign-in email, and whether it is set in the environment (then it can't be changed here). */
+export async function adminAccountInfo(): Promise<{ email: string; managedByEnv: boolean }> {
+  const a = await loadAccount();
+  return { email: a.email, managedByEnv: a.managedByEnv };
+}
+
+/** Change the sign-in email (current password required). Every session ends; the owner signs in again. */
+export async function changeAdminEmail(currentPassword: string, newEmail: string, options: { ip?: string | null } = {}) {
+  const account = await loadAccount();
+  if (account.managedByEnv) throw new HttpError(409, 'This admin account is set by ADMIN_EMAIL in .env.production. Change it there.');
+  const email = newEmail.trim().toLowerCase();
+  if (!/^[^\s@<>",]+@[^\s@<>",]+\.[^\s@<>",]+$/.test(email) || email.length > 254) throw new HttpError(400, 'Please check the email address.');
+  await signIn(account.email, currentPassword, options);
+  account.email = email;
+  persist(account);
+  endAllSessions();
+  return createSessionToken(account);
+}
+
+// ── Forgotten password: a one-time link by email ────────────────────────────
+
+const RESET_TTL_MS = 30 * 60 * 1000;
+const RESET_KEY = 'admin:password-reset';
+
+/**
+ * A reset link for the admin email (anything else gets nothing, and the caller
+ * answers the same either way, so the admin email can't be discovered). The
+ * token is random, kept only as a hash, single use, valid 30 minutes; a new
+ * request replaces the old one.
+ */
+export async function startPasswordReset(emailInput: string): Promise<string | null> {
+  const account = await loadAccount();
+  if (account.managedByEnv || emailInput.trim().toLowerCase() !== account.email) return null;
+  const token = crypto.randomBytes(32).toString('base64url');
+  const { kvSet } = await import('./kv');
+  kvSet(RESET_KEY, { hash: crypto.createHash('sha256').update(token).digest('base64url'), expires: Date.now() + RESET_TTL_MS, email: account.email });
+  return token;
+}
+
+/** Set a new password with a reset token. Every session ends. */
+export async function completePasswordReset(token: string, newPassword: string): Promise<void> {
+  const { kvGet, kvSet } = await import('./kv');
+  const account = await loadAccount();
+  // From here to kvSet(null) nothing awaits, so two requests can't both use one link.
+  const stored = kvGet<{ hash: string; expires: number; email: string } | null>(RESET_KEY)?.data;
+  const given = Buffer.from(crypto.createHash('sha256').update(String(token)).digest('base64url'));
+  const valid =
+    stored &&
+    Date.now() < stored.expires &&
+    given.length === Buffer.from(stored.hash).length &&
+    crypto.timingSafeEqual(given, Buffer.from(stored.hash));
+  if (!valid) throw new HttpError(400, 'This reset link has expired or was already used. Ask for a new one.');
+  if (account.managedByEnv || stored.email !== account.email) throw new HttpError(400, 'This reset link is no longer valid. Ask for a new one.');
+  kvSet(RESET_KEY, null); // single use
+  account.passwordHash = await hashPassword(newPassword);
+  account.mustChangePassword = false;
+  persist(account);
+  failStates.clear();
+  endAllSessions();
+}
+
 /** Test hook: forget cached account/secret/failures so a new DATA_DIR is picked up. */
 export function _resetAdminAuthState() {
   cached = null;
+  cachedMtime = 0;
   _resetServerSecret();
   failStates.clear();
 }

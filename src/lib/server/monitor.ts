@@ -1,6 +1,7 @@
 import fs from 'node:fs';
 import { audit } from './audit';
-import { backupHealth, emailConfigured, sender, transport } from './backup';
+import { backupHealth } from './backup';
+import { emailConfigured, ownerEmail, sender, transport } from './mail';
 import { dataDir } from './dataDir';
 import { getDb } from './db';
 import { kvGet, kvSet } from './kv';
@@ -73,7 +74,7 @@ export function currentProblems(now = Date.now()): Problem[] {
 async function sendOwner(subject: string, text: string): Promise<boolean> {
   if (!emailConfigured()) return false;
   try {
-    await (await transport()).sendMail({ from: sender(), to: process.env.BACKUP_EMAIL, subject: `[Beautiful UAE Home] ${subject}`, text });
+    await (await transport()).sendMail({ from: sender(), to: ownerEmail(), subject: `[Beautiful UAE Home] ${subject}`, text });
     return true;
   } catch (err) {
     logEvent('warn', 'owner_email_failed', { error: err instanceof Error ? err.message : String(err) });
