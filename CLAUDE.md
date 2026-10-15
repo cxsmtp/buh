@@ -34,3 +34,5 @@ Read AGENTS.md first: this is Next.js 16, check `node_modules/next/dist/docs/` b
 - **Docs to keep in step:** README.md (short), docs/user-guide.md, docs/security.md and
   HOSTINGER_DEPLOYMENT_GUIDE.md. Commands one line each.
 - **Defaults are the safe, focused choice; "everything" is opt-in.**
+- **The owner runs containers with Podman, not Docker.** Give `podman` commands in replies and docs (container
+  `beautifuluaehome`, run with `-p 443:3000`; update: `podman pull ghcr.io/cxsmtp/buh:latest`, then stop, rm, re-run).
