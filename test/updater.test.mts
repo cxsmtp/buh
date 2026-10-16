@@ -20,6 +20,11 @@ const LATEST = 'ghcr.io/cxsmtp/buh:latest';
 const UPD1 = 'sha256:upd1' + '1'.repeat(60);
 const UPD2 = 'sha256:upd2' + '2'.repeat(60);
 const UPDBROKEN = 'sha256:updbroken' + '3'.repeat(55);
+// The buh-proxy image ("proxy" ids: the fake's `nc -z` answers for them).
+const PROXY1 = 'sha256:proxy1' + '4'.repeat(58);
+const PROXY2 = 'sha256:proxy2' + '5'.repeat(58);
+const PROXYBROKEN = 'sha256:proxybroken' + '6'.repeat(53);
+const PROXY_REF = 'ghcr.io/cxsmtp/buh-proxy:latest';
 const UPDATER_REF = 'ghcr.io/cxsmtp/buh-updater:latest';
 const key = (ref: string) => ref.replace(/[/:@]/g, '_');
 
@@ -35,7 +40,7 @@ function setup() {
   for (const d of [env.fake, env.bin, env.state, env.project, path.join(env.fake, 'tags'), path.join(env.fake, 'registry')]) fs.mkdirSync(d, { recursive: true });
   fs.copyFileSync(path.join(root, 'test/fixtures/fake-docker.sh'), path.join(env.bin, 'docker'));
   fs.chmodSync(path.join(env.bin, 'docker'), 0o755);
-  fs.writeFileSync(path.join(env.fake, 'ids'), [OLD, NEW, NEWER, BROKEN, CRASH, UPD1, UPD2, UPDBROKEN].join('\n') + '\n');
+  fs.writeFileSync(path.join(env.fake, 'ids'), [OLD, NEW, NEWER, BROKEN, CRASH, UPD1, UPD2, UPDBROKEN, PROXY1, PROXY2, PROXYBROKEN].join('\n') + '\n');
   return env;
 }
 type Env = ReturnType<typeof setup>;
@@ -893,6 +898,73 @@ test('single: Settings → Versions requests ("rollback X.Y.Z", "update") switch
   }
 });
 
+test('regression: a private registry that refuses the download (login expired) is said plainly, once an hour, on Settings → Versions; nothing is marked bad', async () => {
+  const e = setup();
+  runningSingle(e);
+  publish(e, NEW);
+  fs.writeFileSync(path.join(e.fake, 'registry-denied'), 'ghcr.io\n');
+  // Scheduled checks: no switch, exit 3, one alert for two refusals, no image marked bad.
+  for (let i = 0; i < 2; i++) assert.equal(runSingle(e, ['once']).code, 3);
+  assert.equal(fileOf(e, SHOP, 'image'), OLD);
+  assert.ok(!events(e).some((l) => l.startsWith('run ')), events(e).join('\n'));
+  const loginAlerts = alerts(e).filter((a) => /registry login has expired or is missing: ghcr\.io refused to send ghcr\.io\/cxsmtp\/buh:latest/.test(a.message));
+  assert.equal(loginAlerts.length, 1, JSON.stringify(alerts(e)));
+  assert.equal(loginAlerts[0].level, 'error');
+  assert.match(loginAlerts[0].message, /podman login ghcr\.io/);
+  assert.equal(read(path.join(e.state, 'bad-images')), '');
+  // Settings → Versions: the status says so, and an "update" request says why it failed.
+  const control = path.join(path.dirname(e.state), 'control');
+  const pub = path.join(path.dirname(e.state), 'public');
+  fs.mkdirSync(control);
+  fs.mkdirSync(pub);
+  const child: ChildProcess = spawn('sh', [path.join(root, 'deploy/updater/updater.sh'), 'daemon'], {
+    env: {
+      PATH: `${e.bin}:${process.env.PATH}`,
+      NODE_ENV: 'test',
+      FAKE_DOCKER_DIR: e.fake,
+      UPDATER_MODE: 'single',
+      PROJECT_DIR: e.project,
+      STATE_DIR: e.state,
+      ALERT_DIR: e.alerts,
+      CONTROL_DIR: control,
+      PUBLIC_DIR: pub,
+      HEALTH_TIMEOUT: '4',
+      HEAL_CHECK_SECONDS: '1',
+      UPDATE_CHECK_MINUTES: '0',
+    },
+  });
+  let out = '';
+  child.stdout?.on('data', (d: Buffer) => (out += d));
+  const status = () => {
+    try {
+      return JSON.parse(fs.readFileSync(path.join(pub, 'status.json'), 'utf8'));
+    } catch {
+      return null;
+    }
+  };
+  const until = async (fn: () => boolean) => {
+    for (let i = 0; i < 100 && !fn(); i++) await new Promise((r) => setTimeout(r, 100));
+    assert.ok(fn(), out);
+  };
+  try {
+    await until(() => /^the registry login has expired or is missing: ghcr\.io refused/.test(status()?.registryProblem ?? ''));
+    fs.writeFileSync(path.join(control, 'request'), 'update\n');
+    await until(() => status()?.lastRequest.request === 'update' && status()?.lastRequest.result === 'failed');
+    assert.match(status().lastRequest.message, /registry login has expired or is missing/);
+    assert.equal(fileOf(e, SHOP, 'image'), OLD);
+    // Logged in again: the next request works and the note goes away.
+    fs.rmSync(path.join(e.fake, 'registry-denied'));
+    fs.writeFileSync(path.join(control, 'request'), 'update\n');
+    await until(() => status()?.lastRequest.result === 'ok' && status()?.registryProblem === '');
+    assert.equal(fileOf(e, SHOP, 'image'), NEW);
+  } finally {
+    const exited = new Promise((r) => child.on('exit', r));
+    child.kill('SIGTERM');
+    await exited;
+  }
+  assert.ok(!/ghp_|password/i.test(read(path.join(e.state, 'updater.log'))));
+});
+
 // ── `setup` and self-update, from the published buh-updater image (no code on the host) ──
 
 const SOCKET = '/run/user/1000/podman/podman.sock';
@@ -993,6 +1065,62 @@ test('setup refuses, changing nothing: what cannot be carried, a second shop on 
   }
 });
 
+test('private images: setup refuses without a login (nothing changed); with the mounted login it passes it on, and a new login is used without a restart', () => {
+  const e = setup();
+  publish(e, OLD);
+  ownersContainer(e);
+  tag(e, PROXY_REF, PROXY1);
+  fs.writeFileSync(path.join(e.fake, 'registry-denied'), 'ghcr.io\n');
+  const token = 'ghp_' + 'T'.repeat(36);
+  // The login folder as the container sees it (AUTH_MOUNT), and the CLI's own config folder.
+  const mount = path.join(path.dirname(e.state), 'registry-auth');
+  const cliConfig = path.join(path.dirname(e.state), 'docker-config');
+  fs.mkdirSync(mount);
+  const login = { AUTH_MOUNT: mount, DOCKER_CONFIG: cliConfig };
+  const proxy = ['--proxy', 'shop.example.com', '--email', 'owner@shop.example'];
+  const untouched = () => assert.deepEqual(events(e).filter((l) => !l.startsWith('pull-denied ')), [], 'nothing created, started or stopped');
+
+  // 1. A line without the login folder.
+  fs.rmSync(path.join(e.fake, 'events'), { force: true });
+  let r = runSetup(e, proxy, login);
+  assert.equal(r.code, 2, r.out);
+  assert.match(r.out, /ghcr\.io refused to send ghcr\.io\/cxsmtp\/buh:latest ghcr\.io\/cxsmtp\/buh-updater:latest ghcr\.io\/cxsmtp\/buh-proxy:latest: no valid login/);
+  assert.match(r.out, /did not pass Podman's login folder/);
+  assert.match(r.out, /Nothing was changed/);
+  assert.match(r.out, /podman login ghcr\.io -u YOUR-GITHUB-NAME --authfile \/root\/\.config\/containers\/auth\.json/);
+  assert.match(r.out, /read:packages/);
+  untouched();
+  // 2. The folder, but no login in it.
+  fs.writeFileSync(path.join(e.fake, 'setup-auth-mount'), '/root/.config/containers\n');
+  r = runSetup(e, proxy, login);
+  assert.equal(r.code, 2, r.out);
+  assert.match(r.out, /There is no auth\.json in \/root\/\.config\/containers/);
+  untouched();
+  // 3. Logged in: set up; the updater gets the folder read-only, and no token is shown.
+  fs.writeFileSync(path.join(mount, 'auth.json'), JSON.stringify({ auths: { 'ghcr.io': { auth: Buffer.from(`owner:${token}`).toString('base64') } } }));
+  r = runSetup(e, proxy, login);
+  assert.equal(r.code, 0, r.out);
+  assert.match(fileOf(e, UPDATER, 'args'), new RegExp(`-v /root/\\.config/containers:${mount}:ro`));
+  assert.ok(updaterEnv(e).includes('REGISTRY_AUTH_DIR=/root/.config/containers'));
+  assert.equal(fs.readlinkSync(path.join(cliConfig, 'config.json')), path.join(mount, 'auth.json'), 'a link, not a copy');
+  assert.ok(!r.out.includes(token) && !r.out.includes(Buffer.from(`owner:${token}`).toString('base64')));
+
+  // 4. The token expires: the scheduled check says so; a new `podman login` (a new file) is used at once.
+  publish(e, NEW);
+  const asIt = { ...login, AUTH_MOUNT: mount, IMAGE: LATEST };
+  fs.writeFileSync(path.join(mount, 'auth.json.new'), JSON.stringify({ auths: { 'ghcr.io': { auth: Buffer.from('owner:old').toString('base64'), fake: 'expired' } } }));
+  fs.renameSync(path.join(mount, 'auth.json.new'), path.join(mount, 'auth.json'));
+  assert.equal(asUpdater(e, UPDATER, ['once'], asIt).code, 3);
+  assert.match(read(path.join(STATE_VOL(e), 'alerts', 'alerts.log')), /registry login has expired or is missing: ghcr\.io refused/);
+  fs.writeFileSync(path.join(mount, 'auth.json.new'), JSON.stringify({ auths: { 'ghcr.io': { auth: Buffer.from(`owner:${token}`).toString('base64') } } }));
+  fs.renameSync(path.join(mount, 'auth.json.new'), path.join(mount, 'auth.json'));
+  assert.equal(asUpdater(e, UPDATER, ['once'], asIt).code, 0);
+  assert.equal(fileOf(e, SHOP, 'image'), NEW);
+  assert.ok(!fs.existsSync(path.join(STATE_VOL(e), 'registry-login')), 'the note is gone');
+  const logText = read(path.join(STATE_VOL(e), 'updater.log'));
+  assert.ok(!logText.includes(token) && !logText.includes('owner:'), 'no credential in the log');
+});
+
 /** The running updater (as SHOP-updater, from UPD1), set up by `setup`. */
 function setUp(e: Env) {
   tag(e, LATEST, OLD);
@@ -1040,7 +1168,7 @@ test('self-update: a broken updater image is removed, the running updater stays,
   fs.writeFileSync(path.join(e.fake, 'registry', key(UPDATER_REF)), UPDBROKEN + '\n');
   const r = asUpdater(e, UPDATER, ['self-update']);
   assert.equal(r.code, 0, r.out);
-  assert.deepEqual(events(e), [`pull ${UPDATER_REF}`, `run ${UPDATER}-new ${UPDBROKEN}`, `rm ${UPDATER}-new`]);
+  assert.deepEqual(events(e), [`pull ${UPDATER_REF}`, `run ${UPDATER}-new ${UPDBROKEN}`, `kill ${UPDATER}-new`, `rm ${UPDATER}-new`]);
   assert.equal(fileOf(e, UPDATER, 'image'), UPD1, 'the running updater is unchanged');
   assert.equal(exists(e, `${UPDATER}-new`), false);
   assert.match(read(path.join(STATE_VOL(e), 'alerts', 'alerts.log')), /not used \(it could not reach the engine/);
@@ -1072,4 +1200,399 @@ test('regression: the request and status folders are taken back when the engine 
   assert.equal(fs.statSync(pub).uid, 0);
   assert.equal(fs.statSync(pub).mode & 0o7777, 0o755);
   assert.match(r.out, /it is the updater's again/);
+});
+
+test('self-update: a new updater that never completes a round is removed, and the one before takes the name back', () => {
+  const e = setup();
+  setUp(e);
+  fs.writeFileSync(path.join(e.fake, 'registry', key(UPDATER_REF)), UPD2 + '\n');
+  // The handover: UPD2 takes the name; the one before waits (HANDOVER_SECONDS=0: no time).
+  assert.equal(asUpdater(e, UPDATER, ['self-update'], { HANDOVER_SECONDS: '0' }).code, 0);
+  assert.equal(fileOf(e, UPDATER, 'image'), UPD2);
+  assert.equal(statusOf(e, `${UPDATER}-old`), 'running', 'the one before is kept, not stopped');
+  assert.ok(fs.existsSync(path.join(STATE_VOL(e), 'handover')));
+  // The new one fails in its working path (it never confirms); the one before notices.
+  fs.rmSync(path.join(e.fake, 'events'));
+  const r = asUpdater(e, `${UPDATER}-old`, ['self-update']);
+  assert.equal(r.code, 0, r.out);
+  assert.deepEqual(events(e), [`kill ${UPDATER}`, `rm ${UPDATER}`, `rename ${UPDATER}-old ${UPDATER}`]);
+  assert.equal(fileOf(e, UPDATER, 'image'), UPD1, 'the one before has the name again');
+  assert.equal(exists(e, `${UPDATER}-old`), false);
+  assert.match(read(path.join(STATE_VOL(e), 'bad-updater-images')), /upd2/);
+  assert.match(read(path.join(STATE_VOL(e), 'alerts', 'alerts.log')), /did not complete a round/);
+  // Not tried again.
+  fs.rmSync(path.join(e.fake, 'events'));
+  asUpdater(e, UPDATER, ['self-update']);
+  assert.ok(!events(e).some((l) => l.startsWith('run ')), events(e).join('\n'));
+});
+
+test('self-update: once the new updater has done a round, the one before is removed and no longer takes over', () => {
+  const e = setup();
+  setUp(e);
+  fs.writeFileSync(path.join(e.fake, 'registry', key(UPDATER_REF)), UPD2 + '\n');
+  assert.equal(asUpdater(e, UPDATER, ['self-update'], { HANDOVER_SECONDS: '0' }).code, 0);
+  // The one before, before the deadline: nothing.
+  fs.writeFileSync(path.join(STATE_VOL(e), 'handover'), `${UPD2} ${Math.floor(Date.now() / 1000) + 600}\n`);
+  fs.rmSync(path.join(e.fake, 'events'));
+  asUpdater(e, `${UPDATER}-old`, ['self-update']);
+  assert.deepEqual(events(e), []);
+  // The new one does its round: confirmed, the one before removed.
+  asUpdater(e, UPDATER, ['self-update']);
+  assert.deepEqual(events(e).slice(0, 2), [`stop ${UPDATER}-old`, `rm ${UPDATER}-old`]);
+  assert.equal(fs.existsSync(path.join(STATE_VOL(e), 'handover')), false);
+});
+
+/** Set up with the HTTPS proxy, the shop the owner started on 127.0.0.1:3000. */
+function setUpProxy(e: Env, extra: Record<string, string> = {}, args: string[] = []) {
+  tag(e, PROXY_REF, PROXY1);
+  return runSetup(e, ['--proxy', 'shop.example.com', '--email', 'owner@shop.example', ...args], { PROXY_SETTLE_SECONDS: '0', ...extra });
+}
+
+test('setup --proxy: a new shop gets TRUST_PROXY=1 and its https address; the proxy is started once, not again on a re-run', () => {
+  const e = setup();
+  publish(e, OLD);
+  tag(e, LATEST, OLD);
+  const r = setUpProxy(e);
+  assert.equal(r.code, 0, r.out);
+  assert.equal(fileOf(e, SHOP, 'bindings'), '3000/tcp|127.0.0.1|3000', 'a new shop behind the proxy: this server only');
+  const env = envOf(e, SHOP);
+  assert.ok(env.includes('TRUST_PROXY=1') && env.includes('NEXT_PUBLIC_APP_URL=https://shop.example.com'), env.join('\n'));
+  assert.ok(events(e).includes(`create ${SHOP}-proxy ${PROXY1}`));
+  const penv = envOf(e, `${SHOP}-proxy`);
+  for (const kv of ['DOMAIN=shop.example.com', 'UPSTREAM=127.0.0.1:3000', 'ACME_EMAIL=owner@shop.example']) assert.ok(penv.includes(kv), kv);
+  assert.match(fileOf(e, `${SHOP}-proxy`, 'args'), /--network host .*--cap-drop ALL --cap-add NET_BIND_SERVICE --security-opt no-new-privileges:true/);
+  assert.doesNotMatch(r.out, /Please check/);
+  // Again: the proxy already runs this image with these settings, so HTTPS is not interrupted.
+  fs.rmSync(path.join(e.fake, 'events'));
+  const again = setUpProxy(e);
+  assert.equal(again.code, 0, again.out);
+  assert.match(again.out, /already runs with these settings/);
+  assert.ok(!events(e).some((l) => l.includes(`${SHOP}-proxy`)), events(e).join('\n'));
+});
+
+test("setup --proxy on the owner's shop without TRUST_PROXY and with another address: kept as they are, and pointed out", () => {
+  const e = setup();
+  tag(e, LATEST, OLD);
+  ownersContainer(e, SHOP, { bindings: ['3000/tcp|127.0.0.1|3000'], env: ['NEXT_PUBLIC_APP_URL=https://old.example'] });
+  const envFile = path.join(e.fake, 'c', SHOP, 'env');
+  fs.writeFileSync(envFile, read(envFile).replace('TRUST_PROXY=1\n', ''));
+  const r = setUpProxy(e);
+  assert.equal(r.code, 0, r.out);
+  assert.match(r.out, /does not have TRUST_PROXY=1[\s\S]*--env "TRUST_PROXY=1"/);
+  assert.match(r.out, /NEXT_PUBLIC_APP_URL=https:\/\/old\.example, but the proxy serves https:\/\/shop\.example\.com/);
+  assert.ok(!envOf(e, SHOP).includes('TRUST_PROXY=1'), 'not added without being asked');
+  // Asked: added (and no more warnings).
+  const fixed = setUpProxy(e, {}, ['--env', 'TRUST_PROXY=1 NEXT_PUBLIC_APP_URL=https://shop.example.com']);
+  assert.equal(fixed.code, 0, fixed.out);
+  assert.ok(envOf(e, SHOP).includes('TRUST_PROXY=1'));
+  assert.doesNotMatch(fixed.out, /Please check/);
+});
+
+test('setup --proxy: when the proxy cannot start, the shop is still set up and the updater runs; it is not marked bad', () => {
+  const e = setup();
+  tag(e, LATEST, OLD);
+  ownersContainer(e, SHOP, { bindings: ['3000/tcp|127.0.0.1|3000'] });
+  fs.writeFileSync(path.join(e.fake, 'proxy-fails'), '');
+  const r = setUpProxy(e);
+  assert.equal(r.code, 1, r.out);
+  assert.match(r.out, /The shop was set up and the updater runs/);
+  assert.equal(statusOf(e, UPDATER), 'running');
+  assert.equal(exists(e, `${SHOP}-proxy`), false);
+  assert.equal(read(path.join(STATE_VOL(e), 'bad-proxy-images')), '', 'ports taken is not the image');
+  // The updater tries again; once the ports are free, the proxy runs. Alerts are limited.
+  fs.rmSync(path.join(e.fake, 'events'));
+  const env = { PROXY_IMAGE: PROXY_REF, PROXY_DOMAIN: 'shop.example.com', PROXY_EMAIL: 'owner@shop.example', PROXY_UPSTREAM: '127.0.0.1:3000', PROXY_SETTLE_SECONDS: '0' };
+  asUpdater(e, UPDATER, ['self-update'], env);
+  asUpdater(e, UPDATER, ['self-update'], env);
+  assert.equal(read(path.join(STATE_VOL(e), 'alerts', 'alerts.log')).match(/did not come up \(are ports 80 and 443 free/g)?.length, 1, 'two rounds, one alert');
+  fs.rmSync(path.join(e.fake, 'proxy-fails'));
+  asUpdater(e, UPDATER, ['self-update'], env);
+  assert.equal(statusOf(e, `${SHOP}-proxy`), 'running');
+});
+
+test('the proxy: an update that fails is undone and remembered; a missing proxy is never restarted from a bad image', () => {
+  const e = setup();
+  tag(e, LATEST, OLD);
+  ownersContainer(e, SHOP, { bindings: ['3000/tcp|127.0.0.1|3000'] });
+  assert.equal(setUpProxy(e).code, 0);
+  const env = { PROXY_IMAGE: PROXY_REF, PROXY_DOMAIN: 'shop.example.com', PROXY_EMAIL: 'owner@shop.example', PROXY_UPSTREAM: '127.0.0.1:3000', PROXY_SETTLE_SECONDS: '0' };
+  // An update to a broken proxy image: the previous one is back.
+  fs.writeFileSync(path.join(e.fake, 'registry', key(PROXY_REF)), PROXYBROKEN + '\n');
+  fs.rmSync(path.join(e.fake, 'events'));
+  const d = asUpdater(e, UPDATER, ['update-proxy'], env);
+  assert.equal(d.code, 0, d.out);
+  assert.equal(fileOf(e, `${SHOP}-proxy`, 'image'), PROXY1, 'the one before is back');
+  assert.match(read(path.join(STATE_VOL(e), 'bad-proxy-images')), /proxybroken/);
+  // It disappears: started again from the last image that worked, not the bad one.
+  fs.rmSync(path.join(e.fake, 'c', `${SHOP}-proxy`), { recursive: true });
+  fs.rmSync(path.join(e.fake, 'events'));
+  asUpdater(e, UPDATER, ['self-update'], env);
+  assert.ok(events(e).includes(`create ${SHOP}-proxy ${PROXY1}`), events(e).join('\n'));
+  // With no image that worked left, it waits and says so, once an hour.
+  fs.rmSync(path.join(e.fake, 'c', `${SHOP}-proxy`), { recursive: true });
+  fs.rmSync(path.join(STATE_VOL(e), 'proxy-last-good'));
+  fs.rmSync(path.join(e.fake, 'events'));
+  asUpdater(e, UPDATER, ['self-update'], env);
+  asUpdater(e, UPDATER, ['self-update'], env);
+  assert.ok(!events(e).some((l) => l.startsWith(`create ${SHOP}-proxy`)), events(e).join('\n'));
+  assert.equal(read(path.join(STATE_VOL(e), 'alerts', 'alerts.log')).match(/failed before; waiting for a newer one/g)?.length, 1);
+});
+
+test('the proxy: the same image is left running; a new one is created before the old one stops (the shortest pause)', () => {
+  const e = setup();
+  tag(e, LATEST, OLD);
+  ownersContainer(e, SHOP, { bindings: ['3000/tcp|127.0.0.1|3000'] });
+  assert.equal(setUpProxy(e).code, 0);
+  const env = { PROXY_IMAGE: PROXY_REF, PROXY_DOMAIN: 'shop.example.com', PROXY_EMAIL: 'owner@shop.example', PROXY_UPSTREAM: '127.0.0.1:3000', PROXY_SETTLE_SECONDS: '0' };
+  // A release whose proxy image did not change (reproducible build: the same ID): untouched.
+  fs.rmSync(path.join(e.fake, 'events'));
+  assert.equal(asUpdater(e, UPDATER, ['update-proxy'], env).code, 0);
+  assert.ok(!events(e).some((l) => l.includes(`${SHOP}-proxy`)), events(e).join('\n'));
+  // A changed one: the old proxy serves until the new container exists, then stop, start.
+  fs.writeFileSync(path.join(e.fake, 'registry', key(PROXY_REF)), PROXY2 + '\n');
+  fs.rmSync(path.join(e.fake, 'events'), { force: true });
+  assert.equal(asUpdater(e, UPDATER, ['update-proxy'], env).code, 0);
+  assert.deepEqual(events(e).filter((l) => l.includes(`${SHOP}-proxy`)), [
+    `rename ${SHOP}-proxy ${SHOP}-proxy-previous`,
+    `create ${SHOP}-proxy ${PROXY2}`,
+    `stop ${SHOP}-proxy-previous`,
+    `start ${SHOP}-proxy`,
+  ]);
+  assert.equal(fileOf(e, `${SHOP}-proxy`, 'image'), PROXY2);
+});
+
+test('regression: the folder marker is never written through a link the shop planted', { skip: process.getuid?.() !== 0 && 'needs root to chown' }, () => {
+  const e = setup();
+  runningSingle(e);
+  const control = path.join(path.dirname(e.state), 'control');
+  const pub = path.join(path.dirname(e.state), 'public');
+  fs.mkdirSync(control);
+  fs.mkdirSync(pub);
+  const target = path.join(path.dirname(e.state), 'precious');
+  fs.writeFileSync(target, 'keep\n');
+  fs.symlinkSync(target, path.join(control, '.updater-folder'));
+  fs.chownSync(control, 1001, 1001);
+  assert.equal(runSingle(e, ['heal'], { CONTROL_DIR: control, PUBLIC_DIR: pub }).code, 0);
+  assert.equal(fs.readFileSync(target, 'utf8'), 'keep\n');
+  assert.equal(fs.statSync(control).uid, 0);
+  assert.ok(fs.lstatSync(path.join(pub, '.updater-folder')).isFile(), 'made where there was none');
+  assert.deepEqual(fs.readdirSync(pub).filter((f) => f.startsWith('.updater-folder.')), [], 'no temporary file left');
+});
+
+// ── "Install new versions automatically" (Settings → Versions: "auto on" / "auto off") ──
+
+/** The updater's daemon as SHOP-updater (set up by `setup`), with its status and request folders. */
+function daemonAs(e: Env, extra: Record<string, string> = {}) {
+  const control = path.join(e.fake, 'volumes', `${SHOP}-updater-control`);
+  const pub = path.join(e.fake, 'volumes', `${SHOP}-updater-status`);
+  fs.mkdirSync(control, { recursive: true });
+  fs.mkdirSync(pub, { recursive: true });
+  const child: ChildProcess = spawn('sh', [path.join(root, 'deploy/updater/updater.sh'), 'daemon'], {
+    env: {
+      PATH: `${e.bin}:${process.env.PATH}`,
+      NODE_ENV: 'test',
+      FAKE_DOCKER_DIR: e.fake,
+      UPDATER_MODE: 'single',
+      UPDATER_CONTAINER: UPDATER,
+      UPDATER_IMAGE: UPDATER_REF,
+      SOCK: SOCKET,
+      PROJECT_DIR: e.project,
+      STATE_DIR: STATE_VOL(e),
+      ALERT_DIR: path.join(STATE_VOL(e), 'alerts'),
+      CONTROL_DIR: control,
+      PUBLIC_DIR: pub,
+      HEALTH_TIMEOUT: '4',
+      HEAL_CHECK_SECONDS: '1',
+      SELF_CHECK_SECONDS: '0',
+      UPDATE_CHECK_MINUTES: '0',
+      ...extra,
+    },
+  });
+  let out = '';
+  child.stdout?.on('data', (d: Buffer) => (out += d));
+  child.stderr?.on('data', (d: Buffer) => (out += d));
+  const status = () => {
+    try {
+      return JSON.parse(fs.readFileSync(path.join(pub, 'status.json'), 'utf8'));
+    } catch {
+      return null;
+    }
+  };
+  const until = async (fn: () => boolean, what: string) => {
+    for (let i = 0; i < 150 && !fn(); i++) await new Promise((r) => setTimeout(r, 100));
+    assert.ok(fn(), `${what}\n${out}`);
+  };
+  const ask = (line: string) => fs.writeFileSync(path.join(control, 'request'), `${line}\n`);
+  const stop = async () => {
+    const exited = new Promise((r) => child.on('exit', r));
+    child.kill('SIGTERM');
+    await exited;
+  };
+  return { status, until, ask, stop };
+}
+
+test('auto off: no scheduled check or install (shop, proxy, updater); "update" from the page still works; the setting survives a restart and a self-update', async () => {
+  const e = setup();
+  setUp(e);
+  fs.mkdirSync(path.join(e.fake, 'versions'), { recursive: true });
+  fs.writeFileSync(path.join(e.fake, 'versions', OLD), '2.0.0\n');
+  fs.writeFileSync(path.join(e.fake, 'versions', NEW), '2.1.0\n');
+  // 1. Switched off from the page.
+  let d = daemonAs(e);
+  try {
+    await d.until(() => d.status()?.auto === true, 'on by default');
+    d.ask('auto off');
+    await d.until(() => d.status()?.auto === false && d.status()?.lastRequest.request === 'auto off' && d.status()?.lastRequest.result === 'ok', 'auto off confirmed');
+  } finally {
+    await d.stop();
+  }
+  // 2. A new shop version and a new updater are out; checks are due at once (every minute), but off means off.
+  publish(e, NEW);
+  fs.writeFileSync(path.join(e.fake, 'registry', key(UPDATER_REF)), UPD2 + '\n');
+  fs.rmSync(path.join(e.fake, 'events'), { force: true });
+  d = daemonAs(e, { UPDATE_CHECK_MINUTES: '1' });
+  try {
+    await d.until(() => d.status()?.auto === false, 'still off after a restart');
+    await new Promise((r) => setTimeout(r, 3000));
+    assert.ok(!events(e).some((l) => l.startsWith('pull ') || l.startsWith('run ')), events(e).join('\n'));
+    assert.equal(fileOf(e, SHOP, 'image'), OLD);
+    assert.equal(fileOf(e, UPDATER, 'image'), UPD1);
+    // 3. Asked for on the page: it works.
+    d.ask('update');
+    await d.until(() => d.status()?.lastRequest.request === 'update' && d.status()?.lastRequest.result === 'ok', 'manual update');
+    assert.equal(fileOf(e, SHOP, 'image'), NEW);
+    assert.match(d.status().lastCheck.result, /^installed 2\.1\.0$/);
+    assert.ok(Date.parse(d.status().lastCheck.at) > 0);
+    assert.equal(fileOf(e, UPDATER, 'image'), UPD1, 'the updater did not update itself');
+  } finally {
+    await d.stop();
+  }
+  // 4. A self-update asked for by hand: the new updater keeps the setting (it is in the volume).
+  assert.equal(asUpdater(e, UPDATER, ['self-update']).code, 0);
+  assert.equal(fileOf(e, UPDATER, 'image'), UPD2);
+  d = daemonAs(e);
+  try {
+    await d.until(() => d.status()?.auto === false, 'still off after the self-update');
+    d.ask('auto on');
+    await d.until(() => d.status()?.auto === true && d.status()?.lastRequest.request === 'auto on', 'on again');
+    // Anything else is refused, and the setting is not touched.
+    d.ask('auto maybe');
+    await d.until(() => d.status()?.lastRequest.result === 'refused', 'unknown line refused');
+    assert.equal(d.status().auto, true);
+  } finally {
+    await d.stop();
+  }
+});
+
+// ── Versions installed here: history, digests first recorded (trust on first use), rollbacks by digest ──
+
+const D_OLD = 'sha256:' + '1'.repeat(64);
+const D_NEW = 'sha256:' + '2'.repeat(64);
+const D_MOVED = 'sha256:' + '3'.repeat(64);
+const REPO = 'ghcr.io/cxsmtp/buh';
+const history = (e: Env) => read(path.join(e.state, 'install-history')).trim().split('\n').filter(Boolean).map((l) => l.split(' '));
+
+test('every install is recorded (version, digest, when, why) and the shop runs by digest; the same version under another digest is refused', () => {
+  const e = setup();
+  runningSingle(e);
+  fs.mkdirSync(path.join(e.fake, 'versions'), { recursive: true });
+  fs.writeFileSync(path.join(e.fake, 'versions', OLD), '2.0.0\n');
+  fs.writeFileSync(path.join(e.fake, 'versions', NEW), '2.1.0\n');
+  fs.writeFileSync(path.join(e.fake, 'versions', NEWER), '2.1.0\n'); // other contents, same number
+  fs.mkdirSync(path.join(e.fake, 'registry-digest'), { recursive: true });
+  // 2.1.0 is published (scheduled check): installed, recorded, started as repo@digest.
+  publish(e, NEW);
+  fs.writeFileSync(path.join(e.fake, 'registry-digest', key(LATEST)), D_NEW + '\n');
+  assert.equal(runSingle(e, ['once']).code, 0);
+  assert.equal(fileOf(e, SHOP, 'image'), NEW);
+  assert.match(fileOf(e, SHOP, 'args'), new RegExp(`--pids-limit 512 ${REPO}@${D_NEW}$`), 'started by digest');
+  assert.equal(read(path.join(e.state, 'version-digests')), `2.1.0 ${D_NEW}\n`);
+  const [at, version, digest, why] = history(e).at(-1)!;
+  assert.ok(Date.parse(at) > 0);
+  assert.deepEqual([version, digest, why], ['2.1.0', D_NEW, 'scheduled']);
+  // Asked for by hand: "manual".
+  publish(e, NEW);
+  assert.equal(runSingle(e, ['update-now']).code, 0, 'up to date: nothing installed');
+  assert.equal(history(e).length, 2, 'set-up + 2.1.0');
+  // 2.1.0 again, but other contents under another digest (a moved tag): refused, critical, the shop untouched.
+  publish(e, NEWER);
+  fs.writeFileSync(path.join(e.fake, 'registry-digest', key(LATEST)), D_MOVED + '\n');
+  fs.rmSync(path.join(e.fake, 'events'), { force: true });
+  assert.equal(runSingle(e, ['once']).code, 2);
+  assert.equal(fileOf(e, SHOP, 'image'), NEW);
+  assert.ok(!events(e).some((l) => l.startsWith('run ')), events(e).join('\n'));
+  const critical = alerts(e).filter((a) => a.level === 'critical');
+  assert.equal(critical.length, 1);
+  assert.match(critical[0].message, /version 2\.1\.0 is published under another digest than the one it first came with here \(first 222222222222, now 333333333333\), so it is not installed/);
+  assert.match(read(path.join(e.state, 'integrity-problem')), /2\.1\.0/);
+  assert.equal(read(path.join(e.state, 'version-digests')), `2.1.0 ${D_NEW}\n`, 'the first record stays');
+  assert.equal(read(path.join(e.state, 'bad-images')), '', 'not a broken image: a refused one');
+  // Again: refused again, without a second alert within the hour.
+  assert.equal(runSingle(e, ['once']).code, 2);
+  assert.equal(alerts(e).filter((a) => a.level === 'critical').length, 1);
+});
+
+test('a rollback to a recorded version starts it by the digest it first came with, even if its tag has moved since', () => {
+  const e = setup();
+  runningSingle(e);
+  fs.mkdirSync(path.join(e.fake, 'versions'), { recursive: true });
+  fs.writeFileSync(path.join(e.fake, 'versions', OLD), '2.0.0\n');
+  fs.writeFileSync(path.join(e.fake, 'versions', NEW), '2.1.0\n');
+  fs.writeFileSync(path.join(e.fake, 'versions', NEWER), '2.0.0\n');
+  fs.mkdirSync(path.join(e.fake, 'registry-digest'), { recursive: true });
+  // 2.0.0 first came as D_OLD (its pull recorded it), then 2.1.0 was installed.
+  fs.writeFileSync(path.join(e.fake, 'registry', key(`${REPO}:2.0.0`)), OLD + '\n');
+  fs.writeFileSync(path.join(e.fake, 'registry-digest', key(`${REPO}:2.0.0`)), D_OLD + '\n');
+  fs.writeFileSync(path.join(e.fake, 'registry', key(`${REPO}@${D_OLD}`)), OLD + '\n');
+  // (the digest is recorded the first time the version is checked: the rollback below)
+  publish(e, NEW);
+  fs.writeFileSync(path.join(e.fake, 'registry-digest', key(LATEST)), D_NEW + '\n');
+  assert.equal(runSingle(e, ['once']).code, 0);
+  assert.equal(runSingle(e, ['rollback', `${REPO}:2.0.0`]).code, 0);
+  assert.equal(fileOf(e, SHOP, 'image'), OLD);
+  assert.equal(history(e).at(-1)![1], '2.0.0');
+  assert.equal(history(e).at(-1)![3], 'rollback');
+  assert.match(read(path.join(e.state, 'version-digests')), new RegExp(`^2\\.0\\.0 ${D_OLD}$`, 'm'));
+  // Back to 2.1.0 (by its digest too), then the 2.0.0 tag is moved to other contents: the rollback still runs D_OLD.
+  assert.equal(runSingle(e, ['rollback', `${REPO}:2.1.0`]).code, 0);
+  assert.equal(fileOf(e, SHOP, 'image'), NEW);
+  fs.rmSync(path.join(e.fake, 'tags', key(`${REPO}:2.0.0`)));
+  fs.writeFileSync(path.join(e.fake, 'registry', key(`${REPO}:2.0.0`)), NEWER + '\n');
+  fs.writeFileSync(path.join(e.fake, 'registry-digest', key(`${REPO}:2.0.0`)), D_MOVED + '\n');
+  fs.rmSync(path.join(e.fake, 'events'), { force: true });
+  assert.equal(runSingle(e, ['rollback', `${REPO}:2.0.0`]).code, 0);
+  assert.equal(fileOf(e, SHOP, 'image'), OLD, 'the recorded contents, not the moved tag');
+  assert.match(fileOf(e, SHOP, 'args'), new RegExp(`${REPO}@${D_OLD}$`));
+  assert.ok(!events(e).includes(`pull ${REPO}:2.0.0`), 'the moved tag is never fetched');
+});
+
+test('regression: an image built on this computer (no registry in its name) is never refused for its digest (Docker gives every local image one)', () => {
+  const e = setup();
+  runningSingle(e);
+  fs.mkdirSync(path.join(e.fake, 'versions'), { recursive: true });
+  fs.mkdirSync(path.join(e.fake, 'digests'), { recursive: true });
+  for (const [id, d] of [[NEW, '4'], [NEWER, '5']]) {
+    fs.writeFileSync(path.join(e.fake, 'versions', id), '2.1.0\n');
+    fs.writeFileSync(path.join(e.fake, 'digests', id.slice(7)), `buh@sha256:${d.repeat(64)}\n`);
+  }
+  tag(e, 'buh:ci', NEW);
+  assert.equal(runSingle(e, ['once'], { IMAGE: 'buh:ci' }).code, 0);
+  assert.equal(fileOf(e, SHOP, 'image'), NEW);
+  tag(e, 'buh:ci', NEWER);
+  assert.equal(runSingle(e, ['once'], { IMAGE: 'buh:ci' }).code, 0);
+  assert.equal(fileOf(e, SHOP, 'image'), NEWER, 'not refused');
+  assert.equal(read(path.join(e.state, 'version-digests')), '');
+  assert.ok(!alerts(e).some((a) => a.level === 'critical'));
+});
+
+test("regression: Podman's full names for local images (docker.io/library/…, localhost/…) are not registries to log in to", () => {
+  const e = setup();
+  publish(e, OLD);
+  ownersContainer(e);
+  // Docker Hub and localhost would refuse (nothing published there), as a missing login reads.
+  fs.writeFileSync(path.join(e.fake, 'registry-denied'), 'docker.io\nlocalhost\n');
+  tag(e, 'docker.io/library/buh-updater:vps-latest', UPD1);
+  const r = runSetup(e, [], { UPDATER_IMAGE: 'docker.io/library/buh-updater:vps-latest', IMAGE: 'localhost/buh:ci' });
+  assert.equal(r.code, 0, r.out);
+  assert.doesNotMatch(r.out, /refused to send/);
 });

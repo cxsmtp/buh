@@ -22,10 +22,18 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
 
       - name: Shellcheck the updater and the CI tests
-        run: shellcheck --shell=sh deploy/updater/updater.sh deploy/updater/bin/* test/fixtures/fake-docker.sh && shellcheck deploy/ci/zero-downtime-test.sh deploy/ci/single-container-test.sh deploy/ci/setup-proxy-test.sh
+        # A pinned ShellCheck (the runner's apt one is older and changes with the runner image).
+        # The same check locally: docker run --rm -v "$PWD:/mnt:ro" -w /mnt <this image> <files>
+        env:
+          SHELLCHECK: koalaman/shellcheck:v0.11.0@sha256:61862eba1fcf09a484ebcc6feea46f1782532571a34ed51fedf90dd25f925a8d
+        run: |
+          sc() { docker run --rm -v "$PWD:/mnt:ro" -w /mnt "$SHELLCHECK" "$@"; }
+          sc --version
+          sc --shell=sh deploy/updater/updater.sh deploy/updater/bin/* test/fixtures/fake-docker.sh
+          sc deploy/ci/*.sh
 
       - name: Compose file is valid (production, and with the CI override)
         run: |
@@ -34,16 +42,18 @@ jobs:
           docker compose -f docker-compose.yml -f deploy/ci/compose.ci.yml config --quiet
 
       - name: Caddy accepts the three Caddyfiles (Compose, CI, the buh-proxy image)
+        env:
+          CADDY: caddy:2.8.4-alpine@sha256:af32e97399febea808609119bb21544d0265c58a02836576e32a2d082c262c17
         run: |
           docker run --rm -v "$PWD/deploy:/etc/caddy:ro" -e DOMAIN=shop.example.com -e ACME_EMAIL=ci@example.com \
-            caddy:2.8.4-alpine caddy validate --config /etc/caddy/Caddyfile --adapter caddyfile
+            "$CADDY" caddy validate --config /etc/caddy/Caddyfile --adapter caddyfile
           docker run --rm -v "$PWD/deploy:/etc/caddy:ro" \
-            caddy:2.8.4-alpine caddy validate --config /etc/caddy/ci/Caddyfile --adapter caddyfile
+            "$CADDY" caddy validate --config /etc/caddy/ci/Caddyfile --adapter caddyfile
           docker build -q -f deploy/proxy/Dockerfile -t buh-proxy:check .
           docker run --rm --entrypoint caddy -e DOMAIN=shop.example.com -e ACME_EMAIL=ci@example.com buh-proxy:check \
             validate --config /etc/caddy/Caddyfile --adapter caddyfile
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
           node-version: 20
           cache: npm
@@ -51,16 +61,26 @@ jobs:
       - name: Updater logic and database snapshot (unit tests, fake docker)
         run: npm ci --no-audit --no-fund && node --import tsx --test test/updater.test.mts test/backup-now.test.mts
 
+      - name: A published version never changes (deploy/ci/publish-version.sh against a local registry)
+        run: deploy/ci/publish-version-test.sh
+
+      - name: Release notes list the three digests and the changelog entry
+        run: |
+          d=sha256:$(printf '%064d' 0)
+          DRY_RUN=1 VERSION="$(node -p "require('./package.json').version")" SHOP_DIGEST=$d UPDATER_DIGEST=$d PROXY_DIGEST=$d deploy/ci/release.sh > notes.md
+          grep -c "@$d" notes.md | grep -qx 3
+          grep -q '^## BUH-' notes.md
+
   switch:
     runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
 
-      - uses: docker/setup-buildx-action@v3
+      - uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3.12.0
 
       - name: Build the shop image
-        uses: docker/build-push-action@v6
+        uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6.19.2
         with:
           context: .
           platforms: linux/amd64
@@ -96,12 +116,12 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 45
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
 
-      - uses: docker/setup-buildx-action@v3
+      - uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3.12.0
 
       - name: Build the shop image
-        uses: docker/build-push-action@v6
+        uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6.19.2
         with:
           context: .
           platforms: linux/amd64
@@ -115,3 +135,6 @@ jobs:
 
       - name: Images-only set-up (buh-updater setup) and the HTTPS proxy (buh-proxy), under load
         run: deploy/ci/setup-proxy-test.sh
+
+      - name: Private images (a registry that needs a login), digests and the install history
+        run: deploy/ci/private-registry-test.sh

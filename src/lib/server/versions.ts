@@ -34,7 +34,23 @@ export interface UpdaterStatus {
   onServer: string[];
   autoUpdateMinutes: number;
   lastRequest: { request: string; result: string; message: string; at: string };
+  /** Set while the image registry refuses downloads (login missing or expired): what to do, for the owner. */
+  registryProblem: string;
+  /** New versions are installed by themselves (the owner's switch on Settings → Versions); on unless the updater says off. */
+  auto: boolean;
+  /** The last check for a new version: when, and what it found (one line). */
+  lastCheck: { at: string; result: string };
+  /** Versions installed on this server, newest first: when, the digest (or "id:…" for a local build), why. */
+  history: { at: string; version: string; digest: string; why: string }[];
+  /** The digest each version first came with here; verified: installed under that very digest. */
+  digests: { version: string; digest: string; verified: boolean }[];
+  /** A version refused because it came back under another digest (empty when none). */
+  integrityProblem: string;
 }
+
+const DIGEST_RE = /^sha256:[0-9a-f]{64}$/;
+const HISTORY_DIGEST_RE = /^(sha256:[0-9a-f]{64}|id:[0-9a-f]{1,64})$/;
+const WHY = new Set(['scheduled', 'manual', 'rollback', 'set-up']);
 
 const VERSION_RE = /^\d{1,3}\.\d{1,3}\.\d{1,3}$/;
 /** Versions before this keep stock per product, so they cannot run on today's database (and lack this page, which first shipped in 2.0.0, so any version offered has a way back). */
@@ -106,6 +122,18 @@ export function updaterStatus(now = Date.now()): UpdaterStatus | null {
       onServer: Array.isArray(raw.onServer) ? raw.onServer.map(v).filter(Boolean).slice(0, 100) : [],
       autoUpdateMinutes: Number.isInteger(raw.autoUpdateMinutes) ? Number(raw.autoUpdateMinutes) : 0,
       lastRequest: { request: s(lr.request, 64), result: s(lr.result, 20), message: s(lr.message), at: s(lr.at, 40) },
+      registryProblem: s(raw.registryProblem, 400),
+      auto: raw.auto !== false,
+      lastCheck: { at: s((raw.lastCheck as Partial<UpdaterStatus['lastCheck']> | undefined)?.at, 40), result: s((raw.lastCheck as Partial<UpdaterStatus['lastCheck']> | undefined)?.result) },
+      history: (Array.isArray(raw.history) ? raw.history : [])
+        .slice(0, 50)
+        .map((h: Partial<UpdaterStatus['history'][number]>) => ({ at: s(h?.at, 40), version: v(h?.version), digest: typeof h?.digest === 'string' && HISTORY_DIGEST_RE.test(h.digest) ? h.digest : '', why: typeof h?.why === 'string' && WHY.has(h.why) ? h.why : '' }))
+        .filter((h) => h.at && h.digest && h.why),
+      digests: (Array.isArray(raw.digests) ? raw.digests : [])
+        .slice(0, 200)
+        .map((d: Partial<UpdaterStatus['digests'][number]>) => ({ version: v(d?.version), digest: typeof d?.digest === 'string' && DIGEST_RE.test(d.digest) ? d.digest : '', verified: d?.verified === true }))
+        .filter((d) => d.version && d.digest),
+      integrityProblem: s(raw.integrityProblem, 400),
     };
   } catch {
     return null;
@@ -144,7 +172,21 @@ export function requestSwitch(target: string, now = Date.now()): string {
     line = `rollback ${target}`;
   }
   if (status.lastRequest.result === 'working') throw new HttpError(409, 'A version switch is in progress. Wait for it to finish.');
-  if (pendingRequest()) throw new HttpError(409, 'A version switch is already waiting. It starts within a minute.');
+  return handOver(line);
+}
+
+/**
+ * Turn automatic installs on or off ("auto on" / "auto off"). The updater keeps the choice in
+ * its own volume and reports it in its status; checks, healing and requests from this page go on.
+ */
+export function requestAuto(on: boolean, now = Date.now()): string {
+  if (!updaterStatus(now)) throw new HttpError(409, 'Automatic updates are not running on this server.');
+  return handOver(on ? 'auto on' : 'auto off');
+}
+
+/** Hands one request line to the updater (see requestSwitch). */
+function handOver(line: string): string {
+  if (pendingRequest()) throw new HttpError(409, 'A request is already waiting for the updater. It is picked up within a minute.');
   // Written in full to a new file of our own first, then linked as "request": the updater never
   // sees a request half written, and an existing one is never replaced (link fails with EEXIST).
   // The folder is sticky and not listable: we may create, link and remove our own files only.

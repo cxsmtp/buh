@@ -11,7 +11,8 @@
 #   4. a visitor cannot forge X-Real-IP;
 #   5. a version switch of the shop under load through the proxy: failed requests counted;
 #   6. the proxy updates itself (and a broken proxy image is undone);
-#   7. the updater updates itself (and a broken updater image is not used);
+#   7. the updater updates itself (and a broken updater image is not used); a new updater
+#      that starts but never does its work is removed, and the one before takes over again;
 #   8. a stopped proxy is started again.
 # Needs ports 80 and 443 free on this machine. Against Podman's API instead of Docker:
 #   DOCKER_HOST=unix:///run/podman/podman.sock ENGINE_SOCKET=/run/podman/podman.sock deploy/ci/setup-proxy-test.sh
@@ -54,6 +55,8 @@ derive() { # derive FROM TAG CHANGE
   docker rm "$c" > /dev/null
 }
 cleanup() {
+  # Kill first: Podman's rm -f waits out an updater's 600 s stop timeout.
+  docker kill "$NAME-updater" "$NAME-updater-new" "$NAME-updater-old" > /dev/null 2>&1 || true
   docker rm -f "$NAME-updater" "$NAME-updater-new" "$NAME-updater-old" "$NAME-proxy" "$NAME-proxy-previous" \
     "$NAME" "$NAME-previous" "$NAME-candidate" buh-vps-echo buh-vps-echo-proxy > /dev/null 2>&1 || true
   docker volume rm "$NAME-data" "$NAME-updater-state" "$NAME-updater-control" "$NAME-updater-status" \
@@ -105,6 +108,10 @@ derive buh:test buh:9.1.0 'LABEL org.opencontainers.image.version=9.1.0'
 derive buh:test buh:9.1.1 'LABEL org.opencontainers.image.version=9.1.1'
 derive "$UPDATER_REF" buh-updater:vps-next 'LABEL ci.revision=next'
 derive "$UPDATER_REF" buh-updater:vps-broken 'ENTRYPOINT ["/bin/sh","-c","exit 3"]'
+# Starts, keeps running and passes the self-check (docker exec … selfcheck), but its daemon
+# never does a round: the handover must be undone.
+# shellcheck disable=SC2016 # expanded in the container
+derive "$UPDATER_REF" buh-updater:vps-hung 'ENTRYPOINT ["/bin/sh","-c","[ \"$1\" = daemon ] || exec /bin/sh /updater/updater.sh \"$@\"; while :; do sleep 3600; done","sh"]'
 derive "$PROXY_REF" buh-proxy:vps-next 'LABEL ci.revision=next'
 derive "$PROXY_REF" buh-proxy:vps-broken 'ENTRYPOINT ["caddy","run","--config","/nonexistent"]'
 docker tag buh:9.1.0 "$LATEST"
@@ -119,12 +126,12 @@ SESSION_SECRET=$SECRET
 EOF
 docker run -d --name "$NAME" -p "127.0.0.1:$PORT:3000" -v "$NAME-data:/data" --env-file "$WORK/shop.env" \
   --read-only --tmpfs /tmp --cap-drop ALL --security-opt no-new-privileges:true --pids-limit 2048 buh:9.1.0 > /dev/null
-wait_for 90 "the shop" curl --noproxy '*' -sf "http://127.0.0.1:$PORT/api/health"
+wait_for 90 "the shop" curl --noproxy '*' -sf --max-time 10 "http://127.0.0.1:$PORT/api/health"
 docker exec "$NAME" node -e "require('fs').writeFileSync('/data/ci-marker', 'x')"
 
 step "2. the one-line set-up, with the HTTPS proxy"
 docker run --rm --pids-limit 128 --security-opt label=disable -v "$ENGINE_SOCKET:/var/run/docker.sock" -e "SOCK=unix://$ENGINE_SOCKET" \
-  -e PROXY_TLS_INTERNAL=1 -e HEAL_CHECK_SECONDS=3 -e SELF_CHECK_SECONDS=5 -e PROXY_SETTLE_SECONDS=3 \
+  -e PROXY_TLS_INTERNAL=1 -e HEAL_CHECK_SECONDS=3 -e SELF_CHECK_SECONDS=5 -e PROXY_SETTLE_SECONDS=3 -e HANDOVER_SECONDS=60 \
   "$UPDATER_REF" setup "$NAME" --image "$LATEST" --minutes 0 --proxy "$DOMAIN" --email ci@example.com --proxy-image "$PROXY_REF" \
   | tee "$WORK/setup.log" || fail "setup failed"
 grep -q 'Done. Automatic updates are on' "$WORK/setup.log" || fail "no summary"
@@ -222,6 +229,17 @@ docker exec "$NAME-updater" touch /state/update-now
 wait_for 180 "the broken updater to be refused" sh -c "docker exec $NAME-updater grep -q 'newer updater image .* was not used' /state/alerts/alerts.log"
 [ "$(image_of "$NAME-updater")" = "$(id_of buh-updater:vps-next)" ] || fail "the running updater changed"
 if docker inspect "$NAME-updater-new" > /dev/null 2>&1; then fail "the broken updater was left behind"; fi
+docker tag buh-updater:vps-hung "$UPDATER_REF"
+docker exec "$NAME-updater" touch /state/update-now
+wait_for 180 "the handover to the hung updater" sh -c "[ \"\$(docker inspect -f '{{.Image}}' $NAME-updater)\" = '$(id_of buh-updater:vps-hung)' ]"
+docker inspect "$NAME-updater-old" > /dev/null 2>&1 || fail "the updater before was not kept for the handover"
+wait_for 180 "the updater before to take over again" sh -c "[ \"\$(docker inspect -f '{{.Image}}' $NAME-updater)\" = '$(id_of buh-updater:vps-next)' ]"
+if docker inspect "$NAME-updater-old" > /dev/null 2>&1; then fail "the name was not taken back"; fi
+docker exec "$NAME-updater" grep -q 'did not complete a round within' /state/alerts/alerts.log || fail "no alert for the undone handover"
+docker exec "$NAME-updater" grep -qF "$(id_of buh-updater:vps-hung)" /state/bad-updater-images || fail "the hung image is not remembered"
+[ "$(docker inspect -f '{{.HostConfig.RestartPolicy.Name}}' "$NAME-updater")" = always ] || fail "the updater is not --restart=always after taking over again"
+sleep 10
+[ "$(image_of "$NAME-updater")" = "$(id_of buh-updater:vps-next)" ] || fail "the hung updater was tried again"
 
 step "8. a stopped proxy is started again"
 docker stop -t 5 "$NAME-proxy" > /dev/null

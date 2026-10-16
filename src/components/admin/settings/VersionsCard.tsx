@@ -1,9 +1,10 @@
 'use client';
 
 import React, { useCallback, useEffect, useState } from 'react';
-import { ExternalLink, History, Loader2, RotateCcw, Sparkles } from 'lucide-react';
+import { BadgeCheck, ExternalLink, History, Loader2, RotateCcw, ShieldAlert, Sparkles } from 'lucide-react';
 import { getJson, postJson } from '@/lib/apiClient';
 import { MiniMarkdown } from '@/components/common/MiniMarkdown';
+import { SETUP_CMD, SETUP_POWERSHELL } from '@/lib/podmanSetup';
 
 /**
  * Settings → Versions: every release with what changed (the changelog), which
@@ -31,6 +32,14 @@ interface Info {
     onServer: string[];
     autoUpdateMinutes: number;
     lastRequest: { request: string; result: string; message: string; at: string };
+    /** Set while the registry refuses downloads (login missing or expired). */
+    registryProblem?: string;
+    /** New versions are installed by themselves (off: only when asked here). */
+    auto?: boolean;
+    lastCheck?: { at: string; result: string };
+    history?: { at: string; version: string; digest: string; why: string }[];
+    digests?: { version: string; digest: string; verified: boolean }[];
+    integrityProblem?: string;
   } | null;
   pending: string | null;
 }
@@ -43,29 +52,38 @@ const older = (a: string, b: string) => {
 };
 const IMAGE = 'ghcr.io/cxsmtp/buh';
 const PODMAN_RUN = `podman run --replace -d --name beautifuluaehome -p 443:3000 -v beautifuluaehome-data:/data -e TZ=Asia/Dubai --read-only --tmpfs /tmp --cap-drop ALL --security-opt no-new-privileges:true ${IMAGE}:latest`;
-// Turns on automatic updates from the published updater image: one line in Windows cmd, no git, no files.
-const SETUP_WINDOWS = `for /f "delims=" %S in ('podman info --format "{{.Host.RemoteSocket.Path}}"') do podman run --rm --security-opt label=disable -v %S:/var/run/docker.sock -e SOCK=%S ghcr.io/cxsmtp/buh-updater:latest setup beautifuluaehome`;
 const label = (v: string) => `BUH-${v.split('.').map((n) => n.padStart(2, '0')).join('.')}`;
+/** sha256:2c1f…: the first 12 hex digits, as `podman images --digests` shows them; "id:…" (built here) as is. */
+const shortDigest = (d: string) => (d.startsWith('sha256:') ? `sha256:${d.slice(7, 19)}` : d);
+const WHY: Record<string, string> = { scheduled: 'automatic', manual: 'asked for', rollback: 'switched back', 'set-up': 'set-up' };
 
 export function VersionsCard() {
   const [info, setInfo] = useState<Info | null>(null);
   const [error, setError] = useState('');
   const [busy, setBusy] = useState<string | null>(null);
   const [status, setStatus] = useState<{ ok: boolean; text: string } | null>(null);
+  // The setting asked for, until the updater's status confirms it.
+  const [autoWanted, setAutoWanted] = useState<boolean | null>(null);
 
   const load = useCallback(
     () =>
       getJson<Info & { message?: string }>('/api/admin/versions').then(({ ok, data }) => {
-        if (ok) setInfo(data);
-        else setError(data.message || 'Could not load the versions.');
+        if (ok) {
+          setInfo(data);
+          // The updater confirmed the setting asked for: nothing to wait for any more.
+          setAutoWanted((w) => (w !== null && (data.updater?.auto !== false) === w ? null : w));
+        } else setError(data.message || 'Could not load the versions.');
       }),
     []
   );
   useEffect(() => {
     const fetchNow = () =>
       void getJson<Info & { message?: string }>('/api/admin/versions').then(({ ok, data }) => {
-        if (ok) setInfo(data);
-        else setError(data.message || 'Could not load the versions.');
+        if (ok) {
+          setInfo(data);
+          // The updater confirmed the setting asked for: nothing to wait for any more.
+          setAutoWanted((w) => (w !== null && (data.updater?.auto !== false) === w ? null : w));
+        } else setError(data.message || 'Could not load the versions.');
       });
     fetchNow();
     const t = setInterval(fetchNow, 15_000);
@@ -84,9 +102,28 @@ export function VersionsCard() {
     void load();
   };
 
+  const setAuto = async (on: boolean) => {
+    setAutoWanted(on);
+    setStatus(null);
+    const { ok, data } = await postJson<{ message?: string }>('/api/admin/versions', { auto: on });
+    if (!ok) setAutoWanted(null);
+    setStatus({ ok, text: data.message || (ok ? 'Requested.' : 'Could not change the setting.') });
+    void load();
+  };
+  // While the updater has not confirmed a new setting yet, look every 2 s (it takes up to a minute).
+  const waitingForUpdater = autoWanted !== null && Boolean(info?.updater) && autoWanted !== (info?.updater?.auto !== false);
+  useEffect(() => {
+    if (!waitingForUpdater) return;
+    const t = setInterval(() => void load(), 2_000);
+    return () => clearInterval(t);
+  }, [waitingForUpdater, load]);
+
   if (!info) return <p className="text-xs text-stone-500">{error || 'Loading…'}</p>;
   const running = info.updater?.running || info.current;
   const managed = Boolean(info.updater);
+  const autoNow = info.updater?.auto !== false;
+  // Asked for, and the updater's status does not say so yet.
+  const autoWaiting = managed && autoWanted !== null && autoWanted !== autoNow;
 
   return (
     <div className="space-y-4 text-xs text-stone-700">
@@ -103,10 +140,10 @@ export function VersionsCard() {
             </button>
           )}
         </div>
-        {managed ? (
+        {managed && (
           <p className="text-stone-500">
             Automatic updates{info.updater!.mode === 'single' ? ': Podman (one container), ' : ': '}
-            {info.updater!.autoUpdateMinutes > 0 ? `checked every ${info.updater!.autoUpdateMinutes} minutes` : 'only when you ask'}
+            {info.updater!.autoUpdateMinutes > 0 && info.updater!.auto !== false ? `checked every ${info.updater!.autoUpdateMinutes} minutes` : 'new versions only when you ask'}
             {info.updater!.mode === 'single' ? '; a switch closes the shop for a few seconds (the new version is tried first, the database saved).' : '.'}
             {info.updater!.mode === 'single' && (
               <>
@@ -114,7 +151,7 @@ export function VersionsCard() {
                 Update with <strong>Update to the latest</strong>, not with podman pull/stop/rm/run; to do it by hand, stop the updater first (<code>podman stop beautifuluaehome-updater</code>).
               </>
             )}
-            {info.pending && <strong className="text-amber-700"> A switch is waiting to start (within a minute).</strong>}
+            {info.pending && !info.pending.startsWith('auto') && <strong className="text-amber-700"> A switch is waiting to start (within a minute).</strong>}
             {info.updater!.lastRequest.at && !info.pending && (
               <span className={info.updater!.lastRequest.result === 'ok' ? 'text-emerald-700' : info.updater!.lastRequest.result === 'working' ? 'text-amber-700 font-semibold' : 'text-red-700'}>
                 {' '}
@@ -122,9 +159,55 @@ export function VersionsCard() {
               </span>
             )}
           </p>
-        ) : (
+        )}
+        {managed && (
+          <div className="space-y-1">
+            <label className="flex flex-wrap items-center gap-2 font-semibold text-stone-800 cursor-pointer">
+              <input
+                type="checkbox"
+                className="w-4 h-4 accent-[#0f1c2e]"
+                checked={autoWaiting ? autoWanted! : autoNow}
+                disabled={autoWaiting}
+                onChange={(e) => void setAuto(e.target.checked)}
+              />
+              Install new versions automatically
+              {autoWaiting && (
+                <span role="status" className="font-normal text-amber-700">
+                  Waiting for the updater…
+                </span>
+              )}
+            </label>
+            <p className="text-stone-500">
+              {info.updater!.auto === false
+                ? 'Off: nothing is checked or installed by itself (the shop, the HTTPS proxy and the updater). Update to the latest and switching versions still work, and a stopped shop is still started again.'
+                : 'On: new versions of the shop, the HTTPS proxy and the updater are installed by themselves.'}{' '}
+              {info.updater!.lastCheck?.at ? (
+                <>
+                  Last check: <time dateTime={info.updater!.lastCheck.at}>{new Date(info.updater!.lastCheck.at).toLocaleString()}</time>, {info.updater!.lastCheck.result}.
+                </>
+              ) : (
+                'No check yet.'
+              )}
+            </p>
+          </div>
+        )}
+        {managed && info.updater!.integrityProblem && (
+          <p role="alert" className="rounded-lg bg-red-50 border border-red-300 text-red-800 p-2 break-words flex gap-1.5">
+            <ShieldAlert className="w-4 h-4 shrink-0" aria-hidden="true" />
+            <span>{info.updater!.integrityProblem}</span>
+          </p>
+        )}
+        {managed && info.updater!.registryProblem && (
+          <p role="alert" className="rounded-lg bg-red-50 border border-red-200 text-red-800 p-2 break-words">
+            {info.updater!.registryProblem.charAt(0).toUpperCase() + info.updater!.registryProblem.slice(1)}.
+          </p>
+        )}
+        {!managed && (
           <div className="text-stone-600 space-y-1.5">
             <p>Automatic updates are not running on this server, so update with these two commands on the computer that runs the shop (Podman):</p>
+            <p>
+              The images are private, so Podman must be logged in to <code>ghcr.io</code> once, with a GitHub token that can only read packages: on Windows <code>podman login ghcr.io -u YOUR-GITHUB-NAME</code>; on a Linux server as in the deployment guide (&quot;Private images&quot;), so that the login lasts.
+            </p>
             <code className="block bg-stone-100 rounded-lg p-2 break-all">podman pull {IMAGE}:latest</code>
             <code className="block bg-stone-100 rounded-lg p-2 break-all">{PODMAN_RUN}</code>
             <p>
@@ -133,8 +216,10 @@ export function VersionsCard() {
             <p>
               Then reload this page. If it still says <strong className="font-mono">{label(info.current)}</strong>, another, older container is still answering: <code>podman ps</code> shows which one holds the port; stop it.
             </p>
-            <p>To have the shop update itself (and this page switch versions), paste this one line once into the Windows command prompt on that computer. Nothing to download first; use your container&apos;s name if it is not beautifuluaehome:</p>
-            <code className="block bg-stone-100 rounded-lg p-2 break-all">{SETUP_WINDOWS}</code>
+            <p>To have the shop update itself (and this page switch versions), paste one line once on that computer, with Podman running. Nothing to download first; use your container&apos;s name if it is not beautifuluaehome. In <strong>Command Prompt (cmd), not PowerShell</strong>:</p>
+            <code className="block bg-stone-100 rounded-lg p-2 break-all">{SETUP_CMD}</code>
+            <p>Or in PowerShell:</p>
+            <code className="block bg-stone-100 rounded-lg p-2 break-all">{SETUP_POWERSHELL}</code>
             <p>It keeps your container&apos;s data, port and settings, checks for new versions every 15 minutes, and keeps itself up to date; a switch closes the shop for a few seconds. On a Linux server, see the deployment guide.</p>
             <details>
               <summary className="cursor-pointer">Docker Compose server (Hostinger guide)</summary>
@@ -146,10 +231,31 @@ export function VersionsCard() {
         {status && <p role="status" className={`font-semibold ${status.ok ? 'text-emerald-700' : 'text-red-700'}`}>{status.text}</p>}
       </div>
 
+      {managed && (info.updater!.history?.length ?? 0) > 0 && (
+        <section aria-labelledby="installed-here" className="rounded-2xl border border-stone-200 bg-white p-3 space-y-1.5">
+          <h4 id="installed-here" className="font-bold text-[#0f1c2e]">
+            Installed on this server
+          </h4>
+          <ul className="space-y-1">
+            {info.updater!.history!.map((h) => (
+              <li key={`${h.at}-${h.digest}`} className="flex flex-wrap items-baseline gap-x-2 gap-y-0.5">
+                <strong className="font-mono">{/^\d/.test(h.version) ? label(h.version) : 'unknown version'}</strong>
+                <code className="text-stone-500 break-all">{shortDigest(h.digest)}</code>
+                <time dateTime={h.at} className="text-stone-500">
+                  {new Date(h.at).toLocaleString()}
+                </time>
+                <span className="text-stone-600">{WHY[h.why] ?? h.why}</span>
+              </li>
+            ))}
+          </ul>
+        </section>
+      )}
+
       <ol className="space-y-2">
         {info.changelog.map((e) => {
           const isRunning = e.version === running;
           const tooOld = older(e.version, info.oldestRollback);
+          const recorded = info.updater?.digests?.find((d) => d.version === e.version);
           return (
             <li key={e.version} className={`rounded-2xl border p-3 bg-white ${isRunning ? 'border-[#c5a059]' : 'border-stone-200'}`}>
               <details open={e.version === info.changelog[0]?.version}>
@@ -162,6 +268,16 @@ export function VersionsCard() {
                     </a>
                   )}
                   {isRunning && <span className="px-2 py-0.5 rounded-full bg-amber-100 text-amber-800 font-bold">Running</span>}
+                  {recorded && (
+                    <span className="inline-flex items-center gap-1 text-stone-500">
+                      <code className="break-all">{shortDigest(recorded.digest)}</code>
+                      {recorded.verified && (
+                        <span className="inline-flex items-center gap-0.5 text-emerald-700 font-semibold" title="Installed here under the digest this version first came with">
+                          <BadgeCheck className="w-3.5 h-3.5" aria-hidden="true" /> verified
+                        </span>
+                      )}
+                    </span>
+                  )}
                   <span className="ml-auto">
                     {!isRunning && managed && !tooOld && (
                       <button

@@ -36,16 +36,22 @@ docker compose pull app-blue && docker compose up -d
 
 Updates switch between two copies of the shop with no downtime, roll back on their own if the new version is unhealthy, and restart a shop that stops answering; turn on the optional updater as described in the [guide](HOSTINGER_DEPLOYMENT_GUIDE.md#5-updates-without-downtime-and-rollback). Settings → Versions lists every release and switches to any of them.
 
-The image `ghcr.io/cxsmtp/buh:latest` is built, tested and published from main. With Podman, update a running shop (data stays in the volume):
+The image `ghcr.io/cxsmtp/buh:latest` is built, tested and published from main. It is private: log Podman in once with a GitHub token that can only read packages (`podman login ghcr.io -u YOUR-GITHUB-NAME`; on a Linux server see the guide, "Private images"). With Podman, update a running shop (data stays in the volume):
 
 ```
 podman pull ghcr.io/cxsmtp/buh:latest && podman run --replace -d --name beautifuluaehome -p 443:3000 -v beautifuluaehome-data:/data -e TZ=Asia/Dubai --read-only --tmpfs /tmp --cap-drop ALL --security-opt no-new-privileges:true ghcr.io/cxsmtp/buh:latest
 ```
 
-Automatic updates for that one container, from the published updater image (no git, no files; a few seconds' pause at each switch; its data, port and settings are kept), in the Windows command prompt:
+Automatic updates for that one container, from the published updater image (no git, no files; a few seconds' pause at each switch; its data, port and settings are kept). In Windows **Command Prompt (cmd), not PowerShell**:
 
 ```
-for /f "delims=" %S in ('podman info --format "{{.Host.RemoteSocket.Path}}"') do podman run --rm --security-opt label=disable -v %S:/var/run/docker.sock -e SOCK=%S ghcr.io/cxsmtp/buh-updater:latest setup beautifuluaehome
+for /f "delims=" %S in ('podman info --format "{{if index .Host.RemoteSocket.Path 0 | eq 47}}{{.Host.RemoteSocket.Path}}{{else}}{{slice .Host.RemoteSocket.Path 7}}{{end}}"') do podman run --rm --pull=newer --security-opt label=disable -v %S:/var/run/docker.sock -e SOCK=%S -v "%USERPROFILE%\.config\containers:/run/buh/registry-auth:ro" ghcr.io/cxsmtp/buh-updater:latest setup beautifuluaehome
+```
+
+In PowerShell:
+
+```
+$S = (podman info --format '{{.Host.RemoteSocket.Path}}') -replace '^unix://', ''; podman run --rm --pull=newer --security-opt label=disable -v "${S}:/var/run/docker.sock" -e "SOCK=$S" -v "$env:USERPROFILE\.config\containers:/run/buh/registry-auth:ro" ghcr.io/cxsmtp/buh-updater:latest setup beautifuluaehome
 ```
 
 A Linux server with Podman (shop, HTTPS proxy and updater, from images only): [guide](HOSTINGER_DEPLOYMENT_GUIDE.md#hostinger-vps-with-podman-images-only).

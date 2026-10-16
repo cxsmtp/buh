@@ -5,7 +5,7 @@ REM
 REM A thin wrapper: the set-up itself is in the published image ghcr.io/cxsmtp/buh-updater (no
 REM code needed on this computer). This file only types the one-line command of the guide:
 REM
-REM   for /f "delims=" %S in ('podman info --format "{{.Host.RemoteSocket.Path}}"') do podman run --rm --security-opt label=disable -v %S:/var/run/docker.sock -e SOCK=%S ghcr.io/cxsmtp/buh-updater:latest setup beautifuluaehome
+REM   for /f "delims=" %S in ('podman info --format "{{if index .Host.RemoteSocket.Path 0 | eq 47}}{{.Host.RemoteSocket.Path}}{{else}}{{slice .Host.RemoteSocket.Path 7}}{{end}}"') do podman run --rm --pull=newer --security-opt label=disable -v %S:/var/run/docker.sock -e SOCK=%S -v "%USERPROFILE%\.config\containers:/run/buh/registry-auth:ro" ghcr.io/cxsmtp/buh-updater:latest setup beautifuluaehome
 REM
 REM   scripts\podman-autoupdate.bat [NAME] [PORT] [DATA-VOLUME] ["KEY=VALUE KEY=VALUE"] [MINUTES]
 REM
@@ -33,7 +33,7 @@ SET "SOCK=!SOCK:unix://=!"
 
 podman pull %UPDATER_IMAGE%
 if errorlevel 1 goto :end
-podman run --rm --security-opt label=disable -v !SOCK!:/var/run/docker.sock -e SOCK=!SOCK! %UPDATER_IMAGE% setup %NAME% !OPTS!
+podman run --rm --pull=newer --security-opt label=disable -v !SOCK!:/var/run/docker.sock -e SOCK=!SOCK! -v "%USERPROFILE%\.config\containers:/run/buh/registry-auth:ro" %UPDATER_IMAGE% setup %NAME% !OPTS!
 goto :end
 
 :nosocket

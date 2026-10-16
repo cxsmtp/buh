@@ -33,7 +33,7 @@ STATUS=$NAME-updater-status
 STATE=$NAME-updater-state
 CODE=$NAME-updater-code
 UPDATER=$NAME-updater
-UPDATER_IMAGE=docker:27.3.1-cli
+UPDATER_IMAGE=docker:28.5.2-cli@sha256:625d9431a9f54c5a2bc90f24f0e1c3d55b1349fd857dd85035f98c2c9acbdd4d
 # The engine's API socket on this machine, mounted into the updater as /var/run/docker.sock.
 ENGINE_SOCKET=${ENGINE_SOCKET:-/var/run/docker.sock}
 LATEST=buh:ci-latest
@@ -53,6 +53,8 @@ image_of() { docker inspect -f '{{.Image}}' "$1"; }
 started_at() { docker inspect -f '{{.State.StartedAt}}' "$1"; }
 
 cleanup() {
+  # Kill first: Podman's rm -f waits out an updater's 600 s stop timeout.
+  docker kill "$UPDATER" > /dev/null 2>&1 || true
   docker rm -f "$UPDATER" "$NAME" "$NAME-candidate" "$NAME-previous" buh-single-second > /dev/null 2>&1 || true
   docker volume rm "$VOLUME" "$CONTROL" "$STATUS" "$STATE" "$CODE" buh-single-other > /dev/null 2>&1 || true
   # The updater's tags (shared with the blue/green test when both run on one machine).
@@ -161,7 +163,7 @@ docker tag buh:9.0.1 "$LATEST"
 step "1. the owner's container, started by hand (first with an extra folder mounted)"
 mkdir -p "$WORK/receipts"
 owners_run -v "$WORK/receipts:/receipts:ro"
-wait_for 90 "the hand-started shop" curl -sf "$URL/api/health"
+wait_for 90 "the hand-started shop" curl -sf --max-time 10 "$URL/api/health"
 docker exec "$NAME" node -e "require('fs').writeFileSync('/data/ci-marker', 'x')"
 serves
 
@@ -187,7 +189,7 @@ grep -q -- "- the bind .* at /receipts" "$WORK/refused.log" || fail "the refusal
 [ "$(started_at "$NAME")" = "$before" ] || fail "the refused adopt touched the container"
 docker rm -f "$NAME" > /dev/null
 owners_run
-wait_for 90 "the hand-started shop" curl -sf "$URL/api/health"
+wait_for 90 "the hand-started shop" curl -sf --max-time 10 "$URL/api/health"
 
 # A second container on the same data volume (another shop): refused, nothing touched.
 docker run -d --name buh-single-second -v "$VOLUME:/data" --pids-limit 2048 buh:9.0.1 > /dev/null
@@ -280,9 +282,9 @@ data_kept
 
 step "8. self-healing: a stopped shop is started again; a removed one is re-created on the same data"
 docker stop -t 25 "$NAME" > /dev/null
-wait_for 120 "the restart" curl -sf "$URL/api/health"
+wait_for 120 "the restart" curl -sf --max-time 10 "$URL/api/health"
 docker rm -f "$NAME" > /dev/null
-wait_for 120 "the re-created shop" curl -sf "$URL/api/health"
+wait_for 120 "the re-created shop" curl -sf --max-time 10 "$URL/api/health"
 serves
 data_kept
 secret_kept
@@ -294,7 +296,7 @@ docker rm -f "$NAME" > /dev/null
 owners_run
 docker unpause "$UPDATER" > /dev/null
 wait_for 180 "the hand-started container set up again" sh -c "docker inspect -f '{{range .Mounts}}{{.Destination}} {{end}}' $NAME | grep -q /updater-control"
-wait_for 90 "the shop" curl -sf "$URL/api/health"
+wait_for 90 "the shop" curl -sf --max-time 10 "$URL/api/health"
 serves
 data_kept
 secret_kept

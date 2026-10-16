@@ -11,8 +11,15 @@
 #   ghcr.io/cxsmtp/buh-updater   the updater (deploy/updater/Dockerfile): `setup`, then updates
 #   ghcr.io/cxsmtp/buh-proxy     HTTPS in front of the shop (deploy/proxy/Dockerfile, Caddy)
 #
-# Pull requests build and test the images but do not publish them. Their behaviour with
-# real containers is tested in zero-downtime.yml (deploy/ci/setup-proxy-test.sh).
+# Only main publishes: the publish jobs run for a push to main, or a manual run on main, and
+# only they may write packages. Pull requests and other branches build and test the images.
+# Their behaviour with real containers is tested in zero-downtime.yml.
+#
+# The updater and the proxy are built reproducibly (fixed timestamps, no per-commit labels):
+# when nothing in them changed, a release publishes the same image ID and the shop's updater
+# neither restarts itself nor the proxy.
+#
+# Third-party actions are pinned by commit (the tag is in the comment), base images by digest.
 name: Container image
 
 on:
@@ -23,7 +30,6 @@ on:
 
 permissions:
   contents: read
-  packages: write
 
 concurrency:
   group: container-${{ github.ref }}
@@ -39,16 +45,14 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
 
-      - name: Version from package.json
-        id: version
-        run: echo "version=$(node -p "require('./package.json').version")" >> "$GITHUB_OUTPUT"
-
-      - uses: docker/setup-buildx-action@v3
+      - uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3.12.0
 
       - name: Build
-        uses: docker/build-push-action@v6
+        uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6.19.2
         with:
           context: .
           platforms: linux/amd64
@@ -62,7 +66,7 @@ jobs:
           docker run -d --name buh-test -p 3000:3000 -v buh-test-data:/data \
             --read-only --tmpfs /tmp --cap-drop ALL --security-opt no-new-privileges:true \
             -e NEXT_PUBLIC_SUPPORT_EMAIL=help@ci.example buh:test
-          for i in $(seq 1 60); do
+          for _ in $(seq 1 60); do
             if curl -sf http://127.0.0.1:3000/api/health > /dev/null; then break; fi
             sleep 1
           done
@@ -77,62 +81,40 @@ jobs:
           docker exec buh-test node -e "require('fs').writeFileSync('/app/x','x')" && exit 1 || echo "app folder is read-only"
           docker rm -f buh-test
 
-      - name: Sign in to GitHub Container Registry
-        if: github.event_name != 'pull_request'
-        uses: docker/login-action@v3
-        with:
-          registry: ghcr.io
-          username: ${{ github.actor }}
-          password: ${{ secrets.GITHUB_TOKEN }}
-
-      - name: Publish
-        if: github.event_name != 'pull_request'
-        uses: docker/build-push-action@v6
-        with:
-          context: .
-          platforms: linux/amd64
-          push: true
-          tags: |
-            ${{ env.IMAGE }}:latest
-            ${{ env.IMAGE }}:${{ steps.version.outputs.version }}
-            ${{ env.IMAGE }}:sha-${{ github.sha }}
-          labels: |
-            org.opencontainers.image.source=https://github.com/${{ github.repository }}
-            org.opencontainers.image.title=Beautiful UAE Home
-            org.opencontainers.image.version=${{ steps.version.outputs.version }}
-            org.opencontainers.image.revision=${{ github.sha }}
-          cache-from: type=gha
-
   helpers:
-    # The updater and the proxy: small, built on pinned bases (docker:27.3.1-cli, caddy:2.8.4-alpine).
+    # The updater and the proxy: small, built on bases pinned by digest (docker:28.5.2-cli, caddy:2.8.4-alpine).
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
 
-      - name: Version from package.json
-        id: version
-        run: echo "version=$(node -p "require('./package.json').version")" >> "$GITHUB_OUTPUT"
-
-      - uses: docker/setup-buildx-action@v3
+      - uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3.12.0
 
       - name: Build the updater
-        uses: docker/build-push-action@v6
+        uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6.19.2
+        env:
+          SOURCE_DATE_EPOCH: 0
         with:
           context: .
           file: deploy/updater/Dockerfile
           platforms: linux/amd64
-          load: true
-          tags: buh-updater:test
+          provenance: false
+          sbom: false
+          outputs: type=docker,name=buh-updater:test,rewrite-timestamp=true
 
       - name: Build the proxy
-        uses: docker/build-push-action@v6
+        uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6.19.2
+        env:
+          SOURCE_DATE_EPOCH: 0
         with:
           context: .
           file: deploy/proxy/Dockerfile
           platforms: linux/amd64
-          load: true
-          tags: buh-proxy:test
+          provenance: false
+          sbom: false
+          outputs: type=docker,name=buh-proxy:test,rewrite-timestamp=true
 
       - name: Smoke test (the updater reaches the engine; the proxy's config is valid, it is not root)
         run: |
@@ -144,46 +126,171 @@ jobs:
           test "$(docker image inspect -f '{{index .Config.Labels "buh.role"}}' buh-updater:test)" = updater
           test "$(docker image inspect -f '{{index .Config.Labels "buh.role"}}' buh-proxy:test)" = proxy
 
+      - name: Reproducible (a second build without cache gives the same image IDs)
+        run: |
+          first_updater=$(docker image inspect -f '{{.Id}}' buh-updater:test)
+          first_proxy=$(docker image inspect -f '{{.Id}}' buh-proxy:test)
+          touch deploy/updater/updater.sh deploy/proxy/Caddyfile deploy/shop-snippets.caddy
+          SOURCE_DATE_EPOCH=0 docker buildx build --no-cache --provenance=false --sbom=false -f deploy/updater/Dockerfile \
+            --output type=docker,name=buh-updater:again,rewrite-timestamp=true .
+          SOURCE_DATE_EPOCH=0 docker buildx build --no-cache --provenance=false --sbom=false -f deploy/proxy/Dockerfile \
+            --output type=docker,name=buh-proxy:again,rewrite-timestamp=true .
+          test "$(docker image inspect -f '{{.Id}}' buh-updater:again)" = "$first_updater"
+          test "$(docker image inspect -f '{{.Id}}' buh-proxy:again)" = "$first_proxy"
+
+  publish:
+    # main only (a push, or a manual run on main): the only job that may write the shop image.
+    # Pushed by digest first; deploy/ci/publish-version.sh then tags it, and refuses when the
+    # version tag already names other contents (a version is published once, never changed).
+    if: github.ref == 'refs/heads/main' && github.event_name != 'pull_request'
+    needs: image
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: read
+      packages: write
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+      digest: ${{ steps.tag.outputs.digest }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
+
+      - name: Version from package.json
+        id: version
+        run: echo "version=$(node -p "require('./package.json').version")" >> "$GITHUB_OUTPUT"
+
+      - uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3.12.0
+
       - name: Sign in to GitHub Container Registry
-        if: github.event_name != 'pull_request'
-        uses: docker/login-action@v3
+        uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9 # v3.7.0
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Publish the updater
-        if: github.event_name != 'pull_request'
-        uses: docker/build-push-action@v6
+      - name: Push by digest (no tag yet)
+        id: build
+        uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6.19.2
+        with:
+          context: .
+          platforms: linux/amd64
+          # One plain manifest (no attestation index): the digest Docker and Podman both record.
+          provenance: false
+          sbom: false
+          outputs: type=image,name=${{ env.IMAGE }},push-by-digest=true,name-canonical=true,push=true
+          labels: |
+            org.opencontainers.image.source=https://github.com/${{ github.repository }}
+            org.opencontainers.image.title=Beautiful UAE Home
+            org.opencontainers.image.version=${{ steps.version.outputs.version }}
+            org.opencontainers.image.revision=${{ github.sha }}
+          cache-from: type=gha
+
+      - name: Tag the version (refused if it already names other contents)
+        id: tag
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+          DIGEST: ${{ steps.build.outputs.digest }}
+        run: echo "digest=$(deploy/ci/publish-version.sh "$IMAGE" "$VERSION" "$DIGEST" "sha-$GITHUB_SHA" latest)" >> "$GITHUB_OUTPUT"
+
+  publish-helpers:
+    # main only, like publish. Reproducible: no version or revision label (the tags carry the
+    # version), fixed timestamps, no attestations; an unchanged updater or proxy keeps its image ID.
+    if: github.ref == 'refs/heads/main' && github.event_name != 'pull_request'
+    needs: helpers
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      contents: read
+      packages: write
+    outputs:
+      updater-digest: ${{ steps.tag-updater.outputs.digest }}
+      proxy-digest: ${{ steps.tag-proxy.outputs.digest }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
+
+      - name: Version from package.json
+        id: version
+        run: echo "version=$(node -p "require('./package.json').version")" >> "$GITHUB_OUTPUT"
+
+      - uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3.12.0
+
+      - name: Sign in to GitHub Container Registry
+        uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9 # v3.7.0
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Push the updater by digest
+        id: updater
+        uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6.19.2
+        env:
+          SOURCE_DATE_EPOCH: 0
         with:
           context: .
           file: deploy/updater/Dockerfile
           platforms: linux/amd64
-          push: true
-          tags: |
-            ${{ env.UPDATER_IMAGE }}:latest
-            ${{ env.UPDATER_IMAGE }}:${{ steps.version.outputs.version }}
-            ${{ env.UPDATER_IMAGE }}:sha-${{ github.sha }}
+          provenance: false
+          sbom: false
+          outputs: type=image,name=${{ env.UPDATER_IMAGE }},push-by-digest=true,name-canonical=true,push=true,rewrite-timestamp=true
           labels: |
             org.opencontainers.image.source=https://github.com/${{ github.repository }}
             org.opencontainers.image.title=Beautiful UAE Home updater
-            org.opencontainers.image.version=${{ steps.version.outputs.version }}
-            org.opencontainers.image.revision=${{ github.sha }}
 
-      - name: Publish the proxy
-        if: github.event_name != 'pull_request'
-        uses: docker/build-push-action@v6
+      - name: Push the proxy by digest
+        id: proxy
+        uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6.19.2
+        env:
+          SOURCE_DATE_EPOCH: 0
         with:
           context: .
           file: deploy/proxy/Dockerfile
           platforms: linux/amd64
-          push: true
-          tags: |
-            ${{ env.PROXY_IMAGE }}:latest
-            ${{ env.PROXY_IMAGE }}:${{ steps.version.outputs.version }}
-            ${{ env.PROXY_IMAGE }}:sha-${{ github.sha }}
+          provenance: false
+          sbom: false
+          outputs: type=image,name=${{ env.PROXY_IMAGE }},push-by-digest=true,name-canonical=true,push=true,rewrite-timestamp=true
           labels: |
             org.opencontainers.image.source=https://github.com/${{ github.repository }}
             org.opencontainers.image.title=Beautiful UAE Home HTTPS proxy
-            org.opencontainers.image.version=${{ steps.version.outputs.version }}
-            org.opencontainers.image.revision=${{ github.sha }}
+
+      - name: Tag the updater's version
+        id: tag-updater
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+          DIGEST: ${{ steps.updater.outputs.digest }}
+        run: echo "digest=$(deploy/ci/publish-version.sh "$UPDATER_IMAGE" "$VERSION" "$DIGEST" "sha-$GITHUB_SHA" latest)" >> "$GITHUB_OUTPUT"
+
+      - name: Tag the proxy's version
+        id: tag-proxy
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+          DIGEST: ${{ steps.proxy.outputs.digest }}
+        run: echo "digest=$(deploy/ci/publish-version.sh "$PROXY_IMAGE" "$VERSION" "$DIGEST" "sha-$GITHUB_SHA" latest)" >> "$GITHUB_OUTPUT"
+
+  release:
+    # main only: the git tag v<version> and a GitHub Release (private, like the repository) that
+    # lists the three images' digests and the changelog entry. Only this job may write contents.
+    if: github.ref == 'refs/heads/main' && github.event_name != 'pull_request'
+    needs: [publish, publish-helpers]
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
+
+      - name: Tag and release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          VERSION: ${{ needs.publish.outputs.version }}
+          SHOP_DIGEST: ${{ needs.publish.outputs.digest }}
+          UPDATER_DIGEST: ${{ needs.publish-helpers.outputs.updater-digest }}
+          PROXY_DIGEST: ${{ needs.publish-helpers.outputs.proxy-digest }}
+        run: deploy/ci/release.sh

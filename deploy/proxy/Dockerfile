@@ -10,13 +10,18 @@
 #
 # (`buh-updater setup … --proxy DOMAIN` starts it exactly so and keeps it up to date.)
 # Built from the repository root: docker build -f deploy/proxy/Dockerfile .
-FROM caddy:2.8.4-alpine
+# caddy:2.8.4-alpine, pinned by digest (a moved tag cannot change what is built; Dependabot proposes updates).
+FROM caddy:2.8.4-alpine@sha256:af32e97399febea808609119bb21544d0265c58a02836576e32a2d082c262c17
 
 # Not root: the caddy binary carries the one capability it needs (binding 80 and 443),
 # which the container must grant (--cap-add NET_BIND_SERVICE).
-RUN adduser -D -H -u 1000 -s /sbin/nologin buhproxy \
+# The user is written out rather than made with adduser, which stamps today's date into
+# /etc/shadow: the image must come out byte for byte the same when nothing in it changed,
+# so that a release does not restart the proxy (see container.yml).
+RUN printf 'buhproxy:x:1000:1000::/nonexistent:/sbin/nologin\n' >> /etc/passwd \
+ && printf 'buhproxy:x:1000:\n' >> /etc/group \
  && mkdir -p /data/caddy /config/caddy \
- && chown -R buhproxy:buhproxy /data /config
+ && chown -R 1000:1000 /data /config
 
 COPY deploy/shop-snippets.caddy /etc/caddy/shop-snippets.caddy
 COPY deploy/proxy/*.caddy deploy/proxy/Caddyfile /etc/caddy/

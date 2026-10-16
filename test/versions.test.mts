@@ -67,6 +67,14 @@ test('the status is read defensively: odd values dropped, links refused', () => 
   assert.equal(v.updaterStatus()!.mode, 'single');
   writeStatus({ mode: '<b>other</b>' });
   assert.equal(v.updaterStatus()!.mode, 'compose');
+  // The registry refusing downloads (an expired login): passed on, as text, capped.
+  assert.equal(v.updaterStatus()!.registryProblem, '');
+  writeStatus({ registryProblem: 'the registry login has expired or is missing: ghcr.io refused to send ghcr.io/cxsmtp/buh:latest' });
+  assert.match(v.updaterStatus()!.registryProblem, /^the registry login has expired/);
+  writeStatus({ registryProblem: 'y'.repeat(2000) });
+  assert.equal(v.updaterStatus()!.registryProblem.length, 400);
+  writeStatus({ registryProblem: { html: '<b>' } });
+  assert.equal(v.updaterStatus()!.registryProblem, '');
   fs.rmSync(path.join(statusDir, 'status.json'));
   const elsewhere = path.join(dir, 'elsewhere.json');
   fs.writeFileSync(elsewhere, JSON.stringify({ updatedAt: new Date().toISOString(), running: '9.9.9' }));
@@ -143,4 +151,51 @@ test('during a switch (which can take minutes) the updater still counts as runni
   writeStatus({ updatedAt: new Date(Date.now() - 6 * 60 * 1000).toISOString(), lastRequest: { request: 'rollback 2.0.1', result: 'working', message: 'Switching to 2.0.1…', at: '' } });
   assert.ok(v.updaterStatus(), 'a 6-minute-old status is not "stopped"');
   assert.equal(statusOf(() => v.requestSwitch('latest')), 409);
+});
+
+test('the install history, recorded digests and an integrity refusal are passed on, checked field by field', () => {
+  const D = 'sha256:' + 'a'.repeat(64);
+  writeStatus({
+    history: [
+      { at: '2026-10-16T10:00:00Z', version: '2.1.0', digest: D, why: 'scheduled' },
+      { at: '2026-10-15T10:00:00Z', version: '?', digest: 'id:0123456789ab', why: 'set-up' },
+      { at: '2026-10-14T10:00:00Z', version: '2.0.0', digest: 'sha256:<script>', why: 'manual' },
+      { at: '2026-10-14T10:00:00Z', version: '2.0.0', digest: D, why: 'because' },
+      'junk',
+    ],
+    digests: [{ version: '2.1.0', digest: D, verified: true }, { version: '2.0.0', digest: D, verified: 'yes' }, { version: 'x', digest: D, verified: true }],
+    integrityProblem: 'Version 2.1.0 was refused: it is published under another digest',
+  });
+  const s = v.updaterStatus()!;
+  assert.deepEqual(s.history, [
+    { at: '2026-10-16T10:00:00Z', version: '2.1.0', digest: D, why: 'scheduled' },
+    { at: '2026-10-15T10:00:00Z', version: '', digest: 'id:0123456789ab', why: 'set-up' },
+  ]);
+  assert.deepEqual(s.digests, [{ version: '2.1.0', digest: D, verified: true }, { version: '2.0.0', digest: D, verified: false }]);
+  assert.match(s.integrityProblem, /^Version 2\.1\.0 was refused/);
+  writeStatus({ history: 'x', digests: {} });
+  assert.deepEqual(v.updaterStatus()!.history, []);
+  assert.deepEqual(v.updaterStatus()!.digests, []);
+  assert.equal(v.updaterStatus()!.integrityProblem, '');
+});
+
+test('"Install new versions automatically": a strict request line, one at a time; the status reports what the updater keeps', () => {
+  fs.rmSync(path.join(statusDir, 'status.json'), { force: true });
+  assert.equal(statusOf(() => v.requestAuto(false)), 409, 'no updater: nothing to switch');
+  writeStatus({});
+  assert.equal(v.updaterStatus()!.auto, true, 'on unless the updater says off');
+  assert.deepEqual(v.updaterStatus()!.lastCheck, { at: '', result: '' });
+  assert.equal(v.requestAuto(false), 'auto off');
+  assert.equal(request(), 'auto off\n');
+  assert.equal(statusOf(() => v.requestAuto(true)), 409, 'one request at a time');
+  assert.equal(statusOf(() => v.requestSwitch('latest')), 409);
+  fs.rmSync(path.join(controlDir, 'request'));
+  assert.equal(v.requestAuto(true), 'auto on');
+  fs.rmSync(path.join(controlDir, 'request'));
+  writeStatus({ auto: false, lastCheck: { at: '2026-10-16T10:00:00Z', result: 'up to date (2.0.0)' } });
+  assert.equal(v.updaterStatus()!.auto, false);
+  assert.deepEqual(v.updaterStatus()!.lastCheck, { at: '2026-10-16T10:00:00Z', result: 'up to date (2.0.0)' });
+  writeStatus({ auto: 'no', lastCheck: 'x' });
+  assert.equal(v.updaterStatus()!.auto, true, 'only false turns it off');
+  assert.deepEqual(v.updaterStatus()!.lastCheck, { at: '', result: '' });
 });

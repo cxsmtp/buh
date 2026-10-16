@@ -4,7 +4,9 @@
 # inspect and logs to drive deploy/updater/updater.sh without a Docker daemon.
 # State lives in $FAKE_DOCKER_DIR:
 #   tags/<ref>          image id a tag points to (refs with / and : flattened)
-#   registry/<ref>      image id `docker pull <ref>` fetches
+#   registry/<ref>      image id `docker pull <ref>` fetches (<ref> may be repo@sha256:…)
+#   registry-digest/<ref>  the digest a tag is published under (sha256:…): RepoDigests after a pull
+#   digests/<id>        an image's RepoDigests (repo@sha256:… lines)
 #   c/<name>/image      a container's image id. Compose copies are c/blue and c/green
 #                       (container id cid-<colour>); single-mode containers go by name.
 #   c/<name>/status     running | exited | created
@@ -25,6 +27,10 @@
 #   backup-fails        present: the database snapshot fails
 #   no-backup-script    present: the image has no scripts/backup-now.mjs (older than 2.0.0)
 #   hold-candidate      present: a *-candidate container does not answer its health check yet
+#   proxy-fails         present: a proxy container does not listen on 443 (ports taken)
+#   registry-denied     registries (one a line, e.g. ghcr.io) that refuse a pull unless the CLI's
+#                       DOCKER_CONFIG/config.json has a login for it (one without "expired")
+#   setup-auth-mount    the host folder the set-up container has at /run/buh/registry-auth
 #   port-fails          present: `docker run -p …` cannot start (the container stays "created")
 #   events              one line per action, in order
 # Image ids containing "broken" never become healthy; "crash" exits at once.
@@ -76,6 +82,8 @@ case $cmd in
     ;;
   inspect)
     fmt=$2
+    # The set-up container's own mount of the registry login folder (its host path).
+    case $fmt in *registry-auth*) cat "$D/setup-auth-mount" 2> /dev/null; exit 0 ;; esac
     c=$(colour_of "$3")
     [ -f "$D/c/$c/image" ] || exit 1
     st=$(cat "$D/c/$c/status")
@@ -97,8 +105,14 @@ case $cmd in
       # println per entry, then one more line break from the CLI, as docker and podman print it
       *Config.Env*) { cat "$D/c/$c/env" 2> /dev/null || image_env; } && echo ;;
       *PortBindings*)
-        if [ -f "$D/c/$c/bindings" ]; then cat "$D/c/$c/bindings"
-        elif [ -s "$D/c/$c/port" ]; then echo "3000/tcp||$(cat "$D/c/$c/port")"; fi
+        {
+          if [ -f "$D/c/$c/bindings" ]; then cat "$D/c/$c/bindings"
+          elif [ -s "$D/c/$c/port" ]; then echo "3000/tcp||$(cat "$D/c/$c/port")"; fi
+        } | case $fmt in
+          # without the container port ({{$p}}): HOSTIP|HOSTPORT
+          *'{{'\$'p}}'*) cat ;;
+          *) cut -d'|' -f2- ;;
+        esac
         ;;
       *.Type*)
         if [ -f "$D/c/$c/mounts" ]; then cat "$D/c/$c/mounts"
@@ -122,6 +136,7 @@ case $cmd in
           '{{.Id}}') echo "$id" ;;
           *Config.Env*) image_env && echo ;;
           *image.version*) cat "$D/versions/$id" 2> /dev/null || echo '<no value>' ;;
+          *RepoDigests*) cat "$D/digests/${id#sha256:}" 2> /dev/null; echo ;;
           *) echo '<no value>' ;;
         esac
         ;;
@@ -147,8 +162,27 @@ case $cmd in
     ;;
   pull)
     ref=$2
-    [ -f "$D/registry/$(key "$ref")" ] || exit 1
+    # A login the CLI sends (DOCKER_CONFIG/config.json naming the registry, not "expired") is accepted.
+    if [ -f "$D/registry-denied" ] && grep -qx "${ref%%/*}" "$D/registry-denied" &&
+      ! { grep -qF "\"${ref%%/*}\"" "${DOCKER_CONFIG:-/nonexistent}/config.json" 2> /dev/null &&
+        ! grep -q expired "${DOCKER_CONFIG:-/nonexistent}/config.json"; }; then
+      ev "pull-denied $ref"
+      echo "Error response from daemon: initializing source docker://$ref: reading manifest ${ref##*:} in ${ref%:*}: unauthorized: authentication required" >&2
+      exit 1
+    fi
+    [ -f "$D/registry/$(key "$ref")" ] || { echo "Error response from daemon: $ref: connection refused" >&2; exit 1; }
     cp "$D/registry/$(key "$ref")" "$D/tags/$(key "$ref")"
+    # The digest it came under (registry-digest/<ref>, or the ref itself when pulled by digest).
+    pid=$(cat "$D/registry/$(key "$ref")")
+    case $ref in
+      *@sha256:*) dref=$ref ;;
+      *) dref=''; [ -f "$D/registry-digest/$(key "$ref")" ] && dref="${ref%:*}@$(cat "$D/registry-digest/$(key "$ref")")" ;;
+    esac
+    if [ -n "$dref" ]; then
+      mkdir -p "$D/digests"
+      grep -qxF "$dref" "$D/digests/${pid#sha256:}" 2> /dev/null || printf '%s\n' "$dref" >> "$D/digests/${pid#sha256:}"
+      printf '%s\n' "$pid" > "$D/tags/$(key "$dref")"
+    fi
     ev "pull $ref"
     ;;
   tag)
@@ -164,6 +198,11 @@ case $cmd in
     [ "$(cat "$D/c/$c/status" 2> /dev/null)" = running ] || exit 1
     case "$*" in
       *updater.sh\ selfcheck)
+        case $(cat "$D/c/$c/image") in *broken*) exit 1 ;; *) exit 0 ;; esac
+        ;;
+      'nc -z 127.0.0.1 443')
+        # The proxy listens, unless its image is broken or the ports are taken (proxy-fails).
+        [ ! -f "$D/proxy-fails" ] || exit 1
         case $(cat "$D/c/$c/image") in *broken*) exit 1 ;; *) exit 0 ;; esac
         ;;
       'test -f scripts/backup-now.mjs') [ ! -f "$D/no-backup-script" ] ;;
@@ -193,8 +232,8 @@ case $cmd in
     start_as "$D/c/$c"
     ev "up app-$c $id"
     ;;
-  run)
-    # docker run -d --name N [--label k=v] [--restart p -p HOST:3000] -v … -e … … IMAGE
+  run | create)
+    # docker run -d --name N (create: the same, not started) [--label k=v] [--restart p -p HOST:3000] -v … -e … … IMAGE
     args="$*"
     name='' port='' data='' spec='' image='' envfile='' pairs='' binds='' mounts=''
     remove=0 entrypoint=''
@@ -276,6 +315,11 @@ EOF
     date +%s%N > "$D/c/$name/serial"
     printf '%s' "$*" > "$D/c/$name/cmd"
     [ -z "$data" ] || touch "$D/vols/$data"
+    if [ "$cmd" = create ]; then
+      echo created > "$D/c/$name/status"
+      ev "create $name $id"
+      exit 0
+    fi
     ev "run $name $id${port:+ port=$port}"
     if [ -n "$port" ]; then
       busy=''
@@ -314,6 +358,11 @@ EOF
     echo running > "$D/c/$c/status"
     [ -f "$D/c/$c/sick-after-restart" ] || rm -f "$D/c/$c/health"
     ev "restart $(label_of "$3")"
+    ;;
+  kill)
+    [ -f "$D/c/$1/image" ] || exit 1
+    echo exited > "$D/c/$1/status"
+    ev "kill $1"
     ;;
   rm)
     [ "$1" = -f ] && shift
