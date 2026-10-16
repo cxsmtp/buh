@@ -4,6 +4,7 @@
 # updater image, as ghcr.io does for this repository:
 #
 #   1. `setup` without the login folder, then with a wrong login: refused, nothing changed;
+#      a login folder the updater cannot read (another user's, mode 700): refused, saying what to do;
 #   2. with the login (the folder mounted read-only, as the one-line set-up does): set up; the
 #      token is in no output, log or status;
 #   3. an update downloads through the login and runs the shop by digest (repo@sha256:…);
@@ -52,17 +53,22 @@ cleanup() {
   docker volume rm "$NAME-data" "$NAME-updater-state" "$NAME-updater-control" "$NAME-updater-status" > /dev/null 2>&1 || true
   # The updater's tags (shared with the other tests when they run on one machine).
   docker rmi buh:last-good buh:previous > /dev/null 2>&1 || true
-  rm -rf "$WORK"
+  as_root 'rm -rf /l/* /l/.[!.]*' > /dev/null 2>&1 || true
+  rm -rf "$WORK" 2> /dev/null || true
 }
 cleanup
 trap cleanup EXIT
 mkdir -p "$WORK/login" "$WORK/push" "$WORK/auth"
-chmod 700 "$WORK/login" "$WORK/push"
-# auth.json as `podman login` writes it (and the docker CLI reads it as config.json).
+chmod 700 "$WORK/push"
+# The login folder as a root engine has it (/root/.config/containers: root's, 700; auth.json
+# 600), so through a container: this script need not run as root. as_root SCRIPT (stdin passed).
+as_root() {
+  docker run --rm -i --pids-limit 64 --network none -v "$WORK/login:/l" --entrypoint sh "$HTPASSWD_IMAGE" -c "$1"
+}
+login_json() { printf '{"auths":{"%s":{"auth":"%s"}}}\n' "$REG" "$(printf '%s:%s' "$USER_NAME" "$1" | base64 | tr -d '\n')"; }
 write_login() { # write_login PASSWORD: replaced as a new file, as podman login does
-  printf '{"auths":{"%s":{"auth":"%s"}}}\n' "$REG" "$(printf '%s:%s' "$USER_NAME" "$1" | base64 | tr -d '\n')" > "$WORK/login/.auth.json.new"
-  chmod 600 "$WORK/login/.auth.json.new"
-  mv -f "$WORK/login/.auth.json.new" "$WORK/login/auth.json"
+  login_json "$1" | as_root 'cat > /l/.auth.json.new && chmod 600 /l/.auth.json.new && mv -f /l/.auth.json.new /l/auth.json && chown -R 0:0 /l && chmod 700 /l' ||
+    fail "could not write the login"
 }
 updater() { docker exec "$NAME-updater" "$@"; }
 status_json() { updater cat /public/status.json; }
@@ -85,8 +91,7 @@ for _ in $(seq 1 30); do
   [ "$(curl --noproxy '*' -s --max-time 5 -o /dev/null -w '%{http_code}' "http://$REG/v2/")" = 401 ] && break
   sleep 1
 done
-write_login "$TOKEN"
-cp "$WORK/login/auth.json" "$WORK/push/config.json"
+login_json "$TOKEN" > "$WORK/push/config.json"
 push() { DOCKER_CONFIG="$WORK/push" docker push -q "$1" > /dev/null || fail "push $1"; }
 derive buh:test "$SHOP:9.3.0" 'LABEL org.opencontainers.image.version=9.3.0'
 derive buh:test "$SHOP:9.3.1" 'LABEL org.opencontainers.image.version=9.3.1'
@@ -101,7 +106,7 @@ else
 fi
 docker tag "$SHOP:9.3.0" "$SHOP:latest"
 for ref in "$SHOP:9.3.0" "$SHOP:latest" "$UPD:latest"; do push "$ref"; done
-rm -f "$WORK/login/auth.json"
+as_root 'chown 0:0 /l && chmod 700 /l'
 
 step "1. the owner's shop (9.3.0), then setup without the login folder, and with a wrong login"
 docker run -d --name "$NAME" -p "127.0.0.1:$PORT:3000" -v "$NAME-data:/data" --read-only --tmpfs /tmp --cap-drop ALL \
@@ -118,6 +123,14 @@ grep -q "did not pass Podman's login folder" <<< "$out" || fail "no hint about t
 write_login "wrong-token"
 out=$(setup -v "$WORK/login:/run/buh/registry-auth:ro" 2>&1) && fail "setup with a wrong login passed: $out"
 grep -q "no valid login" <<< "$out" || fail "unclear refusal: $out"
+# The right login in a folder the updater cannot read (another user's, 700): said plainly, up front.
+write_login "$TOKEN"
+as_root 'chown -R 1000:1000 /l'
+out=$(setup -v "$WORK/login:/run/buh/registry-auth:ro" 2>&1) && fail "setup with an unreadable login folder passed: $out"
+grep -q "the updater cannot read the registry login folder $WORK/login: .*must belong to the user Podman runs as. On a Linux server (Podman as root): chown -R root:root $WORK/login && chmod 700 $WORK/login" <<< "$out" ||
+  fail "unclear refusal for an unreadable folder: $out"
+grep -q "Nothing was changed" <<< "$out" || fail "no word that nothing changed: $out"
+as_root 'chown -R 0:0 /l'
 [ "$(docker inspect -f '{{.Id}}' "$NAME")" = "$shop_cid" ] || fail "the shop was changed by a refused set-up"
 if docker inspect "$NAME-updater" > /dev/null 2>&1; then fail "an updater was started by a refused set-up"; fi
 
@@ -146,6 +159,14 @@ echo "the shop runs as: $run_ref"
 docker ps --filter "name=^$NAME\$" --format '{{.Names}}  {{.Image}}'
 [[ $run_ref == "$SHOP@sha256:"* ]] || fail "not started by digest: $run_ref"
 updater cat /state/version-digests
+
+step "3b. the folder later belongs to someone else: each check says what to do"
+as_root 'chown -R 1000:1000 /l'
+updater update-now > /dev/null 2>&1 || true
+updater grep -q 'cannot read the registry login folder' /state/alerts/alerts.log || fail "no alert for an unreadable folder: $(updater tail -n 5 /state/updater.log)"
+wait_status '"registryProblem":"the updater cannot read the registry login folder' || fail "no note in the status: $(status_json)"
+as_root 'chown -R 0:0 /l'
+[ "$(image_of "$NAME")" = "$(id_of "$SHOP:9.3.1")" ] || fail "the shop changed"
 
 step "4. the login expires: refused plainly, nothing marked bad"
 write_login "expired-token"

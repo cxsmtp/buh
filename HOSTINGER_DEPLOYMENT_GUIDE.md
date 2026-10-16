@@ -284,7 +284,7 @@ The images (`ghcr.io/cxsmtp/buh`, `buh-updater`, `buh-proxy`) are private. Podma
      ```bash
      chmod 600 /root/.config/containers/auth.json
      ```
-     (A rootless user: `--authfile ~/.config/containers/auth.json`.)
+     (A rootless user: `--authfile ~/.config/containers/auth.json`.) The folder must belong to the user Podman runs as (root here): the updater runs as root without the right to read other users' files, and `setup` refuses, with the `chown` to type, if it cannot read it.
 3. **When the token expires** (Settings → Versions then says "the registry login has expired"; updates wait, the shop keeps running): make a new token, run the same login line again, and that is all; the updater uses the new login at its next check. Delete the old token on GitHub.
 
 `setup` checks the login before it changes anything, and says what is missing.

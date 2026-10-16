@@ -1274,6 +1274,39 @@ registry_message() {
   printf 'the registry login has expired or is missing: %s refused to send %s. On the server, log in again (podman login %s, with a GitHub token that can read packages; deployment guide, "Private images"); updates resume by themselves' "$1" "$2" "$1"
 }
 
+# plain_access PATH BITS (4 read, 5 read and enter): allowed by the owner, group or other
+# permissions alone, as the updater sees it. It runs as root but with every capability dropped
+# (no DAC_OVERRIDE): a folder of another user's with mode 700 is closed to it.
+plain_access() {
+  pa_info=$(stat -c '%u %g %a' "$1" 2> /dev/null) || return 1
+  pa_uid=${pa_info%% *}
+  pa_rest=${pa_info#* }
+  pa_gid=${pa_rest%% *}
+  pa_mode=${pa_rest#* }
+  pa_mode=${pa_mode#"${pa_mode%???}"}
+  if [ "$pa_uid" = "$(id -u)" ]; then
+    pa_bits=${pa_mode%??}
+  elif [ "$pa_gid" = "$(id -g)" ]; then
+    pa_bits=${pa_mode#?}
+    pa_bits=${pa_bits%?}
+  else
+    pa_bits=${pa_mode#??}
+  fi
+  [ $((pa_bits & $2)) = "$2" ]
+}
+
+# What is wrong with the mounted login folder for the updater, in plain words (nothing when
+# it can read it, or none is mounted).
+login_folder_problem() {
+  [ -d "$AUTH_MOUNT" ] || return 0
+  if plain_access "$AUTH_MOUNT" 5; then
+    if [ ! -e "$AUTH_MOUNT/auth.json" ] || plain_access "$AUTH_MOUNT/auth.json" 4; then return 0; fi
+  fi
+  lf_dir=${REGISTRY_AUTH_DIR:-$AUTH_MOUNT}
+  printf 'the updater cannot read the registry login folder %s: it runs as root without the right to read files of other users, so the folder and its auth.json must belong to the user Podman runs as. On a Linux server (Podman as root): chown -R root:root %s && chmod 700 %s && chmod 600 %s/auth.json; or log in with podman login as the user Podman runs as' \
+    "$lf_dir" "$lf_dir" "$lf_dir" "$lf_dir"
+}
+
 # The docker CLI reads its logins from DOCKER_CONFIG/config.json: there, a link to the mounted
 # auth.json (the same format), so a new `podman login` on the host is used at the next pull.
 # The file is never copied, printed or logged.
@@ -1298,6 +1331,15 @@ use_registry_login() {
 PULL_REFUSED=0
 pull_image() {
   PULL_REFUSED=0
+  # A login folder the updater cannot read: said plainly (once an hour), not as an expired login.
+  pi_folder=$(login_folder_problem)
+  if [ -n "$pi_folder" ]; then
+    printf '%s\n' "$pi_folder" > "$STATE_DIR/login-folder-problem"
+    alert_limited login-folder error "$pi_folder"
+  elif [ -f "$STATE_DIR/login-folder-problem" ]; then
+    rm -f "$STATE_DIR/login-folder-problem" "$STATE_DIR/alerted-login-folder"
+    log "the registry login folder can be read again"
+  fi
   use_registry_login
   pi_reg=$(registry_of "$1")
   if pi_out=$(docker pull -q "$1" 2>&1 < /dev/null); then
@@ -1320,6 +1362,10 @@ pull_image() {
 
 # For the status: the refusal kept by pull_image, as one line (empty when none).
 registry_problem() {
+  if [ -s "$STATE_DIR/login-folder-problem" ]; then
+    head -n 1 "$STATE_DIR/login-folder-problem"
+    return 0
+  fi
   [ -f "$STATE_DIR/registry-login" ] || return 0
   rp_at=$(sed -n 1p "$STATE_DIR/registry-login")
   rp_reg=$(sed -n 2p "$STATE_DIR/registry-login")
@@ -2173,6 +2219,12 @@ setup_check_logins() {
     /*) ;;
     *) REGISTRY_AUTH_DIR='' ;;
   esac
+  # Readable here (this container may read anything) but not for the updater: refused now.
+  sl_folder=$(login_folder_problem)
+  if [ -n "$sl_folder" ]; then
+    echo "setup: $sl_folder. Nothing was changed." >&2
+    return 2
+  fi
   use_registry_login
   sl_refused=''
   for sl_ref in "$IMAGE" "$UPDATER_IMAGE" ${PROXY_IMAGE:+"$PROXY_IMAGE"}; do

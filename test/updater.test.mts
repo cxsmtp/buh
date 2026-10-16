@@ -1105,6 +1105,31 @@ test('private images: setup refuses without a login (nothing changed); with the 
   assert.equal(fs.readlinkSync(path.join(cliConfig, 'config.json')), path.join(mount, 'auth.json'), 'a link, not a copy');
   assert.ok(!r.out.includes(token) && !r.out.includes(Buffer.from(`owner:${token}`).toString('base64')));
 
+  // 3b. Regression (CI): a folder the updater cannot read (root without DAC_OVERRIDE; here: no
+  //     permission bits at all, as another user's 700 folder looks to it). Set-up refuses up front, and
+  //     each check says what to do instead of reporting an expired login.
+  const plainly = /the updater cannot read the registry login folder \/root\/\.config\/containers: .*must belong to the user Podman runs as\. On a Linux server \(Podman as root\): chown -R root:root \/root\/\.config\/containers && chmod 700 \/root\/\.config\/containers/;
+  const asRunning = { ...login, IMAGE: LATEST, REGISTRY_AUTH_DIR: '/root/.config/containers' };
+  fs.chmodSync(mount, 0o000);
+  try {
+    fs.rmSync(path.join(e.fake, 'events'), { force: true });
+    r = runSetup(e, proxy, login);
+    assert.equal(r.code, 2, r.out);
+    assert.match(r.out, plainly);
+    assert.match(r.out, /Nothing was changed/);
+    untouched();
+    asUpdater(e, UPDATER, ['once'], asRunning);
+    asUpdater(e, UPDATER, ['once'], asRunning);
+    const said = read(path.join(STATE_VOL(e), 'alerts', 'alerts.log')).split('\n').filter((l) => /cannot read the registry login folder/.test(l));
+    assert.equal(said.length, 1, 'once an hour, not every check');
+    assert.match(said[0], plainly);
+    assert.match(read(path.join(STATE_VOL(e), 'login-folder-problem')), plainly);
+  } finally {
+    fs.chmodSync(mount, 0o700);
+  }
+  asUpdater(e, UPDATER, ['once'], asRunning);
+  assert.ok(!fs.existsSync(path.join(STATE_VOL(e), 'login-folder-problem')), 'readable again: the note is gone');
+
   // 4. The token expires: the scheduled check says so; a new `podman login` (a new file) is used at once.
   publish(e, NEW);
   const asIt = { ...login, AUTH_MOUNT: mount, IMAGE: LATEST };
