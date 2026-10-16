@@ -1,16 +1,43 @@
 'use client';
 
-import React, { useMemo, useState } from 'react';
-import { Archive, ArchiveRestore, ArrowDown, ArrowUp, Edit3, Eye, EyeOff, Minus, Package, Plus, Search } from 'lucide-react';
+import React, { useEffect, useId, useMemo, useRef, useState } from 'react';
+import {
+  Archive,
+  ArchiveRestore,
+  ArrowDown,
+  ArrowUp,
+  ChevronDown,
+  Copy,
+  Edit3,
+  Eye,
+  EyeOff,
+  History,
+  Minus,
+  Package,
+  PackagePlus,
+  Plus,
+  RefreshCw,
+  Search,
+  Share2,
+  Undo2,
+  X,
+  XCircle,
+} from 'lucide-react';
 import type { CatalogSettings, Product } from '@/types';
-import { postJson, sendJson } from '@/lib/apiClient';
+import { getJson, postJson, sendJson } from '@/lib/apiClient';
+import { DEFAULT_LOW_STOCK, isLow, isSoldOut, newKey, shortSizeName, stockAlerts, stockLevel, type StockLevel } from '@/lib/client/stock';
+import { Sheet } from '@/components/common/Sheet';
 import { ProductEditor } from './inventory/ProductEditor';
+import { REASONS, useStockMoves, type StockReason } from './inventory/useStockMoves';
 
 /**
- * Inventory: every product with its pieces per size. + / − change one size's
- * stock straight away (each tap is one atomic change on the server, so a sale
- * at the same moment is never lost). Edit opens the full editor; Remove
- * archives (past orders keep showing it) and can be undone.
+ * Inventory, made for the owner's phone: find a product (name or SKU, filters for
+ * low, sold out, hidden, category), see every size's stock as coloured chips, and
+ * change it with big − / + buttons or by typing the number. Each change is saved
+ * at once (with Undo), checked against what the server has (another phone, a sale)
+ * and recorded with who, why and old → new. "Received stock" adds to several sizes
+ * at once. Quick actions: hide or show, sold out, duplicate (a colour variant),
+ * share the link, edit, history, move, remove.
  */
 
 type AdminProduct = Product & { archived?: boolean };
@@ -21,59 +48,116 @@ interface AdminInventoryTabProps {
   catalog: CatalogSettings;
   /** Reload products (after any change). */
   onChanged: () => Promise<void> | void;
+  /** One product as the server now has it (a saved stock change): shown at once. */
+  onProductUpdated?: (p: Product) => void;
   /** Open the editor for a new product straight away (the "+ Add" tab). */
   startAdding?: boolean;
 }
 
-export const AdminInventoryTab: React.FC<AdminInventoryTabProps> = ({ products, catalog, onChanged, startAdding = false }) => {
+const CHIP: Record<StockLevel, string> = {
+  out: 'bg-red-50 text-red-800 border-red-300',
+  low: 'bg-amber-50 text-amber-900 border-amber-300',
+  ok: 'bg-emerald-50 text-emerald-900 border-emerald-300',
+};
+const LEVEL_WORD: Record<StockLevel, string> = { out: 'sold out', low: 'low', ok: 'in stock' };
+
+const actionBtn = 'min-h-11 px-3 rounded-xl border border-stone-300 bg-white text-stone-800 text-xs font-semibold inline-flex items-center justify-center gap-1.5 disabled:opacity-40';
+const actionDanger = 'min-h-11 px-3 rounded-xl border border-red-300 bg-white text-red-800 text-xs font-semibold inline-flex items-center justify-center gap-1.5 disabled:opacity-40';
+const actionIcon = 'min-h-11 w-11 rounded-xl border border-stone-300 bg-white text-stone-800 inline-flex items-center justify-center disabled:opacity-40';
+const actionPrimary = 'min-h-11 px-3 rounded-xl border border-[#0f1c2e] bg-[#0f1c2e] text-white text-xs font-semibold inline-flex items-center justify-center gap-1.5';
+
+export const AdminInventoryTab: React.FC<AdminInventoryTabProps> = ({ products, catalog, onChanged, onProductUpdated, startAdding = false }) => {
   const [editing, setEditing] = useState<AdminProduct | 'new' | null>(startAdding ? 'new' : null);
   const [query, setQuery] = useState('');
   const [filter, setFilter] = useState<Filter>('all');
+  const [category, setCategory] = useState('');
+  const [open, setOpen] = useState<Set<string>>(() => new Set());
+  const [reason, setReason] = useState<StockReason>('correction');
+  const [receiving, setReceiving] = useState<AdminProduct | null>(null);
+  const [history, setHistory] = useState<AdminProduct | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
-  const [message, setMessage] = useState<{ id: string; text: string } | null>(null);
-  const low = catalog.lowStockThreshold;
+  const [notice, setNotice] = useState<{ text: string; error?: boolean } | null>(null);
+  const low = Number.isInteger(catalog.lowStockThreshold) ? catalog.lowStockThreshold : DEFAULT_LOW_STOCK;
 
-  const live = products.filter((p) => !p.archived);
-  const counts = {
+  const stock = useStockMoves({
+    products,
+    onProduct: (p) => (onProductUpdated ? onProductUpdated(p) : void onChanged()),
+    onRefresh: onChanged,
+  });
+
+  // What the owner sees: the confirmed stock plus taps still on their way.
+  const view = useMemo(
+    () => products.map((p) => ({ ...p, stockBySize: Object.fromEntries(p.profiles.map((s) => [s.id, stock.shown(p.id, s.id, p.stockBySize)])) })),
+    // stock.shown changes with every tap (re-render); products with every reload.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [products, stock.shown, stock.toast, stock.saving]
+  );
+  const live = view.filter((p) => !p.archived);
+  const alerts = stockAlerts(view, low);
+  const counts: Record<Filter, number> = {
     all: live.length,
-    low: live.filter((p) => p.profiles.some((s) => (p.stockBySize[s.id] ?? 0) > 0 && (p.stockBySize[s.id] ?? 0) <= low)).length,
-    'sold-out': live.filter((p) => p.stockCount === 0).length,
+    low: alerts.low.length,
+    'sold-out': alerts.soldOut.length,
     hidden: live.filter((p) => p.active === false).length,
-    archived: products.filter((p) => p.archived).length,
+    archived: view.filter((p) => p.archived).length,
   };
 
   const shown = useMemo(() => {
     const q = query.trim().toLowerCase();
-    return products
+    return view
       .filter((p) => (filter === 'archived' ? p.archived : !p.archived))
-      .filter((p) =>
-        filter === 'low'
-          ? p.profiles.some((s) => (p.stockBySize[s.id] ?? 0) > 0 && (p.stockBySize[s.id] ?? 0) <= low)
-          : filter === 'sold-out'
-          ? p.stockCount === 0
-          : filter === 'hidden'
-          ? p.active === false
-          : true
-      )
-      .filter((p) => !q || p.title.toLowerCase().includes(q) || p.material.toLowerCase().includes(q) || p.category.includes(q));
-  }, [products, filter, query, low]);
+      .filter((p) => (filter === 'low' ? p.active !== false && isLow(p, low) : filter === 'sold-out' ? p.active !== false && isSoldOut(p) : filter === 'hidden' ? p.active === false : true))
+      .filter((p) => !category || p.category === category)
+      .filter((p) => !q || [p.title, p.sku ?? '', p.id, p.material].some((x) => x.toLowerCase().includes(q)));
+  }, [view, filter, query, category, low]);
 
-  const run = async (id: string, call: () => Promise<{ ok: boolean; data: { message?: string } }>) => {
+  const toggle = (id: string) =>
+    setOpen((s) => {
+      const next = new Set(s);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+
+  const run = async (id: string, call: () => Promise<{ ok: boolean; data: { message?: string } }>, done?: string) => {
     setBusy(id);
-    setMessage(null);
+    setNotice(null);
     const { ok, data } = await call();
     setBusy(null);
-    if (!ok) setMessage({ id, text: data.message || 'Could not save that change.' });
+    setNotice(ok ? (done ? { text: done } : null) : { text: data.message || 'Could not save that change.', error: true });
     await onChanged();
+    return ok;
   };
 
-  const adjust = (p: AdminProduct, sizeId: string, delta: number) =>
-    run(p.id, () => postJson(`/api/admin/products/${encodeURIComponent(p.id)}/stock`, { sizeId, delta }));
   const toggleVisible = (p: AdminProduct) =>
-    run(p.id, () => sendJson('PATCH', `/api/admin/products/${encodeURIComponent(p.id)}`, { product: { active: p.active === false } }));
+    run(p.id, () => sendJson('PATCH', `/api/admin/products/${encodeURIComponent(p.id)}`, { product: { active: p.active === false } }), p.active === false ? `${p.title} is shown in the shop.` : `${p.title} is hidden from the shop.`);
   const archive = (p: AdminProduct, archived: boolean) => {
     if (archived && !window.confirm(`Remove "${p.title}" from the shop? It stays in past orders, and you can restore it under "Removed".`)) return;
     return run(p.id, () => postJson(`/api/admin/products/${encodeURIComponent(p.id)}/archive`, { archived }));
+  };
+  const duplicate = async (p: AdminProduct) => {
+    const key = newKey('d');
+    setBusy(p.id);
+    const res = await postJson<{ product?: AdminProduct; message?: string }>(`/api/admin/products/${encodeURIComponent(p.id)}/duplicate`, { key });
+    setBusy(null);
+    await onChanged();
+    if (!res.ok || !res.data.product) return setNotice({ text: res.data.message || 'Could not copy the product.', error: true });
+    setNotice({ text: `Copied as “${res.data.product.title}” (hidden, no stock). Change its photos and colour, then show it.` });
+    setEditing(res.data.product);
+  };
+  const share = async (p: AdminProduct) => {
+    const url = `${window.location.origin}/p/${encodeURIComponent(p.id)}`;
+    try {
+      if (navigator.share) {
+        await navigator.share({ title: p.title, url });
+        return;
+      }
+      await navigator.clipboard.writeText(url);
+      setNotice({ text: `Link copied: ${url}` });
+    } catch (err) {
+      if ((err as Error)?.name === 'AbortError') return; // the owner closed the share sheet
+      setNotice({ text: `Copy this link: ${url}` });
+    }
   };
   const move = (p: AdminProduct, dir: -1 | 1) => {
     const ids = products.map((x) => x.id);
@@ -85,104 +169,278 @@ export const AdminInventoryTab: React.FC<AdminInventoryTabProps> = ({ products, 
   };
 
   const categoryLabel = (id: string) => catalog.categories.find((c) => c.id === id)?.label ?? id;
+  const filters: Array<[Filter, string]> = [
+    ['all', 'All'],
+    ['low', 'Low'],
+    ['sold-out', 'Sold out'],
+    ['hidden', 'Hidden'],
+    ['archived', 'Removed'],
+  ];
 
   return (
-    <div className="space-y-3">
-      <div className="flex flex-wrap items-center gap-2">
-        <h2 className="font-serif font-bold text-lg text-[#0f1c2e] flex items-center gap-2"><Package className="w-5 h-5 text-[#c5a059]" /> Inventory</h2>
-        <button type="button" onClick={() => setEditing('new')} className="ml-auto px-3.5 py-2 rounded-xl bg-[#0f1c2e] text-white text-xs font-bold flex items-center gap-1.5">
-          <Plus className="w-4 h-4" /> Add product
+    <div className="space-y-3 pb-24 sm:pb-6">
+      <div className="flex items-center gap-2">
+        <h2 className="font-serif font-bold text-lg text-[#0f1c2e] flex items-center gap-2">
+          <Package className="w-5 h-5 text-[#8a6a2c]" aria-hidden="true" /> Inventory
+        </h2>
+        <button type="button" onClick={() => setEditing('new')} className="ml-auto min-h-11 px-4 rounded-xl bg-[#0f1c2e] text-white text-sm font-bold flex items-center gap-1.5">
+          <Plus className="w-4 h-4" aria-hidden="true" /> Add product
         </button>
       </div>
 
-      <div className="flex flex-wrap gap-1.5 text-xs">
-        {(
-          [
-            ['all', 'All'],
-            ['low', `Low (≤ ${low})`],
-            ['sold-out', 'Sold out'],
-            ['hidden', 'Hidden'],
-            ['archived', 'Removed'],
-          ] as Array<[Filter, string]>
-        ).map(([id, name]) => (
-          <button
-            key={id}
-            type="button"
-            onClick={() => setFilter(id)}
-            aria-pressed={filter === id}
-            className={`px-2.5 py-1 rounded-full border font-semibold ${filter === id ? 'bg-[#0f1c2e] text-white border-[#0f1c2e]' : 'bg-white border-stone-300 text-stone-700'}`}
-          >
-            {name} <span className="opacity-70">{counts[id]}</span>
+      {(alerts.soldOut.length > 0 || alerts.low.length > 0) && (
+        <div className="grid grid-cols-2 gap-2" aria-label="Stock alerts" role="group">
+          <button type="button" onClick={() => setFilter('sold-out')} className="min-h-14 rounded-2xl border border-red-200 bg-red-50 text-red-900 px-3 py-2 text-left">
+            <span className="block text-xl font-bold leading-tight">{alerts.soldOut.length}</span>
+            <span className="text-xs font-semibold">sold out</span>
           </button>
-        ))}
-        <label className="relative ml-auto min-w-0 flex-1 sm:flex-none sm:w-56">
-          <Search className="w-3.5 h-3.5 absolute left-2.5 top-1/2 -translate-y-1/2 text-stone-500" />
-          <input value={query} onChange={(e) => setQuery(e.target.value)} placeholder="Search products" aria-label="Search products" className="w-full pl-8 pr-2 py-1.5 rounded-full border border-stone-300 bg-white" />
+          <button type="button" onClick={() => setFilter('low')} className="min-h-14 rounded-2xl border border-amber-200 bg-amber-50 text-amber-900 px-3 py-2 text-left">
+            <span className="block text-xl font-bold leading-tight">{alerts.low.length}</span>
+            <span className="text-xs font-semibold">running low (≤ {low} left)</span>
+          </button>
+        </div>
+      )}
+
+      {/* Search and filters stay at the top while the list scrolls. */}
+      <div className="sticky top-0 z-20 -mx-3 px-3 sm:mx-0 sm:px-0 py-2 bg-[#fbf9f5] space-y-2">
+        <label className="relative block">
+          <Search className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-stone-500" aria-hidden="true" />
+          <input
+            type="search"
+            value={query}
+            onChange={(e) => setQuery(e.target.value)}
+            placeholder="Search name or SKU"
+            aria-label="Search name or SKU"
+            className="w-full min-h-11 pl-9 pr-3 rounded-xl border border-stone-300 bg-white text-sm"
+          />
         </label>
+        <div className="flex gap-1.5 overflow-x-auto no-scrollbar sm:flex-wrap" role="group" aria-label="Show">
+          {filters.map(([id, name]) => (
+            <button
+              key={id}
+              type="button"
+              onClick={() => setFilter(id)}
+              aria-pressed={filter === id}
+              className={`shrink-0 min-h-11 px-3.5 rounded-full border text-xs font-semibold ${filter === id ? 'bg-[#0f1c2e] text-white border-[#0f1c2e]' : 'bg-white border-stone-300 text-stone-800'}`}
+            >
+              {name} <span className={filter === id ? 'text-white' : 'text-stone-600'}>{counts[id]}</span>
+            </button>
+          ))}
+        </div>
+        <div className="grid grid-cols-2 gap-2 sm:flex">
+          <label className="min-w-0 text-[11px] font-semibold text-stone-700 sm:w-60">
+            Category
+            <select value={category} onChange={(e) => setCategory(e.target.value)} className="mt-0.5 w-full min-h-11 px-2 rounded-xl border border-stone-300 bg-white text-sm font-normal text-stone-900">
+              <option value="">All categories</option>
+              {catalog.categories.map((c) => (
+                <option key={c.id} value={c.id}>
+                  {c.label}
+                </option>
+              ))}
+            </select>
+          </label>
+          <label className="min-w-0 text-[11px] font-semibold text-stone-700 sm:w-60" title="Recorded with each − / + change and typed number">
+            Reason for − / +
+            <select value={reason} onChange={(e) => setReason(e.target.value as StockReason)} className="mt-0.5 w-full min-h-11 px-2 rounded-xl border border-stone-300 bg-white text-sm font-normal text-stone-900">
+              {REASONS.map((r) => (
+                <option key={r.id} value={r.id}>
+                  {r.label}
+                </option>
+              ))}
+            </select>
+          </label>
+        </div>
       </div>
 
-      {shown.length === 0 && <p className="text-center text-sm text-stone-500 py-10 bg-white rounded-2xl border border-stone-200">Nothing here.</p>}
+      {shown.length === 0 && <p className="text-center text-sm text-stone-600 py-10 bg-white rounded-2xl border border-stone-200">Nothing here.</p>}
 
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-3">
-        {shown.map((p) => (
-          <div key={p.id} className={`bg-white rounded-2xl border p-3 flex gap-3 ${p.active === false || p.archived ? 'border-stone-200 opacity-80' : 'border-stone-200'}`}>
-            {/* eslint-disable-next-line @next/next/no-img-element */}
-            <img src={p.featuredImage} alt="" className="w-20 h-20 sm:w-24 sm:h-24 rounded-xl object-cover bg-stone-100 shrink-0" />
-            <div className="min-w-0 flex-1 space-y-1.5">
-              <div className="flex items-start gap-2">
-                <div className="min-w-0">
-                  <div className="font-bold text-sm text-[#0f1c2e] truncate">{p.title}</div>
-                  <div className="text-[11px] text-stone-500">
+      <ul className="grid grid-cols-1 lg:grid-cols-2 gap-2.5 lg:items-start">
+        {shown.map((p) => {
+          const isOpen = open.has(p.id);
+          const panelId = `inv-${p.id}`;
+          return (
+            <li key={p.id} className={`bg-white rounded-2xl border ${p.archived ? 'border-stone-200 opacity-80' : 'border-stone-200'} overflow-hidden`}>
+              <button
+                type="button"
+                onClick={() => toggle(p.id)}
+                aria-expanded={isOpen}
+                aria-controls={panelId}
+                aria-label={`Stock and actions for ${p.title}`}
+                className="w-full flex gap-3 p-2.5 text-left"
+              >
+                {/* eslint-disable-next-line @next/next/no-img-element */}
+                <img src={p.featuredImage} alt="" className="w-14 h-14 rounded-xl object-cover bg-stone-100 shrink-0" loading="lazy" />
+                <span className="min-w-0 flex-1">
+                  <span className="flex items-start gap-1">
+                    <span className="font-bold text-sm text-[#0f1c2e] truncate flex-1">{p.title}</span>
+                    <ChevronDown className={`w-4 h-4 shrink-0 text-stone-500 transition-transform ${isOpen ? 'rotate-180' : ''}`} aria-hidden="true" />
+                  </span>
+                  <span className="block text-[11px] text-stone-600 truncate">
                     AED {p.price} · {categoryLabel(p.category)}
-                    {p.active === false && !p.archived && <span className="ml-1 font-semibold text-stone-700">· hidden</span>}
-                    {p.stockCount === 0 && !p.archived && <span className="ml-1 font-semibold text-red-700">· sold out</span>}
+                    {p.sku && <> · {p.sku}</>}
+                    {p.active === false && !p.archived && <strong className="ml-1 text-stone-800">· hidden</strong>}
+                    {!p.archived && isSoldOut(p) && <strong className="ml-1 text-red-800">· sold out</strong>}
+                  </span>
+                  {!p.archived && (
+                    <span className="mt-1 flex flex-wrap gap-1">
+                      {p.profiles.map((s) => {
+                        const qty = p.stockBySize[s.id] ?? 0;
+                        const level = stockLevel(qty, low);
+                        return (
+                          <span key={s.id} className={`px-1.5 py-0.5 rounded-md border text-[11px] font-semibold whitespace-nowrap ${CHIP[level]}`} title={`${s.name}: ${qty} (${LEVEL_WORD[level]})`}>
+                            {shortSizeName(s)} {qty}
+                          </span>
+                        );
+                      })}
+                      {stock.saving(p.id) && <span className="text-[11px] text-stone-600">saving…</span>}
+                    </span>
+                  )}
+                </span>
+              </button>
+
+              {isOpen && (
+                <div id={panelId} className="border-t border-stone-100 px-2.5 pb-3 pt-2 space-y-3">
+                  {!p.archived && (
+                    <ul className="space-y-1.5" aria-label={`Stock of ${p.title} per size`}>
+                      {p.profiles.map((s) => (
+                        <SizeStepper
+                          key={s.id}
+                          name={s.name}
+                          short={shortSizeName(s)}
+                          qty={p.stockBySize[s.id] ?? 0}
+                          level={stockLevel(p.stockBySize[s.id] ?? 0, low)}
+                          onStep={(d) => stock.step(p.id, s.id, d, reason)}
+                          onSet={(v) => stock.setTo(p.id, s.id, v, reason)}
+                        />
+                      ))}
+                    </ul>
+                  )}
+                  <div className="flex flex-wrap gap-2">
+                    {p.archived ? (
+                      <button type="button" onClick={() => void archive(p, false)} disabled={busy === p.id} className={actionBtn}>
+                        <ArchiveRestore className="w-4 h-4" aria-hidden="true" /> Restore (hidden)
+                      </button>
+                    ) : (
+                      <>
+                        <button type="button" onClick={() => setReceiving(p)} className={actionPrimary} aria-label={`Received stock for ${p.title}`}>
+                          <PackagePlus className="w-4 h-4" aria-hidden="true" /> Received stock
+                        </button>
+                        <button type="button" onClick={() => setEditing(p)} className={actionBtn} aria-label={`Edit ${p.title}`}>
+                          <Edit3 className="w-4 h-4" aria-hidden="true" /> Edit
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => void toggleVisible(p)}
+                          disabled={busy === p.id}
+                          className={actionBtn}
+                          title={p.active === false ? 'Hidden from the shop: click to show' : 'Shown in the shop: click to hide'}
+                        >
+                          {p.active === false ? (
+                            <>
+                              <Eye className="w-4 h-4" aria-hidden="true" /> Show in shop
+                            </>
+                          ) : (
+                            <>
+                              <EyeOff className="w-4 h-4" aria-hidden="true" /> Hide
+                            </>
+                          )}
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => stock.soldOut(p.id, p.profiles.map((s) => s.id))}
+                          disabled={isSoldOut(p)}
+                          className={actionBtn}
+                          aria-label={`Sold out: set every size of ${p.title} to 0`}
+                        >
+                          <XCircle className="w-4 h-4" aria-hidden="true" /> Sold out
+                        </button>
+                        <button type="button" onClick={() => void duplicate(p)} disabled={busy === p.id} className={actionBtn} aria-label={`Duplicate ${p.title} (for another colour)`}>
+                          <Copy className="w-4 h-4" aria-hidden="true" /> Duplicate
+                        </button>
+                        <button type="button" onClick={() => void share(p)} className={actionBtn} aria-label={`Share the link to ${p.title}`}>
+                          <Share2 className="w-4 h-4" aria-hidden="true" /> Share
+                        </button>
+                        <button type="button" onClick={() => setHistory(p)} className={actionBtn} aria-label={`Stock history of ${p.title}`}>
+                          <History className="w-4 h-4" aria-hidden="true" /> History
+                        </button>
+                        <button type="button" onClick={() => void move(p, -1)} disabled={busy === p.id} className={actionIcon} aria-label={`Move ${p.title} up`}>
+                          <ArrowUp className="w-4 h-4" aria-hidden="true" />
+                        </button>
+                        <button type="button" onClick={() => void move(p, 1)} disabled={busy === p.id} className={actionIcon} aria-label={`Move ${p.title} down`}>
+                          <ArrowDown className="w-4 h-4" aria-hidden="true" />
+                        </button>
+                        <button type="button" onClick={() => void archive(p, true)} disabled={busy === p.id} className={actionDanger}>
+                          <Archive className="w-4 h-4" aria-hidden="true" /> Remove
+                        </button>
+                      </>
+                    )}
                   </div>
                 </div>
-              </div>
-
-              {!p.archived && (
-                <div className="flex flex-wrap gap-1.5">
-                  {p.profiles.map((s) => {
-                    const qty = p.stockBySize[s.id] ?? 0;
-                    return (
-                      <div key={s.id} className={`flex items-center rounded-lg border text-[11px] ${qty === 0 ? 'border-red-200 bg-red-50' : qty <= low ? 'border-amber-200 bg-amber-50' : 'border-stone-200 bg-stone-50'}`}>
-                        <button type="button" disabled={busy === p.id || qty === 0} onClick={() => void adjust(p, s.id, -1)} className="px-2.5 py-2 disabled:opacity-30" aria-label={`One fewer ${s.name} of ${p.title}`}><Minus className="w-3 h-3" /></button>
-                        <span className="px-1 font-semibold whitespace-nowrap">{s.badge || s.name}: {qty}</span>
-                        <button type="button" disabled={busy === p.id} onClick={() => void adjust(p, s.id, 1)} className="px-2.5 py-2 disabled:opacity-30" aria-label={`One more ${s.name} of ${p.title}`}><Plus className="w-3 h-3" /></button>
-                      </div>
-                    );
-                  })}
-                </div>
               )}
+            </li>
+          );
+        })}
+      </ul>
 
-              <div className="flex flex-wrap items-center gap-1.5 text-[11px] pt-0.5">
-                {p.archived ? (
-                  <button type="button" onClick={() => void archive(p, false)} disabled={busy === p.id} className="px-2 py-1 rounded-lg border border-stone-300 font-semibold flex items-center gap-1"><ArchiveRestore className="w-3.5 h-3.5" /> Restore (hidden)</button>
-                ) : (
-                  <>
-                    <button type="button" onClick={() => setEditing(p)} className="px-2 py-1 rounded-lg bg-[#0f1c2e] text-white font-semibold flex items-center gap-1"><Edit3 className="w-3.5 h-3.5" /> Edit</button>
-                    <button type="button" onClick={() => void toggleVisible(p)} disabled={busy === p.id} className="px-2 py-1 rounded-lg border border-stone-300 font-semibold flex items-center gap-1" title={p.active === false ? 'Hidden from the shop: click to show' : 'Shown in the shop: click to hide'}>
-                      {p.active === false ? <><EyeOff className="w-3.5 h-3.5" /> Hidden</> : <><Eye className="w-3.5 h-3.5" /> Visible</>}
-                    </button>
-                    <button type="button" onClick={() => void move(p, -1)} disabled={busy === p.id} className="p-1 rounded-lg border border-stone-300" aria-label={`Move ${p.title} up`}><ArrowUp className="w-3.5 h-3.5" /></button>
-                    <button type="button" onClick={() => void move(p, 1)} disabled={busy === p.id} className="p-1 rounded-lg border border-stone-300" aria-label={`Move ${p.title} down`}><ArrowDown className="w-3.5 h-3.5" /></button>
-                    <button type="button" onClick={() => void archive(p, true)} disabled={busy === p.id} className="ml-auto px-2 py-1 rounded-lg border border-red-200 text-red-700 font-semibold flex items-center gap-1"><Archive className="w-3.5 h-3.5" /> Remove</button>
-                  </>
-                )}
-              </div>
-              {message?.id === p.id && <p role="alert" className="text-[11px] text-red-700">{message.text}</p>}
-            </div>
+      {/* Saved / Undo / conflict messages, above the bottom bar. */}
+      <div className="fixed inset-x-0 bottom-[4.75rem] sm:bottom-20 z-[45] px-3 pointer-events-none flex flex-col items-center gap-2" role="status" aria-live="polite">
+        {stock.toast && (
+          <div
+            key={stock.toast.id}
+            className={`pointer-events-auto w-full max-w-md rounded-2xl shadow-lg px-3 py-2 flex items-center gap-2 text-sm ${
+              stock.toast.kind === 'saved' ? 'bg-[#0f1c2e] text-white' : stock.toast.kind === 'conflict' ? 'bg-amber-100 text-amber-950 border border-amber-300' : 'bg-red-50 text-red-900 border border-red-300'
+            }`}
+          >
+            <span className="flex-1 min-w-0 line-clamp-2">{stock.toast.text}</span>
+            {stock.toast.kind === 'saved' && stock.toast.moveId && (
+              <button type="button" onClick={() => stock.undo(stock.toast!)} className="min-h-11 px-3 rounded-xl bg-white/15 font-bold flex items-center gap-1">
+                <Undo2 className="w-4 h-4" aria-hidden="true" /> Undo
+              </button>
+            )}
+            {stock.toast.kind === 'conflict' && (
+              <button type="button" onClick={() => void stock.refresh()} className="min-h-11 px-3 rounded-xl bg-white font-bold flex items-center gap-1 border border-amber-300">
+                <RefreshCw className="w-4 h-4" aria-hidden="true" /> Refresh
+              </button>
+            )}
+            <button type="button" onClick={stock.dismiss} className="min-h-11 min-w-11 flex items-center justify-center rounded-xl" aria-label="Dismiss">
+              <X className="w-4 h-4" aria-hidden="true" />
+            </button>
           </div>
-        ))}
+        )}
+        {notice && (
+          <div className={`pointer-events-auto w-full max-w-md rounded-2xl shadow-lg px-3 py-2 flex items-center gap-2 text-sm ${notice.error ? 'bg-red-50 text-red-900 border border-red-300' : 'bg-white text-stone-900 border border-stone-300'}`}>
+            <span className="flex-1 min-w-0 break-words">{notice.text}</span>
+            <button type="button" onClick={() => setNotice(null)} className="min-h-11 min-w-11 flex items-center justify-center rounded-xl" aria-label="Dismiss message">
+              <X className="w-4 h-4" aria-hidden="true" />
+            </button>
+          </div>
+        )}
       </div>
+
+      {receiving && (
+        <ReceiveSheet
+          product={receiving}
+          shown={(sizeId) => stock.shown(receiving.id, sizeId, products.find((x) => x.id === receiving.id)?.stockBySize)}
+          onClose={() => setReceiving(null)}
+          onReceive={(changes, note) => {
+            stock.receive(receiving.id, changes, note);
+            setReceiving(null);
+          }}
+        />
+      )}
+      {history && <HistorySheet product={history} onClose={() => setHistory(null)} />}
 
       {editing && (
         <ProductEditor
           product={editing === 'new' ? null : editing}
           catalog={catalog}
-          onClose={() => setEditing(null)}
-          onSaved={() => {
+          onClose={() => {
             setEditing(null);
+            void onChanged();
+          }}
+          onSaved={(saved) => {
+            setEditing(null);
+            setNotice({ text: `${saved.title} is saved${saved.active === false ? ' (hidden)' : ' and in the shop'}.` });
             void onChanged();
           }}
         />
@@ -190,3 +448,209 @@ export const AdminInventoryTab: React.FC<AdminInventoryTabProps> = ({ products, 
     </div>
   );
 };
+
+/** One size: big − / + and the number, which can be tapped to type. */
+function SizeStepper({ name, short, qty, level, onStep, onSet }: { name: string; short: string; qty: number; level: StockLevel; onStep: (d: number) => void; onSet: (v: number) => void }) {
+  const [typing, setTyping] = useState<string | null>(null);
+  const input = useRef<HTMLInputElement>(null);
+  const commit = () => {
+    if (typing === null) return;
+    const v = Number(typing);
+    setTyping(null);
+    if (typing.trim() !== '' && Number.isInteger(v) && v >= 0 && v <= 100_000) onSet(v);
+  };
+  return (
+    <li className="flex items-center gap-2">
+      <span className="min-w-0 flex-1">
+        <span className="block text-sm font-semibold text-stone-900 truncate">{short}</span>
+        <span className={`text-[11px] font-semibold ${level === 'out' ? 'text-red-800' : level === 'low' ? 'text-amber-900' : 'text-emerald-800'}`}>{LEVEL_WORD[level]}</span>
+      </span>
+      <button type="button" onClick={() => onStep(-1)} disabled={qty <= 0} className="w-12 h-12 rounded-xl border border-stone-300 bg-white flex items-center justify-center disabled:opacity-30 active:bg-stone-100" aria-label={`One fewer ${name}`}>
+        <Minus className="w-5 h-5" aria-hidden="true" />
+      </button>
+      {typing === null ? (
+        <button
+          type="button"
+          onClick={() => {
+            setTyping(String(qty));
+            setTimeout(() => input.current?.select(), 0);
+          }}
+          className={`w-16 h-12 rounded-xl border-2 text-lg font-bold tabular-nums ${CHIP[level]}`}
+          aria-label={`${name}: ${qty} in stock. Tap to type the number`}
+        >
+          {qty}
+        </button>
+      ) : (
+        <input
+          ref={input}
+          autoFocus
+          type="number"
+          inputMode="numeric"
+          min={0}
+          max={100000}
+          value={typing}
+          onChange={(e) => setTyping(e.target.value)}
+          onBlur={commit}
+          onKeyDown={(e) => {
+            if (e.key === 'Enter') commit();
+            if (e.key === 'Escape') {
+              e.stopPropagation();
+              setTyping(null);
+            }
+          }}
+          className="w-16 h-12 rounded-xl border-2 border-[#0f1c2e] text-lg font-bold text-center tabular-nums bg-white"
+          aria-label={`Pieces of ${name} in stock`}
+        />
+      )}
+      <button type="button" onClick={() => onStep(1)} className="w-12 h-12 rounded-xl border border-stone-300 bg-white flex items-center justify-center active:bg-stone-100" aria-label={`One more ${name}`}>
+        <Plus className="w-5 h-5" aria-hidden="true" />
+      </button>
+    </li>
+  );
+}
+
+/** "Received stock": how many arrived of each size, added in one go. */
+function ReceiveSheet({ product, shown, onClose, onReceive }: { product: AdminProduct; shown: (sizeId: string) => number; onClose: () => void; onReceive: (changes: Array<{ sizeId: string; delta: number }>, note?: string) => void }) {
+  const titleId = useId();
+  const [add, setAdd] = useState<Record<string, number>>({});
+  const [note, setNote] = useState('');
+  const total = Object.values(add).reduce((a, b) => a + b, 0);
+  const bump = (id: string, d: number) => setAdd((a) => ({ ...a, [id]: Math.max(0, Math.min(1000, (a[id] ?? 0) + d)) }));
+  return (
+    <Sheet labelledBy={titleId} onClose={onClose} variant="bottom">
+      <div className="px-4 pt-4 pb-2 flex items-start gap-2 border-b border-stone-200">
+        <div className="min-w-0 flex-1">
+          <h3 id={titleId} className="font-serif font-bold text-base text-[#0f1c2e]">
+            Received stock
+          </h3>
+          <p className="text-xs text-stone-600 truncate">{product.title}</p>
+        </div>
+        <button type="button" onClick={onClose} className="min-h-11 min-w-11 flex items-center justify-center rounded-full text-stone-600" aria-label="Close">
+          <X className="w-5 h-5" aria-hidden="true" />
+        </button>
+      </div>
+      <div className="overflow-y-auto px-4 py-3 space-y-2">
+        <p className="text-xs text-stone-700">How many pieces arrived of each size? They are added to what is in stock.</p>
+        <ul className="space-y-1.5">
+          {product.profiles.map((s) => {
+            const n = add[s.id] ?? 0;
+            return (
+              <li key={s.id} className="flex items-center gap-2">
+                <span className="min-w-0 flex-1">
+                  <span className="block text-sm font-semibold text-stone-900 truncate">{shortSizeName(s)}</span>
+                  <span className="text-[11px] text-stone-600">
+                    {shown(s.id)} now{n > 0 && <> → {shown(s.id) + n}</>}
+                  </span>
+                </span>
+                <button type="button" onClick={() => bump(s.id, -1)} disabled={n === 0} className="w-12 h-12 rounded-xl border border-stone-300 bg-white flex items-center justify-center disabled:opacity-30" aria-label={`Receive one fewer ${s.name}`}>
+                  <Minus className="w-5 h-5" aria-hidden="true" />
+                </button>
+                <input
+                  type="number"
+                  inputMode="numeric"
+                  min={0}
+                  max={1000}
+                  value={n}
+                  onFocus={(e) => e.target.select()}
+                  onChange={(e) => setAdd((a) => ({ ...a, [s.id]: Math.max(0, Math.min(1000, Math.round(Number(e.target.value)) || 0)) }))}
+                  className="w-16 h-12 rounded-xl border-2 border-stone-300 text-lg font-bold text-center bg-white"
+                  aria-label={`Pieces of ${s.name} received`}
+                />
+                <button type="button" onClick={() => bump(s.id, 1)} className="w-12 h-12 rounded-xl border border-stone-300 bg-white flex items-center justify-center" aria-label={`Receive one more ${s.name}`}>
+                  <Plus className="w-5 h-5" aria-hidden="true" />
+                </button>
+              </li>
+            );
+          })}
+        </ul>
+        <label className="block text-xs font-semibold text-stone-700">
+          Note (optional, e.g. supplier or invoice)
+          <input value={note} maxLength={200} onChange={(e) => setNote(e.target.value)} className="mt-1 w-full min-h-11 px-3 rounded-xl border border-stone-300 bg-white text-sm font-normal" />
+        </label>
+      </div>
+      <div className="px-4 py-3 border-t border-stone-200 flex gap-2">
+        <button type="button" onClick={onClose} className="min-h-12 px-4 rounded-xl border border-stone-300 bg-white text-sm font-semibold">
+          Cancel
+        </button>
+        <button
+          type="button"
+          disabled={total === 0}
+          onClick={() => onReceive(Object.entries(add).map(([sizeId, delta]) => ({ sizeId, delta })), note.trim() || undefined)}
+          className="flex-1 min-h-12 rounded-xl bg-[#0f1c2e] text-white text-sm font-bold disabled:opacity-40"
+        >
+          Add {total} {total === 1 ? 'piece' : 'pieces'}
+        </button>
+      </div>
+    </Sheet>
+  );
+}
+
+interface MoveView {
+  id: number;
+  at: string;
+  actor: string;
+  reason: string;
+  changes: Array<{ sizeId: string; from: number; to: number }>;
+  note: string;
+  undoneBy?: number | null;
+}
+
+const REASON_WORD: Record<string, string> = { received: 'Received', sold_offline: 'Sold offline', damaged: 'Damaged', correction: 'Correction', undo: 'Undo' };
+
+/** The product's latest stock changes: when, who, why, old → new. */
+function HistorySheet({ product, onClose }: { product: AdminProduct; onClose: () => void }) {
+  const titleId = useId();
+  const [moves, setMoves] = useState<MoveView[] | null>(null);
+  const [error, setError] = useState('');
+  useEffect(() => {
+    let live = true;
+    void getJson<{ moves?: MoveView[]; message?: string }>(`/api/admin/products/${encodeURIComponent(product.id)}/stock`).then(({ ok, data }) => {
+      if (!live) return;
+      if (ok) setMoves(data.moves ?? []);
+      else setError(data.message || 'Could not load the history.');
+    });
+    return () => {
+      live = false;
+    };
+  }, [product.id]);
+  const size = (id: string) => {
+    const s = product.profiles.find((x) => x.id === id);
+    return s ? shortSizeName(s) : id;
+  };
+  return (
+    <Sheet labelledBy={titleId} onClose={onClose} variant="bottom">
+      <div className="px-4 pt-4 pb-2 flex items-start gap-2 border-b border-stone-200">
+        <div className="min-w-0 flex-1">
+          <h3 id={titleId} className="font-serif font-bold text-base text-[#0f1c2e]">
+            Stock history
+          </h3>
+          <p className="text-xs text-stone-600 truncate">{product.title}</p>
+        </div>
+        <button type="button" onClick={onClose} className="min-h-11 min-w-11 flex items-center justify-center rounded-full text-stone-600" aria-label="Close">
+          <X className="w-5 h-5" aria-hidden="true" />
+        </button>
+      </div>
+      <div className="overflow-y-auto px-4 py-3">
+        {error && <p role="alert" className="text-sm text-red-800">{error}</p>}
+        {!error && moves === null && <p className="text-sm text-stone-600">Loading…</p>}
+        {moves?.length === 0 && <p className="text-sm text-stone-600">No changes recorded yet. Sales show in Orders.</p>}
+        <ol className="space-y-2">
+          {moves?.map((m) => (
+            <li key={m.id} className="rounded-xl border border-stone-200 px-3 py-2 text-sm">
+              <div className="flex flex-wrap items-baseline gap-x-2">
+                <strong className="text-stone-900">{REASON_WORD[m.reason] ?? m.reason}</strong>
+                <span className="text-xs text-stone-600">{new Date(m.at).toLocaleString()}</span>
+                {m.undoneBy && <span className="text-xs font-semibold text-amber-900">undone</span>}
+              </div>
+              <div className="text-stone-800">{m.changes.map((c) => `${size(c.sizeId)} ${c.from} → ${c.to}`).join(', ')}</div>
+              <div className="text-xs text-stone-600 break-all">
+                by {m.actor}
+                {m.note && <> · {m.note}</>}
+              </div>
+            </li>
+          ))}
+        </ol>
+      </div>
+    </Sheet>
+  );
+}

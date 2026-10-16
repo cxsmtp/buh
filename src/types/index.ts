@@ -28,6 +28,8 @@ export interface Product {
   id: string;
   title: string;
   slug: string;
+  /** The owner's own stock code (optional), searchable in the Admin Hub. */
+  sku?: string;
   description: string;
   shortDescription: string;
   /** A category id from Settings → Catalogue (built-in: bedsheets, duvet-covers, fitted-sheets, hotel-luxury, silk-collection). */

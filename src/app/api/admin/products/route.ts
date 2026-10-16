@@ -18,7 +18,7 @@ export async function POST(req: Request) {
     const session = await requireAdmin(req);
     // Up to 10 photos as data URLs (each stored as a file, max 3 MB).
     const body = await readJsonBody(req, 12 * 1024 * 1024);
-    const product = createProduct(body.product);
+    const product = createProduct(body.product, session.email);
     audit('product.created', { by: session.email, productId: product.id, title: product.title });
     return json({ product }, 201);
   } catch (err) {

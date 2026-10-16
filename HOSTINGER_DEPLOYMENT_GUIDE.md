@@ -78,6 +78,7 @@ Everything the shop stores lives in one Docker volume and is backed up every 12 
   - The status line should be green.
 - [ ] **Restore drill:** restore that backup on your computer (section 4), so you know it works before you need it.
 - [ ] **A real test order:** place it from your phone, then confirm, book and cancel it in the Admin Hub.
+- [ ] **Install it as an app on your phone** (needs the `https://` address): Android, browser menu → **Install app**; iPhone, Safari → Share → **Add to Home Screen**. The name and icon come from Settings → Branding ([user guide](docs/user-guide.md#install-the-shop-as-an-app)). If a proxy or CDN sits in front, it must not cache `/sw.js` (the shop sends `Cache-Control: no-cache`). Emergency switch for the app on phones: the setting `SW_RESET=true` (then restart the shop; see the user guide, "Install the shop as an app").
 - [ ] **Uptime monitor:** use a free service (e.g. UptimeRobot) on `https://yourdomain.ae/api/health`.
 - [ ] **Automatic updates** (recommended): turn on the updater (section 5).
 
@@ -88,7 +89,7 @@ Everything the shop stores lives in one Docker volume and is backed up every 12 
 The shop backs itself up every 12 hours, and straight after a restart if one is due. It emails the backup to `BACKUP_EMAIL` and keeps the newest 14 on the server. Each backup contains:
 
 - **The full database** (`shop.db`): every order, product, setting and booking. Courier and SMS keys are blanked: re-enter them after a restore.
-- **Flat files you can open in Excel:** `orders.csv`, `order_items.csv`, `customers.csv`, `products.csv`.
+- **Flat files you can open in Excel:** `orders.csv`, `order_items.csv`, `customers.csv`, `products.csv`, `chats.csv`, `stock_moves.csv` (every stock change: who, why, old → new).
 - **Bank-transfer receipts and product photos.**
 - **The audit log.**
 - **A checksum manifest:** a damaged file is detected.

@@ -64,7 +64,13 @@ test('settings are validated', async () => {
 });
 
 test('an uploaded logo is stored as a file and served by URL', async () => {
-  const png = Buffer.concat([Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]), Buffer.alloc(40)]);
+  // A PNG header (signature, then an IHDR chunk saying 64 × 64): the logo's size is read from it.
+  const ihdr = Buffer.alloc(25);
+  ihdr.writeUInt32BE(13, 0);
+  ihdr.write('IHDR', 4, 'latin1');
+  ihdr.writeUInt32BE(64, 8);
+  ihdr.writeUInt32BE(64, 12);
+  const png = Buffer.concat([Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]), ihdr, Buffer.alloc(40)]);
   await settings.updateSettings('brand', { logoType: 'image', logoImageUrl: `data:image/png;base64,${png.toString('base64')}` });
   const url = settings.getSettings('brand').logoImageUrl!;
   assert.match(url, /^\/api\/images\/[a-f0-9]{64}\.png$/);

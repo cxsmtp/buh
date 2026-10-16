@@ -112,19 +112,57 @@ Carrier endpoints are fixed in code.
 
 ## Audit log
 
-`DATA_DIR/audit-YYYY-MM.jsonl` records sign-ins, refusals, password changes, courier dispatches and tests, and SMS tests. Each line carries an HMAC over the previous line, so editing, deleting or reordering a line is detected (`verifyAuditLog`).
+`DATA_DIR/audit-YYYY-MM.jsonl` records sign-ins, refusals, password changes, courier dispatches and tests, SMS tests, and stock moves (who, reason, old → new). Each line carries an HMAC over the previous line, so editing, deleting or reordering a line is detected (`verifyAuditLog`).
 
 ## Headers
 
 Every page sends:
 
-- **Content Security Policy:** scripts and connections only to this site, no plugins, no `<base>`, no framing.
+- **Content Security Policy:** scripts and connections only to this site, no plugins, no `<base>`, no framing. Workers only from this site (`worker-src 'self' blob:`: the service worker, and the order confirmation's confetti, drawn in a worker from a `blob:` URL) and the app manifest only from this site (`manifest-src 'self'`).
   - Exception, for Firebase phone sign-in: reCAPTCHA scripts and frames (`www.google.com/recaptcha/`, `www.gstatic.com/recaptcha/`, `recaptcha.google.com/recaptcha/`), `apis.google.com`, frames from `*.firebaseapp.com`, and connections to `identitytoolkit.googleapis.com` and `securetoken.googleapis.com`.
   - **Trade-off:** the policy is fixed at build time (a per-request one costs too much, below), so these Google hosts are allowed even while Firebase is off. They are Google-run, path-limited where CSP allows, and nothing on the page loads from them unless Firebase is switched on. A custom auth domain (not `<project>.firebaseapp.com`) is not covered; keep the default.
 - `X-Frame-Options: DENY`, `nosniff`, `Cross-Origin-Opener-Policy: same-origin`, HSTS, and a `Permissions-Policy` that allows only geolocation (for the address pin).
 - API responses add `Cache-Control: no-store`.
 
 **Why there is no nonce CSP.** A per-request nonce would also block injected inline scripts, but it renders every page per request. On this shop the storefront fell from ~790 to ~145 requests/s, and even an idle proxy cost ~35%. React escapes all rendered text and there are no raw-HTML sinks, so the static policy is the better trade.
+
+## The installed app (service worker)
+
+The shop installs as an app (manifest at `/manifest.webmanifest`, icons at `/icons/…`). A small hand-written service worker, `/sw.js` (source: `src/lib/serviceWorker.ts`, no library), controls the whole site (scope `/`).
+
+**What it keeps on the phone** (the browser's Cache Storage for this site):
+
+| Cache | What | Why it is safe |
+| --- | --- | --- |
+| `buh-shell-<version>` | the offline page (`/offline`), the manifest and the app icons | public, the same for everyone |
+| `buh-static-<version>` | the shop's own scripts, styles and fonts (`/_next/static/…`), at most 300 | public, named by their content: a file never changes under the same name |
+| `buh-images` | uploaded product photos and the logo (`/api/images/…`), the latest 120 | public, named by their content (SHA-256) |
+
+**What it never touches** (the request goes to the server as if there were no worker, and nothing is stored):
+
+- anything that is not a `GET`: orders, checkout, phone codes, sign-in, every admin change;
+- every other `/api/` address: products, prices and stock, orders and order tracking, the chat, settings, live updates (`/api/events`), and all of `/api/admin/`;
+- other sites (Unsplash photos, Google reCAPTCHA);
+- pages (`/`, `/p/…`): always fetched from the server while online and never stored, so a new version shows at once and the zero-downtime version switch works exactly as before. Only when the phone is offline does a page request get the stored offline page.
+
+The worker never stores a response marked `no-store` or `private`, nor one from another site. All API answers carry `Cache-Control: no-store` anyway.
+
+**Updates:** `/sw.js` is sent with `Cache-Control: no-cache` and contains the release's version, so every release is a new worker. It installs in the background and **waits**; the page shows **New version ready — Refresh**, which tells it to take over (`SKIP_WAITING`) and reloads; otherwise it takes over when the app is next opened. On taking over it deletes the previous version's caches. A shopper's page that is in the background switches by itself, never with a product, the bag or checkout open (as before).
+
+**Kill switch (never stranded on a phone):**
+
+- The worker asks the server for `/sw.js` when it takes over and then at most every 10 minutes while pages are opened (also after the browser restarts it, which phones do often). A **404** (the shop was rolled back to a version from before the app, BUH-02.05.00 or older, which has no `/sw.js`) or the **reset** answer (below) makes it delete its caches and unregister. A 502/503 during an update, or no network, is not a 404 and changes nothing.
+- The page does the same when registering fails because `/sw.js` is a 404.
+- **`SW_RESET=true`** (a server setting, for emergencies such as a broken worker): `/sw.js` becomes a reset worker that takes over at once (no waiting for tabs to close), deletes the caches, unregisters and answers nothing. Every phone that opens the shop is cleaned on that visit. While it is on, **`/reset-app`** answers with `Clear-Site-Data: "cache", "storage"`, the browser's own wipe of this site's caches, workers and storage (it also empties that phone's bag and saved delivery details; sign-in cookies are kept). It is a 404 while `SW_RESET` is off, so nobody can wipe a shopper's bag with a link.
+- **Rolling back to a version from before the app:** the shop works as a website straight away (pages always come from the server). Each phone's leftover worker removes itself the next time the shop is opened after the worker restarts, usually the same visit, at most about 10 minutes later. Nothing it kept is needed to place or find an order.
+
+**Navigation preload** is off: a page address the worker leaves alone (an `/api/` address opened directly, `/sw.js`, `/reset-app`) would otherwise be fetched twice.
+
+**Icons** are drawn once per logo and size, and requests that arrive while one is drawn wait for it. A logo larger than 4096 px on a side is refused when saved (the size is read from the PNG/JPEG/WebP header) and is never drawn (the letters are), so a small file that claims a huge size cannot exhaust the server.
+
+**Removing it by hand:** the browser's site settings → Clear data removes the worker and its caches.
+
+Tested by `test/sw-source.test.mts` (every rule above, the 404 and reset kill switch, the 10-minute re-check, preload off), `test/app-icons.test.mts` (one drawing for many requests, the logo size limit) and `test/browser-app.test.mts` (in Chromium: registers for `/`, API and admin responses never come from the worker, nothing under `/api/` but photos is stored, the offline page with the server down, and `SW_RESET=true` removing the worker and its caches on the next open).
 
 ## Deployment
 
@@ -182,7 +220,7 @@ Every 12 hours (see the deployment guide) the shop backs itself up:
 
 - **A consistent database snapshot**, integrity-checked before it is used.
 - **CSV flat files.** A cell starting with `= + - @` is prefixed with `'`, so Excel never runs it as a formula.
-- **Receipts, photos and the audit log**, with a SHA-256 manifest.
+- **Receipts, photos and the audit log**, with a SHA-256 manifest. The stock ledger and product drafts are tables in the database copy; `stock_moves.csv` lists the ledger for Excel.
 - **Encryption (strongly recommended):** AES-256-GCM, with the key derived by scrypt (cost 2^17) from `BACKUP_PASSPHRASE`. The Admin Hub turns amber, and the log warns, while backups are emailed unencrypted or the passphrase is shorter than 12 characters.
 - **Courier and SMS keys are blanked** in the backup's copy of the database (and the copy is vacuumed, so the old values are not left in free pages). Re-enter them after a restore.
 - **A failure is emailed** when it starts, when the error changes and then once a day; the shop retries hourly.
@@ -197,6 +235,12 @@ Every 12 hours (see the deployment guide) the shop backs itself up:
 - **The customer is charged the total they saw.** Checkout sends the total it showed; if a price changed meanwhile, the server refuses the order (nothing taken) and checkout reloads the bag with the new total.
 - **At most 20 of one product per order, and at most 3 unconfirmed orders per phone**, so one verified number cannot tie up the stock.
 - **Stock edits cannot undo a sale:** the Admin Hub sends the stock it showed, and the server refuses the edit (409) if a sale happened in between.
+- **Stock moves from the Admin Hub** (`POST /api/admin/products/<id>/stock`: − / +, a typed number, Received stock, Sold out, Undo) are admin-only and same-site, with a 4 KB body cap and an allow-list of fields and reason codes (received, sold offline, damaged, correction).
+  - **Idempotent:** each change carries its own key; the same key again returns the first answer and moves nothing; the same key with other numbers is refused (409). A lost answer is retried with the same key.
+  - **Never from stale numbers:** each change says what the device saw for every size it changes; if the stock is different now (another device, a sale), nothing is changed (409, "changed on another device"). A typed number must say what was seen.
+  - **Recorded before it is reported:** the move (who, why, every size's old → new) is written to `stock_moves` in the same transaction as the stock, then to the audit log, before the answer. The product editor's stock changes are recorded the same way. Undo works once, and only if nothing changed those sizes since.
+- **Photos** uploaded from the editor (`POST /api/admin/images`) go through the same checks as every image (PNG, JPEG or WebP by their real bytes, at most 3 MB); the phone shrinks them first. **Drafts** (`/api/admin/products/drafts/<id>`) keep only the editor's own fields, accept only uploaded or https photo links, and are capped at 64 KB; nothing in a draft reaches the shop until it is published through the normal product checks.
+- **Duplicate** makes a hidden copy with no stock; its key makes a retried request return the same copy.
 - **Bank transfer is hidden until the real account is saved.** The IBAN must be a UAE IBAN that passes the mod-97 check.
 
 ## Public data and outbound calls added in BUH-02.00.00

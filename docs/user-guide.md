@@ -6,13 +6,35 @@ The shop looks and works like a boutique's Instagram page, on a phone first.
 
 - **At the top:** the shop's logo, name, tagline and address (Settings → Branding & bank, Store & contact), how delivery and payment work, and the festival greeting when one is on.
 - **Round story chips:** **All**, **New in** and **On sale** (each only when it shows fewer pieces than All), then one per category, in the order of Settings → Catalogue, each with a photo from inside it. A category with no pieces in the shop has no chip. One tap shows just that.
-- **The feed:** big photos, two across on a phone (three or four on a computer), with the name, the price (and the price before, crossed out, when it is reduced) and **Only 1 left** or **Sold out** from the real stock.
-- **Tap a photo** and the product opens full screen: swipe the photos (or use the arrows, the dots or the arrow keys), choose the size and colour, **Add to Bag**, or **Ask in chat / on WhatsApp / on Instagram**. **Share** sends its link. The phone's Back button closes it.
+- **The feed:** on a phone, one big photo per row, edge to edge, like Instagram; the two buttons next to **Filter** switch to two across and back, and the phone remembers the choice. Tablets show two (upright) or three (sideways) across, a computer four. Each piece has the name, the price (and the price before, crossed out, when it is reduced) and **Only 1 left** or **Sold out** from the real stock.
+- **Tap a photo** and the product opens full screen: swipe the photos (or use the arrows, the dots or the arrow keys); tap a photo again (or the expand button) to see it full screen and pinch, double-tap or use **+** / **−** to look at the print up close (Back or ✕ closes it). Choose the size and colour, **Add to Bag**, or **Ask in chat / on WhatsApp / on Instagram**. **Share** sends its link. The phone's Back button closes it.
 - **Filter** (next to the number of pieces) opens a sheet with only the choices that make a difference for the pieces in the shop: category, size, colour (worked out from each colour's swatch: blue, cream, red…), price range, **In stock only**, **On sale**, **New in**, and the sort (newest, price). Each choice shows how many pieces it leaves; **Show N pieces** applies them. Every filter on shows as a chip under the button: tap it to remove it, or **Clear all**.
 - **Search** (the tab bar on a phone, the magnifier on a computer) finds pieces by name, colour, category or fabric as you type; tap one to open it, or **See all** to show them in the shop.
 - **Links keep the view:** the address holds the search, filters and the open product, so a filtered view can be sent on WhatsApp and Back steps through what you looked at.
 - **On a phone** the tab bar at the bottom has **Home** (back to the top), **Search**, **Bag** and **Orders** (Track Order), with the **Help** button (chat, or WhatsApp) in its right-hand slot, so nothing floats over the products; the version number is at the very bottom of the page.
 - Everything works with the keyboard (Tab, Enter, Escape closes a sheet), and the shop moves less for people whose phone is set to reduce motion.
+
+## Install the shop as an app
+
+The shop can sit on the home screen of a phone or tablet and open full screen, without the browser's address bar, like an app from a store (it takes almost no space, and there is nothing to update: it is always the latest shop).
+
+**For customers**
+
+- **Android (Chrome, Samsung Internet, Edge):** after a few seconds in the shop a small card offers **Install the app**; tap **Install**. Or open the browser's menu (⋮) → **Install app** / **Add to Home screen**.
+- **iPhone and iPad (Safari):** the card says how: tap **Share** (the square with the arrow), then **Add to Home Screen**. In Chrome or another app's browser on an iPhone, open the shop in Safari first.
+- The card shows once per phone and never while something is open (a product, the bag, checkout). **Not now** or ✕ closes it for good.
+- Long-press the icon for shortcuts straight to the **Bag** and **Track Order**.
+- **No connection?** The app shows a calm "You are offline" page instead of an error; the bag is kept on the phone, and the shop opens again by itself when the connection is back. Prices, stock and orders always come from the shop live, never from an old copy.
+- **A new version:** a line at the top says **New version ready — Refresh**. Tap it (the bag is kept), or it switches the next time the app is opened. It never switches in the middle of a checkout.
+
+**For the owner**
+
+- The app's name and icon come from **Settings → Branding & bank**: the store name (a name in capitals shows as "Beautiful UAE Home"; the label under the icon is shortened to fit, e.g. "UAE Home") and the logo (a PNG or JPEG logo on white, or the logo's letters on the brand colour). A new logo reaches installed phones when they next check, usually within a day.
+- During a festival the phone's status bar takes the festival's colour.
+- Installing needs the shop on **https://** (the deployment's Caddy gives it). Install it on your own phone the same way; the Admin Hub works in the app too.
+- What the app keeps on the phone, and what it never keeps: docs/security.md, "The installed app".
+- **If the app misbehaves on phones** (an emergency): set `SW_RESET=true` in the shop's settings and restart the shop. Each phone that opens the shop then drops the app's saved copy and works as a plain website (the icon stays; it opens the website). For a phone that is still stuck, open `https://yourdomain/reset-app` on it: it also clears that phone's bag. When things are fixed, set `SW_RESET=false` (or remove it) and restart: phones pick the app up again on their next visit.
+- **Going back to a version from before the app** (BUH-02.05.00 or older) is safe: the shop works as a website at once, and the app's saved copy removes itself from each phone the next time the shop is opened (within about 10 minutes).
 
 ## For customers: placing an order
 
@@ -73,15 +95,34 @@ Every change is recorded with who made it and when.
 
 ### Inventory
 
-**Inventory Stock** lists every product with its pieces per size (most designs are one or two pieces, so stock is kept per size).
+**Inventory** lists every product with a photo and its pieces per size as coloured chips: **red** sold out, **amber** low (at or below the warning level in Settings → Catalogue, 2 unless you change it), **green** in stock. Most designs are one or two pieces, so stock is kept per size.
 
-- **+ / −** next to a size adds or removes one piece straight away.
-- **Edit** opens everything: photos (up to 8; the first is the main one; reorder or remove them), name, prices, category, material, colours, sizes (add from your presets, change measurements and price differences) and pieces per size, and whether it is shown, featured or new.
-- **+ Add Product** (or **+ Add** on a phone) opens the same editor for a new product. Phone photos are shrunk before upload.
-- **Visible / Hidden** shows or hides a product; the arrows change its place in the shop.
-- **Remove** takes a product out of the shop for good, but keeps it for past orders; it can be restored (hidden) under **Removed**.
-- Filters: **Low** (at or below your warning level), **Sold out**, **Hidden**, **Removed**, and a search box.
-- If a customer buys while you are editing stock, **Save** says the stock changed and shows the new figure: check it and save again.
+- **Search** by name or SKU (your own stock code, set under the editor's **More details**).
+- **Show:** All, **Low** (a few pieces left in all), **Sold out** (none left in any size), **Hidden**, **Removed**; and a **Category** list. The two cards at the top (sold out, running low) open those lists, and the number on **Inventory** in the bottom bar is the same count.
+- Tap a product to open it: the sizes with **− / +**, then the quick actions below.
+- **Edit** opens the step-by-step editor; **+ Add product** starts a new one (see below).
+- **Hide / Show in shop**, **Sold out** (every size to 0, with Undo), **Duplicate** (a hidden copy with no stock, for another colour: change its photos and colour, then show it), **Share** (the product's link, through your phone's share sheet or copied), **History**, the arrows (its place in the shop) and **Remove** (out of the shop for good but kept for past orders; restore it, hidden, under **Removed**).
+
+### Managing stock from your phone
+
+On a phone the bottom bar is **Orders**, **Inventory**, **Chats** and **More** (Add product, Customers, Settings, View shop).
+
+- **− / +** next to a size takes away or adds one piece. It is saved at once: a message says what changed (for example `King 5 → 6`) with **Undo**. Several quick taps are saved together as one change.
+- **Tap the number** to type it (for example after counting the shelf); **Enter** saves it.
+- **Reason for − / +** (above the list) is recorded with each change: **Correction** (a count), **Sold offline** (a sale outside the shop), **Damaged**, or **Received**.
+- **Received stock** adds new pieces to several sizes at once, with an optional note (supplier, invoice).
+- **Changed on another device: refresh.** If another phone, a laptop or a customer's order changed the same stock since your screen last updated, your change is not saved (nothing is overwritten). Tap **Refresh**, check the numbers and try again.
+- A weak connection is fine: a change that did not get an answer is sent again, and the shop makes sure it counts once.
+- **History** shows the latest changes of a product: when, who, why, and every size's old → new. Every change is also in the audit log and in `stock_moves.csv` in each backup.
+
+**Adding a product from the phone** goes in four steps; **Next** moves on, and the step names at the top go back:
+
+1. **Photos:** **Take photo** opens the camera; **From gallery** picks several at once. Each is made smaller on the phone (at most 1600 px) and uploaded straight away. The first photo is the **cover**: tap the star to make another one the cover, or the arrows (or drag, on a computer) to change the order.
+2. **Details:** name, category and price; **More details** has the SKU, the "was" price, descriptions, fabric and colours.
+3. **Sizes:** tap a size (from your presets in Settings → Catalogue) to add it, then set its pieces with **− / +** or type them.
+4. **Publish:** shown in the shop (or **Save hidden**), new arrival, featured.
+
+The draft saves itself as you go ("Draft saved" at the top), so a phone call or a closed tab loses nothing; open **Add product** again (on any device) to continue, or **Start over**. Editing a product works the same way; if a customer buys while you edit its stock, **Save** shows the new figures to check.
 
 ### Chats
 
@@ -97,7 +138,7 @@ On each product, customers see **Ask in chat**, **Ask on WhatsApp** and **Ask on
 
 ### Customers
 
-**Customers & CRM** is built from the orders: one line per phone number, with the number of orders and the total spent.
+**Customers** (under **More** on a phone) is built from the orders: one line per phone number, with the number of orders and the total spent.
 
 ### Settings
 
@@ -176,4 +217,4 @@ Enter the Jeebly and Eco Express keys and use **Test connection**. Keys are kept
 
 ### Audit log
 
-`DATA_DIR/audit-YYYY-MM.jsonl` lists sign-ins (by password, passkey or recovery code), refused sign-ins, password changes, passkeys added or removed, new recovery codes, courier bookings and tests, and SMS tests. Each line is chained to the one before, so edits are detectable.
+`DATA_DIR/audit-YYYY-MM.jsonl` lists sign-ins (by password, passkey or recovery code), refused sign-ins, password changes, passkeys added or removed, new recovery codes, courier bookings and tests, SMS tests, and every stock change made in the Admin Hub (who, why, old → new). Each line is chained to the one before, so edits are detectable.

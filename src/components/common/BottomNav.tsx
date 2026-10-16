@@ -1,7 +1,11 @@
 'use client';
 
 import React from 'react';
-import { Home, Package, ShoppingBag, Truck, Camera, Users, Settings, Store, ClipboardList, MessagesSquare, Search } from 'lucide-react';
+import dynamic from 'next/dynamic';
+import { Home, ShoppingBag, Truck, Search } from 'lucide-react';
+
+// The Admin Hub's bar: loaded only in the Admin Hub, never for shoppers.
+const AdminBar = dynamic(() => import('@/components/admin/AdminBar').then((m) => m.AdminBar), { ssr: false });
 
 interface BottomNavProps {
   isAdminMode: boolean;
@@ -13,6 +17,8 @@ interface BottomNavProps {
   onSetAdminTab: (tab: 'orders' | 'add-product' | 'inventory' | 'crm' | 'settings' | 'chats') => void;
   /** Chats waiting for a person. */
   chatsWaiting?: number;
+  /** Products on sale that are sold out or running low (the Inventory badge). */
+  stockAlerts?: number;
   cartCount: number;
   onOpenCart: () => void;
   onOpenTrack: () => void;
@@ -35,108 +41,19 @@ export const BottomNav: React.FC<BottomNavProps> = ({
   onToggleAdminMode,
   pendingOrdersCount = 0,
   chatsWaiting = 0,
+  stockAlerts = 0,
   helpSlot = false,
 }) => {
   if (isAdminMode) {
-    return (
-      <nav aria-label="Admin sections" className="fixed bottom-0 left-0 right-0 z-40 bg-white/95 backdrop-blur-md border-t border-stone-200 px-1 py-1.5 flex items-center justify-around shadow-lg">
-        {/* Admin Orders */}
-        <button
-          onClick={() => onSetAdminTab('orders')}
-          className={`flex flex-col items-center py-1 px-1.5 rounded-lg text-xs relative ${
-            adminTab === 'orders' ? 'text-[#8a6a2c] font-bold' : 'text-stone-500'
-          }`}
-        >
-          <ClipboardList className="w-4 h-4" />
-          <span className="text-[9px] mt-0.5">Orders</span>
-          {pendingOrdersCount > 0 && (
-            <span className="absolute -top-1 right-0 bg-red-500 text-white text-[9px] w-3.5 h-3.5 rounded-full flex items-center justify-center font-bold">
-              {pendingOrdersCount}
-            </span>
-          )}
-        </button>
-
-        {/* Chats from the shop (badge: waiting for a person) */}
-        <button
-          onClick={() => onSetAdminTab('chats')}
-          className={`flex flex-col items-center py-1 px-1.5 rounded-lg text-xs relative ${
-            adminTab === 'chats' ? 'text-[#8a6a2c] font-bold' : 'text-stone-500'
-          }`}
-        >
-          <MessagesSquare className="w-4 h-4" />
-          <span className="text-[9px] mt-0.5">Chats</span>
-          {chatsWaiting > 0 && (
-            <span className="absolute -top-1 right-0 bg-red-500 text-white text-[9px] w-3.5 h-3.5 rounded-full flex items-center justify-center font-bold" aria-label={`${chatsWaiting} waiting`}>
-              {chatsWaiting}
-            </span>
-          )}
-        </button>
-
-        {/* Add Product with AI Photo */}
-        <button
-          onClick={() => onSetAdminTab('add-product')}
-          className={`flex flex-col items-center py-1 px-1.5 rounded-lg text-xs relative ${
-            adminTab === 'add-product' ? 'text-[#8a6a2c] font-bold' : 'text-stone-500'
-          }`}
-        >
-          <div className="w-7 h-7 rounded-full bg-gradient-to-tr from-[#c5a059] to-[#dfc082] text-white flex items-center justify-center shadow-md -mt-2.5 ring-2 ring-white">
-            <Camera className="w-3.5 h-3.5" />
-          </div>
-          <span className="text-[9px] mt-0.5 font-medium">+ Add</span>
-        </button>
-
-        {/* Inventory */}
-        <button
-          onClick={() => onSetAdminTab('inventory')}
-          className={`flex flex-col items-center py-1 px-1.5 rounded-lg text-xs ${
-            adminTab === 'inventory' ? 'text-[#8a6a2c] font-bold' : 'text-stone-500'
-          }`}
-        >
-          <Package className="w-4 h-4" />
-          <span className="text-[9px] mt-0.5">Stock</span>
-        </button>
-
-        {/* CRM Customers */}
-        <button
-          onClick={() => onSetAdminTab('crm')}
-          className={`flex flex-col items-center py-1 px-1.5 rounded-lg text-xs ${
-            adminTab === 'crm' ? 'text-[#8a6a2c] font-bold' : 'text-stone-500'
-          }`}
-        >
-          <Users className="w-4 h-4" />
-          <span className="text-[9px] mt-0.5">CRM</span>
-        </button>
-
-        {/* Settings console (store, catalogue, branding, SMS, couriers, system) */}
-        <button
-          onClick={() => onSetAdminTab('settings')}
-          className={`flex flex-col items-center py-1 px-1.5 rounded-lg text-xs ${
-            adminTab === 'settings' ? 'text-[#8a6a2c] font-bold' : 'text-stone-500'
-          }`}
-        >
-          <Settings className="w-4 h-4" />
-          <span className="text-[9px] mt-0.5">Settings</span>
-        </button>
-
-        {/* Return to Shop */}
-        <button
-          onClick={onToggleAdminMode}
-          className="flex flex-col items-center py-1 px-1.5 rounded-lg text-xs text-stone-700 hover:text-stone-900"
-          title="Return to Customer Storefront"
-        >
-          <Store className="w-5 h-5" />
-          <span className="text-[10px] mt-0.5">View Shop</span>
-        </button>
-      </nav>
-    );
+    return <AdminBar adminTab={adminTab} onSetAdminTab={onSetAdminTab} pendingOrdersCount={pendingOrdersCount} chatsWaiting={chatsWaiting} stockAlerts={stockAlerts} onToggleAdminMode={onToggleAdminMode} />;
   }
 
   // The shop on a phone: Home, Search, Bag and Orders, like an app's tab bar (hidden on wider screens,
   // where the header has them). The Help button takes the slot at its right end, so it never floats over the feed.
   const tab = (active: boolean) =>
-    `flex-1 flex flex-col items-center justify-center gap-0.5 h-14 text-[11px] ${active ? 'text-[#0f1c2e] font-semibold' : 'text-stone-600'}`;
+    `flex-1 flex flex-col items-center justify-center gap-0.5 h-14 text-[11px] transition-transform active:scale-95 ${active ? 'text-[#0f1c2e] font-semibold' : 'text-stone-600'}`;
   return (
-    <nav aria-label="Shop" className="fixed bottom-0 inset-x-0 z-40 bg-[#fbf9f5]/95 backdrop-blur-md border-t border-[#e8e1d5] pb-safe md:hidden">
+    <nav aria-label="Shop" className="fixed bottom-0 inset-x-0 z-40 bg-[#fbf9f5]/95 backdrop-blur-md border-t border-[#e8e1d5] pb-safe px-safe md:hidden">
       <div className="flex items-stretch">
         <button type="button" onClick={onHome} aria-current={storeTab === 'home' ? 'page' : undefined} className={tab(storeTab === 'home')}>
           <Home className="w-6 h-6" aria-hidden="true" strokeWidth={storeTab === 'home' ? 2.25 : 1.75} />
@@ -166,3 +83,4 @@ export const BottomNav: React.FC<BottomNavProps> = ({
     </nav>
   );
 };
+

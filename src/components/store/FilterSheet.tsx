@@ -136,7 +136,7 @@ export function FilterSheet({ products, categories, filters, onApply, onClose }:
         )}
       </div>
 
-      <div className="shrink-0 border-t border-stone-200 px-5 py-3 pb-safe flex items-center gap-3 bg-white">
+      <div className="shrink-0 border-t border-stone-200 px-5 pt-3 pb-[calc(0.75rem+env(safe-area-inset-bottom,0px))] flex items-center gap-3 bg-white">
         <button type="button" onClick={() => setDraft(clearFilters(draft))} className="px-4 py-3 rounded-full text-sm font-semibold text-stone-900 underline underline-offset-4">
           Clear all
         </button>

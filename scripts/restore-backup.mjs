@@ -111,6 +111,10 @@ const db = new Database(path.join(target, 'shop.db'));
 const ok = db.pragma('integrity_check', { simple: true });
 const orders = db.prepare('SELECT COUNT(*) AS n FROM orders').get().n;
 const products = db.prepare('SELECT COUNT(*) AS n FROM products').get().n;
+// The stock ledger and product drafts (backups from before BUH-02.05 have neither table).
+const tableExists = (name) => Boolean(db.prepare("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ?").get(name));
+const stockMoves = tableExists('stock_moves') ? db.prepare('SELECT COUNT(*) AS n FROM stock_moves').get().n : 0;
+const drafts = tableExists('product_drafts') ? db.prepare('SELECT COUNT(*) AS n FROM product_drafts').get().n : 0;
 if (ok !== 'ok') {
   db.close();
   console.error(`The restored database failed its integrity check: ${ok}`);
@@ -144,11 +148,11 @@ if (replace) {
   }
   for (const name of fs.readdirSync(target)) fs.renameSync(path.join(target, name), path.join(finalTarget, name));
   fs.rmdirSync(target);
-  console.log(`Restored into ${finalTarget}: ${orders} orders, ${products} products. Integrity check: ok.`);
+  console.log(`Restored into ${finalTarget}: ${orders} orders, ${products} products, ${stockMoves} stock moves, ${drafts} product drafts. Integrity check: ok.`);
   console.log(`The previous data was moved to ${aside} (delete it once you are happy).`);
   console.log('Start the shop again. Admin sign-in: a new one-time password is printed in the log.');
 } else {
-  console.log(`Restored to ${target}: ${orders} orders, ${products} products. Integrity check: ok.`);
+  console.log(`Restored to ${target}: ${orders} orders, ${products} products, ${stockMoves} stock moves, ${drafts} product drafts. Integrity check: ok.`);
   console.log('Next: stop the shop, set DATA_DIR to this folder (or swap folders), start it, and sign in with the new one-time password from the log.');
 }
 if (passkeys || voidedCodes) {

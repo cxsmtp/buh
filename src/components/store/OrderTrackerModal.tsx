@@ -55,7 +55,7 @@ export const OrderTrackerModal: React.FC<OrderTrackerModalProps> = ({
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4">
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4 overscroll-contain sheet-fade">
       <div className="bg-white rounded-3xl max-w-lg w-full p-5 shadow-2xl space-y-4">
         {/* Header */}
         <div className="flex items-center justify-between pb-3 border-b border-stone-200">
@@ -66,7 +66,9 @@ export const OrderTrackerModal: React.FC<OrderTrackerModalProps> = ({
             </h2>
           </div>
           <button
+            type="button"
             onClick={onClose}
+            aria-label="Close Track Order"
             className="p-1 text-stone-500 hover:text-stone-700 rounded-full hover:bg-stone-100"
           >
             <X className="w-5 h-5" />

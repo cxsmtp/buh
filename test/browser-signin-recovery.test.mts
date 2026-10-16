@@ -8,6 +8,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import { after, before, test } from 'node:test';
 import { hasBuild, startServer, type RunningServer } from './server.mjs';
+import { openAdminSection } from './helpers.mjs';
 
 type PW = typeof import('playwright');
 const pw: PW | null = hasBuild ? await import('playwright').catch(() => null) : null;
@@ -57,7 +58,7 @@ async function openSignIn(page: import('playwright').Page, base: string) {
 }
 
 async function openSettingsSection(page: import('playwright').Page) {
-  await page.getByRole('navigation', { name: 'Admin sections' }).getByRole('button', { name: /Settings/ }).click();
+  await openAdminSection(page, /Settings/);
   await page.getByRole('navigation', { name: 'Settings sections' }).getByRole('button', { name: 'Passkeys & recovery codes' }).click();
   await page.getByRole('heading', { name: 'Recovery codes', exact: true }).waitFor();
 }

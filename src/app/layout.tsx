@@ -6,6 +6,9 @@ export const viewport: Viewport = {
   width: "device-width",
   initialScale: 1,
   maximumScale: 5,
+  // The page reaches under a phone's notch and home bar; the header, tab bar and sheets pad
+  // themselves by the safe-area insets (globals.css), like an app.
+  viewportFit: "cover",
 };
 
 export const metadata: Metadata = {
@@ -24,7 +27,12 @@ export const metadata: Metadata = {
   authors: [{ name: "Beautiful UAE Home Trading LLC" }],
   icons: {
     icon: "/favicon.ico",
+    apple: "/icons/apple-touch-icon.png",
   },
+  // Added to an iPhone's home screen, the shop opens full screen like an app (its name and icon
+  // come from the web app manifest, src/app/manifest.ts).
+  appleWebApp: { capable: true, statusBarStyle: "default" },
+  formatDetection: { telephone: false },
 };
 
 export default function RootLayout({
