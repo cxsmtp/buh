@@ -282,3 +282,32 @@ for (const colorScheme of ['dark', 'light'] as const) {
     });
   }
 }
+
+// Every festival look on the shop (greeting band, story ring, announcement bar), at phone and
+// desktop width: the accents stay readable on the shop's ivory.
+for (const width of [360, 1280]) {
+  test(`festival looks are readable (${width} px)`, { skip }, async () => {
+    const problems: string[] = [];
+    const ctx = await browser.newContext({ viewport: { width, height: 900 } });
+    const page = await ctx.newPage();
+    const h = { 'content-type': 'application/json', origin: server.base, cookie };
+    const { FESTIVALS } = await import('@/lib/festivals/catalog');
+    const palettes = new Set<string>();
+    for (const f of FESTIVALS) {
+      // One festival per curated accent, plus the ones the owner named and a solemn day.
+      if (palettes.has(f.theme.palette) && !['eid-al-fitr', 'diwali', 'uae-national-day', 'good-friday'].includes(f.id)) continue;
+      palettes.add(f.theme.palette);
+      await fetch(`${server.base}/api/admin/settings/theme`, { method: 'PUT', headers: h, body: JSON.stringify({ settings: { mode: 'manual', themeId: f.id, showBanner: true, showMarquee: true } }) });
+      await page.goto(server.base, { waitUntil: 'domcontentloaded' });
+      await page.getByRole('note').first().waitFor();
+      await page.locator('main h3').first().waitFor();
+      await settled(page);
+      problems.push(...(await lowContrast(page, `shop in ${f.id}`)));
+      // The greeting itself at the stricter 4.5:1 of body text.
+      problems.push(...(await lowContrast(page, `greeting in ${f.id}`, 4.5)).filter((p) => p.includes(f.theme.greeting.slice(0, 12)) || p.includes(f.theme.headline.slice(0, 12))));
+    }
+    await fetch(`${server.base}/api/admin/settings/theme`, { method: 'PUT', headers: h, body: JSON.stringify({ settings: { mode: 'auto' } }) });
+    await ctx.close();
+    assert.deepEqual(problems, [], `${problems.length} hard-to-read texts`);
+  });
+}

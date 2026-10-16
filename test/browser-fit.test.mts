@@ -169,8 +169,11 @@ const SHAPES: Shape[] = [
   { name: '390 at 200% text', width: 390, height: 844, zoom: true },
 ];
 
-/** Large text: every rem-sized thing doubles, like a phone's biggest text setting. */
-const ZOOM_CSS = 'html { font-size: 200% !important; -webkit-text-size-adjust: 200% !important; }';
+/**
+ * Large text, like Android's text scaling at 200%: every piece of text twice as big, the layout
+ * (spacing, boxes) as it was. Chromium on a phone honours text-size-adjust exactly so.
+ */
+const ZOOM_CSS = 'html { -webkit-text-size-adjust: 200% !important; text-size-adjust: 200% !important; }';
 
 let phoneN = 0;
 const nextPhone = () => `056 41${String(++phoneN).padStart(1, '0')} ${String(1000 + phoneN * 7).slice(-4)}`;
@@ -316,7 +319,7 @@ for (const shape of SHAPES) {
     await page.getByRole('heading', { name: 'You are offline' }).waitFor();
     await fit(page, problems, at('offline page'));
     } catch (e) {
-      problems.push(at(`could not go on: ${String((e as Error).message).replace(/\x1b\[[0-9;]*m/g, "").split("\n").slice(0, 3).join(" ")}`));
+      problems.push(at(`could not go on: ${String((e as Error).message).replace(/\x1b\[[0-9;]*m/g, "").split("\n").slice(0, 16).join(" ")}`));
     }
     await ctx.close();
 
@@ -347,6 +350,8 @@ for (const shape of SHAPES) {
     await a.locator('header button:has-text("Admin Hub")').click();
     const nav = a.getByRole('navigation', { name: 'Admin sections' });
     await nav.waitFor();
+    await a.waitForTimeout(500);
+    await fit(a, problems, at('admin hub, as it opens (orders)'));
     for (const tab of ['Orders', 'Chats', 'Inventory', 'Customers', 'Settings']) {
       await openAdminSection(a, new RegExp(`^${tab}`));
       await a.waitForTimeout(300);
@@ -390,7 +395,7 @@ for (const shape of SHAPES) {
       await fit(a, problems, at(`settings ${name}`));
     }
     } catch (e) {
-      problems.push(at(`could not go on: ${String((e as Error).message).replace(/\x1b\[[0-9;]*m/g, "").split("\n").slice(0, 3).join(" ")}`));
+      problems.push(at(`could not go on: ${String((e as Error).message).replace(/\x1b\[[0-9;]*m/g, "").split("\n").slice(0, 16).join(" ")}`));
     }
     await admin.close();
     console.log(problems.length ? `fit admin ${shape.name}:\n  ${problems.join('\n  ')}` : `fit admin ${shape.name}: ok`);

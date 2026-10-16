@@ -98,14 +98,14 @@ const ProductDetailContent: React.FC<ProductDetailModalProps & { product: Produc
   return (
     <Sheet labelledBy={titleId} onClose={onClose} variant="full" wide>
       {/* Top bar: close, name (once scrolled), share */}
-      <div className="flex items-center gap-2 px-2 sm:px-3 h-12 border-b border-stone-200 shrink-0 bg-white">
-        <button type="button" onClick={onClose} aria-label="Close" data-autofocus className="w-10 h-10 rounded-full flex items-center justify-center text-stone-800 hover:bg-stone-100">
+      <div className="flex items-center gap-2 px-2 sm:px-3 h-12 border-b border-line shrink-0 bg-surface">
+        <button type="button" onClick={onClose} aria-label="Close" data-autofocus className="w-10 h-10 rounded-full flex items-center justify-center text-ink hover:bg-sand">
           <X className="w-5 h-5" aria-hidden="true" />
         </button>
-        <span className="flex-1 min-w-0 truncate text-sm font-semibold text-stone-900 twopane:invisible" aria-hidden="true">
+        <span className="flex-1 min-w-0 truncate font-serif text-base text-ink twopane:invisible" aria-hidden="true">
           {product.title}
         </span>
-        <button type="button" onClick={() => void share()} aria-label="Share" className="w-10 h-10 rounded-full flex items-center justify-center text-stone-800 hover:bg-stone-100">
+        <button type="button" onClick={() => void share()} aria-label="Share" className="w-10 h-10 rounded-full flex items-center justify-center text-ink hover:bg-sand">
           <Share2 className="w-5 h-5" aria-hidden="true" />
         </button>
       </div>
@@ -113,39 +113,36 @@ const ProductDetailContent: React.FC<ProductDetailModalProps & { product: Produc
       <div className="flex-1 min-h-0 overflow-y-auto overscroll-contain twopane:grid twopane:grid-cols-2 twopane:grid-rows-[minmax(0,1fr)] twopane:overflow-hidden">
         <div className="twopane:overflow-y-auto twopane:p-5">
           <div className="twopane:rounded-2xl twopane:overflow-hidden">
-            <PhotoCarousel images={images} title={product.title}>
-              {sale && (
-                <span className="absolute top-3 left-3 rounded-full bg-white/95 text-[#7a2e1d] text-[11px] font-bold uppercase tracking-wider px-2.5 py-1 shadow-sm">Sale</span>
-              )}
-            </PhotoCarousel>
+            <PhotoCarousel images={images} title={product.title} />
           </div>
         </div>
 
         <div className="twopane:overflow-y-auto px-4 sm:px-5 pt-4 pb-6 space-y-5">
           <div className="space-y-1.5">
-            <h2 id={titleId} className="font-serif text-xl sm:text-2xl leading-snug text-stone-900">
+            <h2 id={titleId} className="font-serif text-2xl sm:text-3xl leading-tight text-ink break-anywhere">
               {product.title}
             </h2>
             <p className="flex items-baseline flex-wrap gap-x-2">
-              <span className="text-xl font-semibold text-[#0f1c2e]">{`AED ${unitPrice}`}</span>
+              <span className="text-lg text-ink tracking-[0.02em]">{`AED ${unitPrice}`}</span>
               {sale && (
-                <span className="text-sm text-stone-600 line-through">
+                <span className="text-sm text-ink-muted line-through decoration-ink-muted/60">
                   <span className="sr-only">was </span>
                   {`AED ${formatAed(wasFils)}`}
                 </span>
               )}
+              {sale && <span className="label-caps !text-[10px] text-rose-deep">Reduced</span>}
               <LocalPrice aed={Number(unitPrice)} className="text-xs" />
             </p>
-            <p className="text-xs text-stone-600">
+            <p className="text-xs text-ink-soft">
               {product.material} · {product.threadCount} TC · {product.weave}
             </p>
           </div>
 
           {/* Size */}
           <fieldset className="space-y-2">
-            <legend className="text-xs font-bold text-stone-900 uppercase tracking-wider flex items-center gap-1.5 mb-2">
-              <Ruler className="w-4 h-4 text-[#9f7e38]" aria-hidden="true" />
-              Size: <span className="font-medium normal-case tracking-normal text-stone-700">{selectedProfile.name}</span>
+            <legend className="label-caps text-ink flex flex-wrap items-center gap-1.5 mb-2 min-w-0">
+              <Ruler className="w-4 h-4 text-gold-deep" aria-hidden="true" />
+              Size: <span className="font-medium normal-case tracking-normal text-ink-soft">{selectedProfile.name}</span>
             </legend>
             <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
               {product.profiles.map((profile) => {
@@ -162,14 +159,14 @@ const ProductDetailContent: React.FC<ProductDetailModalProps & { product: Produc
                       setQuantity(1);
                     }}
                     className={`px-3 py-2 rounded-xl text-left border transition-colors ${
-                      isSelected ? 'border-[#0f1c2e] bg-[#0f1c2e] text-white' : pieces === 0 ? 'border-stone-200 bg-stone-50 text-stone-600' : 'border-stone-300 bg-white text-stone-900 hover:border-stone-500'
+                      isSelected ? 'border-ink bg-ivory ring-1 ring-ink text-ink' : pieces === 0 ? 'border-line bg-ivory text-ink-soft' : 'border-line-strong bg-surface text-ink hover:border-ink-muted'
                     }`}
                   >
                     <span className="flex items-center justify-between gap-1">
-                      <span className={`text-sm font-semibold ${pieces === 0 && !isSelected ? 'line-through' : ''}`}>{shortSize(profile.name)}</span>
-                      {isSelected && <Check className="w-4 h-4 text-amber-200" aria-hidden="true" />}
+                      <span className={`text-sm ${pieces === 0 && !isSelected ? 'line-through' : ''}`}>{shortSize(profile.name)}</span>
+                      {isSelected && <Check className="w-4 h-4 text-ink" aria-hidden="true" />}
                     </span>
-                    <span className={`block text-[11px] leading-tight truncate ${isSelected ? 'text-amber-100' : 'text-stone-600'}`}>
+                    <span className={`block text-[11px] leading-tight truncate text-ink-soft`}>
                       {pieces === 0 ? 'Sold out' : pieces <= lowStockThreshold ? `Only ${pieces} left` : profile.mattressSize.split('(')[0].trim()}
                       {profile.priceDelta > 0 && pieces > 0 ? ` · +AED ${profile.priceDelta}` : ''}
                     </span>
@@ -177,15 +174,15 @@ const ProductDetailContent: React.FC<ProductDetailModalProps & { product: Produc
                 );
               })}
             </div>
-            <details className="rounded-xl border border-stone-200 bg-[#fbf9f5] text-xs">
-              <summary className="cursor-pointer px-3 py-2.5 font-semibold text-stone-800">Measurements for {sizeShort} ({selectedProfile.piecesIncluded} pieces)</summary>
-              <dl className="grid grid-cols-1 sm:grid-cols-2 gap-x-4 gap-y-2 px-3 pb-3 text-stone-900">
-                <div><dt className="text-[11px] text-stone-600">Mattress</dt><dd className="font-medium">{selectedProfile.mattressSize}</dd></div>
-                <div><dt className="text-[11px] text-stone-600">Fitted sheet</dt><dd className="font-medium">{selectedProfile.fittedSheet}</dd></div>
-                <div><dt className="text-[11px] text-stone-600">Flat sheet</dt><dd className="font-medium">{selectedProfile.flatSheet}</dd></div>
-                <div><dt className="text-[11px] text-stone-600">Pillowcases</dt><dd className="font-medium">{selectedProfile.pillowcases}</dd></div>
+            <details className="rounded-xl border border-line bg-ivory text-xs">
+              <summary className="cursor-pointer px-3 py-2.5 font-semibold text-ink">Measurements for {sizeShort} ({selectedProfile.piecesIncluded} pieces)</summary>
+              <dl className="grid grid-cols-1 sm:grid-cols-2 gap-x-4 gap-y-2 px-3 pb-3 text-ink">
+                <div><dt className="text-[11px] text-ink-soft">Mattress</dt><dd className="font-medium">{selectedProfile.mattressSize}</dd></div>
+                <div><dt className="text-[11px] text-ink-soft">Fitted sheet</dt><dd className="font-medium">{selectedProfile.fittedSheet}</dd></div>
+                <div><dt className="text-[11px] text-ink-soft">Flat sheet</dt><dd className="font-medium">{selectedProfile.flatSheet}</dd></div>
+                <div><dt className="text-[11px] text-ink-soft">Pillowcases</dt><dd className="font-medium">{selectedProfile.pillowcases}</dd></div>
                 {selectedProfile.duvetCover && (
-                  <div className="sm:col-span-2"><dt className="text-[11px] text-stone-600">Duvet cover</dt><dd className="font-medium">{selectedProfile.duvetCover}</dd></div>
+                  <div className="sm:col-span-2"><dt className="text-[11px] text-ink-soft">Duvet cover</dt><dd className="font-medium">{selectedProfile.duvetCover}</dd></div>
                 )}
               </dl>
             </details>
@@ -194,8 +191,8 @@ const ProductDetailContent: React.FC<ProductDetailModalProps & { product: Produc
           {/* Colour */}
           {product.colors.length > 0 && (
             <fieldset className="space-y-2">
-              <legend className="text-xs font-bold text-stone-900 uppercase tracking-wider mb-2">
-                Colour: <span className="font-medium normal-case tracking-normal text-stone-700">{selectedColor}</span>
+              <legend className="label-caps text-ink mb-2">
+                Colour: <span className="font-medium normal-case tracking-normal text-ink-soft">{selectedColor}</span>
               </legend>
               <div className="flex items-center gap-2 flex-wrap">
                 {product.colors.map((c) => {
@@ -207,10 +204,10 @@ const ProductDetailContent: React.FC<ProductDetailModalProps & { product: Produc
                       aria-pressed={isSelected}
                       onClick={() => setSelectedColor(c.name)}
                       className={`flex items-center gap-2 pl-1.5 pr-3 py-1.5 rounded-full text-xs border transition-colors ${
-                        isSelected ? 'border-[#0f1c2e] ring-1 ring-[#0f1c2e] bg-white text-stone-900 font-semibold' : 'border-stone-300 bg-white text-stone-800 hover:border-stone-500'
+                        isSelected ? 'border-ink ring-1 ring-ink bg-surface text-ink font-semibold' : 'border-line-strong bg-surface text-ink hover:border-ink-muted'
                       }`}
                     >
-                      <span className="w-5 h-5 rounded-full border border-stone-300" style={{ backgroundColor: c.hex }} aria-hidden="true" />
+                      <span className="w-5 h-5 rounded-full border border-line-strong" style={{ backgroundColor: c.hex }} aria-hidden="true" />
                       <span>{c.name}</span>
                     </button>
                   );
@@ -221,13 +218,13 @@ const ProductDetailContent: React.FC<ProductDetailModalProps & { product: Produc
 
           {/* Quantity */}
           <div className="flex items-center gap-3">
-            <span className="text-xs font-bold text-stone-900 uppercase tracking-wider" id={`${titleId}-qty`}>Quantity</span>
-            <div className="flex items-center border border-stone-300 rounded-full overflow-hidden bg-white" role="group" aria-labelledby={`${titleId}-qty`}>
-              <button type="button" onClick={() => setQuantity(Math.max(1, qty - 1))} disabled={qty <= 1} aria-label="One fewer" className="w-9 h-9 flex items-center justify-center text-stone-800 hover:bg-stone-100 disabled:opacity-30">
+            <span className="label-caps text-ink" id={`${titleId}-qty`}>Quantity</span>
+            <div className="flex items-center border border-line-strong rounded-full overflow-hidden bg-surface" role="group" aria-labelledby={`${titleId}-qty`}>
+              <button type="button" onClick={() => setQuantity(Math.max(1, qty - 1))} disabled={qty <= 1} aria-label="One fewer" className="w-9 h-9 flex items-center justify-center text-ink hover:bg-sand disabled:opacity-30">
                 <Minus className="w-4 h-4" aria-hidden="true" />
               </button>
-              <span className="w-8 text-center text-sm font-semibold text-stone-900" aria-live="polite">{soldOut ? 0 : qty}</span>
-              <button type="button" onClick={() => setQuantity(Math.min(left, qty + 1))} disabled={qty >= left} aria-label="One more" className="w-9 h-9 flex items-center justify-center text-stone-800 hover:bg-stone-100 disabled:opacity-30">
+              <span className="w-8 text-center text-sm font-semibold text-ink" aria-live="polite">{soldOut ? 0 : qty}</span>
+              <button type="button" onClick={() => setQuantity(Math.min(left, qty + 1))} disabled={qty >= left} aria-label="One more" className="w-9 h-9 flex items-center justify-center text-ink hover:bg-sand disabled:opacity-30">
                 <Plus className="w-4 h-4" aria-hidden="true" />
               </button>
             </div>
@@ -235,45 +232,45 @@ const ProductDetailContent: React.FC<ProductDetailModalProps & { product: Produc
 
           {/* Ask: the chat, WhatsApp, Instagram (each only when switched on in Settings); email if none */}
           <div className="space-y-2">
-            <p className="text-xs text-stone-700">Questions about this piece? Ask us:</p>
+            <p className="text-xs text-ink-soft">Questions about this piece? Ask us:</p>
             <div className="flex flex-wrap gap-2">
               {chat && (
-                <button type="button" onClick={() => openChat(`About ${product.title} (${selectedProfile.name}): `)} className={`${askClass} text-[#0f1c2e] bg-amber-50 hover:bg-amber-100 border-amber-300`}>
+                <button type="button" onClick={() => openChat(`About ${product.title} (${selectedProfile.name}): `)} className={`${askClass} text-ink bg-surface hover:bg-sand border-line-strong`}>
                   <MessagesSquare className="w-4 h-4" aria-hidden="true" />
                   <span>Ask in chat</span>
                 </button>
               )}
               {inquiry && (
-                <a href={inquiry} target="_blank" rel="noopener noreferrer" className={`${askClass} text-emerald-800 bg-emerald-50 hover:bg-emerald-100 border-emerald-300`}>
+                <a href={inquiry} target="_blank" rel="noopener noreferrer" className={`${askClass} text-ink bg-surface hover:bg-sand border-line-strong`}>
                   <MessageCircle className="w-4 h-4" aria-hidden="true" />
                   <span>Ask on WhatsApp</span>
                 </a>
               )}
               {instagram && (
-                <a href={instagram} target="_blank" rel="noopener noreferrer" onClick={() => void copyLinkForInstagram()} className={`${askClass} text-pink-800 bg-pink-50 hover:bg-pink-100 border-pink-300`}>
+                <a href={instagram} target="_blank" rel="noopener noreferrer" onClick={() => void copyLinkForInstagram()} className={`${askClass} text-ink bg-surface hover:bg-sand border-line-strong`}>
                   <InstagramIcon className="w-4 h-4" />
                   <span>Ask on Instagram</span>
                 </a>
               )}
               {!chat && !inquiry && !instagram && (
-                <a href={emailInquiry} target="_blank" rel="noopener noreferrer" className={`${askClass} text-emerald-800 bg-emerald-50 hover:bg-emerald-100 border-emerald-300`}>
+                <a href={emailInquiry} target="_blank" rel="noopener noreferrer" className={`${askClass} text-ink bg-surface hover:bg-sand border-line-strong`}>
                   <MessageCircle className="w-4 h-4" aria-hidden="true" />
                   <span>Ask by email</span>
                 </a>
               )}
             </div>
-            {igNote && <p role="status" className="text-[11px] text-pink-800">{igNote}</p>}
+            {igNote && <p role="status" className="text-[11px] text-rose-deep">{igNote}</p>}
           </div>
 
-          <p className="text-sm text-stone-700 leading-relaxed">{product.description}</p>
+          <p className="text-sm text-ink-soft leading-relaxed">{product.description}</p>
 
-          <ul className="text-xs text-stone-700 space-y-1.5">
+          <ul className="text-xs text-ink-soft space-y-1.5">
             <li className="flex items-center gap-2">
-              <Truck className="w-4 h-4 text-[#9f7e38]" aria-hidden="true" />
+              <Truck className="w-4 h-4 text-gold-deep" aria-hidden="true" />
               Free delivery in {delivery.standardDays || '1–2 days'} to all seven emirates
             </li>
             <li className="flex items-center gap-2">
-              <ShieldCheck className="w-4 h-4 text-emerald-700" aria-hidden="true" />
+              <ShieldCheck className="w-4 h-4 text-gold-deep" aria-hidden="true" />
               Cash on delivery or bank transfer
             </li>
           </ul>
@@ -281,23 +278,23 @@ const ProductDetailContent: React.FC<ProductDetailModalProps & { product: Produc
       </div>
 
       {/* Always in reach: the total and Add to Bag */}
-      <div className="shrink-0 border-t border-stone-200 bg-white px-4 pt-3 pb-[calc(0.75rem+env(safe-area-inset-bottom,0px))] flex items-center gap-3">
+      <div className="shrink-0 border-t border-line bg-surface px-4 pt-3 pb-[calc(0.75rem+env(safe-area-inset-bottom,0px))] flex flex-wrap items-center gap-x-3 gap-y-2">
         <div className="min-w-0">
-          <div className="text-[11px] text-stone-600">Total</div>
-          <div className="text-lg font-semibold text-[#0f1c2e] leading-tight">{`AED ${totalPrice}`}</div>
+          <div className="label-caps !text-[10px] text-ink-muted">Total</div>
+          <div className="text-lg text-ink leading-tight tracking-[0.02em]">{`AED ${totalPrice}`}</div>
         </div>
         {soldOut ? (
           !inquiry && chat ? (
-            <button type="button" onClick={() => openChat(`${product.title} in ${selectedProfile.name} shows as sold out. Will it come back? `)} className="flex-1 bg-stone-200 text-stone-800 font-semibold text-sm py-3.5 px-4 rounded-full text-center">
+            <button type="button" onClick={() => openChat(`${product.title} in ${selectedProfile.name} shows as sold out. Will it come back? `)} className="flex-1 basis-48 min-w-0 bg-sand text-ink text-sm py-3.5 px-4 rounded-full text-center border border-line">
               {sizeShort} sold out · Ask us
             </button>
           ) : (
-            <a href={inquiry ?? emailInquiry} target="_blank" rel="noopener noreferrer" className="flex-1 bg-stone-200 text-stone-800 font-semibold text-sm py-3.5 px-4 rounded-full text-center">
+            <a href={inquiry ?? emailInquiry} target="_blank" rel="noopener noreferrer" className="flex-1 basis-48 min-w-0 bg-sand text-ink text-sm py-3.5 px-4 rounded-full text-center border border-line">
               {sizeShort} sold out · Ask us
             </a>
           )
         ) : (
-          <button type="button" onClick={handleAddToCart} className="flex-1 bg-[#0f1c2e] hover:bg-[#1c2c44] active:scale-[0.98] text-white font-semibold text-sm py-3.5 px-4 rounded-full shadow transition-transform">
+          <button type="button" onClick={handleAddToCart} className="flex-1 basis-48 min-w-0 bg-ink hover:bg-ink-2 text-ivory font-medium tracking-[0.04em] text-sm py-3.5 px-4 rounded-full transition-colors">
             Add to Bag ({sizeShort})
           </button>
         )}

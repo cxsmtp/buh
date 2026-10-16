@@ -1,13 +1,13 @@
 'use client';
 
 import React, { useEffect, useState } from 'react';
-import { Lock, ShieldCheck, ArrowRight, Eye, EyeOff, Check, KeyRound, LifeBuoy } from 'lucide-react';
+import { Lock, ShieldCheck, ArrowRight, Eye, EyeOff, Check, KeyRound, LifeBuoy, X } from 'lucide-react';
 import { getJson, postJson } from '@/lib/apiClient';
 import { passkeyErrorMessage, passkeysSupported, webauthnBrowser } from '@/lib/client/passkeys';
 
-const input = 'w-full px-3.5 py-2.5 rounded-xl border border-stone-300 bg-white text-stone-900 placeholder:text-stone-500 focus:outline-none focus:ring-2 focus:ring-[#c5a059] text-xs';
-const primary = 'w-full bg-[#0f1c2e] hover:bg-stone-800 disabled:opacity-60 text-white font-bold py-3.5 rounded-xl shadow-lg flex items-center justify-center gap-2 text-xs mt-2';
-const quiet = 'text-stone-600 hover:text-stone-900 font-semibold py-1 underline-offset-2 hover:underline';
+const input = 'w-full px-3.5 py-2.5 rounded-xl border border-line-strong bg-surface text-ink placeholder:text-ink-muted focus:outline-none focus:ring-2 focus:ring-gold text-xs';
+const primary = 'w-full bg-ink hover:bg-ink disabled:opacity-60 text-white font-bold py-3.5 rounded-xl shadow-lg flex items-center justify-center gap-2 text-xs mt-2';
+const quiet = 'text-ink-soft hover:text-ink font-semibold py-1 underline-offset-2 hover:underline';
 
 interface AdminLoginModalProps {
   isOpen: boolean;
@@ -143,7 +143,7 @@ export const AdminLoginModal: React.FC<AdminLoginModalProps> = ({
 
   const codesLeftNote =
     codesLeft === null ? null : (
-      <p className={`rounded-xl border p-2.5 leading-relaxed ${codesLeft <= 2 ? 'bg-amber-50 border-amber-300 text-amber-900' : 'bg-stone-50 border-stone-200 text-stone-700'}`}>
+      <p className={`rounded-xl border p-2.5 leading-relaxed ${codesLeft <= 2 ? 'bg-warning-soft border-warning-line text-warning' : 'bg-ivory border-line text-ink-soft'}`}>
         {codesLeft === 0
           ? 'That was your last recovery code. Create a new set in Settings → Passkeys & recovery codes straight away.'
           : `You have ${codesLeft} recovery code${codesLeft === 1 ? '' : 's'} left.${codesLeft <= 2 ? ' Create a new set in Settings → Passkeys & recovery codes soon.' : ''}`}
@@ -232,49 +232,52 @@ export const AdminLoginModal: React.FC<AdminLoginModalProps> = ({
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/75 backdrop-blur-md p-4">
-      <div className="bg-white rounded-3xl max-w-md w-full p-6 shadow-2xl space-y-5 animate-in zoom-in-95 duration-200 border border-stone-200">
-        {/* Header */}
-        <div className="text-center space-y-1.5">
-          <div className="w-12 h-12 rounded-2xl bg-[#0f1c2e] text-amber-300 flex items-center justify-center mx-auto shadow-md">
-            <Lock className="w-6 h-6 text-[#c5a059]" />
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-ink/45 p-3 sm:p-4 overscroll-contain" role="dialog" aria-modal="true" aria-labelledby="admin-login-title">
+      <div className="bg-surface rounded-3xl max-w-md w-full min-w-0 max-h-[calc(100dvh-1.5rem)] overflow-y-auto overflow-x-hidden overscroll-contain p-6 space-y-5 border border-line">
+        {/* Header (stays in view, with its close button) */}
+        <div className="sticky top-0 z-10 -mx-6 -mt-6 px-6 pt-6 pb-2 bg-surface text-center space-y-1.5">
+          <button type="button" onClick={onClose} aria-label="Close sign-in" className="absolute top-3 right-3 w-10 h-10 flex items-center justify-center rounded-full text-ink hover:bg-sand">
+            <X className="w-5 h-5" strokeWidth={1.5} aria-hidden="true" />
+          </button>
+          <div className="w-12 h-12 rounded-full border border-gold text-gold-deep flex items-center justify-center mx-auto">
+            <Lock className="w-5 h-5" strokeWidth={1.5} />
           </div>
-          <h2 className="font-serif text-xl font-bold text-[#0f1c2e]">
+          <h2 id="admin-login-title" className="font-serif text-2xl text-ink">
             Admin Hub Security Access
           </h2>
-          <p className="text-xs text-stone-500">
+          <p className="text-xs text-ink-muted">
             Beautiful UAE Home • Operations, Couriers & Inventory
           </p>
         </div>
 
         {/* Error message */}
         {error && (
-          <div className="bg-red-50 text-red-700 text-xs p-3 rounded-xl border border-red-200 font-medium">
+          <div className="bg-danger-soft text-danger text-xs p-3 rounded-xl border border-danger-line font-medium">
             {error}
           </div>
         )}
 
         {notice && !error && (
-          <div role="status" className="bg-emerald-50 text-emerald-800 text-xs p-3 rounded-xl border border-emerald-200 font-medium">
+          <div role="status" className="bg-success-soft text-success text-xs p-3 rounded-xl border border-success-line font-medium">
             {notice}
           </div>
         )}
 
         {resetting ? (
           <form onSubmit={handleReset} className="space-y-3.5 text-xs">
-            <p className="text-stone-600 leading-relaxed">
+            <p className="text-ink-soft leading-relaxed">
               Choose a new admin password: at least 12 characters, with at least 5 different characters. Every device is signed out.
             </p>
             <div>
-              <label htmlFor="admin-reset-password" className="block text-stone-800 font-semibold mb-1">New password</label>
-              <input id="admin-reset-password" type="password" required minLength={12} maxLength={256} autoComplete="new-password" value={newPassword} onChange={(e) => setNewPassword(e.target.value)} className="w-full px-3.5 py-2.5 rounded-xl border border-stone-300 bg-white text-stone-900 focus:outline-none focus:ring-2 focus:ring-[#c5a059] text-xs" />
+              <label htmlFor="admin-reset-password" className="block text-ink font-semibold mb-1">New password</label>
+              <input id="admin-reset-password" type="password" required minLength={12} maxLength={256} autoComplete="new-password" value={newPassword} onChange={(e) => setNewPassword(e.target.value)} className="w-full px-3.5 py-2.5 rounded-xl border border-line-strong bg-surface text-ink focus:outline-none focus:ring-2 focus:ring-gold text-xs" />
             </div>
             <div>
-              <label htmlFor="admin-reset-confirm" className="block text-stone-800 font-semibold mb-1">Confirm new password</label>
-              <input id="admin-reset-confirm" type="password" required minLength={12} maxLength={256} autoComplete="new-password" value={confirmPassword} onChange={(e) => setConfirmPassword(e.target.value)} className="w-full px-3.5 py-2.5 rounded-xl border border-stone-300 bg-white text-stone-900 focus:outline-none focus:ring-2 focus:ring-[#c5a059] text-xs" />
+              <label htmlFor="admin-reset-confirm" className="block text-ink font-semibold mb-1">Confirm new password</label>
+              <input id="admin-reset-confirm" type="password" required minLength={12} maxLength={256} autoComplete="new-password" value={confirmPassword} onChange={(e) => setConfirmPassword(e.target.value)} className="w-full px-3.5 py-2.5 rounded-xl border border-line-strong bg-surface text-ink focus:outline-none focus:ring-2 focus:ring-gold text-xs" />
             </div>
-            <button type="submit" disabled={busy} className="w-full bg-[#0f1c2e] hover:bg-stone-800 disabled:opacity-60 text-white font-bold py-3.5 rounded-xl shadow-lg flex items-center justify-center gap-2 text-xs mt-2">
-              <Check className="w-4 h-4 text-amber-300" />
+            <button type="submit" disabled={busy} className="w-full bg-ink hover:bg-ink disabled:opacity-60 text-white font-bold py-3.5 rounded-xl shadow-lg flex items-center justify-center gap-2 text-xs mt-2">
+              <Check className="w-4 h-4 text-gold-light" />
               <span>{busy ? 'Saving…' : 'Set New Password'}</span>
             </button>
             {error && (
@@ -285,7 +288,7 @@ export const AdminLoginModal: React.FC<AdminLoginModalProps> = ({
                   setError('');
                   setForgot(true);
                 }}
-                className="w-full text-stone-500 hover:text-stone-800 font-semibold py-1"
+                className="w-full text-ink-muted hover:text-ink font-semibold py-1"
               >
                 Ask for a new link
               </button>
@@ -293,47 +296,47 @@ export const AdminLoginModal: React.FC<AdminLoginModalProps> = ({
           </form>
         ) : recoveryPending ? (
           <form onSubmit={handleRecoveryPassword} className="space-y-3.5 text-xs">
-            <p className="text-stone-700 leading-relaxed">
+            <p className="text-ink-soft leading-relaxed">
               <strong>You&apos;re in.</strong> Now choose a new admin password: at least 12 characters, with at least 5 different characters. Every other device has been signed out.
             </p>
             {codesLeftNote}
             <div>
-              <label htmlFor="admin-recovery-new" className="block text-stone-800 font-semibold mb-1">New password</label>
+              <label htmlFor="admin-recovery-new" className="block text-ink font-semibold mb-1">New password</label>
               <input id="admin-recovery-new" type="password" required minLength={12} maxLength={256} autoComplete="new-password" value={newPassword} onChange={(e) => setNewPassword(e.target.value)} className={input} />
             </div>
             <div>
-              <label htmlFor="admin-recovery-confirm" className="block text-stone-800 font-semibold mb-1">Confirm new password</label>
+              <label htmlFor="admin-recovery-confirm" className="block text-ink font-semibold mb-1">Confirm new password</label>
               <input id="admin-recovery-confirm" type="password" required minLength={12} maxLength={256} autoComplete="new-password" value={confirmPassword} onChange={(e) => setConfirmPassword(e.target.value)} className={input} />
             </div>
             <button type="submit" disabled={busy} className={primary}>
-              <Check className="w-4 h-4 text-amber-300" />
+              <Check className="w-4 h-4 text-gold-light" />
               <span>{busy ? 'Saving…' : 'Save New Password'}</span>
             </button>
           </form>
         ) : envManaged ? (
           <div className="space-y-3.5 text-xs">
-            <p role="status" className="bg-amber-50 text-amber-900 border border-amber-300 rounded-xl p-3 leading-relaxed">
+            <p role="status" className="bg-warning-soft text-warning border border-warning-line rounded-xl p-3 leading-relaxed">
               <strong>You&apos;re signed in.</strong> Your password can&apos;t be changed here: it is set on the server (ADMIN_PASSWORD_HASH in .env.production).
               To choose a new one, make a new hash with <code className="font-mono">npm run hash-password</code>, put it in .env.production and restart the shop (see the deployment guide), or ask whoever runs your server.
             </p>
             {codesLeftNote}
             <button type="button" onClick={finish} className={primary}>
               <span>Continue to the Admin Hub</span>
-              <ArrowRight className="w-4 h-4 text-amber-300" />
+              <ArrowRight className="w-4 h-4 text-gold-light" />
             </button>
           </div>
         ) : recovery ? (
           <form onSubmit={handleRecovery} className="space-y-3.5 text-xs">
-            <p className="text-stone-700 leading-relaxed">
+            <p className="text-ink-soft leading-relaxed">
               Type your admin email and one of the recovery codes you saved (they look like <span className="font-mono whitespace-nowrap">ABCD-EFGH-JKLM-NPQR</span>). Each code works once.
               You&apos;ll choose a new password next, and every other device is signed out.
             </p>
             <div>
-              <label htmlFor="admin-recovery-email" className="block text-stone-800 font-semibold mb-1">Admin Email</label>
+              <label htmlFor="admin-recovery-email" className="block text-ink font-semibold mb-1">Admin Email</label>
               <input id="admin-recovery-email" type="email" required maxLength={254} autoComplete="username" value={email} onChange={(e) => setEmail(e.target.value)} className={input} />
             </div>
             <div>
-              <label htmlFor="admin-recovery-code" className="block text-stone-800 font-semibold mb-1">Recovery code</label>
+              <label htmlFor="admin-recovery-code" className="block text-ink font-semibold mb-1">Recovery code</label>
               <input
                 id="admin-recovery-code"
                 type="text"
@@ -350,7 +353,7 @@ export const AdminLoginModal: React.FC<AdminLoginModalProps> = ({
             </div>
             <button type="submit" disabled={busy} className={primary}>
               <span>{busy ? 'Checking…' : 'Sign In With Recovery Code'}</span>
-              <ArrowRight className="w-4 h-4 text-amber-300" />
+              <ArrowRight className="w-4 h-4 text-gold-light" />
             </button>
             <button type="button" onClick={() => { setRecovery(false); setError(''); }} className={`w-full ${quiet}`}>
               Back to sign-in
@@ -358,27 +361,27 @@ export const AdminLoginModal: React.FC<AdminLoginModalProps> = ({
           </form>
         ) : forgot ? (
           <form onSubmit={handleForgot} className="space-y-3.5 text-xs">
-            <p className="text-stone-600 leading-relaxed">
+            <p className="text-ink-soft leading-relaxed">
               Type the admin email. If it matches, we email a link to choose a new password (it works once, for 30 minutes).
             </p>
             <div>
-              <label htmlFor="admin-forgot-email" className="block text-stone-800 font-semibold mb-1">Admin Email</label>
-              <input id="admin-forgot-email" type="email" required maxLength={254} autoComplete="username" value={email} onChange={(e) => setEmail(e.target.value)} className="w-full px-3.5 py-2.5 rounded-xl border border-stone-300 bg-white text-stone-900 focus:outline-none focus:ring-2 focus:ring-[#c5a059] text-xs" />
+              <label htmlFor="admin-forgot-email" className="block text-ink font-semibold mb-1">Admin Email</label>
+              <input id="admin-forgot-email" type="email" required maxLength={254} autoComplete="username" value={email} onChange={(e) => setEmail(e.target.value)} className="w-full px-3.5 py-2.5 rounded-xl border border-line-strong bg-surface text-ink focus:outline-none focus:ring-2 focus:ring-gold text-xs" />
             </div>
-            <button type="submit" disabled={busy} className="w-full bg-[#0f1c2e] hover:bg-stone-800 disabled:opacity-60 text-white font-bold py-3.5 rounded-xl shadow-lg flex items-center justify-center gap-2 text-xs mt-2">
+            <button type="submit" disabled={busy} className="w-full bg-ink hover:bg-ink disabled:opacity-60 text-white font-bold py-3.5 rounded-xl shadow-lg flex items-center justify-center gap-2 text-xs mt-2">
               <span>{busy ? 'Sending…' : 'Email Me a Reset Link'}</span>
             </button>
-            <button type="button" onClick={() => { setForgot(false); setError(''); }} className="w-full text-stone-500 hover:text-stone-800 font-semibold py-1">
+            <button type="button" onClick={() => { setForgot(false); setError(''); }} className="w-full text-ink-muted hover:text-ink font-semibold py-1">
               Back to sign-in
             </button>
           </form>
         ) : mustChange ? (
           <form onSubmit={handleChangePassword} className="space-y-3.5 text-xs">
-            <p className="text-stone-600 leading-relaxed">
+            <p className="text-ink-soft leading-relaxed">
               Choose your own admin password to finish signing in: at least 12 characters, with at least 5 different characters.
             </p>
             <div>
-              <label htmlFor="admin-new-password" className="block text-stone-800 font-semibold mb-1">New password</label>
+              <label htmlFor="admin-new-password" className="block text-ink font-semibold mb-1">New password</label>
               <input
                 id="admin-new-password"
                 type="password"
@@ -388,11 +391,11 @@ export const AdminLoginModal: React.FC<AdminLoginModalProps> = ({
                 autoComplete="new-password"
                 value={newPassword}
                 onChange={(e) => setNewPassword(e.target.value)}
-                className="w-full px-3.5 py-2.5 rounded-xl border border-stone-300 bg-white text-stone-900 focus:outline-none focus:ring-2 focus:ring-[#c5a059] text-xs"
+                className="w-full px-3.5 py-2.5 rounded-xl border border-line-strong bg-surface text-ink focus:outline-none focus:ring-2 focus:ring-gold text-xs"
               />
             </div>
             <div>
-              <label htmlFor="admin-confirm-password" className="block text-stone-800 font-semibold mb-1">Confirm new password</label>
+              <label htmlFor="admin-confirm-password" className="block text-ink font-semibold mb-1">Confirm new password</label>
               <input
                 id="admin-confirm-password"
                 type="password"
@@ -402,22 +405,22 @@ export const AdminLoginModal: React.FC<AdminLoginModalProps> = ({
                 autoComplete="new-password"
                 value={confirmPassword}
                 onChange={(e) => setConfirmPassword(e.target.value)}
-                className="w-full px-3.5 py-2.5 rounded-xl border border-stone-300 bg-white text-stone-900 focus:outline-none focus:ring-2 focus:ring-[#c5a059] text-xs"
+                className="w-full px-3.5 py-2.5 rounded-xl border border-line-strong bg-surface text-ink focus:outline-none focus:ring-2 focus:ring-gold text-xs"
               />
             </div>
             <button
               type="submit"
               disabled={busy}
-              className="w-full bg-[#0f1c2e] hover:bg-stone-800 disabled:opacity-60 text-white font-bold py-3.5 rounded-xl shadow-lg flex items-center justify-center gap-2 transition-all active:scale-95 text-xs mt-2"
+              className="w-full bg-ink hover:bg-ink disabled:opacity-60 text-white font-bold py-3.5 rounded-xl shadow-lg flex items-center justify-center gap-2 transition-all active:scale-95 text-xs mt-2"
             >
-              <Check className="w-4 h-4 text-amber-300" />
+              <Check className="w-4 h-4 text-gold-light" />
               <span>{busy ? 'Saving…' : 'Save Password & Continue'}</span>
             </button>
           </form>
         ) : (
         <form onSubmit={handleLogin} className="space-y-3.5 text-xs">
           <div>
-            <label className="block text-stone-800 font-semibold mb-1">
+            <label className="block text-ink font-semibold mb-1">
               Admin Email
             </label>
             <input
@@ -428,12 +431,12 @@ export const AdminLoginModal: React.FC<AdminLoginModalProps> = ({
               placeholder="admin@beautifuluaehome.com"
               value={email}
               onChange={(e) => setEmail(e.target.value)}
-              className="w-full px-3.5 py-2.5 rounded-xl border border-stone-300 bg-white text-stone-900 placeholder:text-stone-400 focus:outline-none focus:ring-2 focus:ring-[#c5a059] focus:bg-white text-xs"
+              className="w-full px-3.5 py-2.5 rounded-xl border border-line-strong bg-surface text-ink placeholder:text-ink-muted focus:outline-none focus:ring-2 focus:ring-gold focus:bg-surface text-xs"
             />
           </div>
 
           <div>
-            <label className="block text-stone-800 font-semibold mb-1">
+            <label className="block text-ink font-semibold mb-1">
               Admin Password
             </label>
             <div className="relative">
@@ -445,13 +448,13 @@ export const AdminLoginModal: React.FC<AdminLoginModalProps> = ({
                 placeholder="••••••••••••"
                 value={password}
                 onChange={(e) => setPassword(e.target.value)}
-                className="w-full px-3.5 py-2.5 rounded-xl border border-stone-300 bg-white text-stone-900 placeholder:text-stone-400 focus:outline-none focus:ring-2 focus:ring-[#c5a059] focus:bg-white pr-10 text-xs"
+                className="w-full px-3.5 py-2.5 rounded-xl border border-line-strong bg-surface text-ink placeholder:text-ink-muted focus:outline-none focus:ring-2 focus:ring-gold focus:bg-surface pr-10 text-xs"
               />
               <button
                 type="button"
                 onClick={() => setShowPassword(!showPassword)}
                 aria-label={showPassword ? 'Hide password' : 'Show password'}
-                className="absolute right-3 top-2.5 text-stone-500 hover:text-stone-600"
+                className="absolute right-3 top-2.5 text-ink-muted hover:text-ink-soft"
               >
                 {showPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
               </button>
@@ -461,19 +464,19 @@ export const AdminLoginModal: React.FC<AdminLoginModalProps> = ({
           <button
             type="submit"
             disabled={busy}
-            className="w-full bg-[#0f1c2e] hover:bg-stone-800 disabled:opacity-60 text-white font-bold py-3.5 rounded-xl shadow-lg flex items-center justify-center gap-2 transition-all active:scale-95 text-xs mt-2"
+            className="w-full bg-ink hover:bg-ink disabled:opacity-60 text-white font-bold py-3.5 rounded-xl shadow-lg flex items-center justify-center gap-2 transition-all active:scale-95 text-xs mt-2"
           >
             <span>{busy ? 'Checking…' : 'Unlock Admin Portal'}</span>
-            <ArrowRight className="w-4 h-4 text-amber-300" />
+            <ArrowRight className="w-4 h-4 text-gold-light" />
           </button>
           {canUsePasskey && (
             <button
               type="button"
               onClick={() => void handlePasskey()}
               disabled={busy}
-              className="w-full border border-stone-300 bg-white hover:bg-stone-50 disabled:opacity-60 text-[#0f1c2e] font-bold py-3 rounded-xl flex items-center justify-center gap-2 text-xs"
+              className="w-full border border-line-strong bg-surface hover:bg-ivory disabled:opacity-60 text-ink font-bold py-3 rounded-xl flex items-center justify-center gap-2 text-xs"
             >
-              <KeyRound className="w-4 h-4 text-[#9a7a35]" />
+              <KeyRound className="w-4 h-4 text-gold-deep" />
               <span>Sign in with a passkey</span>
             </button>
           )}
@@ -488,8 +491,8 @@ export const AdminLoginModal: React.FC<AdminLoginModalProps> = ({
         </form>
         )}
 
-        <div className="bg-stone-50 rounded-2xl p-3 border border-stone-200 text-[11px] text-stone-600 leading-relaxed flex gap-2">
-          <ShieldCheck className="w-4 h-4 text-[#c5a059] shrink-0 mt-0.5" />
+        <div className="bg-ivory rounded-2xl p-3 border border-line text-[11px] text-ink-soft leading-relaxed flex gap-2">
+          <ShieldCheck className="w-4 h-4 text-gold shrink-0 mt-0.5" />
           <span>
             First time here? The owner account&apos;s one-time password is printed in the server log when the
             shop first starts. You will choose your own password right after signing in.
@@ -501,7 +504,7 @@ export const AdminLoginModal: React.FC<AdminLoginModalProps> = ({
           <button
             type="button"
             onClick={onClose}
-            className="text-stone-500 hover:text-stone-700 text-xs font-semibold"
+            className="text-ink-muted hover:text-ink-soft text-xs font-semibold"
           >
             Return to Storefront
           </button>

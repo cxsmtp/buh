@@ -17,7 +17,8 @@ import {
   ChevronRight,
   ShieldCheck,
   Building2,
-  Banknote
+  Banknote,
+  X,
 } from 'lucide-react';
 import { postJson, sendJson } from '@/lib/apiClient';
 
@@ -168,13 +169,13 @@ export const AdminOrdersTab: React.FC<AdminOrdersTabProps> = ({
               onClick={() => setFilter(tab.id as typeof filter)}
               className={`px-3 py-1.5 rounded-xl text-xs font-semibold whitespace-nowrap transition-all flex items-center gap-1.5 ${
                 filter === tab.id
-                  ? 'bg-[#0f1c2e] text-white shadow-sm'
-                  : 'bg-white text-stone-700 hover:bg-stone-100 border border-stone-200'
+                  ? 'bg-ink text-white shadow-sm'
+                  : 'bg-surface text-ink-soft hover:bg-sand border border-line'
               }`}
             >
               <span>{tab.label}</span>
               <span className={`text-[10px] px-1.5 py-0.2 rounded-full ${
-                filter === tab.id ? 'bg-amber-400 text-stone-900 font-bold' : 'bg-stone-200 text-stone-700'
+                filter === tab.id ? 'bg-gold text-ink font-bold' : 'bg-sand-deep text-ink-soft'
               }`}>
                 {count}
               </span>
@@ -186,7 +187,7 @@ export const AdminOrdersTab: React.FC<AdminOrdersTabProps> = ({
       {/* Orders List */}
       <div className="space-y-3">
         {filteredOrders.length === 0 ? (
-          <div className="bg-white rounded-2xl p-8 text-center border border-stone-200 text-stone-500 text-xs">
+          <div className="bg-surface rounded-2xl p-8 text-center border border-line text-ink-muted text-xs">
             No orders found under this filter.
           </div>
         ) : (
@@ -197,36 +198,36 @@ export const AdminOrdersTab: React.FC<AdminOrdersTabProps> = ({
             return (
               <div
                 key={order.id}
-                className="bg-white rounded-2xl p-4 border border-stone-200 hover:border-stone-300 shadow-sm space-y-3 transition-all"
+                className="bg-surface rounded-2xl p-4 border border-line hover:border-line-strong shadow-sm space-y-3 transition-all"
               >
                 {/* Top Strip */}
-                <div className="flex items-start justify-between gap-2 border-b border-stone-100 pb-2.5">
-                  <div>
+                <div className="flex flex-wrap items-start justify-between gap-2 border-b border-line pb-2.5">
+                  <div className="min-w-0">
                     <div className="flex items-center gap-2">
-                      <span className="font-mono font-bold text-sm text-[#0f1c2e]">
+                      <span className="font-mono font-bold text-sm text-ink">
                         {order.id}
                       </span>
                       {order.deliveryOption === 'same_day' && (
-                        <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-red-100 text-red-800 border border-red-300" title={`Same-day delivery (customer paid AED ${order.deliveryFee})`}>
+                        <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-danger-soft text-danger border border-danger-line" title={`Same-day delivery (customer paid AED ${order.deliveryFee})`}>
                           Same day
                         </span>
                       )}
                       <span
                         className={`text-[10px] font-bold px-2 py-0.5 rounded-full uppercase tracking-wider ${
                           isPending
-                            ? 'bg-amber-100 text-amber-900 border border-amber-300'
+                            ? 'bg-warning-soft text-warning border border-warning-line'
                             : order.status === 'confirmed'
-                            ? 'bg-emerald-100 text-emerald-900 border border-emerald-300'
-                            : 'bg-blue-100 text-blue-900 border border-blue-300'
+                            ? 'bg-success-soft text-success border border-success-line'
+                            : 'bg-sand text-ink border border-line-strong'
                         }`}
                       >
                         {order.status.replace('_', ' ')}
                       </span>
                     </div>
-                    <div className="text-[11px] text-stone-500 mt-0.5">
+                    <div className="text-[11px] text-ink-muted mt-0.5">
                       {new Date(order.createdAt).toLocaleString()} • {order.customer.fullName}
                       {order.source && order.source.source !== 'direct' && (
-                        <span className="ml-1.5 px-1.5 py-0.5 rounded-full bg-stone-100 text-stone-600 text-[10px] font-semibold capitalize" title={order.source.campaign ? `Campaign: ${order.source.campaign}` : 'Where the customer came from'}>
+                        <span className="ml-1.5 px-1.5 py-0.5 rounded-full bg-sand text-ink-soft text-[10px] font-semibold capitalize" title={order.source.campaign ? `Campaign: ${order.source.campaign}` : 'Where the customer came from'}>
                           via {order.source.source}
                         </span>
                       )}
@@ -234,15 +235,15 @@ export const AdminOrdersTab: React.FC<AdminOrdersTabProps> = ({
                   </div>
 
                   {/* Payment Mode Badge */}
-                  <div className="text-right">
-                    <span className="text-base font-bold text-[#0f1c2e] block">
+                  <div className="text-right shrink-0 ml-auto">
+                    <span className="text-base font-bold text-ink block">
                       AED {order.total}
                     </span>
                     <span
                       className={`inline-flex items-center gap-1 text-[10px] font-semibold px-2 py-0.5 rounded-md ${
                         isCod
-                          ? 'bg-red-50 text-red-700 border border-red-200'
-                          : 'bg-emerald-50 text-emerald-700 border border-emerald-200'
+                          ? 'bg-warning-soft text-warning border border-warning-line'
+                          : 'bg-success-soft text-success border border-success-line'
                       }`}
                     >
                       {isCod ? <Banknote className="w-3 h-3" /> : <Building2 className="w-3 h-3" />}
@@ -255,11 +256,11 @@ export const AdminOrdersTab: React.FC<AdminOrdersTabProps> = ({
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 text-xs">
                   {/* Items */}
                   <div className="space-y-1">
-                    <span className="text-[10px] font-bold text-stone-500 uppercase tracking-wider block">
+                    <span className="text-[10px] font-bold text-ink-muted uppercase tracking-wider block">
                       Bedding Ordered:
                     </span>
                     {order.items.map((i, idx) => (
-                      <div key={idx} className="flex items-center gap-2 text-stone-800">
+                      <div key={idx} className="flex items-center gap-2 text-ink">
                         {/* eslint-disable-next-line @next/next/no-img-element */}
                         <img src={i.image} alt={i.title} className="w-6 h-6 rounded object-cover" />
                         <span className="truncate">
@@ -270,36 +271,36 @@ export const AdminOrdersTab: React.FC<AdminOrdersTabProps> = ({
                   </div>
 
                   {/* Destination */}
-                  <div className="space-y-1 sm:border-l sm:border-stone-100 sm:pl-3">
-                    <span className="text-[10px] font-bold text-stone-500 uppercase tracking-wider block">
+                  <div className="space-y-1 sm:border-l sm:border-line sm:pl-3">
+                    <span className="text-[10px] font-bold text-ink-muted uppercase tracking-wider block">
                       UAE Delivery Destination:
                     </span>
-                    <div className="text-stone-800 font-medium">
+                    <div className="text-ink font-medium">
                       {order.customer.buildingVilla}, {order.customer.flatVillaNo}, {order.customer.area}
                     </div>
-                    <div className="text-stone-500 text-[11px]">
+                    <div className="text-ink-muted text-[11px]">
                       Emirate: <strong>{order.customer.emirate}</strong> • Tel: {order.customer.phone}
                     </div>
                   </div>
                 </div>
 
                 {/* Courier Assignment Bar */}
-                <div className="bg-stone-50 rounded-xl p-2.5 flex flex-wrap items-center justify-between gap-2 text-xs border border-stone-200/80">
+                <div className="bg-ivory rounded-xl p-2.5 flex flex-wrap items-center justify-between gap-2 text-xs border border-line/80">
                   <div className="flex items-center gap-2">
-                    <Truck className="w-4 h-4 text-[#c5a059]" />
-                    <span className="text-stone-600">Assigned Courier:</span>
-                    <strong className="text-stone-900 capitalize">
+                    <Truck className="w-4 h-4 text-gold" />
+                    <span className="text-ink-soft">Assigned Courier:</span>
+                    <strong className="text-ink capitalize">
                       {order.courier.provider === 'jeebly' ? 'Jeebly Logistics' : 'Eco Express'}
                     </strong>
                     {order.courier.awbNumber && (
-                      <span className="font-mono text-[11px] text-amber-700 bg-amber-100 px-2 py-0.5 rounded font-bold">
+                      <span className="font-mono text-[11px] text-warning bg-warning-soft px-2 py-0.5 rounded font-bold">
                         AWB: {order.courier.awbNumber}
                       </span>
                     )}
                   </div>
 
                   {/* Status */}
-                  <div className="text-[11px] text-stone-500">
+                  <div className="text-[11px] text-ink-muted">
                     Pickup: <strong>{order.courier.pickupDate || 'Tomorrow'}</strong>
                   </div>
                 </div>
@@ -311,8 +312,8 @@ export const AdminOrdersTab: React.FC<AdminOrdersTabProps> = ({
                       <span
                         className={`px-2 py-1 rounded-lg font-semibold border ${
                           order.paymentStatus === 'verified' || order.paymentStatus === 'paid'
-                            ? 'bg-emerald-50 text-emerald-800 border-emerald-200'
-                            : 'bg-amber-50 text-amber-900 border-amber-200'
+                            ? 'bg-success-soft text-success border-success-line'
+                            : 'bg-warning-soft text-warning border-warning-line'
                         }`}
                       >
                         Payment: {order.paymentStatus.replace(/_/g, ' ')}
@@ -323,7 +324,7 @@ export const AdminOrdersTab: React.FC<AdminOrdersTabProps> = ({
                           href={order.paymentReceiptUrl}
                           target="_blank"
                           rel="noopener noreferrer"
-                          className="px-2 py-1 rounded-lg font-semibold border border-stone-300 bg-white text-stone-800 hover:bg-stone-100"
+                          className="px-2 py-1 rounded-lg font-semibold border border-line-strong bg-surface text-ink hover:bg-sand"
                         >
                           View receipt
                         </a>
@@ -333,7 +334,7 @@ export const AdminOrdersTab: React.FC<AdminOrdersTabProps> = ({
                           type="button"
                           disabled={busyOrderId === order.id}
                           onClick={() => patchOrder(order, { paymentStatus: 'verified' }, `Confirm that AED ${order.total} for ${order.id} has arrived in the bank account?`)}
-                          className="px-2 py-1 rounded-lg font-semibold border border-emerald-300 bg-emerald-50 text-emerald-800 hover:bg-emerald-100 disabled:opacity-50"
+                          className="px-2 py-1 rounded-lg font-semibold border border-success-line bg-success-soft text-success hover:bg-success-soft disabled:opacity-50"
                         >
                           Mark payment received
                         </button>
@@ -346,7 +347,7 @@ export const AdminOrdersTab: React.FC<AdminOrdersTabProps> = ({
                       type="button"
                       disabled={busyOrderId === order.id}
                       onClick={() => patchOrder(order, { status: action.to })}
-                      className="px-2 py-1 rounded-lg font-semibold border border-blue-200 bg-blue-50 text-blue-900 hover:bg-blue-100 disabled:opacity-50"
+                      className="px-2 py-1 rounded-lg font-semibold border border-line bg-ivory text-ink hover:bg-sand disabled:opacity-50"
                     >
                       {action.label}
                     </button>
@@ -367,7 +368,7 @@ export const AdminOrdersTab: React.FC<AdminOrdersTabProps> = ({
                               : '')
                         )
                       }
-                      className="px-2 py-1 rounded-lg font-semibold border border-red-200 bg-white text-red-700 hover:bg-red-50 disabled:opacity-50 ml-auto"
+                      className="px-2 py-1 rounded-lg font-semibold border border-danger-line bg-surface text-danger hover:bg-danger-soft disabled:opacity-50 ml-auto"
                     >
                       Cancel order
                     </button>
@@ -381,10 +382,10 @@ export const AdminOrdersTab: React.FC<AdminOrdersTabProps> = ({
                     {order.courier.awbNumber && order.courier.labelGenerated && (
                       <button
                         onClick={() => setLabelOrder(order)}
-                        className="flex items-center gap-1.5 text-xs text-stone-800 bg-stone-100 hover:bg-stone-200 border border-stone-300 font-semibold px-3 py-1.5 rounded-xl transition-colors"
+                        className="flex items-center gap-1.5 text-xs text-ink bg-sand hover:bg-sand-deep border border-line-strong font-semibold px-3 py-1.5 rounded-xl transition-colors"
                         title="Print Courier AWB Label"
                       >
-                        <Printer className="w-3.5 h-3.5 text-[#c5a059]" />
+                        <Printer className="w-3.5 h-3.5 text-gold" />
                         <span>Print Shipping Label</span>
                       </button>
                     )}
@@ -392,7 +393,7 @@ export const AdminOrdersTab: React.FC<AdminOrdersTabProps> = ({
                     {/* WhatsApp notification */}
                     <button
                       onClick={() => sendWhatsAppUpdate(order)}
-                      className="flex items-center gap-1.5 text-xs text-emerald-700 bg-emerald-50 hover:bg-emerald-100 border border-emerald-300 font-semibold px-3 py-1.5 rounded-xl transition-colors"
+                      className="flex items-center gap-1.5 text-xs text-success bg-success-soft hover:bg-success-soft border border-success-line font-semibold px-3 py-1.5 rounded-xl transition-colors"
                       title="Send WhatsApp update to customer"
                     >
                       <MessageCircle className="w-3.5 h-3.5" />
@@ -404,13 +405,13 @@ export const AdminOrdersTab: React.FC<AdminOrdersTabProps> = ({
                   {isPending ? (
                     <button
                       onClick={() => openConfirmationModal(order)}
-                      className="flex items-center gap-1.5 bg-[#0f1c2e] hover:bg-stone-800 text-white font-bold text-xs px-4 py-2 rounded-xl transition-all shadow active:scale-95"
+                      className="flex items-center gap-1.5 bg-ink hover:bg-ink text-white font-bold text-xs px-4 py-2 rounded-xl transition-all shadow active:scale-95"
                     >
-                      <CheckCircle2 className="w-4 h-4 text-amber-300" />
+                      <CheckCircle2 className="w-4 h-4 text-gold-light" />
                       <span>Confirm & Assign Courier</span>
                     </button>
                   ) : order.status === 'confirmed' ? (
-                    <span className="text-[11px] text-emerald-600 font-semibold flex items-center gap-1">
+                    <span className="text-[11px] text-success font-semibold flex items-center gap-1">
                       <CheckCircle2 className="w-3.5 h-3.5" />
                       Ready for Dispatch
                     </span>
@@ -424,35 +425,37 @@ export const AdminOrdersTab: React.FC<AdminOrdersTabProps> = ({
 
       {/* ORDER CONFIRMATION & SMART COURIER ASSIGNMENT MODAL */}
       {selectedOrderForConfirm && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4 overflow-y-auto">
-          <div className="bg-white rounded-3xl max-w-lg w-full p-5 shadow-2xl space-y-4">
-            {/* Header */}
-            <div className="flex items-center justify-between pb-3 border-b border-stone-200">
-              <div>
-                <h3 className="font-serif font-bold text-base text-[#0f1c2e]">
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-ink/45 p-3 sm:p-4 overscroll-contain" role="dialog" aria-modal="true" aria-labelledby="confirm-order-title">
+          <div className="bg-surface rounded-3xl max-w-lg w-full min-w-0 max-h-[calc(100dvh-1.5rem)] overflow-y-auto overflow-x-hidden overscroll-contain p-5 border border-line space-y-4">
+            {/* Header (stays in view) */}
+            <div className="sticky top-0 z-10 -mx-5 -mt-5 px-5 pt-4 pb-3 bg-surface flex items-start justify-between gap-2 border-b border-line">
+              <div className="min-w-0">
+                <h3 id="confirm-order-title" className="font-serif text-xl text-ink">
                   Confirm Order & Generate AWB Label
                 </h3>
-                <p className="text-xs text-stone-500">
+                <p className="text-xs text-ink-muted">
                   Order #{selectedOrderForConfirm.id} • {selectedOrderForConfirm.customer.fullName}
                 </p>
               </div>
               <button
+                type="button"
                 onClick={() => setSelectedOrderForConfirm(null)}
-                className="p-1.5 text-stone-500 hover:text-stone-700 rounded-full hover:bg-stone-100"
+                aria-label="Close"
+                className="shrink-0 w-10 h-10 flex items-center justify-center text-ink rounded-full hover:bg-sand"
               >
-                ✕
+                <X className="w-5 h-5" strokeWidth={1.5} aria-hidden="true" />
               </button>
             </div>
 
             {/* Smart Routing Callout */}
             <div className={`p-3 rounded-2xl border text-xs space-y-1 ${
               selectedOrderForConfirm.paymentMethod === 'cod'
-                ? 'bg-red-50/70 border-red-200 text-red-950'
-                : 'bg-emerald-50/70 border-emerald-200 text-emerald-950'
+                ? 'bg-danger-soft/70 border-danger-line text-danger'
+                : 'bg-success-soft/70 border-success-line text-success'
             }`}>
               <div className="flex items-center justify-between font-bold">
                 <span className="flex items-center gap-1.5">
-                  <ShieldCheck className="w-4 h-4 text-[#c5a059]" />
+                  <ShieldCheck className="w-4 h-4 text-gold" />
                   <span>
                     {selectedOrderForConfirm.paymentMethod === 'cod'
                       ? 'Payment: Cash on Delivery (COD)'
@@ -461,7 +464,7 @@ export const AdminOrdersTab: React.FC<AdminOrdersTabProps> = ({
                 </span>
                 <span className="text-sm">AED {selectedOrderForConfirm.total}</span>
               </div>
-              <p className="text-[11px] text-stone-600">
+              <p className="text-[11px] text-ink-soft">
                 {selectedOrderForConfirm.paymentMethod === 'cod'
                   ? 'Smart Routing Rule: Cash on Delivery orders default to Jeebly Logistics (UAE COD specialist).'
                   : 'Smart Routing Rule: Prepaid orders default to Eco Express Courier Services (Priority Express).'}
@@ -470,7 +473,7 @@ export const AdminOrdersTab: React.FC<AdminOrdersTabProps> = ({
 
             {/* Courier Selection (With 1-Click Override) */}
             <div className="space-y-2">
-              <label className="text-xs font-bold text-stone-900 uppercase tracking-wider block">
+              <label className="text-xs font-bold text-ink uppercase tracking-wider block">
                 Select Courier Service Provider:
               </label>
 
@@ -481,15 +484,15 @@ export const AdminOrdersTab: React.FC<AdminOrdersTabProps> = ({
                   onClick={() => setChosenCourier('jeebly')}
                   className={`p-3 rounded-xl border text-left transition-all ${
                     chosenCourier === 'jeebly'
-                      ? 'border-[#0f1c2e] bg-[#0f1c2e] text-white shadow-md'
-                      : 'border-stone-200 bg-white text-stone-700 hover:border-stone-300'
+                      ? 'border-ink bg-ink text-white shadow-md'
+                      : 'border-line bg-surface text-ink-soft hover:border-line-strong'
                   }`}
                 >
                   <div className="font-bold text-xs flex items-center justify-between">
                     <span>Jeebly Logistics</span>
-                    {chosenCourier === 'jeebly' && <span className="text-amber-300">✓</span>}
+                    {chosenCourier === 'jeebly' && <span className="text-gold-light">✓</span>}
                   </div>
-                  <div className={`text-[10px] mt-0.5 ${chosenCourier === 'jeebly' ? 'text-amber-200' : 'text-stone-500'}`}>
+                  <div className={`text-[10px] mt-0.5 ${chosenCourier === 'jeebly' ? 'text-gold-light' : 'text-ink-muted'}`}>
                     Default for COD
                   </div>
                 </button>
@@ -500,15 +503,15 @@ export const AdminOrdersTab: React.FC<AdminOrdersTabProps> = ({
                   onClick={() => setChosenCourier('echo')}
                   className={`p-3 rounded-xl border text-left transition-all ${
                     chosenCourier === 'echo'
-                      ? 'border-[#0f1c2e] bg-[#0f1c2e] text-white shadow-md'
-                      : 'border-stone-200 bg-white text-stone-700 hover:border-stone-300'
+                      ? 'border-ink bg-ink text-white shadow-md'
+                      : 'border-line bg-surface text-ink-soft hover:border-line-strong'
                   }`}
                 >
                   <div className="font-bold text-xs flex items-center justify-between">
                     <span>Eco Express Courier</span>
-                    {chosenCourier === 'echo' && <span className="text-amber-300">✓</span>}
+                    {chosenCourier === 'echo' && <span className="text-gold-light">✓</span>}
                   </div>
-                  <div className={`text-[10px] mt-0.5 ${chosenCourier === 'echo' ? 'text-amber-200' : 'text-stone-500'}`}>
+                  <div className={`text-[10px] mt-0.5 ${chosenCourier === 'echo' ? 'text-gold-light' : 'text-ink-muted'}`}>
                     Default for Prepaid
                   </div>
                 </button>
@@ -518,19 +521,19 @@ export const AdminOrdersTab: React.FC<AdminOrdersTabProps> = ({
             {/* Shipment Dispatch Parameters */}
             <div className="grid grid-cols-3 gap-2 text-xs">
               <div>
-                <label className="block text-stone-600 font-semibold mb-1">
+                <label className="block text-ink-soft font-semibold mb-1">
                   Pickup Date
                 </label>
                 <input
                   type="date"
                   value={pickupDate}
                   onChange={(e) => setPickupDate(e.target.value)}
-                  className="w-full px-2.5 py-1.5 rounded-xl border border-stone-300 text-xs"
+                  className="w-full px-2.5 py-1.5 rounded-xl border border-line-strong text-xs"
                 />
               </div>
 
               <div>
-                <label className="block text-stone-600 font-semibold mb-1">
+                <label className="block text-ink-soft font-semibold mb-1">
                   Weight (KG)
                 </label>
                 <input
@@ -538,24 +541,24 @@ export const AdminOrdersTab: React.FC<AdminOrdersTabProps> = ({
                   step="0.1"
                   value={weightKg}
                   onChange={(e) => setWeightKg(Number(e.target.value))}
-                  className="w-full px-2.5 py-1.5 rounded-xl border border-stone-300 text-xs"
+                  className="w-full px-2.5 py-1.5 rounded-xl border border-line-strong text-xs"
                 />
               </div>
 
               <div>
-                <label className="block text-stone-600 font-semibold mb-1">
+                <label className="block text-ink-soft font-semibold mb-1">
                   Parcels
                 </label>
                 <input
                   type="number"
                   value={pieces}
                   onChange={(e) => setPieces(Number(e.target.value))}
-                  className="w-full px-2.5 py-1.5 rounded-xl border border-stone-300 text-xs"
+                  className="w-full px-2.5 py-1.5 rounded-xl border border-line-strong text-xs"
                 />
               </div>
 
               <div className="col-span-3">
-                <label className="block text-stone-600 font-semibold mb-1">
+                <label className="block text-ink-soft font-semibold mb-1">
                   Driver Instructions & Notes
                 </label>
                 <input
@@ -563,7 +566,7 @@ export const AdminOrdersTab: React.FC<AdminOrdersTabProps> = ({
                   placeholder="e.g. Call before delivery, handle luxury bedding with care"
                   value={adminNotes}
                   onChange={(e) => setAdminNotes(e.target.value)}
-                  className="w-full px-3 py-1.5 rounded-xl border border-stone-300 text-xs"
+                  className="w-full px-3 py-1.5 rounded-xl border border-line-strong text-xs"
                 />
               </div>
             </div>
@@ -574,13 +577,13 @@ export const AdminOrdersTab: React.FC<AdminOrdersTabProps> = ({
                 type="button"
                 disabled={isDispatching}
                 onClick={handleConfirmAndDispatch}
-                className="w-full bg-[#0f1c2e] hover:bg-stone-800 text-white font-bold text-xs py-3.5 rounded-xl shadow-lg flex items-center justify-center gap-2 transition-all disabled:opacity-50"
+                className="w-full bg-ink hover:bg-ink text-white font-bold text-xs py-3.5 rounded-xl shadow-lg flex items-center justify-center gap-2 transition-all disabled:opacity-50"
               >
                 {isDispatching ? (
                   <span>Connecting to Courier API & Booking Dispatch...</span>
                 ) : (
                   <>
-                    <CheckCircle2 className="w-4 h-4 text-amber-300" />
+                    <CheckCircle2 className="w-4 h-4 text-gold-light" />
                     <span>Confirm Order & Dispatch to {chosenCourier === 'jeebly' ? 'Jeebly' : 'Eco Express'}</span>
                   </>
                 )}

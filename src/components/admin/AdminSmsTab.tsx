@@ -166,15 +166,15 @@ export const AdminSmsTab: React.FC<AdminSmsTabProps> = ({
   return (
     <div className="space-y-6">
       {/* Top Banner */}
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 bg-white p-4 rounded-2xl border border-stone-200 shadow-xs">
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 bg-surface p-4 rounded-2xl border border-line shadow-xs">
         <div>
           <div className="flex items-center gap-2">
-            <Smartphone className="w-5 h-5 text-[#c5a059]" />
-            <h2 className="font-serif text-lg font-bold text-[#0f1c2e]">
+            <Smartphone className="w-5 h-5 text-gold" />
+            <h2 className="font-serif text-lg font-bold text-ink">
               Real SMS & WhatsApp OTP Gateway
             </h2>
           </div>
-          <p className="text-xs text-stone-500 mt-0.5">
+          <p className="text-xs text-ink-muted mt-0.5">
             Connect a genuine telecommunications gateway to dispatch physical SMS verification codes to UAE mobile phones.
           </p>
         </div>
@@ -183,27 +183,27 @@ export const AdminSmsTab: React.FC<AdminSmsTabProps> = ({
           <button
             type="button"
             onClick={handleSave}
-            className="flex items-center gap-1.5 px-4 py-2 text-xs font-bold text-white bg-[#0f1c2e] hover:bg-stone-800 rounded-xl transition-colors shadow"
+            className="flex items-center gap-1.5 px-4 py-2 text-xs font-bold text-white bg-ink hover:bg-ink rounded-xl transition-colors shadow"
           >
-            <Check className="w-4 h-4 text-amber-300" />
+            <Check className="w-4 h-4 text-gold-light" />
             <span>Save Gateway Credentials</span>
           </button>
         </div>
       </div>
 
       {saveError && (
-        <div role="alert" className="bg-red-50 text-red-800 border border-red-200 p-3.5 rounded-2xl text-xs font-medium">
+        <div role="alert" className="bg-danger-soft text-danger border border-danger-line p-3.5 rounded-2xl text-xs font-medium">
           {saveError}
         </div>
       )}
 
       {savedSuccess && (
-        <div className="bg-emerald-50 text-emerald-900 border border-emerald-200 p-3.5 rounded-2xl text-xs flex items-center justify-between animate-in fade-in-50">
+        <div className="bg-success-soft text-success border border-success-line p-3.5 rounded-2xl text-xs flex items-center justify-between animate-in fade-in-50">
           <div className="flex items-center gap-2 font-medium">
-            <CheckCircle2 className="w-4 h-4 text-emerald-600" />
+            <CheckCircle2 className="w-4 h-4 text-success" />
             <span>Saved on the server. Checkout now sends codes through this gateway (unless one is set in the server environment).</span>
           </div>
-          <span className="text-[10px] bg-emerald-200 text-emerald-900 font-bold px-2 py-0.5 rounded-full">
+          <span className="text-[10px] bg-success-line text-success font-bold px-2 py-0.5 rounded-full">
             Active
           </span>
         </div>
@@ -212,22 +212,22 @@ export const AdminSmsTab: React.FC<AdminSmsTabProps> = ({
       {/* Gateway Status Summary Card */}
       <div className={`p-4 rounded-2xl border text-xs flex flex-col sm:flex-row sm:items-center justify-between gap-3 ${
         isConfigured 
-          ? 'bg-emerald-50/80 border-emerald-200 text-emerald-950' 
-          : 'bg-amber-50/80 border-amber-200 text-amber-950'
+          ? 'bg-success-soft/80 border-success-line text-success' 
+          : 'bg-warning-soft/80 border-warning-line text-warning'
       }`}>
         <div className="flex items-center gap-3">
           <div className={`w-10 h-10 rounded-xl flex items-center justify-center shrink-0 ${
-            isConfigured ? 'bg-emerald-600 text-white' : 'bg-amber-500 text-stone-950'
+            isConfigured ? 'bg-success text-white' : 'bg-gold text-ink'
           }`}>
             <Server className="w-5 h-5" />
           </div>
-          <div>
-            <div className="flex items-center gap-2">
+          <div className="min-w-0">
+            <div className="flex flex-wrap items-center gap-2">
               <strong className="text-sm font-bold">
                 {isConfigured ? `Real SMS Gateway Connected (${provider.toUpperCase()})` : 'Sandbox / Unconfigured Gateway'}
               </strong>
               <span className={`text-[9px] font-bold px-2 py-0.5 rounded-full ${
-                isConfigured ? 'bg-emerald-200 text-emerald-900' : 'bg-amber-200 text-amber-900'
+                isConfigured ? 'bg-success-line text-success' : 'bg-warning-line text-warning'
               }`}>
                 {isConfigured ? 'LIVE CARRIER DISPATCH' : 'SANDBOX MODE'}
               </span>
@@ -245,13 +245,13 @@ export const AdminSmsTab: React.FC<AdminSmsTabProps> = ({
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
 
         {/* ================= COLUMN 1: GATEWAY CONFIGURATION ================= */}
-        <div className="bg-white rounded-3xl p-5 border border-stone-200 shadow-xs space-y-4">
-          <div className="border-b border-stone-100 pb-3">
-            <h3 className="font-serif font-bold text-base text-[#0f1c2e] flex items-center gap-2">
-              <Key className="w-4 h-4 text-[#c5a059]" />
+        <div className="bg-surface rounded-3xl p-5 border border-line shadow-xs space-y-4">
+          <div className="border-b border-line pb-3">
+            <h3 className="font-serif font-bold text-base text-ink flex items-center gap-2">
+              <Key className="w-4 h-4 text-gold" />
               <span>1. Choose SMS Gateway Provider</span>
             </h3>
-            <p className="text-xs text-stone-500">
+            <p className="text-xs text-ink-muted">
               Select your telecommunications carrier provider.
             </p>
           </div>
@@ -271,8 +271,8 @@ export const AdminSmsTab: React.FC<AdminSmsTabProps> = ({
                 onClick={() => setProvider(p.id as SmsProvider)}
                 className={`p-2.5 rounded-xl border text-center transition-all ${
                   provider === p.id
-                    ? 'border-[#0f1c2e] bg-[#0f1c2e] text-white shadow-xs font-bold'
-                    : 'border-stone-200 bg-white text-stone-700 hover:border-stone-300'
+                    ? 'border-ink bg-ink text-white shadow-xs font-bold'
+                    : 'border-line bg-surface text-ink-soft hover:border-line-strong'
                 }`}
               >
                 <span className="block text-xs">{p.name}</span>
@@ -283,7 +283,7 @@ export const AdminSmsTab: React.FC<AdminSmsTabProps> = ({
 
           {/* SENDER ID (Firebase sends its own message, so it does not apply there) */}
           {provider !== 'firebase' && <div className="text-xs">
-            <label className="block text-stone-800 font-semibold mb-1">
+            <label className="block text-ink font-semibold mb-1">
               Sender ID / Brand Alphanumeric Header
             </label>
             <input
@@ -292,35 +292,35 @@ export const AdminSmsTab: React.FC<AdminSmsTabProps> = ({
               onChange={(e) => setSenderId(e.target.value)}
               placeholder="BUHome"
               maxLength={11}
-              className="w-full px-3.5 py-2.5 rounded-xl border border-stone-300 bg-white text-stone-900 text-xs font-medium focus:outline-none focus:ring-2 focus:ring-[#c5a059]"
+              className="w-full px-3.5 py-2.5 rounded-xl border border-line-strong bg-surface text-ink text-xs font-medium focus:outline-none focus:ring-2 focus:ring-gold"
             />
-            <p className="text-[10px] text-stone-500 mt-1">
+            <p className="text-[10px] text-ink-muted mt-1">
               Up to 11 characters. Displays as the sender name in the customer&apos;s SMS inbox.
             </p>
           </div>}
 
           {/* FIREBASE CONFIG */}
           {provider === 'firebase' && (
-            <div className="space-y-3 p-3.5 bg-stone-50 rounded-2xl border border-stone-200 text-xs animate-in fade-in-50">
+            <div className="space-y-3 p-3.5 bg-ivory rounded-2xl border border-line text-xs animate-in fade-in-50">
               <div className="flex flex-wrap items-center justify-between gap-2">
-                <span className="font-bold text-stone-900">Firebase Phone Authentication</span>
+                <span className="font-bold text-ink">Firebase Phone Authentication</span>
                 <a
                   href="https://console.firebase.google.com/"
                   target="_blank"
                   rel="noopener noreferrer"
-                  className="text-[11px] text-[#8a6a2c] hover:underline flex items-center gap-1 font-semibold"
+                  className="text-[11px] text-gold-deep hover:underline flex items-center gap-1 font-semibold"
                 >
                   <span>Firebase console</span>
                   <ExternalLink className="w-3 h-3" />
                 </a>
               </div>
 
-              <div role="note" className="p-2.5 rounded-xl bg-amber-50 border border-amber-200 text-amber-950 text-[11px] leading-relaxed">
+              <div role="note" className="p-2.5 rounded-xl bg-warning-soft border border-warning-line text-warning text-[11px] leading-relaxed">
                 <strong>Costs money per SMS.</strong> Firebase only sends phone codes on the paid <strong>Blaze</strong> plan, and Google bills
                 every SMS it sends (UAE numbers are among the pricier destinations). Set a budget alert in Google Cloud billing.
               </div>
 
-              <ol className="list-decimal list-inside space-y-1 text-stone-600 text-[11px] leading-relaxed">
+              <ol className="list-decimal list-inside space-y-1 text-ink-soft text-[11px] leading-relaxed">
                 <li>Create a Firebase project in the Firebase console.</li>
                 <li>Authentication → Sign-in method: turn on <strong>Phone</strong>.</li>
                 <li>Authentication → Settings → <strong>Authorized domains</strong>: add this shop&apos;s domain.</li>
@@ -335,7 +335,7 @@ export const AdminSmsTab: React.FC<AdminSmsTabProps> = ({
                 ['fb-app-id', 'App ID (appId)', '1:123456789012:web:abc123…', fbAppId, setFbAppId],
               ] as const).map(([id, label, placeholder, value, set]) => (
                 <div key={id}>
-                  <label htmlFor={id} className="block text-stone-700 font-semibold mb-1">
+                  <label htmlFor={id} className="block text-ink-soft font-semibold mb-1">
                     {label}:
                   </label>
                   <input
@@ -346,13 +346,13 @@ export const AdminSmsTab: React.FC<AdminSmsTabProps> = ({
                     placeholder={placeholder}
                     value={value}
                     onChange={(e) => set(e.target.value)}
-                    className="w-full px-3.5 py-2 rounded-xl border border-stone-300 bg-white text-stone-900 font-mono text-xs focus:outline-none focus:ring-1 focus:ring-[#c5a059]"
+                    className="w-full px-3.5 py-2 rounded-xl border border-line-strong bg-surface text-ink font-mono text-xs focus:outline-none focus:ring-1 focus:ring-gold"
                   />
                 </div>
               ))}
-              <p className="text-[10px] text-stone-500 leading-relaxed">
+              <p className="text-[10px] text-ink-muted leading-relaxed">
                 These values are public (every shopper&apos;s browser receives them), not passwords. Keep the auth domain as
-                <code className="mx-1 bg-stone-200 px-1 rounded font-mono">your-project.firebaseapp.com</code>: the shop&apos;s security policy allows that domain.
+                <code className="mx-1 bg-sand-deep px-1 rounded font-mono">your-project.firebaseapp.com</code>: the shop&apos;s security policy allows that domain.
                 A gateway set in the server environment (Twilio, Infobip, webhook) still takes precedence.
               </p>
             </div>
@@ -360,16 +360,16 @@ export const AdminSmsTab: React.FC<AdminSmsTabProps> = ({
 
           {/* TWILIO CONFIG */}
           {provider === 'twilio' && (
-            <div className="space-y-3 p-3.5 bg-stone-50 rounded-2xl border border-stone-200 text-xs animate-in fade-in-50">
+            <div className="space-y-3 p-3.5 bg-ivory rounded-2xl border border-line text-xs animate-in fade-in-50">
               <div className="flex items-center justify-between">
-                <span className="font-bold text-stone-900 flex items-center gap-1.5">
+                <span className="font-bold text-ink flex items-center gap-1.5">
                   <span>Twilio Account Credentials</span>
                 </span>
                 <a
                   href="https://www.twilio.com/try-twilio"
                   target="_blank"
                   rel="noopener noreferrer"
-                  className="text-[11px] text-[#8a6a2c] hover:underline flex items-center gap-1 font-semibold"
+                  className="text-[11px] text-gold-deep hover:underline flex items-center gap-1 font-semibold"
                 >
                   <span>Get Free Twilio Trial</span>
                   <ExternalLink className="w-3 h-3" />
@@ -377,7 +377,7 @@ export const AdminSmsTab: React.FC<AdminSmsTabProps> = ({
               </div>
 
               <div>
-                <label className="block text-stone-700 font-semibold mb-1">
+                <label className="block text-ink-soft font-semibold mb-1">
                   Twilio Account SID:
                 </label>
                 <input
@@ -385,12 +385,12 @@ export const AdminSmsTab: React.FC<AdminSmsTabProps> = ({
                   placeholder="ACxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
                   value={twilioAccountSid}
                   onChange={(e) => setTwilioAccountSid(e.target.value)}
-                  className="w-full px-3.5 py-2 rounded-xl border border-stone-300 bg-white text-stone-900 font-mono text-xs focus:outline-none focus:ring-1 focus:ring-[#c5a059]"
+                  className="w-full px-3.5 py-2 rounded-xl border border-line-strong bg-surface text-ink font-mono text-xs focus:outline-none focus:ring-1 focus:ring-gold"
                 />
               </div>
 
               <div>
-                <label className="block text-stone-700 font-semibold mb-1">
+                <label className="block text-ink-soft font-semibold mb-1">
                   Twilio Auth Token:
                 </label>
                 <input
@@ -399,12 +399,12 @@ export const AdminSmsTab: React.FC<AdminSmsTabProps> = ({
                   placeholder={secretPlaceholder(secretsSet['twilio.authToken'])}
                   value={twilioAuthToken}
                   onChange={(e) => setTwilioAuthToken(e.target.value)}
-                  className="w-full px-3.5 py-2 rounded-xl border border-stone-300 bg-white text-stone-900 font-mono text-xs focus:outline-none focus:ring-1 focus:ring-[#c5a059]"
+                  className="w-full px-3.5 py-2 rounded-xl border border-line-strong bg-surface text-ink font-mono text-xs focus:outline-none focus:ring-1 focus:ring-gold"
                 />
               </div>
 
               <div>
-                <label className="block text-stone-700 font-semibold mb-1">
+                <label className="block text-ink-soft font-semibold mb-1">
                   Twilio Outbound Phone Number (E.164 format):
                 </label>
                 <input
@@ -412,7 +412,7 @@ export const AdminSmsTab: React.FC<AdminSmsTabProps> = ({
                   placeholder="+12025550143 or Twilio Messaging Service SID"
                   value={twilioFromNumber}
                   onChange={(e) => setTwilioFromNumber(e.target.value)}
-                  className="w-full px-3.5 py-2 rounded-xl border border-stone-300 bg-white text-stone-900 font-mono text-xs focus:outline-none focus:ring-1 focus:ring-[#c5a059]"
+                  className="w-full px-3.5 py-2 rounded-xl border border-line-strong bg-surface text-ink font-mono text-xs focus:outline-none focus:ring-1 focus:ring-gold"
                 />
               </div>
             </div>
@@ -420,14 +420,14 @@ export const AdminSmsTab: React.FC<AdminSmsTabProps> = ({
 
           {/* INFOBIP CONFIG */}
           {provider === 'infobip' && (
-            <div className="space-y-3 p-3.5 bg-stone-50 rounded-2xl border border-stone-200 text-xs animate-in fade-in-50">
+            <div className="space-y-3 p-3.5 bg-ivory rounded-2xl border border-line text-xs animate-in fade-in-50">
               <div className="flex items-center justify-between">
-                <span className="font-bold text-stone-900">Infobip UAE API Setup</span>
+                <span className="font-bold text-ink">Infobip UAE API Setup</span>
                 <a
                   href="https://portal.infobip.com"
                   target="_blank"
                   rel="noopener noreferrer"
-                  className="text-[11px] text-[#8a6a2c] hover:underline flex items-center gap-1 font-semibold"
+                  className="text-[11px] text-gold-deep hover:underline flex items-center gap-1 font-semibold"
                 >
                   <span>Infobip Portal</span>
                   <ExternalLink className="w-3 h-3" />
@@ -435,7 +435,7 @@ export const AdminSmsTab: React.FC<AdminSmsTabProps> = ({
               </div>
 
               <div>
-                <label className="block text-stone-700 font-semibold mb-1">
+                <label className="block text-ink-soft font-semibold mb-1">
                   API Key:
                 </label>
                 <input
@@ -444,12 +444,12 @@ export const AdminSmsTab: React.FC<AdminSmsTabProps> = ({
                   placeholder={secretPlaceholder(secretsSet['infobip.apiKey'])}
                   value={infobipApiKey}
                   onChange={(e) => setInfobipApiKey(e.target.value)}
-                  className="w-full px-3.5 py-2 rounded-xl border border-stone-300 bg-white text-stone-900 font-mono text-xs focus:outline-none focus:ring-1 focus:ring-[#c5a059]"
+                  className="w-full px-3.5 py-2 rounded-xl border border-line-strong bg-surface text-ink font-mono text-xs focus:outline-none focus:ring-1 focus:ring-gold"
                 />
               </div>
 
               <div>
-                <label className="block text-stone-700 font-semibold mb-1">
+                <label className="block text-ink-soft font-semibold mb-1">
                   Infobip Base URL:
                 </label>
                 <input
@@ -457,7 +457,7 @@ export const AdminSmsTab: React.FC<AdminSmsTabProps> = ({
                   placeholder="https://xxxx.api.infobip.com"
                   value={infobipBaseUrl}
                   onChange={(e) => setInfobipBaseUrl(e.target.value)}
-                  className="w-full px-3.5 py-2 rounded-xl border border-stone-300 bg-white text-stone-900 font-mono text-xs focus:outline-none focus:ring-1 focus:ring-[#c5a059]"
+                  className="w-full px-3.5 py-2 rounded-xl border border-line-strong bg-surface text-ink font-mono text-xs focus:outline-none focus:ring-1 focus:ring-gold"
                 />
               </div>
             </div>
@@ -465,9 +465,9 @@ export const AdminSmsTab: React.FC<AdminSmsTabProps> = ({
 
           {/* WEBHOOK CONFIG */}
           {provider === 'custom_webhook' && (
-            <div className="space-y-3 p-3.5 bg-stone-50 rounded-2xl border border-stone-200 text-xs animate-in fade-in-50">
+            <div className="space-y-3 p-3.5 bg-ivory rounded-2xl border border-line text-xs animate-in fade-in-50">
               <div>
-                <label className="block text-stone-700 font-semibold mb-1">
+                <label className="block text-ink-soft font-semibold mb-1">
                   Custom Endpoint URL:
                 </label>
                 <input
@@ -475,11 +475,11 @@ export const AdminSmsTab: React.FC<AdminSmsTabProps> = ({
                   placeholder="https://your-server.com/api/send-sms"
                   value={webhookUrl}
                   onChange={(e) => setWebhookUrl(e.target.value)}
-                  className="w-full px-3.5 py-2 rounded-xl border border-stone-300 bg-white text-stone-900 text-xs focus:outline-none focus:ring-1 focus:ring-[#c5a059]"
+                  className="w-full px-3.5 py-2 rounded-xl border border-line-strong bg-surface text-ink text-xs focus:outline-none focus:ring-1 focus:ring-gold"
                 />
               </div>
               <div>
-                <label className="block text-stone-700 font-semibold mb-1">
+                <label className="block text-ink-soft font-semibold mb-1">
                   Bearer Token (Optional):
                 </label>
                 <input
@@ -488,7 +488,7 @@ export const AdminSmsTab: React.FC<AdminSmsTabProps> = ({
                   placeholder={secretPlaceholder(secretsSet['customWebhook.bearerToken'])}
                   value={webhookBearer}
                   onChange={(e) => setWebhookBearer(e.target.value)}
-                  className="w-full px-3.5 py-2 rounded-xl border border-stone-300 bg-white text-stone-900 text-xs focus:outline-none focus:ring-1 focus:ring-[#c5a059]"
+                  className="w-full px-3.5 py-2 rounded-xl border border-line-strong bg-surface text-ink text-xs focus:outline-none focus:ring-1 focus:ring-gold"
                 />
               </div>
             </div>
@@ -497,29 +497,29 @@ export const AdminSmsTab: React.FC<AdminSmsTabProps> = ({
           <button
             type="button"
             onClick={handleSave}
-            className="w-full py-3 bg-[#0f1c2e] hover:bg-stone-800 text-white font-bold text-xs rounded-xl shadow-md flex items-center justify-center gap-2 transition-all"
+            className="w-full py-3 bg-ink hover:bg-ink text-white font-bold text-xs rounded-xl shadow-md flex items-center justify-center gap-2 transition-all"
           >
-            <Check className="w-4 h-4 text-amber-300" />
+            <Check className="w-4 h-4 text-gold-light" />
             <span>Save SMS Gateway Configuration</span>
           </button>
           {auto && autosave.bar}
         </div>
 
         {/* ================= COLUMN 2: LIVE TEST SMS DISPATCHER ================= */}
-        <div className="bg-white rounded-3xl p-5 border border-stone-200 shadow-xs space-y-5 flex flex-col justify-between">
+        <div className="bg-surface rounded-3xl p-5 border border-line shadow-xs space-y-5 flex flex-col justify-between">
           <div className="space-y-4">
-            <div className="border-b border-stone-100 pb-3">
-              <h3 className="font-serif font-bold text-base text-[#0f1c2e] flex items-center gap-2">
-                <Send className="w-4 h-4 text-[#c5a059]" />
+            <div className="border-b border-line pb-3">
+              <h3 className="font-serif font-bold text-base text-ink flex items-center gap-2">
+                <Send className="w-4 h-4 text-gold" />
                 <span>2. Send Live Test SMS to Your Mobile</span>
               </h3>
-              <p className="text-xs text-stone-500">
+              <p className="text-xs text-ink-muted">
                 Verify immediate physical SMS delivery directly to your personal phone number.
               </p>
             </div>
 
             {provider === 'firebase' && (
-              <div role="note" className="p-3.5 rounded-2xl bg-stone-50 border border-stone-200 text-[11px] text-stone-700 leading-relaxed">
+              <div role="note" className="p-3.5 rounded-2xl bg-ivory border border-line text-[11px] text-ink-soft leading-relaxed">
                 With Firebase, Google texts the code straight to the shopper&apos;s phone from their browser, so there is no test send
                 from here. Save, then open the shop on your own phone, add something to the bag and verify your number at checkout.
                 Each test is a billed SMS.
@@ -528,7 +528,7 @@ export const AdminSmsTab: React.FC<AdminSmsTabProps> = ({
 
             {/* Test Phone Input */}
             {provider !== 'firebase' && <div className="space-y-2 text-xs">
-              <label className="block text-stone-800 font-semibold">
+              <label className="block text-ink font-semibold">
                 Your Mobile Number (+971 or International):
               </label>
               <div className="flex gap-2">
@@ -537,13 +537,13 @@ export const AdminSmsTab: React.FC<AdminSmsTabProps> = ({
                   value={testPhone}
                   onChange={(e) => setTestPhone(e.target.value)}
                   placeholder="+971 50 123 4567"
-                  className="flex-1 min-w-0 px-3.5 py-2.5 rounded-xl border border-stone-300 bg-white text-stone-900 text-xs font-semibold focus:outline-none focus:ring-2 focus:ring-[#c5a059]"
+                  className="flex-1 min-w-0 px-3.5 py-2.5 rounded-xl border border-line-strong bg-surface text-ink text-xs font-semibold focus:outline-none focus:ring-2 focus:ring-gold"
                 />
                 <button
                   type="button"
                   disabled={isSendingTest}
                   onClick={handleSendTestSms}
-                  className="px-4 py-2.5 bg-emerald-600 hover:bg-emerald-700 active:scale-95 text-white font-bold text-xs rounded-xl shadow flex items-center gap-1.5 transition-all disabled:opacity-50 shrink-0"
+                  className="px-4 py-2.5 bg-success hover:bg-success active:scale-95 text-white font-bold text-xs rounded-xl shadow flex items-center gap-1.5 transition-all disabled:opacity-50 shrink-0"
                 >
                   {isSendingTest ? (
                     <RefreshCw className="w-3.5 h-3.5 animate-spin" />
@@ -559,20 +559,20 @@ export const AdminSmsTab: React.FC<AdminSmsTabProps> = ({
             {testResult && (
               <div className={`p-4 rounded-2xl border text-xs space-y-2 animate-in fade-in-50 ${
                 testResult.success
-                  ? 'bg-emerald-50 border-emerald-200 text-emerald-950'
-                  : 'bg-red-50 border-red-200 text-red-950'
+                  ? 'bg-success-soft border-success-line text-success'
+                  : 'bg-danger-soft border-danger-line text-danger'
               }`}>
                 <div className="flex items-center justify-between">
                   <div className="flex items-center gap-1.5 font-bold">
                     {testResult.success ? (
-                      <CheckCircle2 className="w-4 h-4 text-emerald-600" />
+                      <CheckCircle2 className="w-4 h-4 text-success" />
                     ) : (
-                      <AlertCircle className="w-4 h-4 text-red-600" />
+                      <AlertCircle className="w-4 h-4 text-danger" />
                     )}
                     <span>{testResult.success ? 'SMS Dispatched' : 'Dispatch Failed'}</span>
                   </div>
                   {testResult.provider && (
-                    <span className="text-[10px] bg-white px-2 py-0.5 rounded-full border border-emerald-300 font-semibold">
+                    <span className="text-[10px] bg-surface px-2 py-0.5 rounded-full border border-success-line font-semibold">
                       {testResult.provider}
                     </span>
                   )}
@@ -583,30 +583,30 @@ export const AdminSmsTab: React.FC<AdminSmsTabProps> = ({
                 </p>
 
                 {testResult.devOtpCode && (
-                  <div className="bg-white p-2.5 rounded-xl border border-amber-200 text-[11px]">
-                    <span className="text-stone-500 block">Generated Verification Code:</span>
-                    <strong className="font-mono text-base text-[#0f1c2e] tracking-widest">{testResult.devOtpCode}</strong>
+                  <div className="bg-surface p-2.5 rounded-xl border border-warning-line text-[11px]">
+                    <span className="text-ink-muted block">Generated Verification Code:</span>
+                    <strong className="font-mono text-base text-ink tracking-widest">{testResult.devOtpCode}</strong>
                   </div>
                 )}
               </div>
             )}
 
             {/* Step-by-Step Instructions Card */}
-            {provider !== 'firebase' && <div className="bg-stone-50 p-4 rounded-2xl border border-stone-200 text-xs space-y-2">
-              <span className="font-bold text-stone-900 flex items-center gap-1.5">
-                <HelpCircle className="w-3.5 h-3.5 text-[#c5a059]" />
+            {provider !== 'firebase' && <div className="bg-ivory p-4 rounded-2xl border border-line text-xs space-y-2">
+              <span className="font-bold text-ink flex items-center gap-1.5">
+                <HelpCircle className="w-3.5 h-3.5 text-gold" />
                 <span>How to Get Real SMS Delivery to UAE Mobiles:</span>
               </span>
 
-              <ol className="list-decimal list-inside space-y-1 text-stone-600 text-[11px] leading-relaxed">
+              <ol className="list-decimal list-inside space-y-1 text-ink-soft text-[11px] leading-relaxed">
                 <li>
-                  Sign up for a free Twilio account at <a href="https://www.twilio.com/try-twilio" target="_blank" rel="noopener noreferrer" className="text-[#8a6a2c] underline font-medium">twilio.com/try-twilio</a> (includes trial balance).
+                  Sign up for a free Twilio account at <a href="https://www.twilio.com/try-twilio" target="_blank" rel="noopener noreferrer" className="text-gold-deep underline font-medium">twilio.com/try-twilio</a> (includes trial balance).
                 </li>
                 <li>
                   Copy your <strong>Account SID</strong> and <strong>Auth Token</strong> from the Twilio Console.
                 </li>
                 <li>
-                  Paste them in the fields on the left (or into <code className="bg-stone-200 px-1 py-0.5 rounded font-mono text-[10px]">.env.local</code>).
+                  Paste them in the fields on the left (or into <code className="bg-sand-deep px-1 py-0.5 rounded font-mono text-[10px]">.env.local</code>).
                 </li>
                 <li>
                   Enter your mobile number and tap <strong>&quot;Send Test SMS&quot;</strong> — the physical text message will arrive on your phone in 2-5 seconds!

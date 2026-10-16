@@ -8,55 +8,149 @@
   }
 }
 
-:root {
-  --bg-main: #fbf9f5;
-  --bg-card: #ffffff;
-  --bg-secondary: #f4eee3;
-  --text-main: #1c1815;
-  --text-muted: #6b635b;
-  --primary-gold: #c5a059;
-  --primary-gold-dark: #9f7e38;
-  --artisan-navy: #0f1c2e;
-  --artisan-terracotta: #b85d43;
-  --artisan-indigo: #1e2c3d;
-  --border-color: #e8e1d5;
+/*
+ * The shop's one palette (src/lib/design/tokens.ts holds the same values for the server: the
+ * offline page, the app icon, the title-bar colour; a test checks they agree). Tailwind's own
+ * colour scales are switched off, so a page can only use these: bg-ivory, text-ink, border-line…
+ */
+@theme {
+  --color-*: initial;
+  --color-white: #ffffff;
+  --color-black: #000000;
+  --color-transparent: transparent;
+  --color-current: currentColor;
+
+  --color-ivory: #faf6ef;
+  --color-surface: #fffdf9;
+  --color-sand: #f2ebdf;
+  --color-sand-deep: #e8decd;
+  --color-line: #e5dac9;
+  --color-line-strong: #cbbba3;
+  --color-ink: #2b2127;
+  --color-ink-2: #43353d;
+  --color-ink-soft: #5a4c53;
+  --color-ink-muted: #6a5c62;
+  --color-gold: #c2a36b;
+  --color-gold-light: #e6d5b0;
+  --color-gold-deep: #82612c;
+  --color-rose: #c49a98;
+  --color-rose-soft: #f4e8e5;
+  --color-rose-deep: #8a5659;
+  --color-success: #3d6a4e;
+  --color-success-soft: #eaf1ea;
+  --color-success-line: #c8dacb;
+  --color-warning: #85601c;
+  --color-warning-soft: #f7eedb;
+  --color-warning-line: #e8d3a6;
+  --color-danger: #9a3e39;
+  --color-danger-soft: #f7e6e2;
+  --color-danger-line: #e7c3bc;
+  --color-whatsapp: #1f7a47;
+
+  /* An elegant serif for headings, a clean sans for everything else (both self-hosted). */
+  --font-serif: var(--font-display), "Cormorant Garamond", Georgia, "Times New Roman", serif;
+  --font-sans: var(--font-ui), "Inter", system-ui, -apple-system, "Segoe UI", Roboto, Arial, sans-serif;
+
+  /* One set of corners: small for inputs and chips, medium for cards, large for sheets. */
+  --radius-sm: 0.375rem;
+  --radius-md: 0.5rem;
+  --radius-lg: 0.625rem;
+  --radius-xl: 0.75rem;
+  --radius-2xl: 0.875rem;
+  --radius-3xl: 1.125rem;
+
+  /* Labels: small caps feel, generous letter-spacing. */
+  --tracking-label: 0.14em;
 }
 
 /*
- * One look on every device. The shop is designed light (white cards, dark text); a phone or
- * laptop in dark mode used to turn the page text light while the cards stayed white, so labels
- * vanished. color-scheme keeps the browser's own controls (checkboxes, scrollbars) light too.
+ * A festival may shift only these (src/lib/festivals/catalog.ts: FESTIVE_ACCENTS), set as
+ * --festive* on the page while its look is on; everyday they are the shop's gold. "inline" so a
+ * page can set them on any element.
+ */
+@theme inline {
+  --color-festive: var(--festive, #82612c);
+  --color-festive-soft: var(--festive-soft, #f2ebdf);
+  --color-festive-glow: var(--festive-glow, #c2a36b);
+}
+
+/*
+ * One look on every device. The shop is designed light (ivory, ink text); a phone or laptop in
+ * dark mode used to turn the page text light while the cards stayed white, so labels vanished.
+ * color-scheme keeps the browser's own controls (checkboxes, scrollbars) light too.
  */
 :root {
   color-scheme: light;
 }
 
 body {
-  background-color: var(--bg-main);
-  color: var(--text-main);
+  background-color: var(--color-ivory);
+  color: var(--color-ink);
   -webkit-font-smoothing: antialiased;
   -webkit-tap-highlight-color: transparent;
-  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+  font-family: var(--font-sans);
+  font-feature-settings: "cv11", "ss01";
   transition: background-color 0.3s ease, color 0.3s ease;
+  /* Long words, emails, IBANs and links break instead of pushing the page sideways. */
+  overflow-wrap: break-word;
 }
 
-/* Form Controls - Guarantee 100% visible, high-contrast, dark readable text on light backgrounds */
+/* Headings in the serif: lighter weights, a little air, and the serif's small x-height evened out. */
+.font-serif {
+  font-weight: 500;
+  letter-spacing: 0.005em;
+  font-size-adjust: 0.47;
+}
+.font-serif.font-bold,
+.font-serif.font-semibold,
+.font-serif .font-bold {
+  font-weight: 600;
+}
+
+/* A quiet label: small, spaced capitals. */
+@utility label-caps {
+  font-size: 0.6875rem;
+  line-height: 1rem;
+  font-weight: 500;
+  letter-spacing: var(--tracking-label);
+  text-transform: uppercase;
+}
+
+/* Text that may be one long unbroken string (an email, a URL, an IBAN, an order code). */
+@utility break-anywhere {
+  overflow-wrap: anywhere;
+  word-break: normal;
+  min-width: 0;
+}
+
+/* Form controls: always dark, readable text on light fields. */
 input, select, textarea {
-  color: #1c1815 !important;
+  color: var(--color-ink) !important;
+  max-width: 100%;
+}
+select {
+  text-overflow: ellipsis;
 }
 
 input::placeholder, textarea::placeholder {
-  color: #78716c !important;
+  color: var(--color-ink-muted) !important;
   opacity: 0.85;
 }
 
-/* Support dark inputs only when explicitly intended */
-.dark-input {
-  color: #f5f2eb !important;
-  background-color: #151b24 !important;
+/* Media and code never push a screen wider than itself. */
+img, video, canvas, svg {
+  max-width: 100%;
 }
-.dark-input::placeholder {
-  color: #9e978e !important;
+pre, code, kbd, samp {
+  overflow-wrap: anywhere;
+  white-space: pre-wrap;
+}
+table {
+  max-width: 100%;
+}
+/* A fieldset is as wide as its widest line by default; let it shrink like any box. */
+fieldset {
+  min-width: 0;
 }
 
 /* Custom hide scrollbar for mobile horizontal lists */
@@ -68,25 +162,67 @@ input::placeholder, textarea::placeholder {
   scrollbar-width: none;
 }
 
-/* Smooth Running Marquee Ticker */
+/*
+ * The announcement bar: a slow, even drift (about 32 px a second, set by MarqueeBar from the
+ * width of its text), paused while a finger, pointer or the keyboard is on it. One line, or a
+ * screen too wide to need moving, stays still and centred.
+ */
 @keyframes marquee-run {
-  0% {
-    transform: translateX(0%);
-  }
-  100% {
-    transform: translateX(-50%);
-  }
+  from { transform: translateX(0); }
+  to { transform: translateX(-50%); }
 }
-
 .animate-marquee-runner {
   display: flex;
   width: max-content;
-  animation: marquee-run linear infinite;
+  animation: marquee-run var(--marquee-duration, 60s) linear infinite;
   will-change: transform;
 }
-
-.animate-marquee-runner:hover {
+.marquee:hover .animate-marquee-runner,
+.marquee:focus-within .animate-marquee-runner,
+.marquee:active .animate-marquee-runner {
   animation-play-state: paused;
+}
+.marquee-still .animate-marquee-runner {
+  animation: none;
+  width: auto;
+  justify-content: center;
+}
+.marquee-still .marquee-copy {
+  display: none;
+}
+.marquee-still .marquee-item:last-child .marquee-sep {
+  display: none;
+}
+@media (prefers-reduced-motion: reduce) {
+  .animate-marquee-runner {
+    animation: none;
+    width: auto;
+    justify-content: center;
+  }
+  .marquee-line {
+    flex-wrap: wrap;
+    justify-content: center;
+    row-gap: 0.125rem;
+    flex-shrink: 1;
+    min-width: 0;
+    white-space: normal;
+    text-align: center;
+  }
+  .marquee-copy {
+    display: none !important;
+  }
+  .marquee-item:last-child .marquee-sep {
+    display: none;
+  }
+}
+/* Still, on a phone: just the first line (three stacked lines would crowd the top). */
+@media (prefers-reduced-motion: reduce) and (max-width: 639px) {
+  .marquee-line .marquee-item:not(:first-child) {
+    display: none;
+  }
+  .marquee-line .marquee-item .marquee-sep {
+    display: none;
+  }
 }
 
 /* Print styles for Shipping Labels */
@@ -158,7 +294,7 @@ a:focus-visible,
 button:focus-visible,
 [tabindex]:focus-visible,
 summary:focus-visible {
-  outline: 2px solid #9f7e38;
+  outline: 2px solid var(--color-gold-deep);
   outline-offset: 2px;
 }
 

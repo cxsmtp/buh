@@ -141,7 +141,7 @@ export function HelpLauncher() {
     // The chat is off: the plain WhatsApp button, as before.
     if (!floatingWa) return null;
     return (
-      <a href={floatingWa} target="_blank" rel="noopener noreferrer" aria-label="Chat with us on WhatsApp" className="fixed z-[41] right-1 bottom-[calc(0.25rem+env(safe-area-inset-bottom,0px))] w-16 h-12 rounded-2xl md:right-6 md:bottom-6 md:w-12 md:h-12 md:rounded-full bg-[#1f9d55] text-white md:shadow-lg flex items-center justify-center hover:brightness-110 focus:outline-none focus-visible:ring-4 focus-visible:ring-emerald-300">
+      <a href={floatingWa} target="_blank" rel="noopener noreferrer" aria-label="Chat with us on WhatsApp" className="fixed z-[41] right-1 bottom-[calc(0.25rem+env(safe-area-inset-bottom,0px))] w-16 h-12 rounded-2xl md:right-6 md:bottom-6 md:w-12 md:h-12 md:rounded-full bg-whatsapp text-white md:shadow-lg flex items-center justify-center hover:brightness-110 focus:outline-none focus-visible:ring-4 focus-visible:ring-success-line">
         <MessageCircle className="w-6 h-6" />
       </a>
     );
@@ -208,11 +208,11 @@ export function HelpLauncher() {
             setUnseen(false);
           }}
           aria-label="Help and chat"
-          className="fixed z-[41] right-1 bottom-[calc(0.25rem+env(safe-area-inset-bottom,0px))] w-16 h-12 flex-col justify-center gap-0.5 rounded-2xl md:right-6 md:bottom-6 md:w-auto md:flex-row md:gap-2 md:pl-3.5 md:pr-4 md:rounded-full bg-[#0f1c2e] text-white md:shadow-lg flex items-center hover:brightness-110 focus:outline-none focus-visible:ring-4 focus-visible:ring-amber-300"
+          className="fixed z-[41] right-1 bottom-[calc(0.25rem+env(safe-area-inset-bottom,0px))] w-16 h-12 flex-col justify-center gap-0.5 rounded-2xl md:right-6 md:bottom-6 md:w-auto md:flex-row md:gap-2 md:pl-3.5 md:pr-4 md:rounded-full bg-ink text-white md:shadow-lg flex items-center hover:brightness-110 focus:outline-none focus-visible:ring-4 focus-visible:ring-warning-line"
         >
-          <MessagesSquare className="w-5 h-5 text-amber-300" />
-          <span className="text-xs font-bold">Help</span>
-          {unseen && <span className="absolute top-1 right-1 w-2.5 h-2.5 rounded-full bg-red-500" aria-label="New reply" />}
+          <MessagesSquare className="w-5 h-5 text-gold-light" />
+          <span className="text-xs font-semibold">Help</span>
+          {unseen && <span className="absolute top-1 right-1 w-2.5 h-2.5 rounded-full bg-danger" aria-label="New reply" />}
         </button>
       )}
 
@@ -220,27 +220,27 @@ export function HelpLauncher() {
         <section
           role="dialog"
           aria-label="Chat with the shop"
-          className="fixed z-50 inset-x-2 bottom-[calc(0.5rem+env(safe-area-inset-bottom,0px))] top-[calc(4rem+env(safe-area-inset-top,0px))] overscroll-contain sm:inset-auto sm:right-6 sm:bottom-6 sm:w-[380px] sm:h-[600px] sm:max-h-[calc(100vh-3rem)] bg-white rounded-3xl shadow-2xl border border-stone-200 flex flex-col overflow-hidden"
+          className="fixed z-50 inset-x-2 bottom-[calc(0.5rem+env(safe-area-inset-bottom,0px))] top-[calc(4rem+env(safe-area-inset-top,0px))] overscroll-contain sm:inset-auto sm:right-6 sm:bottom-6 sm:w-[380px] sm:h-[600px] sm:max-h-[calc(100vh-3rem)] bg-surface rounded-3xl border border-line flex flex-col overflow-hidden"
         >
-          <header className="flex items-center gap-2 px-4 py-3 bg-[#0f1c2e] text-white">
-            <Bot className="w-5 h-5 text-amber-300" />
+          <header className="flex items-center gap-2 px-4 py-3 bg-ink text-white">
+            <Bot className="w-5 h-5 text-gold-light" />
             <div className="min-w-0">
-              <div className="text-sm font-bold truncate">{chat.name}</div>
+              <div className="text-sm font-semibold truncate">{chat.name}</div>
               <div className="text-[10px] opacity-75">
                 {view?.status === 'waiting' ? 'Asking the team…' : view?.status === 'human' ? 'The team is here' : 'Replies instantly · a person when you need one'}
               </div>
             </div>
             {view && (
-              <button type="button" onClick={startOver} className="ml-auto p-1.5 rounded-lg hover:bg-white/10" aria-label="Start a new chat" title="Start a new chat">
+              <button type="button" onClick={startOver} className="ml-auto p-1.5 rounded-lg hover:bg-surface/10" aria-label="Start a new chat" title="Start a new chat">
                 <RotateCcw className="w-4 h-4" />
               </button>
             )}
-            <button type="button" onClick={() => setOpen(false)} className={`${view ? '' : 'ml-auto'} p-1.5 rounded-lg hover:bg-white/10`} aria-label="Close chat">
+            <button type="button" onClick={() => setOpen(false)} className={`${view ? '' : 'ml-auto'} p-1.5 rounded-lg hover:bg-surface/10`} aria-label="Close chat">
               <X className="w-5 h-5" />
             </button>
           </header>
 
-          <div className="flex-1 overflow-y-auto px-3 py-3 space-y-2 text-sm bg-stone-50" aria-live="polite">
+          <div className="flex-1 overflow-y-auto px-3 py-3 space-y-2 text-sm bg-ivory" aria-live="polite">
             {!view && greeting && <Bubble author="bot" body={greeting} />}
             {shown.map((m) => (
               <Bubble key={m.id} author={m.author} body={m.body} />
@@ -251,27 +251,27 @@ export function HelpLauncher() {
                   e.preventDefault();
                   void call({ action: 'contact', name: contact.name, contact: contact.contact });
                 }}
-                className="bg-white border border-amber-200 rounded-2xl p-3 space-y-2 text-xs"
+                className="bg-surface border border-warning-line rounded-2xl p-3 space-y-2 text-xs"
               >
-                <p className="font-semibold text-stone-800">So we can get back to you:</p>
+                <p className="font-semibold text-ink">So we can get back to you:</p>
                 <label className="block">
-                  <span className="text-stone-600">Your name</span>
-                  <input value={contact.name} onChange={(e) => setContact((c) => ({ ...c, name: e.target.value }))} maxLength={80} autoComplete="name" className="mt-0.5 w-full px-3 py-2 rounded-xl border border-stone-300 text-sm" />
+                  <span className="text-ink-soft">Your name</span>
+                  <input value={contact.name} onChange={(e) => setContact((c) => ({ ...c, name: e.target.value }))} maxLength={80} autoComplete="name" className="mt-0.5 w-full px-3 py-2 rounded-xl border border-line-strong text-sm" />
                 </label>
                 <label className="block">
-                  <span className="text-stone-600">Phone (WhatsApp) or email</span>
-                  <input value={contact.contact} onChange={(e) => setContact((c) => ({ ...c, contact: e.target.value }))} required maxLength={254} placeholder="050 123 4567 or you@example.com" className="mt-0.5 w-full px-3 py-2 rounded-xl border border-stone-300 text-sm" />
+                  <span className="text-ink-soft">Phone (WhatsApp) or email</span>
+                  <input value={contact.contact} onChange={(e) => setContact((c) => ({ ...c, contact: e.target.value }))} required maxLength={254} placeholder="050 123 4567 or you@example.com" className="mt-0.5 w-full px-3 py-2 rounded-xl border border-line-strong text-sm" />
                 </label>
-                <button type="submit" disabled={busy} className="w-full py-2 rounded-xl bg-[#0f1c2e] text-white font-bold disabled:opacity-50">Save my details</button>
+                <button type="submit" disabled={busy} className="w-full py-2 rounded-xl bg-ink text-white font-semibold disabled:opacity-50">Save my details</button>
               </form>
             )}
             {busy && (
-              <div className="flex items-center gap-1.5 text-xs text-stone-500">
+              <div className="flex items-center gap-1.5 text-xs text-ink-muted">
                 <span className="sr-only">Writing…</span>
-                <span aria-hidden="true" className="inline-flex items-center gap-1 rounded-2xl bg-stone-100 px-3 py-2">
-                  <span className="typing-dot w-1.5 h-1.5 rounded-full bg-stone-500" />
-                  <span className="typing-dot w-1.5 h-1.5 rounded-full bg-stone-500" />
-                  <span className="typing-dot w-1.5 h-1.5 rounded-full bg-stone-500" />
+                <span aria-hidden="true" className="inline-flex items-center gap-1 rounded-2xl bg-sand px-3 py-2">
+                  <span className="typing-dot w-1.5 h-1.5 rounded-full bg-ink-muted" />
+                  <span className="typing-dot w-1.5 h-1.5 rounded-full bg-ink-muted" />
+                  <span className="typing-dot w-1.5 h-1.5 rounded-full bg-ink-muted" />
                 </span>
               </div>
             )}
@@ -279,14 +279,14 @@ export function HelpLauncher() {
           </div>
 
           {(!view || view.status === 'bot') && (
-            <div className="px-3 pt-2 flex gap-1.5 overflow-x-auto no-scrollbar bg-white border-t border-stone-100">
+            <div className="px-3 pt-2 flex gap-1.5 overflow-x-auto no-scrollbar bg-surface border-t border-line">
               {SUGGESTIONS.map((s) => (
-                <button key={s} type="button" disabled={busy} onClick={() => void send(s)} className="shrink-0 px-2.5 py-1.5 rounded-full border border-stone-300 text-[11px] font-semibold text-stone-700 bg-white hover:bg-stone-50">
+                <button key={s} type="button" disabled={busy} onClick={() => void send(s)} className="shrink-0 px-2.5 py-1.5 rounded-full border border-line-strong text-[11px] font-semibold text-ink-soft bg-surface hover:bg-ivory">
                   {s}
                 </button>
               ))}
               {view && (
-                <button type="button" disabled={busy} onClick={() => void call({ action: 'person' })} className="shrink-0 px-2.5 py-1.5 rounded-full border border-amber-300 text-[11px] font-semibold text-amber-800 bg-amber-50 inline-flex items-center gap-1">
+                <button type="button" disabled={busy} onClick={() => void call({ action: 'person' })} className="shrink-0 px-2.5 py-1.5 rounded-full border border-warning-line text-[11px] font-semibold text-warning bg-warning-soft inline-flex items-center gap-1">
                   <UserRound className="w-3 h-3" /> Talk to a person
                 </button>
               )}
@@ -298,7 +298,7 @@ export function HelpLauncher() {
               e.preventDefault();
               void send(draft);
             }}
-            className="p-3 bg-white flex items-end gap-2"
+            className="p-3 bg-surface flex items-end gap-2"
           >
             <label htmlFor="chat-input" className="sr-only">Your message</label>
             <textarea
@@ -315,24 +315,24 @@ export function HelpLauncher() {
               rows={1}
               maxLength={1000}
               placeholder="Type your question…"
-              className="flex-1 min-w-0 resize-none px-3 py-2.5 rounded-2xl border border-stone-300 text-sm focus:outline-none focus:ring-2 focus:ring-[#c5a059]"
+              className="flex-1 min-w-0 resize-none px-3 py-2.5 rounded-2xl border border-line-strong text-sm focus:outline-none focus:ring-2 focus:ring-gold"
             />
-            <button type="submit" disabled={busy || !draft.trim()} aria-label="Send" className="w-10 h-10 rounded-full bg-[#0f1c2e] text-white flex items-center justify-center disabled:opacity-40">
+            <button type="submit" disabled={busy || !draft.trim()} aria-label="Send" className="w-10 h-10 rounded-full bg-ink text-white flex items-center justify-center disabled:opacity-40">
               <Send className="w-4 h-4" />
             </button>
           </form>
-          {error && <p role="alert" className="px-3 pb-2 text-xs text-red-700 bg-white">{error}</p>}
+          {error && <p role="alert" className="px-3 pb-2 text-xs text-danger bg-surface">{error}</p>}
 
           {(wa || ig) && (
-            <div className="px-3 pb-3 bg-white flex flex-wrap items-center gap-2 text-[11px] text-stone-500">
+            <div className="px-3 pb-3 bg-surface flex flex-wrap items-center gap-2 text-[11px] text-ink-muted">
               <span>Or message us on</span>
               {wa && (
-                <a href={wa} target="_blank" rel="noopener noreferrer" aria-label="Chat with us on WhatsApp" className="inline-flex items-center gap-1 px-2 py-1 rounded-full bg-emerald-50 text-emerald-800 border border-emerald-200 font-semibold">
+                <a href={wa} target="_blank" rel="noopener noreferrer" aria-label="Chat with us on WhatsApp" className="inline-flex items-center gap-1 px-2 py-1 rounded-full bg-success-soft text-success border border-success-line font-semibold">
                   <MessageCircle className="w-3.5 h-3.5" /> WhatsApp
                 </a>
               )}
               {ig && (
-                <a href={ig} target="_blank" rel="noopener noreferrer" aria-label="Message us on Instagram" className="inline-flex items-center gap-1 px-2 py-1 rounded-full bg-pink-50 text-pink-800 border border-pink-200 font-semibold">
+                <a href={ig} target="_blank" rel="noopener noreferrer" aria-label="Message us on Instagram" className="inline-flex items-center gap-1 px-2 py-1 rounded-full bg-rose-soft text-rose-deep border border-rose-soft font-semibold">
                   <InstagramIcon className="w-3.5 h-3.5" /> Instagram
                 </a>
               )}
@@ -346,13 +346,13 @@ export function HelpLauncher() {
 
 function Bubble({ author, body }: { author: ChatMessage['author']; body: string }) {
   if (author === 'system') {
-    return <p className="text-center text-[11px] text-stone-500 px-4 py-1 whitespace-pre-wrap">{body}</p>;
+    return <p className="text-center text-[11px] text-ink-muted px-4 py-1 whitespace-pre-wrap">{body}</p>;
   }
   const mine = author === 'customer';
   return (
     <div className={`flex ${mine ? 'justify-end' : 'justify-start'}`}>
-      <div className={`max-w-[85%] rounded-2xl px-3 py-2 whitespace-pre-wrap break-words ${mine ? 'bg-[#0f1c2e] text-white rounded-br-md' : author === 'admin' ? 'bg-amber-50 border border-amber-200 text-stone-800 rounded-bl-md' : 'bg-white border border-stone-200 text-stone-800 rounded-bl-md'}`}>
-        {author === 'admin' && <div className="text-[10px] font-bold text-amber-800 mb-0.5">The team</div>}
+      <div className={`max-w-[85%] rounded-2xl px-3 py-2 whitespace-pre-wrap break-words ${mine ? 'bg-ink text-white rounded-br-md' : author === 'admin' ? 'bg-warning-soft border border-warning-line text-ink rounded-bl-md' : 'bg-surface border border-line text-ink rounded-bl-md'}`}>
+        {author === 'admin' && <div className="text-[10px] font-semibold text-warning mb-0.5">The team</div>}
         {body}
       </div>
     </div>

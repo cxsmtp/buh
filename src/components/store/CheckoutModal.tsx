@@ -29,6 +29,7 @@ import {
   Truck
 } from 'lucide-react';
 import confetti from 'canvas-confetti';
+import { PALETTE } from '@/lib/design/tokens';
 import { classifyPhone, PhoneVerification } from './PhoneVerification';
 
 interface CheckoutModalProps {
@@ -231,15 +232,15 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
             `Your device gave an approximate location (${formatAccuracy(reading.accuracyM)}), so we saved it for the driver but didn’t guess your area.${kept || ' Please choose it below.'}`
           );
         } else if (reading.kind === 'unknown') {
-          setLocationNotice(`📍 Location saved for the driver.${kept || ' Please choose your area below.'}`);
+          setLocationNotice(`Location saved for the driver.${kept || ' Please choose your area below.'}`);
         } else if (!area.trim()) {
           setEmirate(reading.location.emirate);
           setArea(reading.location.name);
           setAreaNote('');
-          setLocationNotice(`📍 Location saved for the driver, in or near ${reading.location.name}, ${reading.location.emirate}. Please check the area below.`);
+          setLocationNotice(`Location saved for the driver, in or near ${reading.location.name}, ${reading.location.emirate}. Please check the area below.`);
         } else {
           // The customer already typed an area: never switch the emirate under it.
-          setLocationNotice(`📍 Location saved for the driver (near ${reading.location.name}, ${reading.location.emirate}).${kept}`);
+          setLocationNotice(`Location saved for the driver (near ${reading.location.name}, ${reading.location.emirate}).${kept}`);
         }
       },
       () => {
@@ -258,7 +259,7 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
     setArea(loc.name);
     setAreaNote('');
     setLocationProblem(false);
-    setLocationNotice(`📍 Pin dropped on: ${loc.name}, ${loc.emirate} (${loc.lat.toFixed(4)}°N, ${loc.lng.toFixed(4)}°E)`);
+    setLocationNotice(`Pin dropped on: ${loc.name}, ${loc.emirate} (${loc.lat.toFixed(4)}°N, ${loc.lng.toFixed(4)}°E)`);
     setShowMapPicker(false);
   };
 
@@ -366,11 +367,15 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
     setConfirmedOrder(data.order);
     onOrderPlaced(data.order);
     try {
+      // A light shower of gold (none for people who asked their device for less motion).
       confetti({
-        particleCount: 80,
-        spread: 70,
-        origin: { y: 0.6 },
-        colors: ['#c5a059', '#dfc082', '#0f1c2e', '#10b981'],
+        particleCount: 36,
+        spread: 60,
+        startVelocity: 28,
+        scalar: 0.8,
+        origin: { y: 0.55 },
+        colors: [PALETTE.gold, PALETTE['gold-light'], PALETTE.ivory, PALETTE['rose']],
+        disableForReducedMotion: true,
       });
     } catch {
       // ignore
@@ -384,75 +389,75 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
     );
 
     return (
-      <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/75 backdrop-blur-md p-4">
-        <div className="bg-white rounded-3xl max-w-lg w-full p-6 text-center shadow-2xl space-y-4 animate-in zoom-in-95 duration-200 border border-stone-200">
-          <div className="w-16 h-16 rounded-full bg-emerald-100 text-emerald-600 flex items-center justify-center mx-auto shadow-inner">
-            <CheckCircle2 className="w-10 h-10" />
+      <div className="fixed inset-0 z-50 flex items-stretch sm:items-center justify-center bg-ink/45 sm:p-4" role="dialog" aria-modal="true" aria-labelledby="order-confirmed-title">
+        <div className="bg-surface sm:rounded-3xl max-w-lg w-full h-[100dvh] sm:h-auto sm:max-h-[92dvh] flex flex-col border border-line pt-safe sm:pt-0 overflow-hidden">
+          <div className="flex-1 min-h-0 overflow-y-auto overflow-x-hidden p-6 text-center space-y-5">
+          <div className="w-14 h-14 rounded-full border border-gold text-gold-deep flex items-center justify-center mx-auto">
+            <CheckCircle2 className="w-7 h-7" strokeWidth={1.25} />
           </div>
 
           <div>
-            <span className="text-xs font-semibold text-amber-800 bg-amber-100 px-3 py-1 rounded-full border border-amber-300">
-              Order Confirmed & Logged
-            </span>
-            <h2 className="font-serif text-2xl font-bold text-[#0f1c2e] mt-2">
-              Thank You for Your Order!
+            <span className="label-caps text-gold-deep">Order confirmed</span>
+            <h2 id="order-confirmed-title" className="font-serif text-3xl text-ink mt-2">
+              Thank you for your order
             </h2>
-            <p className="text-xs text-stone-600 mt-1">
-              Your luxury block linens are being prepared for fulfillment at our Dubai central warehouse.
+            <p className="text-[13px] text-ink-soft mt-2 leading-relaxed">
+              Your linens are being prepared with care in Dubai. We will send a tracking link as soon as they ship.
             </p>
           </div>
 
           {/* Order Details Card */}
-          <div className="bg-stone-50 rounded-2xl p-4 text-left border border-stone-200 space-y-2 text-xs">
-            <div className="flex justify-between items-center pb-2 border-b border-stone-200">
-              <span className="text-stone-500 font-medium">Order Number</span>
-              <span className="font-mono font-bold text-sm text-[#0f1c2e]">{confirmedOrder.id}</span>
+          <div className="bg-ivory rounded-2xl p-4 text-left border border-line space-y-2 text-xs">
+            <div className="flex justify-between items-center pb-2 border-b border-line">
+              <span className="text-ink-muted font-medium">Order Number</span>
+              <span className="font-mono text-sm text-ink break-anywhere text-right">{confirmedOrder.id}</span>
             </div>
 
             <div className="flex justify-between items-center">
-              <span className="text-stone-500 font-medium">Delivery Destination</span>
-              <span className="font-semibold text-stone-900">{confirmedOrder.customer.emirate} ({confirmedOrder.customer.area})</span>
+              <span className="text-ink-muted font-medium">Delivery Destination</span>
+              <span className="text-ink text-right break-anywhere">{confirmedOrder.customer.emirate} ({confirmedOrder.customer.area})</span>
             </div>
 
             {confirmedOrder.customer.gpsCoordinates && (
               <div className="flex justify-between items-center text-[11px]">
-                <span className="text-stone-500 font-medium">GPS Coordinates</span>
-                <span className="font-mono text-emerald-700 bg-emerald-50 px-2 py-0.5 rounded border border-emerald-200">
+                <span className="text-ink-muted font-medium">GPS Coordinates</span>
+                <span className="font-mono text-success bg-success-soft px-2 py-0.5 rounded border border-success-line">
                   {confirmedOrder.customer.gpsCoordinates.lat.toFixed(4)}°N, {confirmedOrder.customer.gpsCoordinates.lng.toFixed(4)}°E
                 </span>
               </div>
             )}
 
             <div className="flex justify-between items-center">
-              <span className="text-stone-500 font-medium">Delivery</span>
-              <span className="font-bold text-[#c5a059] flex items-center gap-1">
+              <span className="text-ink-muted font-medium">Delivery</span>
+              <span className="font-semibold text-gold flex items-center gap-1">
                 <span>{confirmedOrder.deliveryOption === 'same_day' ? `Same day (AED ${confirmedOrder.deliveryFee})` : `${confirmedOrder.courier.serviceability?.deliverySpeed || deliverySettings.standardDays}, free`}</span>
               </span>
             </div>
 
 
             <div className="flex justify-between items-center">
-              <span className="text-stone-500 font-medium">Payment Mode</span>
-              <span className="font-semibold text-stone-900 capitalize">
+              <span className="text-ink-muted font-medium">Payment Mode</span>
+              <span className="font-semibold text-ink capitalize">
                 {confirmedOrder.paymentMethod === 'cod' ? `Cash on Delivery (AED ${confirmedOrder.total})` : 'Direct Bank Transfer'}
               </span>
             </div>
 
-            <div className="flex justify-between items-center pt-2 border-t border-stone-200">
-              <span className="font-bold text-stone-800">Total Payable</span>
-              <span className="font-bold text-base text-[#0f1c2e]">AED {confirmedOrder.total}</span>
+            <div className="flex justify-between items-center pt-2 border-t border-line">
+              <span className="font-semibold text-ink">Total Payable</span>
+              <span className="font-semibold text-base text-ink">AED {confirmedOrder.total}</span>
             </div>
           </div>
 
-          {/* WhatsApp Direct Notification */}
-          <div className="pt-2 flex flex-col sm:flex-row gap-2">
+          </div>
+          {/* WhatsApp Direct Notification, and Done: always on the screen */}
+          <div className="shrink-0 border-t border-line bg-surface p-4 pb-[max(1rem,env(safe-area-inset-bottom))] flex flex-col sm:flex-row gap-2">
             {/* The shop's WhatsApp number from Settings → Store & contact (hidden when none is set). */}
             {shopWhatsApp && (
               <a
                 href={`https://wa.me/${shopWhatsApp}?text=${whatsappMessage}`}
                 target="_blank"
                 rel="noopener noreferrer"
-                className="flex-1 bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs py-3 px-4 rounded-xl flex items-center justify-center gap-2 transition-all shadow"
+                className="flex-1 bg-whatsapp hover:brightness-110 text-white font-medium text-xs py-3 px-4 rounded-xl flex items-center justify-center gap-2 transition-all"
               >
                 <MessageCircle className="w-4 h-4" />
                 <span>Send WhatsApp Order Update</span>
@@ -461,7 +466,7 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
 
             <button
               onClick={onClose}
-              className="bg-stone-900 hover:bg-stone-800 text-white font-semibold text-xs py-3 px-5 rounded-xl transition-all"
+              className="bg-ink hover:bg-ink-2 text-ivory font-medium tracking-[0.04em] text-sm py-3 px-6 rounded-xl transition-colors"
             >
               Done
             </button>
@@ -472,66 +477,67 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
   }
 
   return (
-    <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center bg-black/75 backdrop-blur-md p-0 sm:p-4 overflow-y-auto overscroll-contain">
-      <div className="bg-white text-stone-900 w-full max-w-xl sm:rounded-3xl max-h-[92vh] flex flex-col overflow-hidden shadow-2xl border border-stone-200 pb-safe sm:pb-0 sheet-up sm:[animation-name:sheet-fade]">
+    <div className="fixed inset-0 z-50 flex items-stretch sm:items-center justify-center bg-ink/45 p-0 sm:p-4 overscroll-contain" role="dialog" aria-modal="true" aria-labelledby="checkout-title">
+      <div className="bg-surface text-ink w-full max-w-xl sm:rounded-3xl h-[100dvh] sm:h-auto sm:max-h-[92dvh] flex flex-col overflow-hidden border border-line pt-safe sm:pt-0 sheet-up sm:[animation-name:sheet-fade]">
         
         {/* Header */}
-        <div className="px-4 py-3.5 border-b border-stone-200 flex items-center justify-between bg-stone-50">
-          <div>
-            <h2 className="font-serif font-bold text-base text-[#0f1c2e]">
-              Fast UAE Checkout
+        <div className="shrink-0 px-4 py-3 border-b border-line flex items-center justify-between gap-3 bg-surface">
+          <div className="min-w-0">
+            <h2 id="checkout-title" className="font-serif text-2xl text-ink leading-tight">
+              Checkout
             </h2>
-            <p className="text-[11px] text-stone-600">
-              Handprinted & Machine-Printed Bed Linens • Delivery across the UAE
+            <p className="text-[11px] text-ink-muted tracking-[0.02em]">
+              Free delivery across the UAE · Cash on delivery or bank transfer
             </p>
           </div>
           <button
             type="button"
             onClick={onClose}
             aria-label="Close checkout"
-            className="p-1.5 text-stone-500 hover:text-stone-800 rounded-full hover:bg-stone-200 transition-colors"
+            className="shrink-0 w-10 h-10 -mr-1.5 flex items-center justify-center text-ink rounded-full hover:bg-sand transition-colors"
           >
-            <X className="w-5 h-5" />
+            <X className="w-5 h-5" strokeWidth={1.5} />
           </button>
         </div>
 
         {/* Scrollable Form */}
-        <form onSubmit={handleSubmitOrder} className="p-4 overflow-y-auto space-y-5 flex-1">
+        <form onSubmit={handleSubmitOrder} className="flex-1 min-h-0 flex flex-col">
+          <div className="flex-1 min-h-0 overflow-y-auto overflow-x-hidden p-4 space-y-6">
           {/* Order Summary Strip */}
-          <div className="bg-stone-50 rounded-2xl p-3 border border-stone-200 flex items-center justify-between text-xs">
+          <div className="bg-ivory rounded-2xl p-3 border border-line flex items-center justify-between text-xs">
             <div>
-              <span className="font-bold text-stone-900">{items.length} Bedding Sets in Bag</span>
-              <div className="text-[10px] text-stone-600 mt-0.5">
+              <span className="font-semibold text-ink">{items.length} Bedding Sets in Bag</span>
+              <div className="text-[10px] text-ink-soft mt-0.5">
                 {items.map((i) => `${i.quantity}x ${i.selectedProfile.name.split(' ')[0]}`).join(' • ')}
               </div>
             </div>
             <div className="text-right">
-              <span className="text-[10px] text-stone-500 block">Total Due</span>
-              <span id="checkout-total" className="text-base font-bold text-[#0f1c2e]">AED {grandTotal}</span>
-              {sameDayChosen && <span className="text-[10px] text-stone-500 block">incl. same-day AED {formatAed(deliveryFils)}</span>}
+              <span className="text-[10px] text-ink-muted block">Total Due</span>
+              <span id="checkout-total" className="text-base font-semibold text-ink">AED {grandTotal}</span>
+              {sameDayChosen && <span className="text-[10px] text-ink-muted block">incl. same-day AED {formatAed(deliveryFils)}</span>}
             </div>
           </div>
 
           {/* Section 1: Contact Details & Customer OTP Verification */}
           <div className="space-y-3">
-            <div className="flex items-center justify-between border-b border-stone-200 pb-1.5">
-              <h3 className="text-xs font-bold text-stone-900 uppercase tracking-wider flex items-center gap-1.5">
-                <span>1. Customer & Phone OTP</span>
+            <div className="flex items-center justify-between border-b border-line pb-1.5">
+              <h3 className="label-caps text-ink flex items-center gap-1.5">
+                <span>1. Your details</span>
               </h3>
               {isPhoneVerified ? (
-                <span className="text-[10px] font-bold text-emerald-800 bg-emerald-100 px-2.5 py-0.5 rounded-full flex items-center gap-1 border border-emerald-300">
-                  <Check className="w-3 h-3 text-emerald-600" />
+                <span className="text-[10px] font-semibold text-success bg-success-soft px-2.5 py-0.5 rounded-full flex items-center gap-1 border border-success-line">
+                  <Check className="w-3 h-3 text-success" />
                   <span>Mobile Verified</span>
                 </span>
               ) : (
-                <span className="text-[10px] text-amber-800 bg-amber-50 px-2 py-0.5 rounded-full border border-amber-200">
+                <span className="text-[10px] text-warning bg-warning-soft px-2 py-0.5 rounded-full border border-warning-line">
                   UAE Mobile Verification
                 </span>
               )}
             </div>
 
             {hasSavedDetails && (
-              <p className="text-[11px] text-stone-500">
+              <p className="text-[11px] text-ink-muted">
                 Your details from last time are filled in.{' '}
                 <button type="button" className="underline font-semibold" onClick={forgetDetails}>
                   Not you? Clear them
@@ -540,8 +546,8 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
             )}
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-xs">
               <div>
-                <label className="block text-stone-800 font-semibold mb-1">
-                  Full Name <span className="text-red-500">*</span>
+                <label className="block text-ink font-semibold mb-1">
+                  Full Name <span className="text-danger">*</span>
                 </label>
                 <input
                   type="text"
@@ -549,7 +555,7 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
                   placeholder="e.g. Fatima Al Mansoori"
                   value={fullName}
                   onChange={(e) => setFullName(e.target.value)}
-                  className="w-full px-3.5 py-2.5 rounded-xl border border-stone-300 bg-white text-stone-900 placeholder:text-stone-400 font-medium focus:outline-none focus:ring-2 focus:ring-[#c5a059] focus:bg-white text-xs"
+                  className="w-full px-3.5 py-2.5 rounded-xl border border-line-strong bg-surface text-ink placeholder:text-ink-muted font-medium focus:outline-none focus:ring-2 focus:ring-gold focus:bg-surface text-xs"
                 />
               </div>
 
@@ -569,15 +575,15 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
               />
 
               <div className="sm:col-span-2">
-                <label className="block text-stone-800 font-semibold mb-1">
-                  Email Address <span className="text-stone-500 font-normal">(Optional for order tracking receipt)</span>
+                <label className="block text-ink font-semibold mb-1">
+                  Email Address <span className="text-ink-muted font-normal">(Optional for order tracking receipt)</span>
                 </label>
                 <input
                   type="email"
                   placeholder="name@domain.com"
                   value={email}
                   onChange={(e) => setEmail(e.target.value)}
-                  className="w-full px-3.5 py-2.5 rounded-xl border border-stone-300 bg-white text-stone-900 placeholder:text-stone-400 font-medium focus:outline-none focus:ring-2 focus:ring-[#c5a059] focus:bg-white text-xs"
+                  className="w-full px-3.5 py-2.5 rounded-xl border border-line-strong bg-surface text-ink placeholder:text-ink-muted font-medium focus:outline-none focus:ring-2 focus:ring-gold focus:bg-surface text-xs"
                 />
               </div>
             </div>
@@ -585,26 +591,26 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
 
           {/* Section 2: UAE Delivery Address with GPS Pin Drop & Map Selector */}
           <div className="space-y-3">
-            <div className="flex flex-wrap items-center justify-between gap-2 border-b border-stone-200 pb-1.5">
-              <h3 className="text-xs font-bold text-stone-900 uppercase tracking-wider flex items-center gap-1.5">
-                <span>2. UAE Delivery Address & GPS Pin</span>
+            <div className="flex flex-wrap items-center justify-between gap-2 border-b border-line pb-1.5">
+              <h3 className="label-caps text-ink flex items-center gap-1.5">
+                <span>2. Delivery address</span>
               </h3>
               <div className="flex items-center gap-2">
                 <button
                   type="button"
                   onClick={handleUseCurrentLocation}
                   disabled={isLocating}
-                  className="text-[11px] font-bold text-[#0f1c2e] bg-amber-100 hover:bg-amber-200 border border-amber-300 px-2.5 py-1 rounded-lg flex items-center gap-1 whitespace-nowrap transition-colors"
+                  className="text-[11px] font-semibold text-ink bg-warning-soft hover:bg-warning-line border border-warning-line px-2.5 py-1 rounded-lg flex items-center gap-1 whitespace-nowrap transition-colors"
                 >
-                  <Navigation className={`w-3 h-3 text-amber-700 ${isLocating ? 'animate-spin' : ''}`} />
+                  <Navigation className={`w-3 h-3 text-warning ${isLocating ? 'animate-spin' : ''}`} />
                   <span>{isLocating ? 'Locating...' : 'Use My GPS'}</span>
                 </button>
                 <button
                   type="button"
                   onClick={() => setShowMapPicker(!showMapPicker)}
-                  className="text-[11px] font-bold text-stone-800 bg-white hover:bg-stone-100 border border-stone-300 px-2.5 py-1 rounded-lg flex items-center gap-1 whitespace-nowrap transition-colors"
+                  className="text-[11px] font-semibold text-ink bg-surface hover:bg-sand border border-line-strong px-2.5 py-1 rounded-lg flex items-center gap-1 whitespace-nowrap transition-colors"
                 >
-                  <MapPin className="w-3 h-3 text-[#c5a059]" />
+                  <MapPin className="w-3 h-3 text-gold" />
                   <span>{showMapPicker ? 'Close Map' : 'Drop Pin on Map'}</span>
                 </button>
               </div>
@@ -612,20 +618,20 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
 
             {/* GPS Location Notice Pill */}
             {locationNotice && (
-              <div role="status" className={`text-[11px] p-2.5 rounded-xl border ${locationProblem ? 'bg-amber-50 text-amber-900 border-amber-200' : 'bg-emerald-50 text-emerald-900 border-emerald-200'}`}>
+              <div role="status" className={`text-[11px] p-2.5 rounded-xl border ${locationProblem ? 'bg-warning-soft text-warning border-warning-line' : 'bg-success-soft text-success border-success-line'}`}>
                 <span className="font-semibold">{locationNotice}</span>
               </div>
             )}
 
             {/* INTERACTIVE UAE MAP PIN DROP SELECTOR */}
             {showMapPicker && (
-              <div className="bg-gradient-to-b from-stone-50 to-stone-100 p-3.5 rounded-2xl border border-stone-300 space-y-3 animate-in fade-in-50 text-xs">
+              <div className="bg-gradient-to-b from-ivory to-sand p-3.5 rounded-2xl border border-line-strong space-y-3 animate-in fade-in-50 text-xs">
                 <div className="flex items-center justify-between">
                   <div className="flex items-center gap-1.5">
-                    <Crosshair className="w-4 h-4 text-[#c5a059]" />
-                    <strong className="text-stone-900 text-xs">UAE Delivery Map Pin Selector</strong>
+                    <Crosshair className="w-4 h-4 text-gold" />
+                    <strong className="text-ink text-xs">UAE Delivery Map Pin Selector</strong>
                   </div>
-                  <span className="text-[11px] text-stone-600">Tap your community</span>
+                  <span className="text-[11px] text-ink-soft">Tap your community</span>
                 </div>
 
                 <input
@@ -638,13 +644,13 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
                     // Escape clears the search first; a second Escape closes checkout.
                     if (e.key === 'Escape' && pinQuery) e.stopPropagation();
                   }}
-                  className="w-full px-3 py-2 rounded-xl border border-stone-300 bg-white text-stone-900 placeholder:text-stone-400 font-medium focus:outline-none focus:ring-2 focus:ring-[#c5a059] text-xs"
+                  className="w-full px-3 py-2 rounded-xl border border-line-strong bg-surface text-ink placeholder:text-ink-muted font-medium focus:outline-none focus:ring-2 focus:ring-gold text-xs"
                 />
 
                 {/* Quick Presets for Popular UAE Communities */}
-                <div className="flex flex-wrap gap-1.5 max-h-40 overflow-y-auto p-1 bg-white rounded-xl border border-stone-200">
+                <div className="flex flex-wrap gap-1.5 max-h-40 overflow-y-auto p-1 bg-surface rounded-xl border border-line">
                   {pinMatches.length === 0 && (
-                    <p className="p-1.5 text-[11px] text-stone-600">No pin for that community yet. Type your area below, and use “Use My GPS” or a landmark for the driver.</p>
+                    <p className="p-1.5 text-[11px] text-ink-soft">No pin for that community yet. Type your area below, and use “Use My GPS” or a landmark for the driver.</p>
                   )}
                   {pinMatches.map((loc) => {
                     const isSelected = area === loc.name;
@@ -655,11 +661,11 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
                         onClick={() => handleSelectMapLocation(loc)}
                         className={`px-2.5 py-1 rounded-lg text-[11px] font-semibold transition-all flex items-center gap-1 ${
                           isSelected
-                            ? 'bg-[#0f1c2e] text-white shadow-xs'
-                            : 'bg-stone-50 text-stone-700 hover:bg-amber-50 hover:text-amber-900 border border-stone-200'
+                            ? 'bg-ink text-white '
+                            : 'bg-ivory text-ink-soft hover:bg-warning-soft hover:text-warning border border-line'
                         }`}
                       >
-                        <MapPin className={`w-3 h-3 ${isSelected ? 'text-amber-300' : 'text-[#c5a059]'}`} />
+                        <MapPin className={`w-3 h-3 ${isSelected ? 'text-gold-light' : 'text-gold'}`} />
                         <span>{loc.name}</span>
                         <span className="text-[10px]">({loc.emirate})</span>
                       </button>
@@ -668,9 +674,9 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
                 </div>
 
                 {/* Visual UAE Coordinate Display */}
-                <div className="bg-white p-2.5 rounded-xl border border-stone-200 flex items-center justify-between text-[11px]">
-                  <span className="text-stone-500 font-medium">Selected GPS Coordinates:</span>
-                  <span className="font-mono font-bold text-stone-900">
+                <div className="bg-surface p-2.5 rounded-xl border border-line flex items-center justify-between text-[11px]">
+                  <span className="text-ink-muted font-medium">Selected GPS Coordinates:</span>
+                  <span className="font-mono font-semibold text-ink">
                     {gpsCoordinates
                       ? `${gpsCoordinates.lat.toFixed(4)}°N, ${gpsCoordinates.lng.toFixed(4)}°E`
                       : 'None yet'}
@@ -682,8 +688,8 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
             {/* Address Input Grid */}
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-xs">
               <div>
-                <label htmlFor="checkout-emirate" className="block text-stone-800 font-semibold mb-1">
-                  Emirate <span className="text-red-500">*</span>
+                <label htmlFor="checkout-emirate" className="block text-ink font-semibold mb-1">
+                  Emirate <span className="text-danger">*</span>
                 </label>
                 <select
                   id="checkout-emirate"
@@ -692,7 +698,7 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
                     setEmirate(e.target.value as Emirate);
                     setAreaNote('');
                   }}
-                  className="w-full px-3.5 py-2.5 rounded-xl border border-stone-300 bg-white text-stone-900 font-medium focus:outline-none focus:ring-2 focus:ring-[#c5a059] focus:bg-white text-xs"
+                  className="w-full px-3.5 py-2.5 rounded-xl border border-line-strong bg-surface text-ink font-medium focus:outline-none focus:ring-2 focus:ring-gold focus:bg-surface text-xs"
                 >
                   {UAE_EMIRATES.map((em) => (
                     <option key={em} value={em}>
@@ -703,8 +709,8 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
               </div>
 
               <div>
-                <label htmlFor="checkout-area" className="block text-stone-800 font-semibold mb-1">
-                  Area / Neighborhood <span className="text-red-500">*</span>
+                <label htmlFor="checkout-area" className="block text-ink font-semibold mb-1">
+                  Area / Neighborhood <span className="text-danger">*</span>
                 </label>
                 <AreaCombobox
                   id="checkout-area"
@@ -717,18 +723,18 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
                     setAreaNote('');
                   }}
                   onPick={handlePickArea}
-                  className="w-full px-3.5 py-2.5 rounded-xl border border-stone-300 bg-white text-stone-900 placeholder:text-stone-400 font-medium focus:outline-none focus:ring-2 focus:ring-[#c5a059] focus:bg-white text-xs"
+                  className="w-full px-3.5 py-2.5 rounded-xl border border-line-strong bg-surface text-ink placeholder:text-ink-muted font-medium focus:outline-none focus:ring-2 focus:ring-gold focus:bg-surface text-xs"
                 />
                 {areaNote && (
-                  <p role="status" className="mt-1 text-[11px] text-stone-700">
+                  <p role="status" className="mt-1 text-[11px] text-ink-soft">
                     {areaNote}
                   </p>
                 )}
               </div>
 
               <div className="sm:col-span-2">
-                <label className="block text-stone-800 font-semibold mb-1">
-                  Street Address <span className="text-red-500">*</span>
+                <label className="block text-ink font-semibold mb-1">
+                  Street Address <span className="text-danger">*</span>
                 </label>
                 <input
                   type="text"
@@ -736,13 +742,13 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
                   placeholder="Street name, road, or community number"
                   value={streetAddress}
                   onChange={(e) => setStreetAddress(e.target.value)}
-                  className="w-full px-3.5 py-2.5 rounded-xl border border-stone-300 bg-white text-stone-900 placeholder:text-stone-400 font-medium focus:outline-none focus:ring-2 focus:ring-[#c5a059] focus:bg-white text-xs"
+                  className="w-full px-3.5 py-2.5 rounded-xl border border-line-strong bg-surface text-ink placeholder:text-ink-muted font-medium focus:outline-none focus:ring-2 focus:ring-gold focus:bg-surface text-xs"
                 />
               </div>
 
               <div>
-                <label className="block text-stone-800 font-semibold mb-1">
-                  Building / Villa Name <span className="text-red-500">*</span>
+                <label className="block text-ink font-semibold mb-1">
+                  Building / Villa Name <span className="text-danger">*</span>
                 </label>
                 <input
                   type="text"
@@ -750,13 +756,13 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
                   placeholder="e.g. Marina Gate 1 or Villa 24"
                   value={buildingVilla}
                   onChange={(e) => setBuildingVilla(e.target.value)}
-                  className="w-full px-3.5 py-2.5 rounded-xl border border-stone-300 bg-white text-stone-900 placeholder:text-stone-400 font-medium focus:outline-none focus:ring-2 focus:ring-[#c5a059] focus:bg-white text-xs"
+                  className="w-full px-3.5 py-2.5 rounded-xl border border-line-strong bg-surface text-ink placeholder:text-ink-muted font-medium focus:outline-none focus:ring-2 focus:ring-gold focus:bg-surface text-xs"
                 />
               </div>
 
               <div>
-                <label className="block text-stone-800 font-semibold mb-1">
-                  Flat / Apartment / Villa # <span className="text-red-500">*</span>
+                <label className="block text-ink font-semibold mb-1">
+                  Flat / Apartment / Villa # <span className="text-danger">*</span>
                 </label>
                 <input
                   type="text"
@@ -764,52 +770,52 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
                   placeholder="e.g. Apt 1402 or Villa 24"
                   value={flatVillaNo}
                   onChange={(e) => setFlatVillaNo(e.target.value)}
-                  className="w-full px-3.5 py-2.5 rounded-xl border border-stone-300 bg-white text-stone-900 placeholder:text-stone-400 font-medium focus:outline-none focus:ring-2 focus:ring-[#c5a059] focus:bg-white text-xs"
+                  className="w-full px-3.5 py-2.5 rounded-xl border border-line-strong bg-surface text-ink placeholder:text-ink-muted font-medium focus:outline-none focus:ring-2 focus:ring-gold focus:bg-surface text-xs"
                 />
               </div>
 
               <div className="sm:col-span-2">
-                <label className="block text-stone-800 font-semibold mb-1">
-                  Nearest Landmark <span className="text-stone-500 font-normal">(Crucial for courier driver pinpoint)</span>
+                <label className="block text-ink font-semibold mb-1">
+                  Nearest Landmark <span className="text-ink-muted font-normal">(Crucial for courier driver pinpoint)</span>
                 </label>
                 <input
                   type="text"
                   placeholder="e.g. Near Spinneys, Behind Mall of the Emirates, Opposite Park"
                   value={landmark}
                   onChange={(e) => setLandmark(e.target.value)}
-                  className="w-full px-3.5 py-2.5 rounded-xl border border-stone-300 bg-white text-stone-900 placeholder:text-stone-400 font-medium focus:outline-none focus:ring-2 focus:ring-[#c5a059] focus:bg-white text-xs"
+                  className="w-full px-3.5 py-2.5 rounded-xl border border-line-strong bg-surface text-ink placeholder:text-ink-muted font-medium focus:outline-none focus:ring-2 focus:ring-gold focus:bg-surface text-xs"
                 />
               </div>
             </div>
 
             {/* Delivery: from the address; the courier is chosen behind the scenes */}
-            <div className={`p-3.5 rounded-2xl border text-xs space-y-2.5 ${delivery.serviceable ? 'bg-emerald-50/80 border-emerald-200' : 'bg-red-50 border-red-200'}`} role="status" aria-live="polite">
+            <div className={`p-3.5 rounded-2xl border text-xs space-y-2.5 ${delivery.serviceable ? 'bg-success-soft/80 border-success-line' : 'bg-danger-soft border-danger-line'}`} role="status" aria-live="polite">
               <div className="flex items-center gap-2">
                 {delivery.serviceable ? (
-                  <span className="w-6 h-6 rounded-full bg-emerald-600 text-white flex items-center justify-center shrink-0"><Check className="w-4 h-4" /></span>
+                  <span className="w-6 h-6 rounded-full bg-success text-white flex items-center justify-center shrink-0"><Check className="w-4 h-4" /></span>
                 ) : (
-                  <AlertCircle className="w-5 h-5 text-red-600 shrink-0" />
+                  <AlertCircle className="w-5 h-5 text-danger shrink-0" />
                 )}
                 <div>
-                  <div className={`font-bold ${delivery.serviceable ? 'text-emerald-900' : 'text-red-800'}`}>{delivery.message}</div>
-                  {delivery.serviceable && <div className="text-stone-600">Delivery in {delivery.days}, free</div>}
+                  <div className={`font-semibold ${delivery.serviceable ? 'text-success' : 'text-danger'}`}>{delivery.message}</div>
+                  {delivery.serviceable && <div className="text-ink-soft">Delivery in {delivery.days}, free</div>}
                 </div>
               </div>
               {delivery.serviceable && deliverySettings.sameDayEnabled && (
                 <fieldset className="grid grid-cols-1 sm:grid-cols-2 gap-2 pt-1">
                   <legend className="sr-only">Delivery speed</legend>
-                  <label className={`flex items-start gap-2 p-2.5 rounded-xl border cursor-pointer ${!sameDayChosen ? 'border-[#0f1c2e] bg-white' : 'border-stone-200 bg-white/60'}`}>
+                  <label className={`flex items-start gap-2 p-2.5 rounded-xl border cursor-pointer ${!sameDayChosen ? 'border-ink bg-surface' : 'border-line bg-surface/60'}`}>
                     <input type="radio" name="delivery-option" className="mt-0.5" checked={!sameDayChosen} onChange={() => setDeliveryOption('standard')} />
                     <span>
-                      <strong className="block text-stone-900">Standard · free</strong>
-                      <span className="text-stone-500">{delivery.days}</span>
+                      <strong className="block text-ink">Standard · free</strong>
+                      <span className="text-ink-muted">{delivery.days}</span>
                     </span>
                   </label>
-                  <label className={`flex items-start gap-2 p-2.5 rounded-xl border ${delivery.sameDay.available ? 'cursor-pointer' : 'opacity-60'} ${sameDayChosen ? 'border-[#0f1c2e] bg-white' : 'border-stone-200 bg-white/60'}`}>
+                  <label className={`flex items-start gap-2 p-2.5 rounded-xl border ${delivery.sameDay.available ? 'cursor-pointer' : 'opacity-60'} ${sameDayChosen ? 'border-ink bg-surface' : 'border-line bg-surface/60'}`}>
                     <input type="radio" name="delivery-option" className="mt-0.5" checked={sameDayChosen} disabled={!delivery.sameDay.available} onChange={() => setDeliveryOption('same_day')} />
                     <span>
-                      <strong className="block text-stone-900">Same day · +AED {formatAed(toFils(delivery.sameDay.fee))}</strong>
-                      <span className="text-stone-500">{delivery.sameDay.available ? `Order before ${delivery.sameDay.cutoff}` : delivery.sameDay.reason}</span>
+                      <strong className="block text-ink">Same day · +AED {formatAed(toFils(delivery.sameDay.fee))}</strong>
+                      <span className="text-ink-muted">{delivery.sameDay.available ? `Order before ${delivery.sameDay.cutoff}` : delivery.sameDay.reason}</span>
                     </span>
                   </label>
                 </fieldset>
@@ -819,107 +825,107 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
 
           {/* Section 3: Payment Method Selection */}
           <div className="space-y-3">
-            <h3 className="text-xs font-bold text-stone-900 uppercase tracking-wider flex items-center gap-1.5 border-b border-stone-200 pb-1.5">
-              <span>3. Payment Options</span>
+            <h3 className="label-caps text-ink flex items-center gap-1.5 border-b border-line pb-2">
+              <span>3. Payment</span>
             </h3>
 
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+            <div role="radiogroup" aria-label="Payment" className="grid grid-cols-1 sm:grid-cols-2 gap-3">
               {/* Option 1: Cash On Delivery */}
-              <div
+              <button
+                type="button"
+                role="radio"
+                aria-checked={paymentMethod === 'cod'}
                 onClick={() => setPaymentMethod('cod')}
-                className={`p-3.5 rounded-2xl border cursor-pointer transition-all ${
+                className={`text-left p-3.5 rounded-2xl border transition-colors min-w-0 ${
                   paymentMethod === 'cod'
-                    ? 'border-[#0f1c2e] bg-[#0f1c2e] text-white shadow-md'
-                    : 'border-stone-300 bg-white text-stone-800 hover:border-stone-400'
+                    ? 'border-ink bg-ivory ring-1 ring-ink text-ink'
+                    : 'border-line bg-surface text-ink hover:border-line-strong'
                 }`}
               >
-                <div className="flex items-center justify-between mb-2">
-                  <div className="flex items-center gap-2">
-                    <Banknote className={`w-5 h-5 ${paymentMethod === 'cod' ? 'text-amber-300' : 'text-[#c5a059]'}`} />
-                    <span className="text-xs font-bold">Cash on Delivery</span>
-                  </div>
-                  {paymentMethod === 'cod' && <Check className="w-4 h-4 text-amber-300" />}
-                </div>
-                <p className={`text-[11px] leading-relaxed ${paymentMethod === 'cod' ? 'text-stone-300' : 'text-stone-600'}`}>
-                  Pay conveniently in cash to our courier driver upon doorstep delivery across all 7 Emirates.
-                </p>
-                <div className="mt-2 text-[10px] text-amber-300 font-medium">
-                  Doorstep Cash Collection Available
-                </div>
-              </div>
+                <span className="flex items-center justify-between gap-2 mb-1.5">
+                  <span className="flex items-center gap-2 min-w-0">
+                    <Banknote className="w-5 h-5 shrink-0 text-gold-deep" strokeWidth={1.5} />
+                    <span className="text-sm">Cash on delivery</span>
+                  </span>
+                  {paymentMethod === 'cod' && <Check className="w-4 h-4 shrink-0 text-ink" />}
+                </span>
+                <span className="block text-[11px] leading-relaxed text-ink-soft">
+                  Pay the courier in cash at your door, in any of the seven emirates.
+                </span>
+              </button>
 
-              {/* Option 2: Account / Bank Transfer (only once the shop's real account is entered) */}
-              {bankReady && <div
+              {/* Option 2: Bank transfer (only once the shop's real account is entered) */}
+              {bankReady && <button
+                type="button"
+                role="radio"
+                aria-checked={paymentMethod === 'bank_transfer'}
                 onClick={() => setPaymentMethod('bank_transfer')}
-                className={`p-3.5 rounded-2xl border cursor-pointer transition-all ${
+                className={`text-left p-3.5 rounded-2xl border transition-colors min-w-0 ${
                   paymentMethod === 'bank_transfer'
-                    ? 'border-[#0f1c2e] bg-[#0f1c2e] text-white shadow-md'
-                    : 'border-stone-300 bg-white text-stone-800 hover:border-stone-400'
+                    ? 'border-ink bg-ivory ring-1 ring-ink text-ink'
+                    : 'border-line bg-surface text-ink hover:border-line-strong'
                 }`}
               >
-                <div className="flex items-center justify-between mb-2">
-                  <div className="flex items-center gap-2">
-                    <Building2 className={`w-5 h-5 ${paymentMethod === 'bank_transfer' ? 'text-amber-300' : 'text-[#c5a059]'}`} />
-                    <span className="text-xs font-bold">Account / Bank Transfer</span>
-                  </div>
-                  {paymentMethod === 'bank_transfer' && <Check className="w-4 h-4 text-amber-300" />}
-                </div>
-                <p className={`text-[11px] leading-relaxed ${paymentMethod === 'bank_transfer' ? 'text-stone-300' : 'text-stone-600'}`}>
-                  Transfer directly to our {bank.bankName} account with fast receipt verification.
-                </p>
-                <div className="mt-2 text-[10px] text-amber-300 font-medium">
-                  Prepaid Express Priority Dispatch
-                </div>
-              </div>}
+                <span className="flex items-center justify-between gap-2 mb-1.5">
+                  <span className="flex items-center gap-2 min-w-0">
+                    <Building2 className="w-5 h-5 shrink-0 text-gold-deep" strokeWidth={1.5} />
+                    <span className="text-sm">Bank transfer</span>
+                  </span>
+                  {paymentMethod === 'bank_transfer' && <Check className="w-4 h-4 shrink-0 text-ink" />}
+                </span>
+                <span className="block text-[11px] leading-relaxed text-ink-soft break-anywhere">
+                  Transfer to our {bank.bankName} account; we dispatch as soon as it arrives.
+                </span>
+              </button>}
             </div>
 
             {/* If Bank Transfer Selected: Show UAE Bank Details & Receipt Uploader */}
             {paymentMethod === 'bank_transfer' && bankReady && (
-              <div className="bg-amber-50/70 rounded-2xl p-4 border border-amber-200/90 space-y-3 animate-in fade-in-50 text-xs">
+              <div className="bg-warning-soft/70 rounded-2xl p-4 border border-warning-line/90 space-y-3 animate-in fade-in-50 text-xs">
                 <div className="flex items-center justify-between">
-                  <span className="font-bold text-stone-900 flex items-center gap-1.5">
-                    <ShieldCheck className="w-4 h-4 text-[#c5a059]" />
+                  <span className="font-semibold text-ink flex items-center gap-1.5">
+                    <ShieldCheck className="w-4 h-4 text-gold" />
                     <span>{bank.bankName} Bank Details</span>
                   </span>
                   <button
                     type="button"
                     onClick={handleCopyIban}
-                    className="flex items-center gap-1 text-[11px] text-[#0f1c2e] font-semibold bg-white border border-stone-300 px-2.5 py-1 rounded-lg hover:bg-stone-50 transition-colors"
+                    className="flex items-center gap-1 text-[11px] text-ink font-semibold bg-surface border border-line-strong px-2.5 py-1 rounded-lg hover:bg-ivory transition-colors"
                   >
-                    {copiedIban ? <Check className="w-3.5 h-3.5 text-emerald-600" /> : <Copy className="w-3.5 h-3.5" />}
+                    {copiedIban ? <Check className="w-3.5 h-3.5 text-success" /> : <Copy className="w-3.5 h-3.5" />}
                     <span>{copiedIban ? 'IBAN Copied!' : 'Copy IBAN'}</span>
                   </button>
                 </div>
 
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 bg-white p-3 rounded-xl border border-amber-200 text-[11px]">
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 bg-surface p-3 rounded-xl border border-warning-line text-[11px]">
                   <div>
-                    <span className="text-stone-500 block">Bank Name</span>
-                    <strong className="text-stone-800">{bank.bankName}</strong>
+                    <span className="text-ink-muted block">Bank Name</span>
+                    <strong className="text-ink">{bank.bankName}</strong>
                   </div>
                   <div>
-                    <span className="text-stone-500 block">Account Name</span>
-                    <strong className="text-stone-800">{bank.accountName}</strong>
+                    <span className="text-ink-muted block">Account Name</span>
+                    <strong className="text-ink break-anywhere">{bank.accountName}</strong>
                   </div>
                   <div className="sm:col-span-2">
-                    <span className="text-stone-500 block">IBAN Number</span>
-                    <strong className="font-mono text-stone-900 text-xs">{bank.iban}</strong>
+                    <span className="text-ink-muted block">IBAN Number</span>
+                    <strong className="font-mono text-ink text-xs break-anywhere">{bank.iban}</strong>
                   </div>
                   <div>
-                    <span className="text-stone-500 block">Account Number</span>
-                    <strong className="font-mono text-stone-800">{bank.accountNumber}</strong>
+                    <span className="text-ink-muted block">Account Number</span>
+                    <strong className="font-mono text-ink">{bank.accountNumber}</strong>
                   </div>
                   <div>
-                    <span className="text-stone-500 block">SWIFT Code</span>
-                    <strong className="font-mono text-stone-800">{bank.swiftCode}</strong>
+                    <span className="text-ink-muted block">SWIFT Code</span>
+                    <strong className="font-mono text-ink">{bank.swiftCode}</strong>
                   </div>
                 </div>
 
-                {bank.instructions && <p className="text-[11px] text-stone-700 leading-relaxed">{bank.instructions}</p>}
+                {bank.instructions && <p className="text-[11px] text-ink-soft leading-relaxed">{bank.instructions}</p>}
 
                 {/* Optional Reference or Receipt Upload */}
                 <div className="space-y-2 pt-1">
                   <div>
-                    <label className="block text-stone-800 font-semibold mb-1">
+                    <label className="block text-ink font-semibold mb-1">
                       Bank Transfer Reference / Transaction ID:
                     </label>
                     <input
@@ -927,17 +933,17 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
                       placeholder="e.g. ENBD-TX-849201948"
                       value={bankRef}
                       onChange={(e) => setBankRef(e.target.value)}
-                      className="w-full px-3.5 py-2.5 rounded-xl border border-stone-300 bg-white text-stone-900 placeholder:text-stone-400 font-medium focus:outline-none focus:ring-1 focus:ring-[#c5a059] text-xs"
+                      className="w-full px-3.5 py-2.5 rounded-xl border border-line-strong bg-surface text-ink placeholder:text-ink-muted font-medium focus:outline-none focus:ring-1 focus:ring-gold text-xs"
                     />
                   </div>
 
                   <div>
-                    <label className="block text-stone-800 font-semibold mb-1">
+                    <label className="block text-ink font-semibold mb-1">
                       Attach Transfer Receipt / Screenshot:
                     </label>
                     <div className="flex items-center gap-3">
-                      <label className="flex items-center gap-1.5 px-3 py-2 bg-white border border-stone-300 rounded-xl cursor-pointer hover:bg-stone-50 text-stone-700 text-xs font-semibold">
-                        <Upload className="w-3.5 h-3.5 text-[#c5a059]" />
+                      <label className="flex items-center gap-1.5 px-3 py-2 bg-surface border border-line-strong rounded-xl cursor-pointer hover:bg-ivory text-ink-soft text-xs font-semibold">
+                        <Upload className="w-3.5 h-3.5 text-gold" />
                         <span>Upload Screenshot</span>
                         <input
                           type="file"
@@ -947,7 +953,7 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
                         />
                       </label>
                       {receiptUrl && (
-                        <span className="text-emerald-700 font-bold text-xs flex items-center gap-1">
+                        <span className="text-success font-semibold text-xs flex items-center gap-1">
                           <Check className="w-3.5 h-3.5" />
                           Receipt Attached
                         </span>
@@ -959,35 +965,36 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
             )}
           </div>
 
-          {/* Sticky Checkout Button */}
-          <div className="pt-2 space-y-2">
+          </div>
+          {/* The order button: always on the screen, above the keyboard and the home bar */}
+          <div className="shrink-0 border-t border-line bg-surface px-4 pt-3 pb-[max(0.75rem,env(safe-area-inset-bottom))] space-y-1.5">
             {submitError && (
-              <p role="alert" className="text-[11px] text-red-700 bg-red-50 border border-red-200 rounded-lg px-2.5 py-1.5 font-medium">
+              <p role="alert" className="text-[11px] text-danger bg-danger-soft border border-danger-line rounded-lg px-2.5 py-1.5 font-medium">
                 {submitError}
               </p>
             )}
             <button
               type="submit"
               disabled={isSubmitting || !delivery.serviceable || !isPhoneVerified}
-              className="w-full bg-[#0f1c2e] hover:bg-stone-800 active:scale-95 text-white font-bold text-sm py-4 rounded-xl shadow-xl flex items-center justify-center gap-2 transition-all disabled:opacity-50"
+              className="w-full bg-ink hover:bg-ink-2 text-ivory font-medium tracking-[0.03em] text-sm py-3.5 px-3 rounded-xl flex items-center justify-center gap-2 transition-colors disabled:opacity-50 text-center"
             >
               {isSubmitting ? (
-                <span>Generating Order Requisition...</span>
+                <span>Placing your order…</span>
               ) : !isPhoneVerified ? (
                 <>
-                  <ShieldCheck className="w-4 h-4 text-amber-300" />
+                  <ShieldCheck className="w-4 h-4 text-gold-light" />
                   <span>Verify your UAE mobile to place order</span>
                 </>
               ) : (
                 <>
                   <span>
-                    Confirm & Raise Order • AED {grandTotal}
+                    Place order · AED {grandTotal}
                   </span>
-                  <ArrowRight className="w-4 h-4 text-amber-300" />
+                  <ArrowRight className="w-4 h-4 text-gold-light" />
                 </>
               )}
             </button>
-            <p className="text-[10px] text-center text-stone-600 mt-2">
+            <p className="text-[10px] text-center text-ink-muted">
               Delivered to your door, with a tracking link as soon as it ships.
             </p>
           </div>

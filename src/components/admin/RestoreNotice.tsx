@@ -34,8 +34,8 @@ export function RestoreNotice({ onReview }: { onReview: () => void }) {
   };
 
   return (
-    <div role="alert" className="rounded-2xl border border-amber-300 bg-amber-50 text-amber-950 p-3 text-xs flex flex-wrap items-start gap-3">
-      <AlertTriangle className="w-4 h-4 shrink-0 mt-0.5 text-amber-800" aria-hidden="true" />
+    <div role="alert" className="rounded-2xl border border-warning-line bg-warning-soft text-warning p-3 text-xs flex flex-wrap items-start gap-3">
+      <AlertTriangle className="w-4 h-4 shrink-0 mt-0.5 text-warning" aria-hidden="true" />
       <div className="min-w-0 flex-1 space-y-1">
         <p className="font-bold">The shop was restored from a backup ({when}). Review your passkeys and create new recovery codes.</p>
         <p>
@@ -47,8 +47,8 @@ export function RestoreNotice({ onReview }: { onReview: () => void }) {
         </p>
       </div>
       <div className="flex flex-wrap gap-2">
-        <button type="button" onClick={onReview} className="px-3 py-1.5 rounded-lg bg-[#0f1c2e] text-white font-bold">Review now</button>
-        <button type="button" onClick={() => void done()} className="px-3 py-1.5 rounded-lg border border-amber-400 bg-white text-stone-900 font-bold">Done, hide this</button>
+        <button type="button" onClick={onReview} className="px-3 py-1.5 rounded-lg bg-ink text-white font-bold">Review now</button>
+        <button type="button" onClick={() => void done()} className="px-3 py-1.5 rounded-lg border border-gold bg-surface text-ink font-bold">Done, hide this</button>
       </div>
     </div>
   );

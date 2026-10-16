@@ -50,17 +50,17 @@ export function SettingsHistoryCard({ onRestored }: { onRestored: () => void }) 
 
   return (
     <div className="space-y-2 text-xs">
-      <h3 className="font-bold text-sm text-[#0f1c2e] flex items-center gap-1.5"><History className="w-4 h-4" /> Settings history</h3>
-      <p className="text-stone-500">Each save keeps the version it replaced. Restore one to go back to a setup that worked.</p>
-      {status && <p role="status" className={`font-semibold ${status.ok ? 'text-emerald-700' : 'text-red-700'}`}>{status.text}</p>}
-      <ul className="divide-y divide-stone-100 border border-stone-200 rounded-xl bg-white max-h-80 overflow-y-auto">
-        {versions === null && <li className="p-3 text-stone-500">Loading…</li>}
-        {versions?.length === 0 && <li className="p-3 text-stone-500">Nothing yet: versions appear after the first change.</li>}
+      <h3 className="font-bold text-sm text-ink flex items-center gap-1.5"><History className="w-4 h-4" /> Settings history</h3>
+      <p className="text-ink-muted">Each save keeps the version it replaced. Restore one to go back to a setup that worked.</p>
+      {status && <p role="status" className={`font-semibold ${status.ok ? 'text-success' : 'text-danger'}`}>{status.text}</p>}
+      <ul className="divide-y divide-line border border-line rounded-xl bg-surface max-h-80 overflow-y-auto">
+        {versions === null && <li className="p-3 text-ink-muted">Loading…</li>}
+        {versions?.length === 0 && <li className="p-3 text-ink-muted">Nothing yet: versions appear after the first change.</li>}
         {versions?.map((v) => (
           <li key={v.id} className="flex items-center gap-2 p-2.5">
-            <span className="font-semibold text-stone-800">{NAMES[v.key] ?? v.key}</span>
-            <span className="text-stone-500">as of {new Date(v.savedAt).toLocaleString()}</span>
-            <button type="button" onClick={() => void restore(v)} disabled={busy !== null} className="ml-auto px-2 py-1 rounded-lg border border-stone-300 font-semibold flex items-center gap-1 disabled:opacity-50">
+            <span className="font-semibold text-ink">{NAMES[v.key] ?? v.key}</span>
+            <span className="text-ink-muted">as of {new Date(v.savedAt).toLocaleString()}</span>
+            <button type="button" onClick={() => void restore(v)} disabled={busy !== null} className="ml-auto px-2 py-1 rounded-lg border border-line-strong font-semibold flex items-center gap-1 disabled:opacity-50">
               {busy === v.id && <Loader2 className="w-3 h-3 animate-spin" />} Restore
             </button>
           </li>

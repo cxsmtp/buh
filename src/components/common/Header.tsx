@@ -3,6 +3,7 @@
 import React from 'react';
 import { ShoppingBag, Search, MapPin, Layers } from 'lucide-react';
 import { BrandSettings } from '@/types';
+import { PALETTE } from '@/lib/design/tokens';
 
 interface HeaderProps {
   cartCount: number;
@@ -21,13 +22,13 @@ interface HeaderProps {
 export function BrandLogo({ brand, className = 'w-9 h-9 text-base' }: { brand?: BrandSettings; className?: string }) {
   if (brand?.logoType === 'image' && brand.logoImageUrl) {
     // eslint-disable-next-line @next/next/no-img-element
-    return <img src={brand.logoImageUrl} alt="" className={`${className} shrink-0 object-contain rounded-full bg-white border border-stone-200`} />;
+    return <img src={brand.logoImageUrl} alt="" className={`${className} shrink-0 object-contain rounded-full bg-surface border border-line`} />;
   }
   return (
     <span
       aria-hidden="true"
-      className={`${className} shrink-0 rounded-full flex items-center justify-center text-white font-serif font-bold`}
-      style={{ background: `linear-gradient(135deg, ${brand?.accentColor || '#c5a059'}, #9f7e38)` }}
+      className={`${className} shrink-0 rounded-full flex items-center justify-center text-white font-serif font-semibold tracking-[0.04em]`}
+      style={{ background: `linear-gradient(135deg, ${brand?.accentColor || PALETTE.gold}, ${PALETTE['gold-deep']})` }}
     >
       {brand?.logoText || 'BU'}
     </span>
@@ -41,7 +42,7 @@ export function BrandLogo({ brand, className = 'w-9 h-9 text-base' }: { brand?: 
 export const Header: React.FC<HeaderProps> = ({ cartCount, onOpenCart, onOpenSearch, onOpenTrack, isAdminMode, onToggleAdminMode, pendingOrdersCount = 0, brandSettings, onHome }) => {
   const name = brandSettings?.storeName || 'Beautiful UAE Home';
   return (
-    <header className="sticky top-0 z-40 bg-[#fbf9f5]/95 backdrop-blur-md border-b border-[#e8e1d5] pt-safe">
+    <header className="sticky top-0 z-40 bg-ivory/95 backdrop-blur-md border-b border-line pt-safe">
       <div className="max-w-7xl mx-auto px-4 sm:px-6 h-14 flex items-center justify-between gap-3">
         <button
           type="button"
@@ -51,19 +52,19 @@ export const Header: React.FC<HeaderProps> = ({ cartCount, onOpenCart, onOpenSea
         >
           <BrandLogo brand={brandSettings} />
           <span className="min-w-0">
-            <span className="block font-serif text-base sm:text-lg font-bold text-[#0f1c2e] leading-tight truncate">{name}</span>
-            {brandSettings?.tagline && <span className="hidden sm:block text-[11px] text-stone-600 tracking-wide truncate">{brandSettings.tagline}</span>}
+            <span className="block font-serif text-[15px] sm:text-lg text-ink leading-tight tracking-[0.12em] uppercase truncate">{name}</span>
+            {brandSettings?.tagline && <span className="hidden sm:block text-[10px] text-ink-muted tracking-[0.14em] uppercase truncate">{brandSettings.tagline}</span>}
           </span>
         </button>
 
         <div className="flex items-center gap-1 sm:gap-2 shrink-0">
           {!isAdminMode && (
             <>
-              <button type="button" onClick={onOpenSearch} className="hidden md:flex w-10 h-10 items-center justify-center rounded-full text-stone-800 hover:bg-stone-200/60" aria-label="Search products">
+              <button type="button" onClick={onOpenSearch} className="hidden md:flex w-10 h-10 items-center justify-center rounded-full text-ink hover:bg-sand-deep/60" aria-label="Search products">
                 <Search className="w-5 h-5" aria-hidden="true" />
               </button>
-              <button type="button" onClick={onOpenTrack} className="hidden md:flex items-center gap-1.5 h-10 px-3 rounded-full text-sm text-stone-800 hover:bg-stone-200/60">
-                <MapPin className="w-4 h-4 text-[#9f7e38]" aria-hidden="true" />
+              <button type="button" onClick={onOpenTrack} className="hidden md:flex items-center gap-1.5 h-10 px-3 rounded-full text-sm text-ink hover:bg-sand-deep/60">
+                <MapPin className="w-4 h-4 text-gold-deep" aria-hidden="true" />
                 <span>Track Order</span>
               </button>
             </>
@@ -75,21 +76,21 @@ export const Header: React.FC<HeaderProps> = ({ cartCount, onOpenCart, onOpenSea
             onClick={onToggleAdminMode}
             title={isAdminMode ? 'Admin Hub' : 'Admin Hub (for the shop owner)'}
             className={`relative flex items-center gap-1.5 h-10 px-2.5 rounded-full text-xs font-semibold transition-colors ${
-              isAdminMode ? 'bg-amber-600 text-white' : 'text-stone-700 hover:bg-stone-200/60'
+              isAdminMode ? 'bg-warning text-white' : 'text-ink-soft hover:bg-sand-deep/60'
             }`}
           >
             <Layers className="w-4 h-4" aria-hidden="true" />
             <span className={isAdminMode ? 'hidden sm:inline' : 'sr-only'}>Admin Hub</span>
             {pendingOrdersCount > 0 && (
-              <span className="absolute -top-0.5 -right-0.5 min-w-4 h-4 px-1 rounded-full bg-red-600 text-[10px] font-bold text-white flex items-center justify-center">{pendingOrdersCount}</span>
+              <span className="absolute -top-0.5 -right-0.5 min-w-4 h-4 px-1 rounded-full bg-danger text-[10px] font-semibold text-white flex items-center justify-center">{pendingOrdersCount}</span>
             )}
           </button>
 
           {!isAdminMode && (
-            <button type="button" onClick={onOpenCart} className="relative w-10 h-10 flex items-center justify-center rounded-full bg-[#0f1c2e] text-white hover:bg-[#1c2c44]" aria-label={`View shopping bag${cartCount ? `, ${cartCount} ${cartCount === 1 ? 'piece' : 'pieces'}` : ''}`}>
-              <ShoppingBag className="w-5 h-5 text-amber-100" aria-hidden="true" />
+            <button type="button" onClick={onOpenCart} className="relative w-10 h-10 flex items-center justify-center rounded-full bg-ink text-white hover:bg-ink-2" aria-label={`View shopping bag${cartCount ? `, ${cartCount} ${cartCount === 1 ? 'piece' : 'pieces'}` : ''}`}>
+              <ShoppingBag className="w-5 h-5 text-gold-light" aria-hidden="true" />
               {cartCount > 0 && (
-                <span className="absolute -top-1 -right-1 bg-[#c5a059] text-stone-950 text-[11px] font-bold min-w-5 h-5 px-1 rounded-full flex items-center justify-center ring-2 ring-[#fbf9f5]" aria-hidden="true">
+                <span className="absolute -top-1 -right-1 bg-gold text-ink text-[11px] font-semibold min-w-5 h-5 px-1 rounded-full flex items-center justify-center ring-2 ring-ivory" aria-hidden="true">
                   {cartCount}
                 </span>
               )}

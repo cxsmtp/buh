@@ -6,6 +6,8 @@
  * copy, the service worker, and what the shop kept on the phone (the bag, the delivery details,
  * the feed layout). Sign-in cookies are kept. Then it offers the shop again.
  */
+import { PALETTE } from '@/lib/design/tokens';
+
 export const dynamic = 'force-dynamic';
 
 const HTML = `<!doctype html>
@@ -17,11 +19,11 @@ const HTML = `<!doctype html>
 <title>The app was reset</title>
 <style>
   :root { color-scheme: light; }
-  body { margin: 0; min-height: 100vh; display: flex; align-items: center; justify-content: center; background: #fbf9f5; color: #1c1815; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Arial, sans-serif; padding: 24px; box-sizing: border-box; }
+  body { margin: 0; min-height: 100vh; display: flex; align-items: center; justify-content: center; background: ${PALETTE.ivory}; color: ${PALETTE.ink}; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Arial, sans-serif; padding: 24px; box-sizing: border-box; }
   main { max-width: 22rem; text-align: center; }
-  h1 { font-family: Georgia, serif; color: #0f1c2e; font-size: 1.4rem; }
-  p { color: #57504a; line-height: 1.55; }
-  a { display: inline-block; margin-top: 12px; background: #0f1c2e; color: #fff; text-decoration: none; font-weight: 600; border-radius: 999px; padding: 14px 28px; }
+  h1 { font-family: Georgia, serif; font-weight: 500; color: ${PALETTE.ink}; font-size: 1.4rem; }
+  p { color: ${PALETTE['ink-soft']}; line-height: 1.55; }
+  a { display: inline-block; margin-top: 12px; background: ${PALETTE.ink}; color: #fff; text-decoration: none; font-weight: 600; border-radius: 999px; padding: 14px 28px; }
 </style>
 </head>
 <body>
