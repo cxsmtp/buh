@@ -1,12 +1,15 @@
 # Beautiful UAE Home — Caddy in front of the shop (docker-compose.yml).
 # Free HTTPS certificates from Let's Encrypt, renewed automatically; HTTP → HTTPS.
 # DOMAIN and ACME_EMAIL come from .env.production.
-# The site itself (limits, the two shop copies, headers, logs) is in shop.caddy, which the
-# CI test (deploy/ci/Caddyfile) imports too, so the config tested there is this one.
+# The site itself (the two shop copies) is in shop.caddy, which the CI test (deploy/ci/Caddyfile)
+# imports too, so the config tested there is this one; the protections are in shop-snippets.caddy,
+# shared with the buh-proxy image.
 # After changing either file: docker compose exec caddy caddy reload --config /etc/caddy/Caddyfile
 {
 	email {$ACME_EMAIL}
 }
+
+import shop-snippets.caddy
 
 {$DOMAIN} {
 	import shop.caddy

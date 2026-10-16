@@ -95,6 +95,19 @@ export function rateLimit(key: string, max: number, windowMs: number, now = Date
   return { ok: true, remaining: max - (bucketFor(key, false)?.hits.length ?? 0), retryAfterSec: 0 };
 }
 
+/** Would one more hit be allowed? Counts nothing (pair it with recordHit once the thing really happened). */
+export function peekLimit(key: string, max: number, windowMs: number, now = Date.now()): LimitResult {
+  const bucket = bucketFor(key, false);
+  if (bucket) prune(bucket, windowMs, now);
+  return verdict(bucket, { key, max, windowMs }, now);
+}
+
+/** Count one hit, e.g. a test email that was actually sent. */
+export function recordHit(key: string, now = Date.now()) {
+  bucketFor(key, true)!.hits.push(now);
+  evictIfFull(now);
+}
+
 export function resetRateLimit(key: string) {
   buckets.delete(key);
   globalBuckets.delete(key);

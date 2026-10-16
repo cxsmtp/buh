@@ -1,4 +1,5 @@
 import type { DeliverySettings, Emirate } from '@/types';
+import { resolveArea } from '@/data/uaeAreas';
 
 /**
  * Where and how fast we deliver. Used by checkout (to show it) and by the
@@ -37,7 +38,10 @@ export function deliveryCheck(input: { emirate: string; area: string }, s: Deliv
   // The whole area name, or (for names of two words or more) that name inside a longer address:
   // "Bay" must not block "Business Bay", nor "Al" every "Al …" area.
   const padded = ` ${norm(area)} `;
-  const blocked = Boolean(area) && notServed.some((n) => norm(area) === n || (n.includes(' ') && padded.includes(` ${n} `)));
+  // A short name and the full one are the same place: "JVC" blocks "Jumeirah Village Circle (JVC)" and back.
+  const known = area ? resolveArea(area, emirate) : null;
+  const sameKnown = (n: string) => Boolean(known) && resolveArea(n, emirate) === known;
+  const blocked = Boolean(area) && (notServed.some((n) => norm(area) === n || (n.includes(' ') && padded.includes(` ${n} `))) || s.notServed.some(sameKnown));
   const where = [area, emirate].filter(Boolean).join(', ');
   const serviceable = Boolean(emirate) && s.emirates.includes(emirate!) && !blocked;
   const [h, m] = s.sameDayCutoff.split(':').map(Number);

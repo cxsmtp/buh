@@ -1,5 +1,19 @@
 # User guide
 
+## For customers: browsing the shop
+
+The shop looks and works like a boutique's Instagram page, on a phone first.
+
+- **At the top:** the shop's logo, name, tagline and address (Settings → Branding & bank, Store & contact), how delivery and payment work, and the festival greeting when one is on.
+- **Round story chips:** **All**, **New in** and **On sale** (each only when it shows fewer pieces than All), then one per category, in the order of Settings → Catalogue, each with a photo from inside it. A category with no pieces in the shop has no chip. One tap shows just that.
+- **The feed:** big photos, two across on a phone (three or four on a computer), with the name, the price (and the price before, crossed out, when it is reduced) and **Only 1 left** or **Sold out** from the real stock.
+- **Tap a photo** and the product opens full screen: swipe the photos (or use the arrows, the dots or the arrow keys), choose the size and colour, **Add to Bag**, or **Ask in chat / on WhatsApp / on Instagram**. **Share** sends its link. The phone's Back button closes it.
+- **Filter** (next to the number of pieces) opens a sheet with only the choices that make a difference for the pieces in the shop: category, size, colour (worked out from each colour's swatch: blue, cream, red…), price range, **In stock only**, **On sale**, **New in**, and the sort (newest, price). Each choice shows how many pieces it leaves; **Show N pieces** applies them. Every filter on shows as a chip under the button: tap it to remove it, or **Clear all**.
+- **Search** (the tab bar on a phone, the magnifier on a computer) finds pieces by name, colour, category or fabric as you type; tap one to open it, or **See all** to show them in the shop.
+- **Links keep the view:** the address holds the search, filters and the open product, so a filtered view can be sent on WhatsApp and Back steps through what you looked at.
+- **On a phone** the tab bar at the bottom has **Home** (back to the top), **Search**, **Bag** and **Orders** (Track Order), with the **Help** button (chat, or WhatsApp) in its right-hand slot, so nothing floats over the products; the version number is at the very bottom of the page.
+- Everything works with the keyboard (Tab, Enter, Escape closes a sheet), and the shop moves less for people whose phone is set to reduce motion.
+
 ## For customers: placing an order
 
 1. Choose a set, a bed size and a colour, then **Add to Bag** and **Proceed to Checkout**.
@@ -16,7 +30,7 @@
 - Stock and prices update on the open page within seconds. Prices and stock are always checked by the shop when the order is placed.
 - **Share** on a product sends its link (with its photo in the preview) through WhatsApp or the phone's share sheet.
 
-- **Delivery** is free, in 1–2 days, to all seven emirates; a green tick confirms the address. Where the shop offers it, **Same day** can be chosen for an extra charge before the cut-off time. **Use My GPS** saves the location for the driver and suggests the area; if the phone or laptop reports a location outside the UAE (common with network or VPN locations), it says so and you choose the emirate and area yourself.
+- **Delivery** is free, in 1–2 days, to all seven emirates; a green tick confirms the address. Where the shop offers it, **Same day** can be chosen for an extra charge before the cut-off time. **Use My GPS** always saves the location for the driver, but only fills in the area when the reading is precise (within 300 m) and next to a community it knows; a laptop or phone indoors often gives an approximate Wi-Fi location (± 1–5 km), and then it says so and you choose the area. A location outside the UAE (common with VPNs) is not used. **Area** suggests communities from every emirate as you type any part of the name or a short form ("JVC", "JLT", "DIP"); choosing one in another emirate switches the emirate, and you can still type any area. **Drop Pin on Map** is a searchable list of communities whose location is known.
 
 ## For the owner: the Admin Hub
 
@@ -42,7 +56,7 @@ Set these up once, in **Settings → Passkeys & recovery codes**, so you can alw
 - **After restoring a backup:** the backup may be older than a passkey you removed or your newest codes, so restored recovery codes stop working and restored passkeys are switched off. Sign in with the password, then follow the banner (**Review now**): press **Keep** (password needed) on each passkey you still have, **Remove** the others, and create new recovery codes. Press **Done, hide this** when finished.
 - The version (BUH-xx.xx.xx) shows bottom left on every page. In the Admin Hub, tap it for **Settings → Versions**: every release with what changed, and (with automatic updates on) **Switch to this version** for any release from BUH-02.00.00, or **Update to the latest**. The shop stays open while it switches, and the database is saved first.
 - **Updates** (with the updater turned on, see the deployment guide) install themselves without closing the shop or signing you out. If a new version does not start properly, the shop stays on the one before and an alert is written. A customer in the middle of checkout carries on: their bag, details and SMS code are kept.
-- **One Podman container (Windows):** run `scripts\podman-autoupdate.bat` once in the shop folder (deployment guide, "Podman on Windows") and the same happens, with one difference: at the switch the shop is closed for a few seconds. The new version is tried first beside the running one, and if it does not answer, the old one is put back. Settings → Versions then says "Automatic updates: Podman (one container)". The shop keeps its own settings and port. From then on, update with **Update to the latest**, not with the old Podman commands (stop the updater first if you must). Without it, the page shows the two Podman commands to update by hand. After Windows restarts, start Podman (`podman machine start`, or Podman Desktop); the updater then starts the shop.
+- **One Podman container (a Windows laptop or a Linux server):** paste the one-line `setup` command once (Settings → Versions shows it, one line for Command Prompt and one for PowerShell; deployment guide, "One Podman container"). The images are private, so Podman must be logged in to `ghcr.io` first (deployment guide, "Private images"); when that login expires, Settings → Versions says so in red and updates wait until you log in again. The page also has a switch, **Install new versions automatically** (on by default): off, nothing is checked or installed by itself, but "Update to the latest", switching versions and restarting a stopped shop still work; it says when the last check ran and what it found. Under **Installed on this server** you see each version installed, with its digest, when, and why; a release marked "verified" runs exactly the contents it was first published with. If a version ever comes back with other contents, it is refused and the page warns you in red. Nothing is downloaded or kept on the computer but the images. The same then happens, with one difference: at the switch the shop is closed for a few seconds. The new version is tried first beside the running one, and if it does not answer, the old one is put back. Settings → Versions then says "Automatic updates: Podman (one container)". The shop keeps its own settings and port. From then on, update with **Update to the latest**, not with the old Podman commands (stop the updater first if you must). Without it, the page shows the two Podman commands to update by hand. The updater also keeps itself up to date. After the computer restarts, start Podman (`podman machine start`, or let Podman Desktop start it); the shop and the updater come back if Podman's restart service is on (the set-up prints the one line for it), otherwise run `podman start beautifuluaehome-updater` and it starts the shop.
 
 ### Orders
 
@@ -93,10 +107,10 @@ On each product, customers see **Ask in chat**, **Ask on WhatsApp** and **Ask on
 
 - **Store & contact:** your WhatsApp number (change it any time; empty hides the WhatsApp buttons), the message a chat opens with, the floating WhatsApp button, the support email, Instagram, TikTok and Facebook, which of **Ask on WhatsApp / Instagram** show, the address, and whether visitors abroad see their own currency.
 - **Chat assistant:** see Chats above.
-- **Delivery:** the emirates you deliver to, areas you don't serve, the delivery time customers see (1–2 days), and same-day delivery: switch it on, set the extra charge, the cut-off time (UAE) and where it's offered. Customers see a green tick for their area and choose standard or same day; the courier is never named to them.
+- **Delivery:** the emirates you deliver to, areas you don't serve (a short form counts: "JVC" also covers "Jumeirah Village Circle (JVC)"), the delivery time customers see (1–2 days), and same-day delivery: switch it on, set the extra charge, the cut-off time (UAE) and where it's offered. Customers see a green tick for their area and choose standard or same day; the courier is never named to them.
 - **Email & admin account:** the mail server, where backups and alerts go, the mailbox for chat replies, and your sign-in email.
 - **Passkeys & recovery codes:** your ways back in if you forget the password (see above).
-- **Catalogue:** the size presets offered when adding a product (name, measurements, price difference, pieces in the set), the categories shown in the shop, and the **Only N left** level.
+- **Catalogue:** the size presets offered when adding a product (name, measurements, price difference, pieces in the set), the categories shown in the shop (each category with pieces in it is a round story chip at the top of the shop, in this order, with its first piece's photo; **New in** and **On sale** chips come from each product's **New arrival** tick and its **Was (AED)** price), and the **Only N left** level.
 - **Branding & bank:** logo, colours, the scrolling bar, and bank-transfer details.
 - **Festival themes:** see below.
 - **Phone verification:** the SMS gateway (see below).

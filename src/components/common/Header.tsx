@@ -1,9 +1,8 @@
 'use client';
 
 import React from 'react';
-import { ShoppingBag, ShieldCheck, Search, MapPin, Layers, Sparkles, Palette } from 'lucide-react';
+import { ShoppingBag, Search, MapPin, Layers } from 'lucide-react';
 import { BrandSettings } from '@/types';
-import { MarqueeBar } from './MarqueeBar';
 
 interface HeaderProps {
   cartCount: number;
@@ -14,134 +13,83 @@ interface HeaderProps {
   onToggleAdminMode: () => void;
   pendingOrdersCount?: number;
   brandSettings?: BrandSettings;
+  /** The logo (and name) take the shopper back to the top of the shop. */
+  onHome?: () => void;
 }
 
-export const Header: React.FC<HeaderProps> = ({
-  cartCount,
-  onOpenCart,
-  onOpenSearch,
-  onOpenTrack,
-  isAdminMode,
-  onToggleAdminMode,
-  pendingOrdersCount = 0,
-  brandSettings,
-}) => {
+/** The shop's logo: the uploaded image, or its letters on the brand colour. */
+export function BrandLogo({ brand, className = 'w-9 h-9 text-base' }: { brand?: BrandSettings; className?: string }) {
+  if (brand?.logoType === 'image' && brand.logoImageUrl) {
+    // eslint-disable-next-line @next/next/no-img-element
+    return <img src={brand.logoImageUrl} alt="" className={`${className} shrink-0 object-contain rounded-full bg-white border border-stone-200`} />;
+  }
   return (
-    <header className="sticky top-0 z-40 bg-white/95 backdrop-blur-md border-b border-stone-200 shadow-xs">
-      {/* Running Marquee Small Announcement Line */}
-      {brandSettings && <MarqueeBar brandSettings={brandSettings} />}
+    <span
+      aria-hidden="true"
+      className={`${className} shrink-0 rounded-full flex items-center justify-center text-white font-serif font-bold`}
+      style={{ background: `linear-gradient(135deg, ${brand?.accentColor || '#c5a059'}, #9f7e38)` }}
+    >
+      {brand?.logoText || 'BU'}
+    </span>
+  );
+}
 
-      {/* Main Navigation Bar */}
-      <div className="max-w-7xl mx-auto px-4 sm:px-6 py-3.5 flex items-center justify-between gap-3 sm:gap-4">
-        {/* Brand Logo & Title */}
-        <div 
-          className="flex items-center gap-3 cursor-pointer min-w-0"
-          onClick={() => isAdminMode && onToggleAdminMode()}
-          title={isAdminMode ? 'Click to return to Storefront' : brandSettings?.storeName || 'Beautiful UAE Home'}
+/**
+ * The slim bar that stays at the top while scrolling: the logo and name, and the bag. On wider
+ * screens also search and Track Order (on phones those are in the tab bar at the bottom).
+ */
+export const Header: React.FC<HeaderProps> = ({ cartCount, onOpenCart, onOpenSearch, onOpenTrack, isAdminMode, onToggleAdminMode, pendingOrdersCount = 0, brandSettings, onHome }) => {
+  const name = brandSettings?.storeName || 'Beautiful UAE Home';
+  return (
+    <header className="sticky top-0 z-40 bg-[#fbf9f5]/95 backdrop-blur-md border-b border-[#e8e1d5]">
+      <div className="max-w-7xl mx-auto px-4 sm:px-6 h-14 flex items-center justify-between gap-3">
+        <button
+          type="button"
+          className="flex items-center gap-2.5 min-w-0 rounded-full text-left"
+          onClick={() => (isAdminMode ? onToggleAdminMode() : onHome?.())}
+          aria-label={isAdminMode ? 'Back to the shop' : `${name}: top of the shop`}
         >
-          {brandSettings?.logoType === 'image' && brandSettings?.logoImageUrl ? (
-            <img
-              src={brandSettings.logoImageUrl}
-              alt={brandSettings.storeName || 'Logo'}
-              className="w-10 h-10 shrink-0 object-contain rounded-xl border border-stone-200 shadow-xs"
-            />
-          ) : (
-            <div 
-              className="w-10 h-10 shrink-0 rounded-xl flex items-center justify-center text-white shadow font-serif text-lg font-bold"
-              style={{
-                background: `linear-gradient(135deg, ${brandSettings?.accentColor || '#c5a059'}, #dfc082)`,
-              }}
-            >
-              {brandSettings?.logoText || 'BU'}
-            </div>
+          <BrandLogo brand={brandSettings} />
+          <span className="min-w-0">
+            <span className="block font-serif text-base sm:text-lg font-bold text-[#0f1c2e] leading-tight truncate">{name}</span>
+            {brandSettings?.tagline && <span className="hidden sm:block text-[11px] text-stone-600 tracking-wide truncate">{brandSettings.tagline}</span>}
+          </span>
+        </button>
+
+        <div className="flex items-center gap-1 sm:gap-2 shrink-0">
+          {!isAdminMode && (
+            <>
+              <button type="button" onClick={onOpenSearch} className="hidden md:flex w-10 h-10 items-center justify-center rounded-full text-stone-800 hover:bg-stone-200/60" aria-label="Search products">
+                <Search className="w-5 h-5" aria-hidden="true" />
+              </button>
+              <button type="button" onClick={onOpenTrack} className="hidden md:flex items-center gap-1.5 h-10 px-3 rounded-full text-sm text-stone-800 hover:bg-stone-200/60">
+                <MapPin className="w-4 h-4 text-[#9f7e38]" aria-hidden="true" />
+                <span>Track Order</span>
+              </button>
+            </>
           )}
-          {/* min-w-0 + truncate: on phones the name and tagline shorten instead of pushing the buttons off-screen */}
-          <div className="min-w-0">
-            <div className="font-serif tracking-wide text-base sm:text-xl font-bold text-[#0f1c2e] leading-tight flex items-center gap-2">
-              <span className="truncate">{brandSettings?.storeName || 'BEAUTIFUL UAE HOME'}</span>
-              {brandSettings?.badgeText && (
-                <span className="text-[10px] uppercase font-sans font-semibold tracking-wider px-2 py-0.5 rounded-full bg-amber-100 text-amber-900 border border-amber-300 hidden sm:inline-block">
-                  {brandSettings.badgeText}
-                </span>
-              )}
-            </div>
-            <p className="text-[10px] text-stone-600 tracking-wider font-medium truncate">
-              {brandSettings?.tagline || 'HANDPRINTED & MACHINE BLOCK LINENS • DUBAI'}
-            </p>
-          </div>
-        </div>
 
-        {/* Desktop Centered Navigation Links (Laptop and Desktop view) */}
-        {!isAdminMode && (
-          <nav className="hidden lg:flex items-center gap-6 text-xs font-semibold text-stone-700">
-            <span className="text-[#8a6a2c] hover:text-[#6f5523] cursor-pointer transition-colors">
-              Block Print Editions
-            </span>
-            <span className="hover:text-stone-900 cursor-pointer transition-colors">
-              Artisan Heritage
-            </span>
-            <span className="hover:text-stone-900 cursor-pointer transition-colors">
-              Mattress Sizing Guide
-            </span>
-            <span
-              onClick={onOpenTrack}
-              className="hover:text-stone-900 cursor-pointer transition-colors flex items-center gap-1"
-            >
-              <MapPin className="w-3.5 h-3.5 text-[#c5a059]" />
-              <span>Track Order</span>
-            </span>
-          </nav>
-        )}
-
-        {/* Right Action Icons */}
-        <div className="flex items-center gap-2.5 shrink-0">
-          {/* Track Order Button (Mobile/Tablet) */}
+          {/* The owner's way in (signed-in check on the server) */}
           <button
-            onClick={onOpenTrack}
-            className="hidden sm:flex lg:hidden items-center gap-1.5 text-xs text-stone-700 hover:text-stone-900 bg-stone-100 hover:bg-stone-200 px-3 py-2 rounded-xl transition-colors font-medium"
-            title="Track Order Status"
-          >
-            <MapPin className="w-3.5 h-3.5 text-[#c5a059]" />
-            <span>Track Order</span>
-          </button>
-
-          {/* Search Button */}
-          <button
-            onClick={onOpenSearch}
-            className="p-2.5 text-stone-600 hover:text-stone-900 rounded-xl hover:bg-stone-100 transition-colors"
-            aria-label="Search products"
-          >
-            <Search className="w-5 h-5" />
-          </button>
-
-          {/* Admin Mode Toggle Pill */}
-          <button
+            type="button"
             onClick={onToggleAdminMode}
-            className={`flex items-center gap-1.5 text-xs font-semibold px-3.5 py-2.5 rounded-xl transition-all shadow-xs ${
-              isAdminMode
-                ? 'bg-amber-600 text-white ring-2 ring-amber-400'
-                : 'bg-stone-900 text-white hover:bg-stone-800'
+            title={isAdminMode ? 'Admin Hub' : 'Admin Hub (for the shop owner)'}
+            className={`relative flex items-center gap-1.5 h-10 px-2.5 rounded-full text-xs font-semibold transition-colors ${
+              isAdminMode ? 'bg-amber-600 text-white' : 'text-stone-700 hover:bg-stone-200/60'
             }`}
           >
-            <Layers className="w-3.5 h-3.5" />
-            <span className="hidden xs:inline">{isAdminMode ? 'Admin Hub' : 'Admin Hub'}</span>
+            <Layers className="w-4 h-4" aria-hidden="true" />
+            <span className={isAdminMode ? 'hidden sm:inline' : 'sr-only'}>Admin Hub</span>
             {pendingOrdersCount > 0 && (
-              <span className="w-4 h-4 rounded-full bg-red-500 text-[10px] font-bold text-white flex items-center justify-center animate-bounce">
-                {pendingOrdersCount}
-              </span>
+              <span className="absolute -top-0.5 -right-0.5 min-w-4 h-4 px-1 rounded-full bg-red-600 text-[10px] font-bold text-white flex items-center justify-center">{pendingOrdersCount}</span>
             )}
           </button>
 
-          {/* Cart Button */}
           {!isAdminMode && (
-            <button
-              onClick={onOpenCart}
-              className="relative p-2.5 bg-[#0f1c2e] hover:bg-stone-800 text-white rounded-xl shadow transition-transform active:scale-95"
-              aria-label="View shopping bag"
-            >
-              <ShoppingBag className="w-5 h-5 text-amber-200" />
+            <button type="button" onClick={onOpenCart} className="relative w-10 h-10 flex items-center justify-center rounded-full bg-[#0f1c2e] text-white hover:bg-[#1c2c44]" aria-label={`View shopping bag${cartCount ? `, ${cartCount} ${cartCount === 1 ? 'piece' : 'pieces'}` : ''}`}>
+              <ShoppingBag className="w-5 h-5 text-amber-100" aria-hidden="true" />
               {cartCount > 0 && (
-                <span className="absolute -top-1.5 -right-1.5 bg-[#c5a059] text-stone-900 text-[11px] font-bold w-5 h-5 rounded-full flex items-center justify-center shadow-md">
+                <span className="absolute -top-1 -right-1 bg-[#c5a059] text-stone-950 text-[11px] font-bold min-w-5 h-5 px-1 rounded-full flex items-center justify-center ring-2 ring-[#fbf9f5]" aria-hidden="true">
                   {cartCount}
                 </span>
               )}

@@ -141,7 +141,7 @@ export function HelpLauncher() {
     // The chat is off: the plain WhatsApp button, as before.
     if (!floatingWa) return null;
     return (
-      <a href={floatingWa} target="_blank" rel="noopener noreferrer" aria-label="Chat with us on WhatsApp" className="fixed z-40 right-3 bottom-20 md:bottom-6 md:right-6 w-12 h-12 rounded-full bg-[#1f9d55] text-white shadow-lg flex items-center justify-center hover:brightness-110 focus:outline-none focus-visible:ring-4 focus-visible:ring-emerald-300">
+      <a href={floatingWa} target="_blank" rel="noopener noreferrer" aria-label="Chat with us on WhatsApp" className="fixed z-[41] right-1 bottom-[calc(0.25rem+env(safe-area-inset-bottom,0px))] w-16 h-12 rounded-2xl md:right-6 md:bottom-6 md:w-12 md:h-12 md:rounded-full bg-[#1f9d55] text-white md:shadow-lg flex items-center justify-center hover:brightness-110 focus:outline-none focus-visible:ring-4 focus-visible:ring-emerald-300">
         <MessageCircle className="w-6 h-6" />
       </a>
     );
@@ -208,7 +208,7 @@ export function HelpLauncher() {
             setUnseen(false);
           }}
           aria-label="Help and chat"
-          className="fixed z-40 right-3 bottom-20 md:bottom-6 md:right-6 h-12 pl-3.5 pr-4 rounded-full bg-[#0f1c2e] text-white shadow-lg flex items-center gap-2 hover:brightness-110 focus:outline-none focus-visible:ring-4 focus-visible:ring-amber-300"
+          className="fixed z-[41] right-1 bottom-[calc(0.25rem+env(safe-area-inset-bottom,0px))] w-16 h-12 flex-col justify-center gap-0.5 rounded-2xl md:right-6 md:bottom-6 md:w-auto md:flex-row md:gap-2 md:pl-3.5 md:pr-4 md:rounded-full bg-[#0f1c2e] text-white md:shadow-lg flex items-center hover:brightness-110 focus:outline-none focus-visible:ring-4 focus-visible:ring-amber-300"
         >
           <MessagesSquare className="w-5 h-5 text-amber-300" />
           <span className="text-xs font-bold">Help</span>

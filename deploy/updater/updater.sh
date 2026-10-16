@@ -25,6 +25,11 @@
 #   rollback [image]  switch to buh:previous (or the image given) the same zero-downtime way
 #   status            what runs, the last good image, rejected images, recent log
 #   adopt             single mode only: set up the shop container (see below)
+#   setup NAME [opts] single mode, from the ghcr.io/cxsmtp/buh-updater image: the whole
+#                     one-time set-up through the engine's API socket (see setup())
+#   self-update       single mode: one round, then replace this updater with a newer image
+#   update-proxy      single mode: update the HTTPS proxy now, if its image is newer
+#   selfcheck         the engine answers through the socket and this script parses
 #
 # From the Admin Hub (Settings → System → Versions): the shop writes one line to
 # $CONTROL_DIR/request ("rollback 2.0.1" or "update"); the daemon checks it strictly, deletes
@@ -58,7 +63,7 @@
 # good image); one that stops answering is restarted, then re-created from the last good image.
 # Health is asked of the app itself (node inside the container), not of the engine's
 # healthcheck, which Podman runs only where systemd timers are available.
-# `adopt` (run once by scripts/podman-autoupdate.bat) re-creates an existing shop container
+# `adopt` (run by `setup`) re-creates an existing shop container
 # with this definition, keeping its image, data volume, port bindings and its own settings
 # (env, carried in a root-only env file); it refuses a container whose data lives anywhere
 # but SHOP_VOLUME, or that has anything it cannot carry (another mount, another port). The
@@ -104,6 +109,32 @@ CARRIED_DIR=$STATE_DIR/shop
 SHOP_ENV_FILE=$CARRIED_DIR/env
 SHOP_PORTS_FILE=$CARRIED_DIR/ports
 SHOP_PORTS=$SHOP_PORT
+# The published updater image (ghcr.io/cxsmtp/buh-updater) runs single mode with no code on
+# the host: `setup` starts it as SHOP_NAME-updater, and it replaces itself with a newer
+# UPDATER_IMAGE on the update schedule. SOCK is the engine's API socket on the host (mounted
+# here as /var/run/docker.sock), needed to start the next updater the same way.
+UPDATER_IMAGE=${UPDATER_IMAGE:-}
+SOCK=${SOCK:-}
+DEFAULT_UPDATER_IMAGE=ghcr.io/cxsmtp/buh-updater:latest
+SELF_CHECK_SECONDS=${SELF_CHECK_SECONDS:-8}
+# After a self-update the updater before waits (as SHOP_NAME-updater-old) until the new one
+# has done one full round; if it has not within this time, the old one takes the name back.
+HANDOVER_SECONDS=${HANDOVER_SECONDS:-600}
+# Private images: the host folder that holds Podman's registry login (auth.json), mounted
+# read-only at AUTH_MOUNT. Podman's Docker API does not use the engine's own login for a pull
+# the docker CLI asks for (tested with Podman 4.9 and 5.7): the CLI must send it. `setup` finds
+# the folder from its own mounts (-v <folder>:/run/buh/registry-auth:ro on the one line).
+REGISTRY_AUTH_DIR=${REGISTRY_AUTH_DIR:-}
+AUTH_MOUNT=${AUTH_MOUNT:-/run/buh/registry-auth}
+# Optional HTTPS in front of the shop (a Linux server): SHOP_NAME-proxy from the buh-proxy
+# image (Caddy), on the host network, kept up to date like the shop. Set by `setup --proxy`.
+PROXY_IMAGE=${PROXY_IMAGE:-}
+PROXY_DOMAIN=${PROXY_DOMAIN:-}
+PROXY_EMAIL=${PROXY_EMAIL:-}
+PROXY_UPSTREAM=${PROXY_UPSTREAM:-127.0.0.1:3000}
+PROXY_TLS_INTERNAL=${PROXY_TLS_INTERNAL:-0}
+PROXY_SETTLE_SECONDS=${PROXY_SETTLE_SECONDS:-5}
+DEFAULT_PROXY_IMAGE=ghcr.io/cxsmtp/buh-proxy:latest
 
 # ── Small helpers ────────────────────────────────────────────────────────────
 
@@ -190,6 +221,19 @@ alert() {
     fi
   fi
   send_webhook "$alert_level" "$alert_msg"
+}
+
+# alert_limited KEY LEVEL MESSAGE: an alert at most once an hour for the same KEY (a check
+# that fails every round writes to the log, not a new alert each time).
+alert_limited() {
+  al_file=$STATE_DIR/alerted-$1
+  shift
+  if [ -f "$al_file" ] && read -r al_at < "$al_file" && is_number "$al_at" && [ $(($(now) - al_at)) -lt 3600 ]; then
+    log "(again, not alerted) $2"
+    return 0
+  fi
+  now > "$al_file"
+  alert "$@"
 }
 
 send_webhook() {
@@ -498,6 +542,7 @@ switch_to() {
 
   log "step 4/4: app-$sw_idle is healthy; giving Caddy ${SETTLE_SECONDS}s to see it, then stopping app-$sw_active"
   remember_good "$sw_new"
+  record_install "$sw_new"
   if [ "$sw_old" != "$sw_new" ]; then docker tag "$sw_old" "$PREVIOUS" > /dev/null; fi
   printf '%s\n' "$sw_idle" > "$STATE_DIR/active"
   sleep "$SETTLE_SECONDS"
@@ -567,10 +612,9 @@ check_single_settings() {
   if [ "$SHOP_VOLUME" = "$CONTROL_VOLUME" ] || [ "$SHOP_VOLUME" = "$STATUS_VOLUME" ] || [ "$CONTROL_VOLUME" = "$STATUS_VOLUME" ]; then
     bad_setting "SHOP_VOLUME, CONTROL_VOLUME and STATUS_VOLUME must be three different volumes"
   fi
-  case $SHOP_PORT in
-    '' | *[!0-9]* | 0*) bad_setting "SHOP_PORT must be a port number, 1 to 65535" ;;
-    *) if [ "${#SHOP_PORT}" -gt 5 ] || [ "$SHOP_PORT" -gt 65535 ]; then bad_setting "SHOP_PORT must be a port number, 1 to 65535"; fi ;;
-  esac
+  # A port (all addresses) or IPv4:PORT, e.g. 127.0.0.1:3000 behind the proxy.
+  valid_binding "$SHOP_PORT" || bad_setting "SHOP_PORT must be a port number, 1 to 65535, or an IPv4 address and port such as 127.0.0.1:3000"
+  check_proxy_settings || cs_ok=1
   case $IMAGE in
     '' | [!A-Za-z0-9]* | *[!A-Za-z0-9._/:@-]*) bad_setting "IMAGE must be an image name such as ghcr.io/cxsmtp/buh:latest" ;;
   esac
@@ -695,7 +739,7 @@ log_tail() {
 single_guard() {
   sg_vol=$(data_volume_of "$1")
   if [ "$sg_vol" != "$SHOP_VOLUME" ]; then
-    alert critical "$1 keeps its data in ${sg_vol:-a host folder (or nowhere)}, not in the volume $SHOP_VOLUME, so the updater leaves it alone. Set SHOP_VOLUME to the volume it uses (scripts/podman-autoupdate.bat does)."
+    alert critical "$1 keeps its data in ${sg_vol:-a host folder (or nowhere)}, not in the volume $SHOP_VOLUME, so the updater leaves it alone. Run the set-up again (setup $1 --volume <its volume>), or set SHOP_VOLUME to the volume it uses."
     return 1
   fi
   volume_free
@@ -717,7 +761,7 @@ others_on_volume() {
 volume_free() {
   vf_others=$(others_on_volume)
   [ -z "$vf_others" ] && return 0
-  alert critical "another running container uses the data volume $SHOP_VOLUME: ${vf_others% }. Two shops must never share it, so the updater starts nothing. Stop that container, or if it is the shop, set the updater up with its name (scripts\\podman-autoupdate.bat ${vf_others%% *} …)."
+  alert critical "another running container uses the data volume $SHOP_VOLUME: ${vf_others% }. Two shops must never share it, so the updater starts nothing. Stop that container, or if it is the shop, run the set-up with its name (setup ${vf_others%% *})."
   return 1
 }
 
@@ -836,6 +880,7 @@ single_switch() {
 
   log "step 4/4: $SHOP_NAME serves $(describe "$ss_new")"
   remember_good "$ss_new"
+  record_install "$ss_new"
   if ! same_image "$ss_old" "$ss_new"; then docker tag "${ss_old#sha256:}" "$PREVIOUS" > /dev/null; fi
   docker image prune -f --filter "label=$IMAGE_SOURCE_LABEL" > /dev/null 2>&1 || true
   if same_image "$ss_old" "$ss_new"; then
@@ -1020,7 +1065,7 @@ restore_carried() {
   load_carried
 }
 
-# Set-up (scripts/podman-autoupdate.bat runs it once): make SHOP_NAME the container this
+# Set-up (`setup` runs it): make SHOP_NAME the container this
 # script defines, with the request and status volumes, keeping its image, data volume, port
 # bindings and its own settings. 0 done (or nothing to do), 1 the new container failed (the
 # old one is back), 2 refused.
@@ -1033,7 +1078,7 @@ adopt() {
     else
       log "no container $SHOP_NAME and no volume $SHOP_VOLUME: a new shop, with a new data volume"
     fi
-    docker pull -q "$IMAGE" > /dev/null 2>&1 || log "could not pull $IMAGE; using the copy on this server, if any"
+    pull_image "$IMAGE" || true
     if ! image_id "$IMAGE" > /dev/null; then
       log "no image $IMAGE on this server"
       return 2
@@ -1050,7 +1095,7 @@ adopt() {
   ad_vol=$(data_volume_of "$SHOP_NAME")
   if [ "$ad_vol" != "$SHOP_VOLUME" ]; then
     if [ -n "$ad_vol" ]; then
-      log "refusing: $SHOP_NAME keeps its data in the volume $ad_vol, not $SHOP_VOLUME. Run the set-up again with that volume: scripts\\podman-autoupdate.bat $SHOP_NAME $SHOP_PORT $ad_vol"
+      log "refusing: $SHOP_NAME keeps its data in the volume $ad_vol, not $SHOP_VOLUME. Run the set-up again with that volume: setup $SHOP_NAME --volume $ad_vol"
     else
       log "refusing: $SHOP_NAME keeps its data in a host folder (or nowhere), not in the volume $SHOP_VOLUME; move it into a volume first"
     fi
@@ -1080,6 +1125,7 @@ adopt() {
   fi
   # The image it runs, re-created with the full definition: the same checked switch.
   ad_rc=0
+  INSTALL_WHY=set-up
   single_switch "$(container_image "$SHOP_NAME")" "set-up" || ad_rc=$?
   if [ "$ad_rc" != 0 ]; then restore_carried; fi
   return "$ad_rc"
@@ -1113,15 +1159,248 @@ single_status() {
   done
 }
 
+# ── Versions installed here, and their digests (trust on first use) ──────────────
+
+# Why the next install happens (the history): scheduled, manual, rollback or set-up.
+INSTALL_WHY=scheduled
+
+# The registry digests (sha256:…) this image was downloaded under, for IMAGE's repository,
+# one a line. None for a repository without a registry name (buh:test, built here): Docker's
+# containerd store gives every local image a digest, which says nothing about a publication.
+repo_digests_of() {
+  rd_repo=$(image_repo)
+  [ -n "$(registry_of "$rd_repo")" ] || return 0
+  docker image inspect -f '{{range .RepoDigests}}{{println .}}{{end}}' "${1#sha256:}" 2> /dev/null |
+    sed -n "s|^$rd_repo@\(sha256:[0-9a-f]\{64\}\)\$|\1|p"
+}
+
+# The digest first recorded for a version (empty when none).
+recorded_digest() {
+  sed -n "s/^$1 \(sha256:[0-9a-f]\{64\}\)\$/\1/p" "$STATE_DIR/version-digests" 2> /dev/null | head -n 1
+}
+
+# check_integrity ID: 0 when the image may be installed. A version is published once: the
+# digest it first came with here is recorded, and the same version number under another digest
+# later is refused (a moved tag, or a changed package), with a critical alert.
+check_integrity() {
+  ci_version=$(version_of "$1")
+  ci_digests=$(repo_digests_of "$1")
+  [ -n "$ci_version" ] && [ -n "$ci_digests" ] || return 0
+  printf '%s' "$ci_version" | grep -Eqx '[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}' || return 0
+  ci_recorded=$(recorded_digest "$ci_version")
+  if [ -z "$ci_recorded" ]; then
+    printf '%s %s\n' "$ci_version" "$(printf '%s\n' "$ci_digests" | head -n 1)" >> "$STATE_DIR/version-digests"
+    return 0
+  fi
+  if printf '%s\n' "$ci_digests" | grep -qxF "$ci_recorded"; then return 0; fi
+  ci_now=$(printf '%s\n' "$ci_digests" | head -n 1)
+  printf '%s\n%s\n%s\n%s\n' "$(stamp)" "$ci_version" "$ci_recorded" "$ci_now" > "$STATE_DIR/integrity-problem"
+  alert_limited "integrity-$ci_version" critical "version $ci_version is published under another digest than the one it first came with here (first $(short "$ci_recorded"), now $(short "$ci_now")), so it is not installed. A published version must never change: check the package on GitHub (deployment guide, security)."
+  return 1
+}
+
+# The reference to start a checked image by: repo@sha256:… when its digest is known (what
+# runs is exactly what was checked, and podman ps shows the digest), else the image id.
+run_ref_of() {
+  rr_digest=$(recorded_digest "$(version_of "$1")")
+  if [ -n "$rr_digest" ] && repo_digests_of "$1" | grep -qxF "$rr_digest"; then
+    printf '%s@%s' "$(image_repo)" "$rr_digest"
+  else
+    printf '%s' "$1"
+  fi
+}
+
+# record_install ID: a line of the history (time, version, digest or id, why).
+record_install() {
+  ri_version=$(version_of "$1")
+  ri_digest=$(recorded_digest "$ri_version")
+  [ -n "$ri_digest" ] || ri_digest="id:$(short "$1")"
+  printf '%s %s %s %s\n' "$(stamp)" "${ri_version:-?}" "$ri_digest" "$INSTALL_WHY" >> "$STATE_DIR/install-history"
+  # A refused version stays on Settings → Versions until a version is installed after it (the
+  # alert log keeps it).
+  rm -f "$STATE_DIR/integrity-problem"
+  if [ "$(wc -l < "$STATE_DIR/install-history")" -gt 200 ]; then
+    tail -n 100 "$STATE_DIR/install-history" > "$STATE_DIR/install-history.tmp" && mv -f "$STATE_DIR/install-history.tmp" "$STATE_DIR/install-history"
+  fi
+}
+
+# For the status: the history (newest first, 20), the recorded digests with "verified" (installed
+# here under the digest first recorded), and an integrity refusal, if any.
+history_json() {
+  [ -f "$STATE_DIR/install-history" ] || return 0
+  tail -n 20 "$STATE_DIR/install-history" | sed '1!G;h;$!d' |
+    awk '$1 ~ /^[0-9T:Z-]+$/ && $2 ~ /^([0-9.]+|\?)$/ && $3 ~ /^(sha256:[0-9a-f]+|id:[0-9a-f]+)$/ && $4 ~ /^[a-z-]+$/ { printf "%s{\"at\":\"%s\",\"version\":\"%s\",\"digest\":\"%s\",\"why\":\"%s\"}", (n++ ? "," : ""), $1, $2, $3, $4 }'
+}
+digests_json() {
+  [ -f "$STATE_DIR/version-digests" ] || return 0
+  while read -r dj_v dj_d; do
+    printf '%s' "$dj_v $dj_d" | grep -Eqx '[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3} sha256:[0-9a-f]{64}' || continue
+    dj_ok=false
+    if grep -qE "^[^ ]+ $dj_v $dj_d " "$STATE_DIR/install-history" 2> /dev/null; then dj_ok=true; fi
+    printf '%s{"version":"%s","digest":"%s","verified":%s}' "${dj_sep:-}" "$dj_v" "$dj_d" "$dj_ok"
+    dj_sep=,
+  done < "$STATE_DIR/version-digests"
+  dj_sep=''
+}
+integrity_problem() {
+  [ -f "$STATE_DIR/integrity-problem" ] || return 0
+  printf 'Version %s was refused: it is published under another digest (%s) than the one it first came with here (%s), on %s. A published version must never change; check the package on GitHub.' \
+    "$(sed -n 2p "$STATE_DIR/integrity-problem")" "$(short "$(sed -n 4p "$STATE_DIR/integrity-problem")")" "$(short "$(sed -n 3p "$STATE_DIR/integrity-problem")")" "$(sed -n 1p "$STATE_DIR/integrity-problem")"
+}
+
+# ── Downloads from a registry that needs a login (private ghcr.io packages) ─────
+
+# The registry an image reference names: ghcr.io/cxsmtp/buh:1.2.0 -> ghcr.io. Empty for a
+# name without one (buh:test), or on Docker Hub, whose answer for a missing image reads like a refusal.
+registry_of() {
+  case $1 in
+    */*)
+      case ${1%%/*} in
+        # Docker Hub (Podman writes local names as docker.io/library/… too) and Podman's own
+        # localhost/… (an image built here): not a registry this shop logs in to.
+        docker.io | index.docker.io | registry-1.docker.io | localhost) ;;
+        *.* | *:*) printf '%s' "${1%%/*}" ;;
+      esac
+      ;;
+  esac
+}
+
+# A download the registry refused for want of a (valid) login, as Docker and Podman word it.
+is_auth_error() {
+  printf '%s' "$1" | grep -Eiq 'unauthorized|authentication required|access to the resource is denied|denied: |: denied|no basic auth credentials|invalid username/password|status code from registry 40[13]|40[13] (unauthorized|forbidden)'
+}
+
+registry_message() {
+  printf 'the registry login has expired or is missing: %s refused to send %s. On the server, log in again (podman login %s, with a GitHub token that can read packages; deployment guide, "Private images"); updates resume by themselves' "$1" "$2" "$1"
+}
+
+# plain_access PATH BITS (4 read, 5 read and enter): allowed by the owner, group or other
+# permissions alone, as the updater sees it. It runs as root but with every capability dropped
+# (no DAC_OVERRIDE): a folder of another user's with mode 700 is closed to it.
+plain_access() {
+  pa_info=$(stat -c '%u %g %a' "$1" 2> /dev/null) || return 1
+  pa_uid=${pa_info%% *}
+  pa_rest=${pa_info#* }
+  pa_gid=${pa_rest%% *}
+  pa_mode=${pa_rest#* }
+  pa_mode=${pa_mode#"${pa_mode%???}"}
+  if [ "$pa_uid" = "$(id -u)" ]; then
+    pa_bits=${pa_mode%??}
+  elif [ "$pa_gid" = "$(id -g)" ]; then
+    pa_bits=${pa_mode#?}
+    pa_bits=${pa_bits%?}
+  else
+    pa_bits=${pa_mode#??}
+  fi
+  [ $((pa_bits & $2)) = "$2" ]
+}
+
+# What is wrong with the mounted login folder for the updater, in plain words (nothing when
+# it can read it, or none is mounted).
+login_folder_problem() {
+  [ -d "$AUTH_MOUNT" ] || return 0
+  if plain_access "$AUTH_MOUNT" 5; then
+    if [ ! -e "$AUTH_MOUNT/auth.json" ] || plain_access "$AUTH_MOUNT/auth.json" 4; then return 0; fi
+  fi
+  lf_dir=${REGISTRY_AUTH_DIR:-$AUTH_MOUNT}
+  printf 'the updater cannot read the registry login folder %s: it runs as root without the right to read files of other users, so the folder and its auth.json must belong to the user Podman runs as. On a Linux server (Podman as root): chown -R root:root %s && chmod 700 %s && chmod 600 %s/auth.json; or log in with podman login as the user Podman runs as' \
+    "$lf_dir" "$lf_dir" "$lf_dir" "$lf_dir"
+}
+
+# The docker CLI reads its logins from DOCKER_CONFIG/config.json: there, a link to the mounted
+# auth.json (the same format), so a new `podman login` on the host is used at the next pull.
+# The file is never copied, printed or logged.
+use_registry_login() {
+  [ -n "${DOCKER_CONFIG:-}" ] || return 0
+  if [ ! -f "$AUTH_MOUNT/auth.json" ]; then
+    if [ -L "$DOCKER_CONFIG/config.json" ]; then rm -f "$DOCKER_CONFIG/config.json"; fi
+    return 0
+  fi
+  [ "$(readlink "$DOCKER_CONFIG/config.json" 2> /dev/null)" != "$AUTH_MOUNT/auth.json" ] || return 0
+  mkdir -p "$DOCKER_CONFIG" 2> /dev/null || return 0
+  chmod 700 "$DOCKER_CONFIG" 2> /dev/null || true
+  rm -f "$DOCKER_CONFIG/config.json"
+  ln -s "$AUTH_MOUNT/auth.json" "$DOCKER_CONFIG/config.json" 2> /dev/null || true
+}
+
+# pull_image REF: 0 downloaded; 1 not (the copy on this server, if any, is used). A refusal
+# for want of a login is kept for Settings → Versions and alerted at most once an hour. It is
+# tried again at the next scheduled check only (never in a loop), and no image is marked bad
+# for it. The engine's answer is logged, never a credential. Never from the terminal (< /dev/null):
+# the docker CLI before 28 asked "Login prior to pull: Username:" on a refusal and waited for ever.
+PULL_REFUSED=0
+pull_image() {
+  PULL_REFUSED=0
+  # A login folder the updater cannot read: said plainly (once an hour), not as an expired login.
+  pi_folder=$(login_folder_problem)
+  if [ -n "$pi_folder" ]; then
+    printf '%s\n' "$pi_folder" > "$STATE_DIR/login-folder-problem"
+    alert_limited login-folder error "$pi_folder"
+  elif [ -f "$STATE_DIR/login-folder-problem" ]; then
+    rm -f "$STATE_DIR/login-folder-problem" "$STATE_DIR/alerted-login-folder"
+    log "the registry login folder can be read again"
+  fi
+  use_registry_login
+  pi_reg=$(registry_of "$1")
+  if pi_out=$(docker pull -q "$1" 2>&1 < /dev/null); then
+    if [ -n "$pi_reg" ] && [ -f "$STATE_DIR/registry-login" ] && [ "$(sed -n 2p "$STATE_DIR/registry-login")" = "$pi_reg" ]; then
+      rm -f "$STATE_DIR/registry-login" "$STATE_DIR/alerted-registry-login"
+      log "the login for $pi_reg works again"
+    fi
+    return 0
+  fi
+  pi_why=$(printf '%s' "$pi_out" | tr -d '\r' | grep -v '^[[:space:]]*$' | tail -n 1 | cut -c1-200)
+  if [ -n "$pi_reg" ] && is_auth_error "$pi_out"; then
+    PULL_REFUSED=1
+    printf '%s\n%s\n%s\n' "$(stamp)" "$pi_reg" "$1" > "$STATE_DIR/registry-login"
+    alert_limited registry-login error "$(registry_message "$pi_reg" "$1") ($pi_why)"
+  else
+    log "could not download $1 ($pi_why); using the copy on this server, if any"
+  fi
+  return 1
+}
+
+# For the status: the refusal kept by pull_image, as one line (empty when none).
+registry_problem() {
+  if [ -s "$STATE_DIR/login-folder-problem" ]; then
+    head -n 1 "$STATE_DIR/login-folder-problem"
+    return 0
+  fi
+  [ -f "$STATE_DIR/registry-login" ] || return 0
+  rp_at=$(sed -n 1p "$STATE_DIR/registry-login")
+  rp_reg=$(sed -n 2p "$STATE_DIR/registry-login")
+  rp_ref=$(sed -n 3p "$STATE_DIR/registry-login")
+  printf '%s (since %s)' "$(registry_message "$rp_reg" "$rp_ref")" "$rp_at"
+}
+
 # ── Update: pull, compare, switch ───────────────────────────────────────────
+
+# Automatic installs (the owner's switch on Settings → Versions, "auto on" / "auto off"): on
+# unless switched off. Kept in this updater's volume, so a restart or a self-update keeps it.
+auto_on() {
+  [ ! -f "$STATE_DIR/auto-off" ]
+}
+
+# note_check RESULT: the last check for a new version, for Settings → Versions.
+note_check() {
+  printf '%s\n%s\n' "$(stamp)" "$1" > "$STATE_DIR/last-check.tmp" && mv -f "$STATE_DIR/last-check.tmp" "$STATE_DIR/last-check"
+}
+
+# A version as the owner knows it (2.1.0), else the short image id.
+version_or_id() {
+  vi_v=$(version_of "$1")
+  if [ -n "$vi_v" ]; then printf '%s' "$vi_v"; else short "$1"; fi
+}
 
 update_once() {
   log "checking $IMAGE for a new version"
-  if ! docker pull -q "$IMAGE" > /dev/null 2>&1; then
-    log "could not pull $IMAGE; using the copy on this server, if any"
+  if ! pull_image "$IMAGE" && [ "$PULL_REFUSED" = 1 ]; then
+    note_check "could not download: the registry login has expired or is missing"
+    return 3
   fi
   up_new=$(image_id "$IMAGE") || {
     log "no image $IMAGE on this server"
+    note_check "no image to check (it could not be downloaded)"
     return 2
   }
   up_cid=$(serving_cid)
@@ -1129,13 +1408,26 @@ update_once() {
   up_old=$(container_image "$up_cid")
   if same_image "$up_new" "$up_old"; then
     log "up to date: $(serving_name) runs $(describe "$up_new")"
+    note_check "up to date ($(version_or_id "$up_new"))"
     return 0
   fi
   if is_bad "$up_new"; then
     log "skipping $(describe "$up_new"): it failed before; waiting for a newer image"
+    note_check "$(version_or_id "$up_new") is out, but it failed here before; waiting for a newer one"
     return 0
   fi
-  switch_image "$IMAGE" "update"
+  if ! check_integrity "$up_new"; then
+    note_check "refused $(version_or_id "$up_new"): it is published under another digest than before"
+    return 2
+  fi
+  up_rc=0
+  switch_image "$(run_ref_of "$up_new")" "update" || up_rc=$?
+  case $up_rc in
+    0) note_check "installed $(version_or_id "$up_new")" ;;
+    1) note_check "$(version_or_id "$up_new") did not start properly; the shop stayed on $(version_or_id "$up_old")" ;;
+    *) note_check "$(version_or_id "$up_new") could not be installed (see the updater log)" ;;
+  esac
+  return "$up_rc"
 }
 
 # ── Self-healing ─────────────────────────────────────────────────────────────
@@ -1241,10 +1533,20 @@ heal_once() {
 # rollback_to REF: 0 switched (or already running), 1 the image failed, 2 refused or error.
 rollback_to() {
   rb_ref=$1
+  INSTALL_WHY=rollback
+  # A published version that was recorded here is fetched and started by its digest, so a
+  # moved tag cannot bring other contents back under that number.
+  case $rb_ref in
+    "$(image_repo)":*)
+      rb_digest=$(recorded_digest "${rb_ref##*:}")
+      if [ -n "$rb_digest" ]; then rb_ref="$(image_repo)@$rb_digest"; fi
+      ;;
+  esac
   # A published version (ghcr.io/cxsmtp/buh:1.2.0) is fetched first if it is not here yet.
-  image_id "$rb_ref" > /dev/null || docker pull -q "$rb_ref" > /dev/null 2>&1 || true
+  image_id "$rb_ref" > /dev/null || pull_image "$rb_ref" || true
   if ! image_id "$rb_ref" > /dev/null; then
     log "rollback: $rb_ref could not be found or downloaded"
+    if [ "$PULL_REFUSED" = 1 ]; then return 3; fi
     return 2
   fi
   # Versions before 2.0.0 keep stock as one number per product, not per size: on today's
@@ -1258,6 +1560,7 @@ rollback_to() {
       fi
       ;;
   esac
+  check_integrity "$(image_id "$rb_ref")" || return 2
   rb_cid=$(serving_cid)
   if [ -n "$rb_cid" ]; then
     rb_current=$(container_image "$rb_cid")
@@ -1320,21 +1623,38 @@ take_request() {
     case $rq_rc in
       0) last_result=ok last_message="The shop runs $rq_version." ;;
       1) last_result=failed last_message="$rq_version did not start properly; the shop stays on the version it was running." ;;
+      3) last_result=failed last_message="$rq_version could not be downloaded: the registry login has expired or is missing (see the note above). The shop stays on the version it was running." ;;
       *) last_result=refused last_message="$rq_version could not be used (not published, or older than 2.0.0, which cannot run on this database). See the updater log." ;;
     esac
+  elif [ "$rq_line" = 'auto on' ] || [ "$rq_line" = 'auto off' ]; then
+    last_request=$rq_line
+    if [ "$rq_line" = 'auto off' ]; then
+      : > "$STATE_DIR/auto-off"
+      last_message="New versions are installed only when you ask."
+    else
+      rm -f "$STATE_DIR/auto-off"
+      last_message="New versions are installed by themselves."
+    fi
+    last_result=ok
+    log "Admin Hub: $rq_line. $last_message"
   elif [ "$rq_line" = update ]; then
     last_request=update
     log "Admin Hub asked for the latest version"
     last_result=working last_message="Fetching and starting the latest version…"
     publish_status
-    docker pull -q "$IMAGE" > /dev/null 2>&1 || true
-    # Asked for by a person: give an image that was rolled back from another chance.
-    if rq_latest=$(image_id "$IMAGE"); then forget_bad "$rq_latest"; fi
     rq_rc=0
-    update_once || rq_rc=$?
+    INSTALL_WHY=manual
+    if pull_image "$IMAGE" || [ "$PULL_REFUSED" != 1 ]; then
+      # Asked for by a person: give an image that was rolled back from another chance.
+      if rq_latest=$(image_id "$IMAGE"); then forget_bad "$rq_latest"; fi
+      update_once || rq_rc=$?
+    else
+      rq_rc=3
+    fi
     case $rq_rc in
       0) last_result=ok last_message="The shop runs the latest version." ;;
       1) last_result=failed last_message="The latest version did not start properly; the shop stays on the version it was running." ;;
+      3) last_result=failed last_message="The latest version could not be downloaded: the registry login has expired or is missing (see the note above). The shop stays on the version it was running." ;;
       *) last_result=failed last_message="The latest version could not be fetched. See the updater log." ;;
     esac
   else
@@ -1358,6 +1678,8 @@ publish_status() {
   image_id "$PREVIOUS" > /dev/null && ps_prev=$(version_of "$PREVIOUS")
   ps_versions=''
   for ps_id in $(docker image ls -q --filter "label=$IMAGE_SOURCE_LABEL" 2>/dev/null | sort -u); do
+    # The updater's and the proxy's images (same repository and version numbers) are not shop versions.
+    case $(docker image inspect -f '{{index .Config.Labels "buh.role"}}' "$ps_id" 2> /dev/null) in updater | proxy) continue ;; esac
     ps_v=$(version_of "$ps_id")
     if printf '%s' "$ps_v" | grep -Eqx '[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}'; then
       case ",$ps_versions," in *",\"$ps_v\","*) ;; *) ps_versions="${ps_versions:+$ps_versions,}\"$ps_v\"" ;; esac
@@ -1369,14 +1691,688 @@ publish_status() {
   ps_tmp=$(mktemp "$PUBLIC_DIR/.status.XXXXXX") || return 0
   ps_mode=compose
   if is_single; then ps_mode=single; fi
-  printf '{"updatedAt":"%s","mode":"%s","running":"%s","lastGood":"%s","previous":"%s","onServer":[%s],"autoUpdateMinutes":%s,"lastRequest":{"request":"%s","result":"%s","message":"%s","at":"%s"}}\n' \
+  ps_auto=true
+  auto_on || ps_auto=false
+  ps_check_at=$(sed -n 1p "$STATE_DIR/last-check" 2> /dev/null || true)
+  ps_check=$(sed -n 2p "$STATE_DIR/last-check" 2> /dev/null || true)
+  printf '{"updatedAt":"%s","mode":"%s","running":"%s","lastGood":"%s","previous":"%s","onServer":[%s],"autoUpdateMinutes":%s,"lastRequest":{"request":"%s","result":"%s","message":"%s","at":"%s"},"registryProblem":"%s","auto":%s,"lastCheck":{"at":"%s","result":"%s"},"history":[%s],"digests":[%s],"integrityProblem":"%s"}\n' \
     "$(stamp)" "$ps_mode" "$(json_escape "$ps_running")" "$(json_escape "$ps_good")" "$(json_escape "$ps_prev")" "$ps_versions" "$ps_minutes" \
-    "$(json_escape "$last_request")" "$last_result" "$(json_escape "$last_message")" "$last_at" > "$ps_tmp"
+    "$(json_escape "$last_request")" "$last_result" "$(json_escape "$last_message")" "$last_at" "$(json_escape "$(registry_problem)")" \
+    "$ps_auto" "$(json_escape "$ps_check_at")" "$(json_escape "$ps_check")" "$(history_json)" "$(digests_json)" "$(json_escape "$(integrity_problem)")" > "$ps_tmp"
   chmod 644 "$ps_tmp" 2>/dev/null || true
   mv -f "$ps_tmp" "$PUBLIC_DIR/status.json"
 }
 
+# ── The updater's own container (single mode, from the buh-updater image) ──────
+
+# This process's container name (empty when not in a container the engine knows).
+my_container() {
+  if [ -n "${UPDATER_CONTAINER:-}" ]; then
+    printf '%s' "$UPDATER_CONTAINER"
+    return
+  fi
+  mc_name=$(docker inspect -f '{{.Name}}' "$(hostname)" 2> /dev/null) || return 0
+  printf '%s' "${mc_name#/}"
+}
+
+# work, or idle for SHOP_NAME-updater-new (not handed over yet) and -old (handed over).
+updater_role() {
+  if ! is_single; then echo work; return; fi
+  case $(my_container) in
+    "$SHOP_NAME-updater-new" | "$SHOP_NAME-updater-old") echo idle ;;
+    *) echo work ;;
+  esac
+}
+
+# The working updater removes the one it took over from (once the handover is confirmed:
+# confirm_handover), and a -new left by an interrupted self-update (its own self-update is
+# synchronous, so none is under way now).
+retire_other_updaters() {
+  is_single || return 0
+  [ "$(my_container)" = "$SHOP_NAME-updater" ] || return 0
+  if [ ! -f "$STATE_DIR/handover" ] && state_of "$SHOP_NAME-updater-old" > /dev/null; then
+    log "stopping the updater this one replaced ($SHOP_NAME-updater-old)"
+    docker stop -t 600 "$SHOP_NAME-updater-old" > /dev/null 2>&1 || true
+    docker rm -f "$SHOP_NAME-updater-old" > /dev/null 2>&1 || true
+  fi
+  if state_of "$SHOP_NAME-updater-new" > /dev/null; then
+    log "removing $SHOP_NAME-updater-new, left by an interrupted self-update"
+    kill_container "$SHOP_NAME-updater-new"
+  fi
+}
+
+valid_sock() {
+  case $1 in /*) ;; *) return 1 ;; esac
+  case $1 in *[!A-Za-z0-9/._-]* | *..*) return 1 ;; esac
+}
+
+valid_image() {
+  case $1 in '' | [!A-Za-z0-9]* | *[!A-Za-z0-9._/:@-]*) return 1 ;; esac
+}
+
+# run_updater_container rm|detach NAME IMAGE COMMAND: the updater container, as `setup` and
+# a self-update start it (one definition): the API socket, its own state volume, the request
+# and status volumes, every setting as an environment variable, and the usual hardening.
+run_updater_container() {
+  ru_mode=$1
+  ru_name=$2
+  ru_image=${3#sha256:}
+  ru_cmd=$4
+  set -- run
+  if [ "$ru_mode" = rm ]; then
+    set -- "$@" --rm
+  else
+    set -- "$@" -d --name "$ru_name" --restart=always --stop-timeout 600 --label buh.updater=daemon
+  fi
+  # label=disable: SELinux (Podman on Fedora, the Podman machine) would refuse the socket.
+  set -- "$@" --security-opt label=disable -v "$SOCK:/var/run/docker.sock" \
+    -v "$SHOP_NAME-updater-state:/state" -v "$CONTROL_VOLUME:/control" -v "$STATUS_VOLUME:/public" \
+    -e UPDATER_MODE=single -e "SHOP_NAME=$SHOP_NAME" -e "SHOP_PORT=$SHOP_PORT" -e "SHOP_VOLUME=$SHOP_VOLUME" \
+    -e "SHOP_ENV=$SHOP_ENV" -e "CONTROL_VOLUME=$CONTROL_VOLUME" -e "STATUS_VOLUME=$STATUS_VOLUME" \
+    -e "IMAGE=$IMAGE" -e "UPDATER_IMAGE=$UPDATER_IMAGE" -e "SOCK=$SOCK" \
+    -e "UPDATE_CHECK_MINUTES=$(setting UPDATE_CHECK_MINUTES 15)"
+  # Timings, when set (tests): numbers only.
+  for ru_var in HEAL_CHECK_SECONDS HEALTH_TIMEOUT SELF_CHECK_SECONDS PROXY_SETTLE_SECONDS HANDOVER_SECONDS; do
+    ru_val=$(printenv "$ru_var" 2> /dev/null || true)
+    if [ -n "$ru_val" ] && is_number "$ru_val"; then set -- "$@" -e "$ru_var=$ru_val"; fi
+  done
+  if [ -n "${ALERT_WEBHOOK_URL:-}" ]; then set -- "$@" -e "ALERT_WEBHOOK_URL=$ALERT_WEBHOOK_URL"; fi
+  # The registry login folder, read-only (see REGISTRY_AUTH_DIR).
+  if [ -n "$REGISTRY_AUTH_DIR" ]; then
+    set -- "$@" -v "$REGISTRY_AUTH_DIR:$AUTH_MOUNT:ro" -e "REGISTRY_AUTH_DIR=$REGISTRY_AUTH_DIR"
+  fi
+  if [ -n "$PROXY_IMAGE" ]; then
+    set -- "$@" -e "PROXY_IMAGE=$PROXY_IMAGE" -e "PROXY_DOMAIN=$PROXY_DOMAIN" -e "PROXY_EMAIL=$PROXY_EMAIL" \
+      -e "PROXY_UPSTREAM=$PROXY_UPSTREAM" -e "PROXY_TLS_INTERNAL=$PROXY_TLS_INTERNAL"
+  fi
+  # CHOWN and FOWNER only to keep its two folders its own (repair_folders): Podman's Docker API
+  # hands an empty volume to the user of the container that mounts it (the shop's).
+  set -- "$@" --read-only --tmpfs /tmp --cap-drop ALL --cap-add CHOWN --cap-add FOWNER \
+    --security-opt no-new-privileges:true --pids-limit 128 \
+    "$ru_image" "$ru_cmd"
+  docker "$@"
+}
+
+# Remove an updater container now, even one that hangs: Podman's `rm -f` first waits out the
+# container's stop timeout (600 s for an updater), Docker's kills at once; so kill, then remove.
+kill_container() {
+  docker kill "$1" > /dev/null 2>&1 || true
+  docker rm -f "$1" > /dev/null 2>&1 || true
+}
+
+# The engine answers through the socket, and this script parses (a new updater, checked
+# by the one it replaces).
+selfcheck() {
+  sh -n "$0" && docker version > /dev/null 2>&1
+}
+
+# A newer buh-updater image: start it as SHOP_NAME-updater-new, check it, then hand over
+# (it is renamed SHOP_NAME-updater; this one becomes -old and is stopped by it). Any failure
+# removes the new one and leaves this one running. 0 always (shop updates must go on).
+self_update() {
+  is_single || return 0
+  [ -n "$UPDATER_IMAGE" ] && [ -n "$SOCK" ] || return 0
+  su_me=$(my_container)
+  [ "$su_me" = "$SHOP_NAME-updater" ] || return 0
+  su_new_name=$SHOP_NAME-updater-new
+  # Not reachable: the copy on this server (it may have been updated by hand) is compared.
+  pull_image "$UPDATER_IMAGE" || true
+  su_new=$(image_id "$UPDATER_IMAGE") || return 0
+  su_cur=$(container_image "$su_me") || return 0
+  same_image "$su_new" "$su_cur" && return 0
+  if grep -qxE "$(id_pattern "$su_new")" "$STATE_DIR/bad-updater-images" 2> /dev/null; then
+    log "skipping updater image $(short "$su_new"): it failed before"
+    return 0
+  fi
+  log "a newer updater ($(describe "$su_new")); starting it as $su_new_name"
+  kill_container "$su_new_name"
+  su_problem=''
+  if ! su_out=$(run_updater_container detach "$su_new_name" "$su_new" daemon 2>&1); then
+    su_problem="it could not be started: $(printf '%s' "$su_out" | tail -n 2 | tr '\n' ' ')"
+  else
+    sleep "$SELF_CHECK_SECONDS"
+    su_state=$(docker inspect -f '{{.State.Status}} {{.RestartCount}}' "$su_new_name" 2> /dev/null || echo gone)
+    if [ "$su_state" != "running 0" ]; then
+      su_problem="it did not keep running ($su_state)"
+    elif ! docker exec "$su_new_name" /bin/sh /updater/updater.sh selfcheck > /dev/null 2>&1; then
+      su_problem='it could not reach the engine through the socket'
+    fi
+  fi
+  if [ -z "$su_problem" ]; then
+    if docker rename "$su_me" "$SHOP_NAME-updater-old" > /dev/null 2>&1; then
+      if docker rename "$su_new_name" "$su_me" > /dev/null 2>&1; then
+        # This one stays, idle, until the new one has done a full round (confirm_handover);
+        # otherwise it takes the name back (watch_handover).
+        printf '%s %s\n' "$su_new" "$(($(now) + HANDOVER_SECONDS))" > "$STATE_DIR/handover"
+        alert info "the updater updated itself to $(describe "$su_new"); the one before waits until the new one has done a full round, and takes over again if it does not"
+        UPDATER_CONTAINER=$SHOP_NAME-updater-old
+        return 0
+      fi
+      docker rename "$SHOP_NAME-updater-old" "$su_me" > /dev/null 2>&1 || true
+    fi
+    su_problem='the containers could not be renamed'
+  fi
+  kill_container "$su_new_name"
+  printf '%s\n' "$su_new" >> "$STATE_DIR/bad-updater-images"
+  alert error "the newer updater image $(describe "$su_new") was not used ($su_problem). This updater keeps running and keeps updating the shop; the image is not tried again."
+  return 0
+}
+
+# The new updater, after its first full round (heal and status written): the handover is
+# confirmed, and the one before can be removed.
+confirm_handover() {
+  [ -f "$STATE_DIR/handover" ] || return 0
+  [ "$(my_container)" = "$SHOP_NAME-updater" ] || return 0
+  ch_id=''
+  read -r ch_id _ < "$STATE_DIR/handover" || true
+  same_image "$ch_id" "$(container_image "$SHOP_NAME-updater")" || return 0
+  rm -f "$STATE_DIR/handover"
+  log "this updater ($(short "$ch_id")) did its first full round; the one before is no longer needed"
+}
+
+# The updater handed over from (SHOP_NAME-updater-old, idle): when the new one has not done a
+# full round in time, it is removed and this one takes the name back; its image is not tried
+# again.
+watch_handover() {
+  [ "$(my_container)" = "$SHOP_NAME-updater-old" ] || return 0
+  [ -f "$STATE_DIR/handover" ] || return 0
+  wh_id='' wh_deadline=''
+  read -r wh_id wh_deadline < "$STATE_DIR/handover" || true
+  is_number "$wh_deadline" || wh_deadline=0
+  [ "$(now)" -ge "$wh_deadline" ] || return 0
+  kill_container "$SHOP_NAME-updater"
+  if ! docker rename "$SHOP_NAME-updater-old" "$SHOP_NAME-updater" > /dev/null 2>&1; then
+    log "could not take the name $SHOP_NAME-updater back; trying again next round"
+    return 0
+  fi
+  UPDATER_CONTAINER=$SHOP_NAME-updater
+  rm -f "$STATE_DIR/handover"
+  # The removed one may have held the lock: it is gone now.
+  if [ -f "$STATE_DIR/lock/owner" ]; then
+    read -r wh_host _ < "$STATE_DIR/lock/owner" || true
+    [ "${wh_host:-}" = "$(hostname)" ] || rm -rf "$STATE_DIR/lock"
+  fi
+  printf '%s\n' "$wh_id" >> "$STATE_DIR/bad-updater-images"
+  alert error "the new updater $(describe "$wh_id") did not complete a round within ${HANDOVER_SECONDS}s, so it was removed and the one before works again. That image is not tried again."
+}
+
+# ── The HTTPS proxy in front of the shop (optional, `setup --proxy DOMAIN`) ─────
+
+check_proxy_settings() {
+  [ -n "$PROXY_IMAGE" ] || return 0
+  cp_ok=0
+  valid_image "$PROXY_IMAGE" || { echo "updater: PROXY_IMAGE must be an image name" >&2; cp_ok=1; }
+  printf '%s' "$PROXY_DOMAIN" | grep -Eqx '([a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z]{2,63}' ||
+    { echo "updater: the proxy's domain must be a name like shop.example.com (lower case, no https://)" >&2; cp_ok=1; }
+  printf '%s' "$PROXY_EMAIL" | grep -Eqx '[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}' ||
+    { echo "updater: the proxy needs an e-mail address for Let's Encrypt (--email you@example.com)" >&2; cp_ok=1; }
+  printf '%s' "$PROXY_UPSTREAM" | grep -Eqx '[0-9]{1,3}(\.[0-9]{1,3}){3}:[0-9]{1,5}' ||
+    { echo "updater: PROXY_UPSTREAM must be IPv4:PORT" >&2; cp_ok=1; }
+  case $PROXY_TLS_INTERNAL in 0 | 1) ;; *) echo "updater: PROXY_TLS_INTERNAL is 0 or 1" >&2; cp_ok=1 ;; esac
+  return "$cp_ok"
+}
+
+# create_proxy NAME IMAGE: the proxy from its one definition, created but not started: the
+# host network (it reaches the shop on 127.0.0.1 and serves 80 and 443), its certificates in a
+# volume, read-only, no capability but binding the low ports, not root (the image's user).
+create_proxy() {
+  rp_image=${2#sha256:}
+  set -- create --name "$1" --restart=always --label buh.proxy=1 --network host \
+    -v "$SHOP_NAME-proxy-data:/data" -v "$SHOP_NAME-proxy-config:/config" \
+    -e "DOMAIN=$PROXY_DOMAIN" -e "UPSTREAM=$PROXY_UPSTREAM"
+  set -- "$@" -e "ACME_EMAIL=$PROXY_EMAIL"
+  # Tests only: Caddy's local authority instead of Let's Encrypt.
+  if [ "$PROXY_TLS_INTERNAL" = 1 ]; then set -- "$@" -e TLS=internal; fi
+  # The server's own srvNNNN.hstgr.cloud name has no www.
+  case $PROXY_DOMAIN in *.hstgr.cloud) set -- "$@" -e WWW_REDIRECT=off ;; esac
+  set -- "$@" --read-only --tmpfs /tmp --cap-drop ALL --cap-add NET_BIND_SERVICE \
+    --security-opt no-new-privileges:true --pids-limit 256 "$rp_image"
+  docker "$@"
+}
+
+# Up: running, not restarted, for PROXY_SETTLE_SECONDS (Caddy exits on a bad setting or a
+# port it cannot take), and listening on 443.
+proxy_ready() {
+  pr_deadline=$(($(now) + 30))
+  while [ "$(now)" -lt "$pr_deadline" ]; do
+    if docker exec "$1" nc -z 127.0.0.1 443 > /dev/null 2>&1; then
+      sleep "$PROXY_SETTLE_SECONDS"
+      [ "$(docker inspect -f '{{.State.Status}} {{.RestartCount}}' "$1" 2> /dev/null)" = "running 0" ] &&
+        docker exec "$1" nc -z 127.0.0.1 443 > /dev/null 2>&1
+      return
+    fi
+    sleep 1
+  done
+  return 1
+}
+
+# proxy_switch IMAGE WHY [remember]: start the proxy from IMAGE; the one before is kept,
+# stopped, as SHOP_NAME-proxy-previous and put back if the new one does not come up. Both
+# need ports 80 and 443, so HTTPS pauses between the old one stopping and the new one
+# listening: the new container is created first (the image is already pulled), so the pause
+# is only the stop and the start, a second or two. Called only when the image or a setting
+# changed. Only an update (remember) marks a failed image bad: a set-up or a restart can fail
+# for other reasons (ports taken). 0 done, 1 failed.
+proxy_switch() {
+  px_name=$SHOP_NAME-proxy
+  px_new=$(image_id "$1") || {
+    log "$2: no image $1 on this server"
+    return 1
+  }
+  docker rm -f "$px_name-previous" > /dev/null 2>&1 || true
+  px_had=0
+  if state_of "$px_name" > /dev/null; then
+    # Renaming does not interrupt it; it serves until the new one is ready to start.
+    docker rename "$px_name" "$px_name-previous" > /dev/null 2>&1 && px_had=1
+  fi
+  log "$2: starting $px_name from $(describe "$px_new") for https://$PROXY_DOMAIN"
+  px_ok=0
+  if px_out=$(create_proxy "$px_name" "$px_new" 2>&1); then
+    if [ "$px_had" = 1 ]; then docker stop -t 10 "$px_name-previous" > /dev/null 2>&1 || true; fi
+    if px_out=$(docker start "$px_name" 2>&1) && proxy_ready "$px_name"; then px_ok=1; fi
+  fi
+  if [ "$px_ok" = 1 ]; then
+    printf '%s\n' "$px_new" > "$STATE_DIR/proxy-last-good"
+    alert info "$2: the HTTPS proxy runs $(describe "$px_new")"
+    return 0
+  fi
+  log "  it did not come up: $(printf '%s' "$px_out" | tail -n 2 | tr '\n' ' ') $(log_tail "$px_name")"
+  docker rm -f "$px_name" > /dev/null 2>&1 || true
+  if [ "$px_had" = 1 ]; then
+    if docker rename "$px_name-previous" "$px_name" > /dev/null 2>&1; then
+      docker start "$px_name" > /dev/null 2>&1 || true
+    fi
+  fi
+  if [ "${3:-}" = remember ]; then
+    printf '%s\n' "$px_new" >> "$STATE_DIR/bad-proxy-images"
+    alert error "$2: the HTTPS proxy $(describe "$px_new") did not come up, so the one before was put back (if there was one). It is not tried again."
+  else
+    alert_limited proxy-start error "$2: the HTTPS proxy $(describe "$px_new") did not come up (are ports 80 and 443 free? podman logs $px_name). Tried again later."
+  fi
+  return 1
+}
+
+# The proxy that runs is the last one that worked, when nothing is recorded yet (the set-up
+# starts it from its own container, which does not keep the updater's state).
+note_proxy_good() {
+  [ ! -f "$STATE_DIR/proxy-last-good" ] || return 0
+  [ "$(state_of "$SHOP_NAME-proxy")" = running ] || return 0
+  container_image "$SHOP_NAME-proxy" > "$STATE_DIR/proxy-last-good" 2> /dev/null || rm -f "$STATE_DIR/proxy-last-good"
+}
+
+proxy_update() {
+  [ -n "$PROXY_IMAGE" ] || return 0
+  note_proxy_good
+  pull_image "$PROXY_IMAGE" || true
+  pu_new=$(image_id "$PROXY_IMAGE") || return 0
+  pu_cur=$(container_image "$SHOP_NAME-proxy" 2> /dev/null || true)
+  same_image "$pu_new" "$pu_cur" && return 0
+  grep -qxE "$(id_pattern "$pu_new")" "$STATE_DIR/bad-proxy-images" 2> /dev/null && return 0
+  proxy_switch "$PROXY_IMAGE" "proxy update" remember
+}
+
+# A stopped proxy is started again; a missing one is started from the last image that
+# worked (never from one that failed before). Alerts at most once an hour.
+proxy_heal() {
+  [ -n "$PROXY_IMAGE" ] || return 0
+  ph_state=$(state_of "$SHOP_NAME-proxy") || ph_state=''
+  if [ "$ph_state" = running ]; then
+    note_proxy_good
+    return 0
+  fi
+  if [ -n "$ph_state" ]; then
+    alert_limited proxy-stopped error "the HTTPS proxy $SHOP_NAME-proxy was not running ($ph_state); starting it"
+    if docker start "$SHOP_NAME-proxy" > /dev/null 2>&1 && proxy_ready "$SHOP_NAME-proxy"; then return 0; fi
+  fi
+  ph_ref=$(cat "$STATE_DIR/proxy-last-good" 2> /dev/null || true)
+  if [ -z "$ph_ref" ] || ! image_id "$ph_ref" > /dev/null; then ph_ref=$PROXY_IMAGE; fi
+  ph_id=$(image_id "$ph_ref") || return 0
+  if grep -qxE "$(id_pattern "$ph_id")" "$STATE_DIR/bad-proxy-images" 2> /dev/null; then
+    alert_limited proxy-bad critical "the HTTPS proxy is not running, and its image $(describe "$ph_id") failed before; waiting for a newer one (podman logs $SHOP_NAME-proxy)"
+    return 0
+  fi
+  proxy_switch "$ph_ref" "the HTTPS proxy was not running"
+}
+
+# setup NAME [--volume V] [--port P] [--env "K=V ..."] [--minutes N] [--image REF]
+# The whole one-time set-up, from the buh-updater image with only the API socket mounted:
+#   podman run --rm --security-opt label=disable -v <socket>:/var/run/docker.sock -e SOCK=<socket>
+#     ghcr.io/cxsmtp/buh-updater:latest setup beautifuluaehome
+# Volumes, `adopt` (every check: the same data volume, the container's own settings and port,
+# a list of what cannot be carried, one shop per volume), then SHOP_NAME-updater
+# (--restart=always) from this image. Run it again to change a setting; it is idempotent.
+setup() {
+  if [ $# -lt 1 ]; then
+    echo "usage: setup CONTAINER-NAME [--volume DATA-VOLUME] [--port PORT] [--env \"KEY=VALUE ...\"] [--minutes N] [--image SHOP-IMAGE] [--proxy DOMAIN [--email EMAIL]]" >&2
+    return 2
+  fi
+  SHOP_NAME=$1
+  shift
+  st_volume=''
+  st_env_given=0
+  while [ $# -gt 0 ]; do
+    if [ $# -lt 2 ]; then
+      echo "setup: $1 needs a value" >&2
+      return 2
+    fi
+    case $1 in
+      --volume) st_volume=$2 ;;
+      --port) SHOP_PORT=$2 ;;
+      --env)
+        SHOP_ENV=$2
+        st_env_given=1
+        ;;
+      --minutes) UPDATE_CHECK_MINUTES=$2 ;;
+      --image) IMAGE=$2 ;;
+      --proxy) PROXY_DOMAIN=$2 ;;
+      --email) PROXY_EMAIL=$2 ;;
+      --proxy-image) PROXY_IMAGE=$2 ;;
+      *)
+        echo "setup: unknown option (use --volume, --port, --env, --minutes, --image, --proxy, --email)" >&2
+        return 2
+        ;;
+    esac
+    shift 2
+  done
+  if ! valid_name "$SHOP_NAME"; then
+    echo "setup: the container name must be letters, digits, _ . - (podman ps shows it)" >&2
+    return 2
+  fi
+  SOCK=${SOCK#unix://}
+  if ! valid_sock "$SOCK"; then
+    echo "setup: pass the engine's socket path as SOCK (-e SOCK=...), the same path mounted at /var/run/docker.sock" >&2
+    return 2
+  fi
+  if ! is_number "${UPDATE_CHECK_MINUTES:-15}"; then
+    echo "setup: --minutes must be a whole number (0 = only when asked)" >&2
+    return 2
+  fi
+  export UPDATE_CHECK_MINUTES="${UPDATE_CHECK_MINUTES:-15}"
+  if ! docker version > /dev/null 2>&1; then
+    echo "setup: Podman does not answer through /var/run/docker.sock. Is the socket path right, and is it mounted with -v <socket>:/var/run/docker.sock?" >&2
+    return 2
+  fi
+  if [ -z "$UPDATER_IMAGE" ]; then
+    UPDATER_IMAGE=$(docker inspect -f '{{.Config.Image}}' "$(hostname)" 2> /dev/null || true)
+    valid_image "$UPDATER_IMAGE" || UPDATER_IMAGE=$DEFAULT_UPDATER_IMAGE
+  fi
+  if ! valid_image "$UPDATER_IMAGE"; then
+    echo "setup: UPDATER_IMAGE must be an image name" >&2
+    return 2
+  fi
+  if st_state=$(state_of "$SHOP_NAME"); then
+    st_found=$(data_volume_of "$SHOP_NAME")
+    if [ -z "$st_found" ]; then
+      echo "setup: $SHOP_NAME keeps its data in a host folder (or nowhere), not in a volume; nothing was changed. Move the data into a volume first." >&2
+      return 2
+    fi
+    SHOP_VOLUME=${st_volume:-$st_found}
+    # Its own settings are carried over as they are; --env adds or overrides.
+    [ "$st_env_given" = 1 ] || SHOP_ENV=''
+  else
+    st_state=''
+    SHOP_VOLUME=${st_volume:-$SHOP_NAME-data}
+    # A new shop behind the proxy listens on this server only, trusts the address the proxy
+    # passes on (TRUST_PROXY=1: per-visitor limits), and knows its public address.
+    if [ -n "$PROXY_DOMAIN" ]; then
+      if [ "$SHOP_PORT" = 443 ]; then SHOP_PORT=127.0.0.1:3000; fi
+      case " $SHOP_ENV " in *" TRUST_PROXY="*) ;; *) SHOP_ENV="${SHOP_ENV:+$SHOP_ENV }TRUST_PROXY=1" ;; esac
+      case " $SHOP_ENV " in *" NEXT_PUBLIC_APP_URL="*) ;; *) SHOP_ENV="$SHOP_ENV NEXT_PUBLIC_APP_URL=https://$PROXY_DOMAIN" ;; esac
+    fi
+  fi
+  if [ -n "$PROXY_DOMAIN" ]; then
+    PROXY_IMAGE=${PROXY_IMAGE:-$DEFAULT_PROXY_IMAGE}
+  elif [ -n "$PROXY_IMAGE$PROXY_EMAIL" ]; then
+    echo "setup: --email and --proxy-image go with --proxy DOMAIN" >&2
+    return 2
+  fi
+  CONTROL_VOLUME=$SHOP_NAME-updater-control
+  STATUS_VOLUME=$SHOP_NAME-updater-status
+  CANDIDATE=$SHOP_NAME-candidate
+  PREVIOUS_NAME=$SHOP_NAME-previous
+  UPDATER_MODE=single
+  check_single_settings || return 2
+  # Before anything changes: the engine itself (its login, not the one of whoever typed the
+  # line) must be able to download every image the updater will keep up to date.
+  setup_check_logins || return 2
+
+  echo "Setting up automatic updates for $SHOP_NAME (data volume $SHOP_VOLUME; updater image $UPDATER_IMAGE)."
+  if [ -z "$st_state" ]; then
+    echo "There is no container $SHOP_NAME yet: a new shop is started on port $SHOP_PORT."
+  fi
+  for st_vol in "$SHOP_NAME-updater-state" "$CONTROL_VOLUME" "$STATUS_VOLUME"; do
+    docker volume inspect "$st_vol" > /dev/null 2>&1 || docker volume create "$st_vol" > /dev/null || {
+      echo "setup: could not create the volume $st_vol" >&2
+      return 2
+    }
+  done
+  # The updater (root in its container) owns both folders; the shop (user 1001) may only drop
+  # a request into the first (sticky, not listable) and only read the second. A file in each
+  # keeps them from being empty: Podman's Docker API gives an empty volume to the user of the
+  # container that mounts it.
+  if ! docker run --rm --pids-limit 64 --user 0 --security-opt label=disable -v "$CONTROL_VOLUME:/c" -v "$STATUS_VOLUME:/s" \
+    --entrypoint /bin/sh "$UPDATER_IMAGE" -c 'chown 0:0 /c /s && chmod 1733 /c && chmod 755 /s && for d in /c /s; do [ -e $d/.updater-folder ] || [ -L $d/.updater-folder ] || : > $d/.updater-folder; done'; then
+    echo "setup: could not prepare the request and status volumes" >&2
+    return 2
+  fi
+
+  echo "Checking $SHOP_NAME and re-creating it with the updater's volumes (same image, data, port and settings; a few seconds' pause)..."
+  st_rc=0
+  run_updater_container rm '' "$UPDATER_IMAGE" adopt || st_rc=$?
+  if [ "$st_rc" != 0 ]; then
+    echo
+    if [ "$st_rc" = 2 ]; then
+      echo "Nothing was changed: see the reason above. The shop runs as before."
+    else
+      echo "The re-created container did not answer, so the one before was put back. The shop runs as before."
+    fi
+    return "$st_rc"
+  fi
+
+  st_proxy_rc=0
+  st_warnings=''
+  if [ -n "$PROXY_IMAGE" ]; then
+    setup_proxy || st_proxy_rc=$?
+    # Refused before anything was started (the shop's own port): stop here.
+    if [ "$st_proxy_rc" = 2 ]; then return 2; fi
+    st_warnings=$(proxy_settings_warnings)
+  fi
+
+  echo "Starting the updater ($SHOP_NAME-updater)..."
+  # A switch under way is finished first (up to 10 minutes); a new one is not started.
+  for st_old in "$SHOP_NAME-updater" "$SHOP_NAME-updater-new" "$SHOP_NAME-updater-old"; do
+    if state_of "$st_old" > /dev/null; then
+      docker stop -t 600 "$st_old" > /dev/null 2>&1 || true
+      docker rm -f "$st_old" > /dev/null 2>&1 || true
+    fi
+  done
+  if ! run_updater_container detach "$SHOP_NAME-updater" "$UPDATER_IMAGE" daemon > /dev/null; then
+    echo "setup: the updater did not start; the shop keeps running (without automatic updates)." >&2
+    return 1
+  fi
+  st_rootless=0
+  case $(docker info -f '{{json .SecurityOptions}}' 2> /dev/null) in *rootless*) st_rootless=1 ;; esac
+  setup_summary "$st_rootless"
+  if [ -n "$st_warnings" ]; then
+    printf '\nPlease check:\n%s\n' "$st_warnings"
+  fi
+  if [ "$st_proxy_rc" != 0 ]; then
+    echo
+    echo "The HTTPS proxy did not come up (is something else using ports 80 and 443? podman logs $SHOP_NAME-proxy)."
+    echo "The shop was set up and the updater runs; it tries to start the proxy again every round."
+    return 1
+  fi
+  return 0
+}
+
+# setup_check_logins: 0 when no registry refuses the engine; 2 (with what to do) otherwise.
+setup_check_logins() {
+  # The login folder this line mounted (its path on the host, for the updater it starts).
+  REGISTRY_AUTH_DIR=$(docker inspect -f '{{range .Mounts}}{{if eq .Destination "'"$AUTH_MOUNT"'"}}{{.Source}}{{end}}{{end}}' "$(hostname)" 2> /dev/null || true)
+  case $REGISTRY_AUTH_DIR in
+    '') ;;
+    /*:* | *,* | *"
+"*)
+      echo "setup: the registry login folder's path ($REGISTRY_AUTH_DIR) has a character a mount cannot take; nothing was changed." >&2
+      return 2
+      ;;
+    /*) ;;
+    *) REGISTRY_AUTH_DIR='' ;;
+  esac
+  # Readable here (this container may read anything) but not for the updater: refused now.
+  sl_folder=$(login_folder_problem)
+  if [ -n "$sl_folder" ]; then
+    echo "setup: $sl_folder. Nothing was changed." >&2
+    return 2
+  fi
+  use_registry_login
+  sl_refused=''
+  for sl_ref in "$IMAGE" "$UPDATER_IMAGE" ${PROXY_IMAGE:+"$PROXY_IMAGE"}; do
+    sl_reg=$(registry_of "$sl_ref")
+    [ -n "$sl_reg" ] || continue
+    sl_out=$(docker pull -q "$sl_ref" 2>&1 < /dev/null) && continue
+    if is_auth_error "$sl_out"; then
+      sl_refused="$sl_refused $sl_ref"
+    else
+      echo "Note: $sl_ref could not be downloaded now ($(printf '%s' "$sl_out" | tr -d '\r' | tail -n 1 | cut -c1-160)); the copy on this server is used, if any."
+    fi
+  done
+  [ -n "$sl_refused" ] || return 0
+  sl_first=${sl_refused# }
+  sl_reg=$(registry_of "${sl_first%% *}")
+  {
+    echo "setup: $sl_reg refused to send$sl_refused: no valid login for it reached the updater. Nothing was changed."
+    if [ -z "$REGISTRY_AUTH_DIR" ]; then
+      echo "This line did not pass Podman's login folder (-v <folder>:$AUTH_MOUNT:ro): use the line from the deployment guide or Settings → Versions."
+    elif [ ! -f "$AUTH_MOUNT/auth.json" ]; then
+      echo "There is no auth.json in $REGISTRY_AUTH_DIR: Podman is not logged in there."
+    fi
+    echo "Log in once with a GitHub token (classic) that can only read packages (read:packages), then run this line again:"
+    echo "  Linux server (as root):  podman login $sl_reg -u YOUR-GITHUB-NAME --authfile /root/.config/containers/auth.json"
+    echo "  Windows:  podman login $sl_reg -u YOUR-GITHUB-NAME"
+    echo "(Deployment guide, \"Private images\".)"
+  } >&2
+  return 2
+}
+
+# An adopted shop behind the proxy keeps its own settings; what it should have is pointed out
+# (its own settings are not changed without being asked: add them with --env).
+proxy_settings_warnings() {
+  pw_env=$(docker inspect -f '{{range .Config.Env}}{{println .}}{{end}}' "$SHOP_NAME" 2> /dev/null)
+  if ! printf '%s\n' "$pw_env" | grep -qx 'TRUST_PROXY=1'; then
+    echo "  - $SHOP_NAME does not have TRUST_PROXY=1: behind the proxy, per-visitor limits need it."
+    echo "    Run the set-up again with:  --env \"TRUST_PROXY=1\""
+  fi
+  pw_url=$(printf '%s\n' "$pw_env" | sed -n 's/^NEXT_PUBLIC_APP_URL=//p' | tail -n 1)
+  case ${pw_url%/} in
+    "https://$PROXY_DOMAIN") ;;
+    *)
+      echo "  - $SHOP_NAME has NEXT_PUBLIC_APP_URL=${pw_url:-(not set)}, but the proxy serves https://$PROXY_DOMAIN."
+      echo "    Run the set-up again with:  --env \"NEXT_PUBLIC_APP_URL=https://$PROXY_DOMAIN\""
+      ;;
+  esac
+}
+
+# The proxy reaches the shop on its port on this server: never one that takes 80 or 443.
+setup_proxy() {
+  sp_bind=$(docker inspect -f '{{range $p, $b := .HostConfig.PortBindings}}{{range $b}}{{.HostIp}}|{{.HostPort}}{{println}}{{end}}{{end}}' "$SHOP_NAME" 2> /dev/null | head -n 1)
+  sp_ip=${sp_bind%%|*}
+  sp_port=${sp_bind#*|}
+  case $sp_ip in '' | 0.0.0.0 | ::) sp_ip=127.0.0.1 ;; esac
+  case $sp_port in
+    80 | 443 | '')
+      echo "setup: $SHOP_NAME listens on port ${sp_port:-(none)} itself, so the HTTPS proxy cannot take 80 and 443. Run the shop on 127.0.0.1:3000 (deployment guide), then run this again." >&2
+      return 2
+      ;;
+  esac
+  PROXY_UPSTREAM=$sp_ip:$sp_port
+  check_proxy_settings || return 2
+  echo "Starting the HTTPS proxy ($SHOP_NAME-proxy) for https://$PROXY_DOMAIN -> $PROXY_UPSTREAM..."
+  docker pull -q "$PROXY_IMAGE" > /dev/null 2>&1 < /dev/null || true
+  # The certificate folders belong to the proxy's user.
+  for sp_vol in "$SHOP_NAME-proxy-data" "$SHOP_NAME-proxy-config"; do
+    docker volume inspect "$sp_vol" > /dev/null 2>&1 || docker volume create "$sp_vol" > /dev/null
+  done
+  # Started again only if it is not running or not this image (no needless HTTPS pause).
+  sp_new=$(image_id "$PROXY_IMAGE" 2> /dev/null || true)
+  if [ "$(state_of "$SHOP_NAME-proxy" 2> /dev/null)" = running ] && same_image "$sp_new" "$(container_image "$SHOP_NAME-proxy")" &&
+    [ "$(docker inspect -f '{{range .Config.Env}}{{println .}}{{end}}' "$SHOP_NAME-proxy" 2> /dev/null | grep -c -x -e "DOMAIN=$PROXY_DOMAIN" -e "UPSTREAM=$PROXY_UPSTREAM" -e "ACME_EMAIL=$PROXY_EMAIL")" = 3 ]; then
+    echo "The HTTPS proxy already runs with these settings."
+    return 0
+  fi
+  proxy_switch "$PROXY_IMAGE" "set-up"
+}
+
+setup_summary() {
+  if [ "$UPDATE_CHECK_MINUTES" = 0 ]; then st_when='only when you ask'; else st_when="every $UPDATE_CHECK_MINUTES minutes"; fi
+  cat << EOF
+
+Done. Automatic updates are on for $SHOP_NAME.
+  - New versions are checked $st_when, tried beside the shop first, and switched to with
+    a pause of a few seconds; the database is saved first; a version that fails is undone.
+  - Settings > Versions in the Admin Hub shows this and can update or switch versions.
+    Use it (not podman pull/stop/rm/run) from now on.
+  - The updater ($SHOP_NAME-updater) also keeps itself up to date$( [ -z "$PROXY_IMAGE" ] || printf ', and the HTTPS proxy\n    (%s-proxy, https://%s)' "$SHOP_NAME" "$PROXY_DOMAIN").
+  - Its log:        podman logs -f $SHOP_NAME-updater
+  - What runs:      podman exec $SHOP_NAME-updater updater-status
+  - Turn it off:    podman rm -f $SHOP_NAME-updater   (the shop keeps running)
+
+After a restart of the computer: the shop and the updater have --restart=always, but Podman
+brings such containers back only through podman-restart.service, which is not on by default.
+EOF
+  if [ "$1" = 1 ]; then
+    cat << 'EOF'
+  - Windows (Podman machine): let Podman Desktop start at login and start the machine
+    (Podman Desktop > Settings > Preferences), and turn the service on once:
+        podman machine ssh "loginctl enable-linger && systemctl --user enable podman-restart.service"
+  - Linux server (rootless Podman), as the user that runs the shop:
+        loginctl enable-linger && systemctl --user enable --now podman.socket podman-restart.service
+EOF
+  else
+    cat << 'EOF'
+  - Windows (Podman machine): let Podman Desktop start at login and start the machine
+    (Podman Desktop > Settings > Preferences), and turn the service on once:
+        podman machine ssh "sudo systemctl enable podman-restart.service"
+  - Linux server (rootful Podman):
+        sudo systemctl enable --now podman.socket podman-restart.service
+EOF
+  fi
+  cat << EOF
+  If they still do not come back, start the updater by hand; it then starts the shop:
+        podman start $SHOP_NAME-updater
+EOF
+}
+
 # ── Commands ─────────────────────────────────────────────────────────────────
+
+# The request folder (sticky, not listable: the shop may only drop a request in) and the
+# status folder (the shop only reads) belong to the updater. Podman's Docker API copies an
+# image's folder into an EMPTY volume when a container mounts it, owner and mode included,
+# which gave them to the shop's user (or root 1755, when that folder did not exist): a file
+# of the updater's keeps each one from being empty, and anything changed is put back, or
+# requests could not be taken and the status not written.
+repair_folders() {
+  rf_me=$(id -u)
+  for rf_pair in "$CONTROL_DIR:1733" "$PUBLIC_DIR:755"; do
+    rf_dir=${rf_pair%:*}
+    if [ ! -d "$rf_dir" ] || [ -L "$rf_dir" ]; then continue; fi
+    # First the folder itself (owner, mode)...
+    if [ "$(stat -c %u "$rf_dir" 2> /dev/null)" != "$rf_me" ]; then
+      if chown "$rf_me:$(id -g)" "$rf_dir" 2> /dev/null; then
+        log "$rf_dir belonged to another user (the engine gave it to the shop's); it is the updater's again"
+      fi
+    fi
+    chmod "${rf_pair##*:}" "$rf_dir" 2> /dev/null || true
+    # ...then the file that keeps it from being empty: made new and moved in without
+    # replacing anything (whatever is there, a link included, is left alone, never followed).
+    if [ ! -e "$rf_dir/.updater-folder" ] && [ ! -L "$rf_dir/.updater-folder" ]; then
+      if rf_tmp=$(mktemp "$rf_dir/.updater-folder.XXXXXX" 2> /dev/null); then
+        mv -n "$rf_tmp" "$rf_dir/.updater-folder" 2> /dev/null || true
+        rm -f "$rf_tmp"
+      fi
+    fi
+  done
+}
 
 stop_requested=0
 on_term() {
@@ -1401,25 +2397,47 @@ daemon() {
     log "updater started ($started_what, image $IMAGE): updates every $minutes min; health checked every ${HEAL_CHECK_SECONDS}s"
   fi
   trap on_term TERM INT
+  use_registry_login
   next_update=$(now)
   while [ "$stop_requested" = 0 ]; do
+    # A self-update starts the next updater as -new and renames it when it works; the one
+    # handed over from becomes -old. Only SHOP_NAME-updater works; the others wait.
+    if [ "$(updater_role)" = idle ]; then
+      watch_handover
+      sleep "$HEAL_CHECK_SECONDS" &
+      wait $! || true
+      continue
+    fi
     if lock; then
       heal_once || true
+      proxy_heal || true
       due=0
+      INSTALL_WHY=scheduled
       if [ -f "$STATE_DIR/update-now" ]; then
         rm -f "$STATE_DIR/update-now"
         log "update requested"
         due=1
+        INSTALL_WHY=manual
       fi
+      # Scheduled checks only while automatic installs are on (the shop, the proxy and this
+      # updater alike); healing above and requests below go on either way.
       if [ "$minutes" -gt 0 ] && [ "$(now)" -ge "$next_update" ]; then
-        due=1
         next_update=$(($(now) + minutes * 60))
+        if auto_on; then due=1; fi
       fi
       if [ "$due" = 1 ] && [ "$stop_requested" = 0 ]; then
         update_once || true
+        # After the shop's update, and only between switches (the lock is held): a failure
+        # here leaves this updater running, so shop updates go on.
+        [ "$stop_requested" = 1 ] || proxy_update || true
+        [ "$stop_requested" = 1 ] || self_update || true
       fi
+      repair_folders
       [ "$stop_requested" = 1 ] || take_request
       publish_status
+      # A full round done: a self-update before it is confirmed, the updater before removed.
+      confirm_handover
+      retire_other_updaters
       unlock
     fi
     [ "$stop_requested" = 0 ] || break
@@ -1457,6 +2475,18 @@ main() {
   if [ -f "$STATE_DIR/updater.log" ] && [ "$(wc -c < "$STATE_DIR/updater.log")" -gt 5242880 ]; then
     mv "$STATE_DIR/updater.log" "$STATE_DIR/updater.log.1"
   fi
+  case ${1:-} in
+    setup)
+      shift
+      UPDATER_MODE=single
+      setup "$@"
+      exit $?
+      ;;
+    selfcheck)
+      selfcheck
+      exit $?
+      ;;
+  esac
   case $UPDATER_MODE in
     single)
       check_single_settings || exit 2
@@ -1482,7 +2512,7 @@ main() {
   unset BUH_IMAGE
   # The shop (another user) may create its request file here but not remove others' (sticky)
   # nor list the folder; the updater owns it, so it can read and remove requests.
-  if [ -d "$CONTROL_DIR" ] && [ ! -L "$CONTROL_DIR" ]; then chmod 1733 "$CONTROL_DIR" 2>/dev/null || true; fi
+  repair_folders
 
   cmd=${1:-daemon}
   if [ "$cmd" = daemon ] && [ "$ONE_SHOT" = 1 ]; then cmd=once; fi
@@ -1491,6 +2521,7 @@ main() {
       daemon
       ;;
     once | update-now)
+      if [ "$cmd" = update-now ]; then INSTALL_WHY=manual; fi
       wait_for_lock || exit 2
       trap unlock EXIT
       rc=0
@@ -1519,11 +2550,32 @@ main() {
       trap unlock EXIT
       adopt
       ;;
+    self-update)
+      # As the daemon does: the updater handed over from watches the new one; the working one
+      # does a round (heal, status), confirms a handover, retires the one before, then checks.
+      if [ "$(updater_role)" = idle ]; then
+        watch_handover
+        exit 0
+      fi
+      wait_for_lock || exit 2
+      trap unlock EXIT
+      heal_once || true
+      proxy_heal || true
+      publish_status
+      confirm_handover
+      retire_other_updaters
+      self_update
+      ;;
+    update-proxy)
+      wait_for_lock || exit 2
+      trap unlock EXIT
+      proxy_update || true
+      ;;
     status)
       status
       ;;
     *)
-      echo "usage: updater.sh [daemon | once | update-now | heal | rollback [image] | status | adopt]" >&2
+      echo "usage: updater.sh [daemon | once | update-now | heal | rollback [image] | status | adopt | setup NAME | self-update | update-proxy | selfcheck]" >&2
       exit 2
       ;;
   esac

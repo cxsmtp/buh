@@ -2,12 +2,14 @@
 
 import React, { useState, useEffect } from 'react';
 import { BankTransferDetails, CartItem, Emirate, Order, PaymentMethod, PhoneVerificationConfig } from '@/types';
-import { UAE_EMIRATES, UAE_POPULAR_AREAS } from '@/data/initialData';
+import { UAE_EMIRATES } from '@/data/initialData';
+import { searchAreas, type UAEArea } from '@/data/uaeAreas';
 import { cartFils, formatAed, toFils } from '@/lib/money';
 import { useShop } from '@/lib/client/shop';
 import { postJson } from '@/lib/apiClient';
-import { nearestUAELocation, UAE_KEY_LOCATIONS } from '@/lib/uaeLocations';
-import { deliveryCheck, inUAE } from '@/lib/delivery';
+import { formatAccuracy, suggestAreaFromGps, UAE_KEY_LOCATIONS } from '@/lib/uaeLocations';
+import { deliveryCheck } from '@/lib/delivery';
+import { AreaCombobox } from './AreaCombobox';
 import { 
   X, 
   CheckCircle2, 
@@ -146,6 +148,9 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
   const [isLocating, setIsLocating] = useState(false);
   const [locationNotice, setLocationNotice] = useState<string | null>(null);
   const [showMapPicker, setShowMapPicker] = useState(false);
+  const [pinQuery, setPinQuery] = useState('');
+  // Said once when choosing an area also changed the emirate.
+  const [areaNote, setAreaNote] = useState('');
 
   // Customer Mobile OTP State
   const [isPhoneVerified, setIsPhoneVerified] = useState(false);
@@ -208,26 +213,33 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
       (pos) => {
         setIsLocating(false);
         const { latitude, longitude, accuracy } = pos.coords;
-        // Laptops and some phones report a network location (often another country, e.g. through a VPN):
-        // only a reading inside the UAE is used, and the address fields are only suggested, never forced.
-        if (!inUAE(latitude, longitude)) {
+        // Laptops and many phones indoors report a Wi-Fi or network location (sometimes another country,
+        // e.g. through a VPN). The pin is kept for the driver, but an area is only suggested from a
+        // precise reading close to a community we know; otherwise the customer chooses it.
+        const reading = suggestAreaFromGps(latitude, longitude, accuracy);
+        if (reading.kind === 'outside') {
           setGpsCoordinates(null);
           setLocationProblem(true);
           setLocationNotice('Your device’s location doesn’t look like the UAE (this happens with network or VPN locations). Please choose your emirate and area below.');
           return;
         }
         setGpsCoordinates({ lat: latitude, lng: longitude });
-        const near = nearestUAELocation(latitude, longitude);
-        const approx = accuracy > 1000 ? ` (about ${Math.round(accuracy / 1000)} km accuracy, please check)` : '';
-        if (near && !area) {
-          setEmirate(near.location.emirate);
-          setArea(near.location.name);
-          setLocationNotice(`📍 Location saved for the driver, near ${near.location.name}, ${near.location.emirate}${approx}.`);
-        } else if (near) {
-          // The customer already typed an area: never switch the emirate under it.
-          setLocationNotice(`📍 Location saved for the driver (near ${near.location.name}, ${near.location.emirate}${approx}). Your address above is kept.`);
+        const kept = area.trim() ? ' Your address above is kept.' : '';
+        if (reading.kind === 'approximate') {
+          setLocationProblem(true);
+          setLocationNotice(
+            `Your device gave an approximate location (${formatAccuracy(reading.accuracyM)}), so we saved it for the driver but didn’t guess your area.${kept || ' Please choose it below.'}`
+          );
+        } else if (reading.kind === 'unknown') {
+          setLocationNotice(`📍 Location saved for the driver.${kept || ' Please choose your area below.'}`);
+        } else if (!area.trim()) {
+          setEmirate(reading.location.emirate);
+          setArea(reading.location.name);
+          setAreaNote('');
+          setLocationNotice(`📍 Location saved for the driver, in or near ${reading.location.name}, ${reading.location.emirate}. Please check the area below.`);
         } else {
-          setLocationNotice(`📍 Location saved for the driver${approx}. Please choose your emirate and area below.`);
+          // The customer already typed an area: never switch the emirate under it.
+          setLocationNotice(`📍 Location saved for the driver (near ${reading.location.name}, ${reading.location.emirate}).${kept}`);
         }
       },
       () => {
@@ -244,9 +256,29 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
     setGpsCoordinates({ lat: loc.lat, lng: loc.lng });
     setEmirate(loc.emirate);
     setArea(loc.name);
+    setAreaNote('');
+    setLocationProblem(false);
     setLocationNotice(`📍 Pin dropped on: ${loc.name}, ${loc.emirate} (${loc.lat.toFixed(4)}°N, ${loc.lng.toFixed(4)}°E)`);
     setShowMapPicker(false);
   };
+
+  // An area chosen from the list: in another emirate, the emirate follows it.
+  const handlePickArea = (a: UAEArea) => {
+    setArea(a.name);
+    if (a.emirate !== emirate) {
+      setEmirate(a.emirate);
+      setAreaNote(`Emirate changed to ${a.emirate} for ${a.name}.`);
+    } else {
+      setAreaNote('');
+    }
+  };
+
+  // Communities with a known centre, for "Drop pin": searchable like the area field.
+  const pinMatches = pinQuery.trim()
+    ? searchAreas(pinQuery, emirate, 200)
+        .map((m) => UAE_KEY_LOCATIONS.find((l) => l.name === m.area.name && l.emirate === m.area.emirate))
+        .filter((l): l is (typeof UAE_KEY_LOCATIONS)[number] => Boolean(l))
+    : [...UAE_KEY_LOCATIONS.filter((l) => l.emirate === emirate), ...UAE_KEY_LOCATIONS.filter((l) => l.emirate !== emirate)];
 
   // Copy IBAN
   const handleCopyIban = () => {
@@ -553,7 +585,7 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
 
           {/* Section 2: UAE Delivery Address with GPS Pin Drop & Map Selector */}
           <div className="space-y-3">
-            <div className="flex items-center justify-between border-b border-stone-200 pb-1.5">
+            <div className="flex flex-wrap items-center justify-between gap-2 border-b border-stone-200 pb-1.5">
               <h3 className="text-xs font-bold text-stone-900 uppercase tracking-wider flex items-center gap-1.5">
                 <span>2. UAE Delivery Address & GPS Pin</span>
               </h3>
@@ -562,7 +594,7 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
                   type="button"
                   onClick={handleUseCurrentLocation}
                   disabled={isLocating}
-                  className="text-[11px] font-bold text-[#0f1c2e] bg-amber-100 hover:bg-amber-200 border border-amber-300 px-2.5 py-1 rounded-lg flex items-center gap-1 transition-colors"
+                  className="text-[11px] font-bold text-[#0f1c2e] bg-amber-100 hover:bg-amber-200 border border-amber-300 px-2.5 py-1 rounded-lg flex items-center gap-1 whitespace-nowrap transition-colors"
                 >
                   <Navigation className={`w-3 h-3 text-amber-700 ${isLocating ? 'animate-spin' : ''}`} />
                   <span>{isLocating ? 'Locating...' : 'Use My GPS'}</span>
@@ -570,7 +602,7 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
                 <button
                   type="button"
                   onClick={() => setShowMapPicker(!showMapPicker)}
-                  className="text-[11px] font-bold text-stone-800 bg-white hover:bg-stone-100 border border-stone-300 px-2.5 py-1 rounded-lg flex items-center gap-1 transition-colors"
+                  className="text-[11px] font-bold text-stone-800 bg-white hover:bg-stone-100 border border-stone-300 px-2.5 py-1 rounded-lg flex items-center gap-1 whitespace-nowrap transition-colors"
                 >
                   <MapPin className="w-3 h-3 text-[#c5a059]" />
                   <span>{showMapPicker ? 'Close Map' : 'Drop Pin on Map'}</span>
@@ -593,16 +625,32 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
                     <Crosshair className="w-4 h-4 text-[#c5a059]" />
                     <strong className="text-stone-900 text-xs">UAE Delivery Map Pin Selector</strong>
                   </div>
-                  <span className="text-[10px] text-stone-500">Tap any community or drop pin</span>
+                  <span className="text-[11px] text-stone-600">Tap your community</span>
                 </div>
 
+                <input
+                  type="search"
+                  aria-label="Search communities"
+                  placeholder="Search, e.g. Discovery Gardens, JLT, Yas"
+                  value={pinQuery}
+                  onChange={(e) => setPinQuery(e.target.value)}
+                  onKeyDown={(e) => {
+                    // Escape clears the search first; a second Escape closes checkout.
+                    if (e.key === 'Escape' && pinQuery) e.stopPropagation();
+                  }}
+                  className="w-full px-3 py-2 rounded-xl border border-stone-300 bg-white text-stone-900 placeholder:text-stone-400 font-medium focus:outline-none focus:ring-2 focus:ring-[#c5a059] text-xs"
+                />
+
                 {/* Quick Presets for Popular UAE Communities */}
-                <div className="flex flex-wrap gap-1.5 max-h-28 overflow-y-auto p-1 bg-white rounded-xl border border-stone-200">
-                  {UAE_KEY_LOCATIONS.map((loc) => {
+                <div className="flex flex-wrap gap-1.5 max-h-40 overflow-y-auto p-1 bg-white rounded-xl border border-stone-200">
+                  {pinMatches.length === 0 && (
+                    <p className="p-1.5 text-[11px] text-stone-600">No pin for that community yet. Type your area below, and use “Use My GPS” or a landmark for the driver.</p>
+                  )}
+                  {pinMatches.map((loc) => {
                     const isSelected = area === loc.name;
                     return (
                       <button
-                        key={loc.name}
+                        key={`${loc.emirate}|${loc.name}`}
                         type="button"
                         onClick={() => handleSelectMapLocation(loc)}
                         className={`px-2.5 py-1 rounded-lg text-[11px] font-semibold transition-all flex items-center gap-1 ${
@@ -613,7 +661,7 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
                       >
                         <MapPin className={`w-3 h-3 ${isSelected ? 'text-amber-300' : 'text-[#c5a059]'}`} />
                         <span>{loc.name}</span>
-                        <span className="text-[9px] opacity-70">({loc.emirate})</span>
+                        <span className="text-[10px]">({loc.emirate})</span>
                       </button>
                     );
                   })}
@@ -625,7 +673,7 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
                   <span className="font-mono font-bold text-stone-900">
                     {gpsCoordinates
                       ? `${gpsCoordinates.lat.toFixed(4)}°N, ${gpsCoordinates.lng.toFixed(4)}°E`
-                      : '25.1972°N, 55.2744°E (Dubai Central)'}
+                      : 'None yet'}
                   </span>
                 </div>
               </div>
@@ -634,12 +682,16 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
             {/* Address Input Grid */}
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-xs">
               <div>
-                <label className="block text-stone-800 font-semibold mb-1">
+                <label htmlFor="checkout-emirate" className="block text-stone-800 font-semibold mb-1">
                   Emirate <span className="text-red-500">*</span>
                 </label>
                 <select
+                  id="checkout-emirate"
                   value={emirate}
-                  onChange={(e) => setEmirate(e.target.value as Emirate)}
+                  onChange={(e) => {
+                    setEmirate(e.target.value as Emirate);
+                    setAreaNote('');
+                  }}
                   className="w-full px-3.5 py-2.5 rounded-xl border border-stone-300 bg-white text-stone-900 font-medium focus:outline-none focus:ring-2 focus:ring-[#c5a059] focus:bg-white text-xs"
                 >
                   {UAE_EMIRATES.map((em) => (
@@ -651,23 +703,27 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
               </div>
 
               <div>
-                <label className="block text-stone-800 font-semibold mb-1">
+                <label htmlFor="checkout-area" className="block text-stone-800 font-semibold mb-1">
                   Area / Neighborhood <span className="text-red-500">*</span>
                 </label>
-                <input
-                  type="text"
+                <AreaCombobox
+                  id="checkout-area"
                   required
-                  list="area-suggestions"
+                  emirate={emirate}
                   placeholder="e.g. Dubai Marina, Saadiyat, JVC"
                   value={area}
-                  onChange={(e) => setArea(e.target.value)}
+                  onChange={(t) => {
+                    setArea(t);
+                    setAreaNote('');
+                  }}
+                  onPick={handlePickArea}
                   className="w-full px-3.5 py-2.5 rounded-xl border border-stone-300 bg-white text-stone-900 placeholder:text-stone-400 font-medium focus:outline-none focus:ring-2 focus:ring-[#c5a059] focus:bg-white text-xs"
                 />
-                <datalist id="area-suggestions">
-                  {(UAE_POPULAR_AREAS[emirate] || []).map((a) => (
-                    <option key={a} value={a} />
-                  ))}
-                </datalist>
+                {areaNote && (
+                  <p role="status" className="mt-1 text-[11px] text-stone-700">
+                    {areaNote}
+                  </p>
+                )}
               </div>
 
               <div className="sm:col-span-2">

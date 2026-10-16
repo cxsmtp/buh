@@ -11,6 +11,7 @@ Everything the shop stores lives in one Docker volume and is backed up every 12 
 | Option | Use it? | Why |
 | --- | --- | --- |
 | **KVM VPS + Docker Compose** (this guide) | ✅ Recommended | One command to start. Updates switch between two copies without closing the shop, and a version that fails is rolled back on its own. HTTPS is automatic. The database, photos and receipts persist in a volume. Backups run on their own. The shop containers run read-only, as non-root, with no extra privileges. |
+| KVM VPS + Podman, images only | ✅ Supported | Nothing on the server but three published images (shop, HTTPS proxy, updater) and one settings file; set up with a few commands, then updates install themselves (a few seconds' pause at each switch). See "Hostinger VPS with Podman, images only". |
 | KVM VPS + PM2 + nginx | Possible | It works (see the end of this guide), but you look after Node, nginx, certbot and the data folder yourself. |
 | Shared / Cloud hosting (hPanel Node.js) | ❌ Not for this shop | The shop needs a persistent data folder for its database, a native SQLite module, and a process that keeps running for the 12-hourly backups. hPanel Node.js hosting is not built for that. |
 
@@ -266,27 +267,57 @@ Once, at a quiet time. The shop keeps serving except for a second or two while C
 
 The version (`BUH-xx.xx.xx`) shows next to the Admin Hub title.
 
-### Podman on Windows (one container)
+### Private images: log Podman in once
 
-A shop that runs as one Podman container (no Caddy, no second copy) gets the same updater in single-container mode: it checks for a new version every 15 minutes, saves the database first, tries the new version beside the shop (same data, no port) and switches only when it answers; Settings → Versions can update or switch versions; a shop that stops is started again. One difference: **at the switch the shop is closed for a few seconds** (the old container stops, the new one takes the port). If the new container does not answer on the port, the old one is put back and an alert is written.
+The images (`ghcr.io/cxsmtp/buh`, `buh-updater`, `buh-proxy`) are private. Podman needs a login to download them, and the updater uses the same login: every `setup` line mounts the folder that holds it (read-only), because Podman's Docker API does not use Podman's own login for the updater's downloads (tested with Podman 4.9 and 5.7).
 
-Turn it on once, in the shop folder on that computer, with your container name, port and data volume (`podman ps` shows them; these are the defaults):
+1. **A token that can only read the images.** GitHub → your picture → Settings → Developer settings → Personal access tokens → Tokens (classic) → Generate new token (classic). Tick only `read:packages`. Give it a long expiry (a year) and put the date in your calendar.
+2. **Log in** (it asks for your GitHub name and the token as the password; the token is not shown):
+   - Windows, in Command Prompt or PowerShell (kept in `%USERPROFILE%\.config\containers\auth.json`):
+     ```bat
+     podman login ghcr.io -u YOUR-GITHUB-NAME
+     ```
+   - Linux server, as root. `--authfile` matters: without it root's login is kept in `/run/user/0`, which is emptied at every restart:
+     ```bash
+     podman login ghcr.io -u YOUR-GITHUB-NAME --authfile /root/.config/containers/auth.json
+     ```
+     ```bash
+     chmod 600 /root/.config/containers/auth.json
+     ```
+     (A rootless user: `--authfile ~/.config/containers/auth.json`.) The folder must belong to the user Podman runs as (root here): the updater runs as root without the right to read other users' files, and `setup` refuses, with the `chown` to type, if it cannot read it.
+3. **When the token expires** (Settings → Versions then says "the registry login has expired"; updates wait, the shop keeps running): make a new token, run the same login line again, and that is all; the updater uses the new login at its next check. Delete the old token on GitHub.
+
+`setup` checks the login before it changes anything, and says what is missing.
+
+### One Podman container: automatic updates from images only
+
+A shop that runs as one Podman container (no Caddy, no second copy), on a Windows laptop or on a Linux server, gets the same updater, published as an image: nothing is cloned or downloaded first, and no file is kept on the computer. It checks for a new version every 15 minutes, saves the database first, tries the new version beside the shop (same data, no port) and switches only when it answers; Settings → Versions can update or switch versions; a shop that stops is started again; and the updater keeps itself (and the HTTPS proxy, if any) up to date. One difference from the Compose setup: **at the switch the shop is closed for a few seconds** (the old container stops, the new one takes the port; behind the HTTPS proxy, visitors' requests wait for it instead of failing). If the new container does not answer, the old one is put back and an alert is written.
+
+**Turn it on (Windows).** With the Podman machine running, one line (use your container's name if it is not `beautifuluaehome`; `podman ps` shows it). In **Command Prompt (cmd), not PowerShell**:
 
 ```bat
-scripts\podman-autoupdate.bat beautifuluaehome 443 beautifuluaehome-data
+for /f "delims=" %S in ('podman info --format "{{if index .Host.RemoteSocket.Path 0 | eq 47}}{{.Host.RemoteSocket.Path}}{{else}}{{slice .Host.RemoteSocket.Path 7}}{{end}}"') do podman run --rm --pull=newer --security-opt label=disable -v %S:/var/run/docker.sock -e SOCK=%S -v "%USERPROFILE%\.config\containers:/run/buh/registry-auth:ro" ghcr.io/cxsmtp/buh-updater:latest setup beautifuluaehome
 ```
 
-For plain-http use on the same computer (test mode), add the settings as a fourth argument:
+Or in PowerShell:
 
-```bat
-scripts\podman-autoupdate.bat beautifuluaehome 443 beautifuluaehome-data "TZ=Asia/Dubai INSECURE_COOKIES=1 OTP_DEV_MODE=true"
+```powershell
+$S = (podman info --format '{{.Host.RemoteSocket.Path}}') -replace '^unix://', ''; podman run --rm --pull=newer --security-opt label=disable -v "${S}:/var/run/docker.sock" -e "SOCK=$S" -v "$env:USERPROFILE\.config\containers:/run/buh/registry-auth:ro" ghcr.io/cxsmtp/buh-updater:latest setup beautifuluaehome
 ```
 
-The script finds Podman's socket inside the Podman machine, creates the updater's volumes, re-creates the shop container with two more volumes (requests and status for Settings → Versions), and starts the updater as `beautifuluaehome-updater` with `--restart=always`. The re-created container keeps the image, the data volume, the port and the container's own settings (every `-e`, secrets included: they are kept in a file in the updater's volume that only the updater can read, and never written to its log); the shop pauses for a few seconds. The port argument is used only for a new shop. A fifth argument sets the minutes between checks (`0` = only when you ask). Run it again to change a setting or to get a newer updater.
+Both find Podman's socket, drop a leading `unix://` that some Podman versions print, pass the registry login folder (log in first: "Private images" above), and pull the newest updater image first (`--pull=newer`).
+
+**Turn it on (Linux server).** See "Hostinger VPS with Podman, images only" below for the whole server; the line itself, with Podman's socket on (`systemctl enable --now podman.socket`), is:
+
+```bash
+S=$(podman info --format '{{.Host.RemoteSocket.Path}}'); S=${S#unix://}; podman run --rm --pull=newer --security-opt label=disable -v "$S:/var/run/docker.sock" -e "SOCK=$S" -v "$HOME/.config/containers:/run/buh/registry-auth:ro" ghcr.io/cxsmtp/buh-updater:latest setup beautifuluaehome
+```
+
+`setup` re-creates the shop container with two more volumes (requests and status for Settings → Versions), keeping its image, data volume, port binding (e.g. `127.0.0.1:3000` stays `127.0.0.1:3000`) and its own settings (every `-e` and `--env-file` value, secrets included: they are kept in a file in the updater's volume that only the updater can read, and never written to its log or output); the shop pauses for a few seconds. Then it starts the updater as `beautifuluaehome-updater` with `--restart=always`, and prints what it did. Run the same line again any time: a shop that is already set up is left as it is. Options after the name: `--minutes 0` (only when you ask), `--env "KEY=VALUE KEY=VALUE"` (add settings), `--volume NAME` and `--port PORT` (for a new shop), `--proxy DOMAIN --email ADDRESS` (HTTPS in front, Linux server). With `--proxy`, a new shop gets `TRUST_PROXY=1` and `NEXT_PUBLIC_APP_URL=https://DOMAIN`; an existing shop keeps its own settings, and `setup` points out when `TRUST_PROXY=1` is missing or `NEXT_PUBLIC_APP_URL` is another address, with the `--env` to add.
 
 It changes nothing, and says why, when:
 
-- the container keeps its data in another volume (it prints the one it found: run it again with that name);
+- the container keeps its data in another volume than `--volume` names, or in a host folder;
 - another container also uses the data volume (two shops must never share one database: pass that container's name if it is the shop, or remove it);
 - the container has something the updater cannot carry over, such as a folder or another volume mounted, or a port other than the shop's (it lists them; start the shop without them first).
 
@@ -308,18 +339,142 @@ It changes nothing, and says why, when:
   ```bat
   podman exec beautifuluaehome-updater rollback
   ```
-- Turn automatic updates off (the shop keeps running):
+- Only install new versions when you ask: untick **Install new versions automatically** in Settings → Versions (the updater keeps healing the shop, and "Update to the latest" still works; the page shows when it last checked and what it found, and **Installed on this server** lists each version installed, with its digest, when and why).
+- Remove the updater altogether (the shop keeps running):
   ```bat
   podman rm -f beautifuluaehome-updater
   ```
 
-To stop the shop on purpose, stop the updater first (`podman stop beautifuluaehome-updater`), or it starts the shop again. Stopping the updater (or running the script again) lets a switch that is under way finish, up to 10 minutes; a new one is not started.
+To stop the shop on purpose, stop the updater first (`podman stop beautifuluaehome-updater`), or it starts the shop again. Stopping the updater (or running `setup` again) lets a switch that is under way finish, up to 10 minutes; a new one is not started.
 
-**After Windows restarts.** The Podman machine does not start with Windows by itself: run `podman machine start` (or let Podman Desktop start it at login). `--restart=always` brings a container back only through `podman-restart.service` inside the machine, so the script turns that on (rootless, the default: `loginctl enable-linger` and the user service; rootful: the system service). If it could not, it says so; then, after a restart, run `podman machine start` and `podman start beautifuluaehome-updater`, and the updater starts the shop.
+**The updater updates itself.** On the same schedule it pulls `ghcr.io/cxsmtp/buh-updater:latest`; a newer image is started beside it as `beautifuluaehome-updater-new`, checked (it keeps running and reaches Podman), and then takes over the name. The old one stays, idle, as `beautifuluaehome-updater-old` until the new one has done one full round (checked the shop and written the status for Settings → Versions); then the new one removes it. If the new one does not finish a round within 10 minutes, the old one removes it, takes the name back and goes on, writes an alert, and that image is not tried again. Never during a shop switch. If the new one does not even start, it is removed at once and the running updater carries on.
 
-A shop on a version before BUH-02.00.00 has no database snapshot tool, so the updater does not switch away from it: update it once by hand (the two Podman commands in Settings → Versions). If the image is private, sign in once with `podman login ghcr.io`. The updater controls Podman through its socket; [docs/security.md](docs/security.md) explains the trade-off.
+**The HTTPS proxy and the updater restart only when they changed.** Their images are built so that a release that does not touch them publishes the very same image, so most releases restart neither. A new proxy image means a pause of a second or two without HTTPS (the new proxy is created first, then the old one stops and the new one starts; both need ports 80 and 443); if it does not come up, the old one is started again and an alert is written.
 
-**Not yet tried on a real Windows Podman machine:** the script and this set-up were tested against Docker and Podman 4.9 on Linux (the same steps and checks, through the same Docker-compatible API), not on Windows. In particular, finding the socket path, the `podman machine ssh` step for restarts, and pulling a private image with the machine's `podman login` have not been seen working there.
+**After a restart of the computer.** The shop and the updater have `--restart=always`, but Podman has no background service that starts containers at boot: per Podman's documentation, `--restart=always` containers come back after a reboot only through `podman-restart.service`, which is off by default. We have not been able to check this on a Windows Podman machine. So, once:
+
+- Windows: let Podman Desktop start at login and start the machine (Podman Desktop → Settings → Preferences), and turn the service on inside the machine:
+  ```bat
+  podman machine ssh "loginctl enable-linger && systemctl --user enable podman-restart.service"
+  ```
+  (a rootful machine: `podman machine ssh "sudo systemctl enable podman-restart.service"`). If the shop still is not back after a restart, start the updater; it starts the shop:
+  ```bat
+  podman start beautifuluaehome-updater
+  ```
+- Linux server: `systemctl enable podman-restart.service` (in the server section below).
+
+A shop on a version before BUH-02.00.00 has no database snapshot tool, so the updater does not switch away from it: update it once by hand (the two Podman commands in Settings → Versions). The updater controls Podman through its socket; [docs/security.md](docs/security.md) explains the trade-off. `scripts\podman-autoupdate.bat` (in a checkout) runs the same line for you.
+
+**What was tested:** `setup`, the updater, its self-update and the proxy were tested with real containers against Docker, Podman 4.9 (Ubuntu 24.04) and Podman 5.7 (Ubuntu 26.04), through the same Docker-compatible API. Not on a Windows Podman machine: finding the socket, the restart after a reboot and the `podman machine ssh` line have not been seen working there.
+
+## Hostinger VPS with Podman, images only
+
+The shop on a Hostinger KVM VPS with Ubuntu 26.04 LTS (24.04 works too), from published images only: no code, no Compose, nothing cloned on the server. Three containers: the shop (on `127.0.0.1:3000`, not reachable from outside), `buh-proxy` (Caddy: HTTPS with free certificates, HTTP → HTTPS, www → the domain) and `buh-updater` (updates, self-healing; it keeps the other two and itself up to date). Log in as root (`ssh root@your-server-ip`); type each line on its own.
+
+**No domain yet?** The server's own name, `srvNNNN.hstgr.cloud` (hPanel → VPS → Overview), works for HTTPS as a temporary domain: use it wherever `shop.example.com` appears below. To move to your own domain later (DNS pointing at the server first), run step 7 again with the new domain and its address:
+```bash
+podman run --rm --pull=newer --security-opt label=disable -v /run/podman/podman.sock:/var/run/docker.sock -e SOCK=/run/podman/podman.sock -v /root/.config/containers:/run/buh/registry-auth:ro ghcr.io/cxsmtp/buh-updater:latest setup beautifuluaehome --proxy shop.example.com --email you@example.com --env "NEXT_PUBLIC_APP_URL=https://shop.example.com"
+```
+
+1. **Firewall in hPanel** (VPS → Security → Firewall): add a rule set that accepts TCP 22, TCP 80, TCP 443 and UDP 443, and drops everything else; activate it.
+2. **Updates and Podman:**
+   ```bash
+   apt update && apt upgrade -y
+   ```
+   ```bash
+   apt install -y podman unattended-upgrades ufw
+   ```
+3. **Podman's API socket, and containers back after a reboot:**
+   ```bash
+   systemctl enable --now podman.socket
+   ```
+   ```bash
+   systemctl enable podman-restart.service
+   ```
+4. **The shop's settings** (one file, readable by root only from the moment it exists; replace the domain):
+   ```bash
+   install -d -m 700 /etc/buh && install -m 600 /dev/null /etc/buh/shop.env
+   ```
+   ```bash
+   printf 'NEXT_PUBLIC_APP_URL=https://shop.example.com\nTRUST_PROXY=1\nTZ=Asia/Dubai\n' > /etc/buh/shop.env
+   ```
+   Other settings (`NEXT_PUBLIC_SUPPORT_EMAIL`, `BACKUP_PASSPHRASE`, …) go in the same file, one `KEY=value` a line, without quotes (`nano /etc/buh/shop.env`), before step 7: `setup` keeps a copy of the shop's settings, so later changes go in with `--env "KEY=value"` on the step 7 line. `TRUST_PROXY=1` is right only behind the proxy: it is the proxy that sets the visitor's address.
+5. **The shop**, on this server only, with every protection:
+   ```bash
+   podman run -d --name beautifuluaehome --restart=always -p 127.0.0.1:3000:3000 -v beautifuluaehome-data:/data --env-file /etc/buh/shop.env --read-only --tmpfs /tmp --cap-drop ALL --security-opt no-new-privileges:true --pids-limit 512 ghcr.io/cxsmtp/buh:latest
+   ```
+   (The images are private: log in first, as in "Private images" above: `podman login ghcr.io -u YOUR-GITHUB-NAME --authfile /root/.config/containers/auth.json`, then `chmod 600 /root/.config/containers/auth.json`.)
+6. **The first admin password** (printed once, on the first start):
+   ```bash
+   podman logs beautifuluaehome
+   ```
+7. **Automatic updates and HTTPS** (replace the domain and the e-mail, where Let's Encrypt writes before a certificate expires). This starts the proxy and the updater:
+   ```bash
+   podman run --rm --pull=newer --security-opt label=disable -v /run/podman/podman.sock:/var/run/docker.sock -e SOCK=/run/podman/podman.sock -v /root/.config/containers:/run/buh/registry-auth:ro ghcr.io/cxsmtp/buh-updater:latest setup beautifuluaehome --proxy shop.example.com --email you@example.com
+   ```
+   The domain's DNS (an `A` record for `shop.example.com`, and `www.shop.example.com` too) must point at the server first; the certificate follows within a minute. Then open https://shop.example.com.
+8. **Harden the server.**
+   - SSH with a key instead of a password: add your public key in hPanel (VPS → Settings → SSH keys), or from Windows PowerShell on your laptop:
+     ```powershell
+     type $env:USERPROFILE\.ssh\id_ed25519.pub | ssh root@your-server-ip "mkdir -p ~/.ssh && chmod 700 ~/.ssh && cat >> ~/.ssh/authorized_keys && chmod 600 ~/.ssh/authorized_keys"
+     ```
+     (no key yet: `ssh-keygen -t ed25519` first). **Then open a new window and check that `ssh root@your-server-ip` logs in without a password**, and only then turn passwords off; otherwise you lock yourself out (hPanel's browser terminal still works then). The file is named `00-` because the first value SSH reads wins over the server's own files (such as `50-cloud-init.conf`):
+     ```bash
+     printf 'PasswordAuthentication no\nKbdInteractiveAuthentication no\nPermitRootLogin prohibit-password\n' > /etc/ssh/sshd_config.d/00-buh.conf
+     ```
+     ```bash
+     sshd -t && systemctl reload ssh
+     ```
+     Check that it applies; it must print `passwordauthentication no` and `permitrootlogin without-password`:
+     ```bash
+     sshd -T | grep -Ei 'passwordauthentication|permitrootlogin'
+     ```
+   - Security updates install themselves:
+     ```bash
+     dpkg-reconfigure -f noninteractive unattended-upgrades
+     ```
+   - The server's own firewall too (allow SSH **before** turning it on):
+     ```bash
+     ufw allow 22/tcp && ufw allow 80/tcp && ufw allow 443
+     ```
+     ```bash
+     ufw --force enable
+     ```
+
+Day to day: Settings → Versions in the Admin Hub; the commands in the section above (`podman logs -f beautifuluaehome-updater`, `podman exec beautifuluaehome-updater updater-status`); `podman logs -f beautifuluaehome-proxy` for HTTPS. A rootless Podman user instead of root also works: run steps 3 and 7 as that user with `systemctl --user enable --now podman.socket podman-restart.service` and `loginctl enable-linger`, and in step 7 use the socket that `podman info --format '{{.Host.RemoteSocket.Path}}'` prints; the proxy needs ports 80 and 443, which a rootless user may not open by default (`sysctl net.ipv4.ip_unprivileged_port_start=80`), so root is simpler.
+
+**Moving the laptop shop to the server** (its orders, products, photos and settings):
+
+1. On the laptop, in the Admin Hub: Settings → System & backups → **Back up now**. Then, in the Windows command prompt, list the backups and copy the newest out of the container and onto the server (use its real name):
+   ```bat
+   podman exec beautifuluaehome ls /data/backups
+   ```
+   ```bat
+   podman cp beautifuluaehome:/data/backups/buh-backup-20261016-1200.tar.gz.enc .
+   ```
+   ```bat
+   scp buh-backup-20261016-1200.tar.gz.enc root@your-server-ip:/root/
+   ```
+2. On the server: stop the updater, then the shop, and restore over the new shop's data (the data before is kept aside in `replaced-<time>/`). The passphrase is the laptop shop's `BACKUP_PASSPHRASE`; it is typed without showing and passed by name only, so it is not on a command line or in the shell history (a backup ending in `.tar.gz`, not `.enc`, needs none: press Enter):
+   ```bash
+   podman stop beautifuluaehome-updater && podman stop beautifuluaehome
+   ```
+   ```bash
+   chmod 644 /root/buh-backup-20261016-1200.tar.gz.enc
+   ```
+   ```bash
+   read -rs -p 'Backup passphrase: ' BACKUP_PASSPHRASE && export BACKUP_PASSPHRASE
+   ```
+   ```bash
+   podman run --rm -v beautifuluaehome-data:/data -v /root/buh-backup-20261016-1200.tar.gz.enc:/restore/buh-backup-20261016-1200.tar.gz.enc:ro -e BACKUP_PASSPHRASE --entrypoint node ghcr.io/cxsmtp/buh:latest scripts/restore-backup.mjs /restore/buh-backup-20261016-1200.tar.gz.enc /data --replace
+   ```
+   ```bash
+   unset BACKUP_PASSPHRASE
+   ```
+   ```bash
+   podman start beautifuluaehome && podman start beautifuluaehome-updater
+   ```
+3. Sign in with the new one-time password from `podman logs beautifuluaehome` (the admin account is not in backups), re-enter the courier and SMS keys, and follow the Admin Hub's banner about passkeys (section 4).
 
 ## 6. Logs and health
 

@@ -99,3 +99,62 @@ input::placeholder, textarea::placeholder {
     padding: 10px;
   }
 }
+
+/* Sheets (product, filters, search): slide up from the bottom on phones, fade in on desktop. */
+@media (prefers-reduced-motion: no-preference) {
+  .sheet-up {
+    animation: sheet-up 0.24s cubic-bezier(0.2, 0.8, 0.2, 1);
+  }
+  .sheet-fade {
+    animation: sheet-fade 0.18s ease-out;
+  }
+  .sheet-down {
+    animation: sheet-down 0.2s cubic-bezier(0.2, 0.8, 0.2, 1);
+  }
+}
+@keyframes sheet-up {
+  from { transform: translateY(100%); }
+  to { transform: translateY(0); }
+}
+@keyframes sheet-down {
+  from { transform: translateY(-1.5rem); opacity: 0; }
+  to { transform: translateY(0); opacity: 1; }
+}
+@keyframes sheet-fade {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+/* Someone who asked their device for less motion gets none: no ticker, no smooth scrolling. */
+@media (prefers-reduced-motion: reduce) {
+  .animate-marquee-runner {
+    animation: none;
+  }
+  html {
+    scroll-behavior: auto !important;
+  }
+  *, *::before, *::after {
+    transition-duration: 0.01ms !important;
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+  }
+}
+
+/* A photo that could not load shows its grey box, not its description spilling over the card. */
+img.photo {
+  color: transparent;
+}
+
+/* A clear ring on whatever the keyboard is on (mouse and touch taps show none). */
+a:focus-visible,
+button:focus-visible,
+[tabindex]:focus-visible,
+summary:focus-visible {
+  outline: 2px solid #9f7e38;
+  outline-offset: 2px;
+}
+
+/* The phone tab bar sits above the home indicator on phones that have one. */
+.pb-safe {
+  padding-bottom: env(safe-area-inset-bottom, 0px);
+}

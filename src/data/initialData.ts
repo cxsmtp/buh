@@ -11,16 +11,6 @@ export const UAE_EMIRATES = [
   'Umm Al Quwain',
 ] as const;
 
-export const UAE_POPULAR_AREAS: Record<string, string[]> = {
-  Dubai: ['Dubai Marina', 'Downtown Dubai', 'Palm Jumeirah', 'Jumeirah 1, 2 & 3', 'Al Barsha', 'Dubai Hills Estate', 'Umm Suqeim', 'Mirdif', 'Arabian Ranches', 'Jumeirah Village Circle (JVC)', 'Al Wasl', 'Business Bay'],
-  'Abu Dhabi': ['Saadiyat Cultural District', 'Yas Island', 'Al Reem Island', 'Al Bateen', 'Al Raha Beach', 'Khalifa City', 'Corniche'],
-  Sharjah: ['Al Majaz Waterfront', 'Al Heerah Beach', 'Muwaileh', 'Al Taawun', 'Al Khan'],
-  Ajman: ['Ajman Corniche', 'Al Nuaimiya', 'Al Rashidiya'],
-  'Ras Al Khaimah': ['Al Hamra Village', 'Mina Al Arab', 'Khuzam'],
-  Fujairah: ['Fujairah Beach', 'Al Faseel', 'Dibba'],
-  'Umm Al Quwain': ['Al Salama', 'Umm Al Quwain Marina'],
-};
-
 // No account until the owner enters the real one (Admin Hub → Logo & Marquee → Bank transfer details).
 export const INITIAL_BANK_DETAILS: BankTransferDetails = {
   bankName: '',

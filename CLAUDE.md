@@ -36,5 +36,10 @@ Read AGENTS.md first: this is Next.js 16, check `node_modules/next/dist/docs/` b
 - **Defaults are the safe, focused choice; "everything" is opt-in.**
 - **The owner runs containers with Podman, not Docker.** Give `podman` commands in replies and docs. The image is
   `ghcr.io/cxsmtp/buh` (not `beautifuluaehome`, which is a container/volume name); data volume `beautifuluaehome-data`.
+- **The owner keeps no code locally**: only the published images. Live today on their Windows laptop (container
+  `beautifuluaehome`, 127.0.0.1:3000); final home a Hostinger Linux VPS with Podman. Setup and updates must work
+  from the images alone (no git clone, no scripts on disk).
+- **Not VAT-registered.** UAE VAT (TRN, tax invoices, returns) is opt-in and off by default; warn the owner as
+  12-month sales approach the AED 375,000 mandatory registration threshold.
 - **Every commit reaches main.** Nothing is left on a branch: each piece of work ends with its pull request merged
   (green CI, version bump, changelog), then the branch is reset to main.

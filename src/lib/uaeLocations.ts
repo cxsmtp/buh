@@ -1,7 +1,8 @@
 import type { Emirate } from '@/types';
+import { UAE_AREAS } from '@/data/uaeAreas';
 import { inUAE } from './delivery';
 
-/** Well-known UAE communities, for "Drop pin on map" and to suggest an area from a GPS reading. */
+/** Communities whose centre we know, for "Drop pin" and to suggest an area from a precise GPS reading. */
 
 export interface UAEKnownLocation {
   name: string;
@@ -10,50 +11,12 @@ export interface UAEKnownLocation {
   lng: number;
 }
 
-export const UAE_KEY_LOCATIONS: UAEKnownLocation[] = [
-  // Dubai
-  { name: 'Dubai Marina', emirate: 'Dubai', lat: 25.0772, lng: 55.1396 },
-  { name: 'Downtown Dubai / Burj Khalifa', emirate: 'Dubai', lat: 25.1972, lng: 55.2744 },
-  { name: 'Palm Jumeirah', emirate: 'Dubai', lat: 25.1124, lng: 55.1390 },
-  { name: 'JBR (Jumeirah Beach Residence)', emirate: 'Dubai', lat: 25.0805, lng: 55.1364 },
-  { name: 'Jumeirah Village Circle (JVC)', emirate: 'Dubai', lat: 25.0597, lng: 55.2078 },
-  { name: 'Business Bay', emirate: 'Dubai', lat: 25.1837, lng: 55.2666 },
-  { name: 'Arabian Ranches', emirate: 'Dubai', lat: 25.0534, lng: 55.2655 },
-  { name: 'Dubai Hills Estate', emirate: 'Dubai', lat: 25.1122, lng: 55.2536 },
-  { name: 'Al Barsha', emirate: 'Dubai', lat: 25.1118, lng: 55.2039 },
-  { name: 'Mirdif', emirate: 'Dubai', lat: 25.2167, lng: 55.4167 },
-  { name: 'Deira', emirate: 'Dubai', lat: 25.2697, lng: 55.3095 },
-  { name: 'Bur Dubai', emirate: 'Dubai', lat: 25.2532, lng: 55.2974 },
-  { name: 'Dubai Silicon Oasis', emirate: 'Dubai', lat: 25.1245, lng: 55.3789 },
-  
-  // Abu Dhabi
-  { name: 'Corniche / Downtown', emirate: 'Abu Dhabi', lat: 24.4697, lng: 54.3435 },
-  { name: 'Saadiyat Island', emirate: 'Abu Dhabi', lat: 24.5422, lng: 54.4372 },
-  { name: 'Yas Island', emirate: 'Abu Dhabi', lat: 24.4962, lng: 54.6064 },
-  { name: 'Al Reem Island', emirate: 'Abu Dhabi', lat: 24.4975, lng: 54.4069 },
-  { name: 'Khalifa City', emirate: 'Abu Dhabi', lat: 24.4258, lng: 54.5800 },
-  { name: 'Al Ain Central', emirate: 'Abu Dhabi', lat: 24.2075, lng: 55.7447 },
-
-  // Sharjah
-  { name: 'Al Majaz Waterfront', emirate: 'Sharjah', lat: 25.3283, lng: 55.3854 },
-  { name: 'Al Nahda', emirate: 'Sharjah', lat: 25.3012, lng: 55.3725 },
-  { name: 'Muwailih Commercial', emirate: 'Sharjah', lat: 25.3060, lng: 55.4590 },
-  { name: 'Al Taawun', emirate: 'Sharjah', lat: 25.3167, lng: 55.3722 },
-
-  // Ajman
-  { name: 'Ajman Corniche', emirate: 'Ajman', lat: 25.4111, lng: 55.4350 },
-  { name: 'Al Nuaimiya', emirate: 'Ajman', lat: 25.3875, lng: 55.4560 },
-
-  // Ras Al Khaimah
-  { name: 'Al Marjan Island', emirate: 'Ras Al Khaimah', lat: 25.6800, lng: 55.7400 },
-  { name: 'Al Hamra Village', emirate: 'Ras Al Khaimah', lat: 25.6989, lng: 55.7878 },
-
-  // Fujairah
-  { name: 'Fujairah City Center', emirate: 'Fujairah', lat: 25.1288, lng: 56.3265 },
-
-  // Umm Al Quwain
-  { name: 'Al Salamah / UAQ Marina', emirate: 'Umm Al Quwain', lat: 25.5647, lng: 55.5552 },
-];
+export const UAE_KEY_LOCATIONS: UAEKnownLocation[] = UAE_AREAS.filter((a) => a.lat !== undefined && a.lng !== undefined).map((a) => ({
+  name: a.name,
+  emirate: a.emirate,
+  lat: a.lat!,
+  lng: a.lng!,
+}));
 
 /** Distance in km (haversine). */
 export function kmBetween(a: { lat: number; lng: number }, b: { lat: number; lng: number }): number {
@@ -64,11 +27,16 @@ export function kmBetween(a: { lat: number; lng: number }, b: { lat: number; lng
   return 6371 * 2 * Math.asin(Math.sqrt(h));
 }
 
+/** A community is suggested only within this distance of its centre… */
+export const SUGGEST_WITHIN_KM = 1.5;
+/** …and only from a reading this precise (metres). Wi-Fi and network locations are often ±1–5 km. */
+export const SUGGEST_MAX_ACCURACY_M = 300;
+
 /**
  * The nearest known community to a GPS reading, only if the reading is in the UAE and within
- * `maxKm` of one; otherwise null (a guess would put the customer in the wrong emirate).
+ * `maxKm` of one; otherwise null (a guess would put the customer in the wrong community).
  */
-export function nearestUAELocation(lat: number, lng: number, maxKm = 15): { location: UAEKnownLocation; km: number } | null {
+export function nearestUAELocation(lat: number, lng: number, maxKm = SUGGEST_WITHIN_KM): { location: UAEKnownLocation; km: number } | null {
   if (!inUAE(lat, lng)) return null;
   let best: { location: UAEKnownLocation; km: number } | null = null;
   for (const loc of UAE_KEY_LOCATIONS) {
@@ -76,4 +44,35 @@ export function nearestUAELocation(lat: number, lng: number, maxKm = 15): { loca
     if (!best || km < best.km) best = { location: loc, km };
   }
   return best && best.km <= maxKm ? best : null;
+}
+
+export type GpsSuggestion =
+  | { kind: 'outside' }
+  /** Accuracy worse than SUGGEST_MAX_ACCURACY_M: keep the pin for the driver, guess nothing. */
+  | { kind: 'approximate'; accuracyM: number }
+  /** Precise, but no known community centre within SUGGEST_WITHIN_KM. */
+  | { kind: 'unknown' }
+  | { kind: 'area'; location: UAEKnownLocation; km: number };
+
+/**
+ * What a GPS reading tells us about the customer's area. Only a precise reading (≤ 300 m) within
+ * 1.5 km of a known community suggests that community; a laptop's ±2 km Wi-Fi location once
+ * "found" a customer in Discovery Gardens 12 km away in Arabian Ranches.
+ */
+export function suggestAreaFromGps(lat: number, lng: number, accuracyM: number): GpsSuggestion {
+  if (!inUAE(lat, lng)) return { kind: 'outside' };
+  // A missing or nonsense accuracy is treated as approximate, never as precise.
+  if (!(Number.isFinite(accuracyM) && accuracyM >= 0 && accuracyM <= SUGGEST_MAX_ACCURACY_M)) {
+    return { kind: 'approximate', accuracyM: Number.isFinite(accuracyM) && accuracyM > 0 ? accuracyM : Infinity };
+  }
+  const near = nearestUAELocation(lat, lng);
+  return near ? { kind: 'area', ...near } : { kind: 'unknown' };
+}
+
+/** "± 2 km", "± 1.5 km", "± 450 m" (unknown: "unknown accuracy"). */
+export function formatAccuracy(m: number): string {
+  if (!Number.isFinite(m)) return 'unknown accuracy';
+  if (m < 1000) return `± ${Math.round(m / 10) * 10} m`;
+  const km = m / 1000;
+  return `± ${km < 10 ? Math.round(km * 10) / 10 : Math.round(km)} km`;
 }

@@ -1,0 +1,46 @@
+# The shop's protections, shared by every Caddy in front of it (so they cannot drift):
+#   deploy/Caddyfile         Docker Compose (blue/green), through shop.caddy
+#   deploy/ci/Caddyfile      the zero-downtime test in CI, through shop.caddy
+#   deploy/proxy/Caddyfile   the buh-proxy image (one shop container on a Podman server)
+# Imported at the top of each Caddyfile; it only defines snippets.
+
+# Inside the site block.
+(shop_site) {
+	encode zstd gzip
+
+	# Product photos are uploaded through the admin hub (max ~12 MB per request).
+	request_body {
+		max_size 12MB
+	}
+
+	# HSTS, CSP and the other security headers come from the app (next.config.ts); not set
+	# here, so they are not sent twice.
+	header {
+		-Server
+		-X-Powered-By
+	}
+
+	log {
+		output stdout
+		format console
+	}
+}
+
+# Inside reverse_proxy: wait for a healthy shop instead of failing while it switches.
+(shop_upstream) {
+	# Keep trying for up to 30 s (covers a restart or a version switch), every 250 ms. A
+	# request that never reached the shop is always retried; one that did, only if a GET.
+	lb_try_duration 30s
+	lb_try_interval 250ms
+
+	# Active health checks: traffic goes only to a copy whose /api/health answers 200.
+	health_uri /api/health
+	health_interval 2s
+	health_timeout 2s
+	health_status 200
+	health_fails 1
+
+	# The real visitor address, for per-address limits (the app trusts it with TRUST_PROXY=1).
+	# Set here, so a visitor cannot fake it.
+	header_up X-Real-IP {remote_host}
+}
