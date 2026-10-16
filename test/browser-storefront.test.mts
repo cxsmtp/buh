@@ -319,14 +319,41 @@ for (const width of [375, 1280]) {
       assert.equal(await nav.isVisible(), false, 'no tab bar on a computer');
     } else {
       for (const name of ['Home', 'Search', 'Bag', 'Orders']) await nav.getByRole('button', { name: new RegExp(`^${name}`) }).waitFor();
-      // Scrolled to the very bottom, the last thing on the page sits above the tab bar and the Help button.
+      // Help takes the tab bar's right-hand slot (regression: it floated over the second card).
+      const navBox = (await nav.boundingBox())!;
+      const help = (await page.getByRole('button', { name: 'Help and chat' }).boundingBox())!;
+      assert.ok(help.y >= navBox.y && help.y + help.height <= navBox.y + navBox.height && help.x + help.width <= 375, `Help ${JSON.stringify(help)} sits in the tab bar ${JSON.stringify(navBox)}`);
+      const tabs = await nav.getByRole('button').evaluateAll((els) => els.map((e) => e.getBoundingClientRect().right));
+      assert.ok(Math.max(...tabs) <= help.x + 1, 'no tab under the Help button');
+      // At every scroll position, every product name, price and the Filter button that is on screen
+      // above the tab bar is really on top (nothing floats over it: not Help, not the version badge).
+      const height = await page.evaluate(() => document.documentElement.scrollHeight);
+      let checked = 0;
+      for (let y = 0; y <= height; y += 150) {
+        await page.evaluate((top) => window.scrollTo(0, top), y);
+        const covered = await page.evaluate((barTop) => {
+          const out: string[] = [];
+          let n = 0;
+          for (const el of document.querySelectorAll('main article h3, main article p, main button')) {
+            const r = el.getBoundingClientRect();
+            if (r.height === 0 || r.top < 60 || r.bottom > barTop) continue; // under the sticky header or the bar
+            n++;
+            for (const [x, yy] of [[r.left + 2, r.top + 2], [r.right - 2, r.bottom - 2], [r.left + r.width / 2, r.top + r.height / 2]]) {
+              const hit = document.elementFromPoint(x, yy);
+              if (hit && !el.contains(hit) && !hit.contains(el)) out.push(`${(el.textContent || '').slice(0, 30)} under ${hit.tagName}.${String(hit.className).slice(0, 40)}`);
+            }
+          }
+          return { out, n };
+        }, navBox.y);
+        checked += covered.n;
+        assert.deepEqual(covered.out, [], `scrolled to ${y}`);
+      }
+      assert.ok(checked > 30, `${checked} names, prices and buttons checked`);
+      // Scrolled to the very bottom, the last thing on the page (the footer with the version) sits above the tab bar.
       await page.evaluate(() => window.scrollTo(0, document.documentElement.scrollHeight));
       await page.waitForTimeout(300);
-      const navTop = (await nav.boundingBox())!.y;
-      const help = (await page.getByRole('button', { name: 'Help and chat' }).boundingBox())!;
-      assert.ok(help.y + help.height <= navTop, `Help (${help.y + help.height}) sits above the tab bar (${navTop})`);
-      const promise = (await page.getByRole('heading', { name: /promise/ }).locator('..').boundingBox())!;
-      assert.ok(promise.y + promise.height <= help.y, `content ends (${promise.y + promise.height}) above the Help button (${help.y})`);
+      const badge = (await page.getByLabel(/^Version BUH-/).boundingBox())!;
+      assert.ok(badge.y + badge.height <= navBox.y, `the footer (${badge.y + badge.height}) ends above the tab bar (${navBox.y})`);
       // Home goes back to the top; Orders opens Track Order.
       await nav.getByRole('button', { name: 'Home' }).click();
       await page.waitForFunction(() => window.scrollY === 0);

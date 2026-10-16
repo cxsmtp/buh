@@ -3,7 +3,7 @@
 import React, { useState, useEffect, useMemo, useCallback, useRef } from 'react';
 import { Product, Order, Customer, CourierSettings, CartItem, BedProfileMeasurement, BrandSettings, SmsGatewaySettings, BankTransferDetails, CatalogSettings, StoreSettings, ThemeSettings, EmailSettings, AssistantSettings, DeliverySettings, PhoneVerificationConfig } from '@/types';
 import { DEFAULT_ASSISTANT, DEFAULT_CATALOG, DEFAULT_DELIVERY, DEFAULT_EMAIL_SETTINGS, DEFAULT_STORE, DEFAULT_THEME_SETTINGS } from '@/data/catalogDefaults';
-import { piecesLeft, refreshCart, ShopProvider, type FestivalView, type ShopInfo } from '@/lib/client/shop';
+import { askWhatsAppLink, piecesLeft, refreshCart, ShopProvider, type FestivalView, type ShopInfo } from '@/lib/client/shop';
 import { captureLanding, decodeBag, type BagLine, type Landing } from '@/lib/client/landing';
 import { useLiveUpdates } from '@/lib/client/live';
 import { INITIAL_BANK_DETAILS, INITIAL_BRAND_SETTINGS, INITIAL_COURIER_SETTINGS, INITIAL_SMS_SETTINGS } from '@/data/initialData';
@@ -590,7 +590,7 @@ export function ShopApp({ initialProductId }: { initialProductId?: string } = {}
       )}
 
       {/* Main Content Area (on phones, room at the bottom for the tab bar and the Help button) */}
-      <main className={`flex-1 max-w-7xl mx-auto w-full ${isAdminMode ? 'pb-20 px-3 sm:px-6' : 'pb-36 md:pb-16 px-4 sm:px-6'}`}>
+      <main className={`flex-1 max-w-7xl mx-auto w-full ${isAdminMode ? 'pb-20 px-3 sm:px-6' : 'pb-20 md:pb-16 px-4 sm:px-6'}`}>
         {isAdminMode ? (
           /* ================= ADMIN MOBILE HUB ================= */
           <div className="py-4 space-y-4">
@@ -926,6 +926,11 @@ export function ShopApp({ initialProductId }: { initialProductId?: string } = {}
                 Every set is made with slow handcraft, fitted for deep Gulf mattresses, and delivered to your door in all seven emirates, with cash on delivery or bank transfer.
               </p>
             </div>
+
+            {/* The version: in the footer on phones (never over the feed), bottom left on wider screens */}
+            <footer className="pb-2">
+              <VersionBadge inFooter />
+            </footer>
           </div>
         )}
       </main>
@@ -1006,6 +1011,7 @@ export function ShopApp({ initialProductId }: { initialProductId?: string } = {}
         onToggleAdminMode={handleToggleAdminMode}
         pendingOrdersCount={pendingOrdersCount}
         chatsWaiting={chatsWaiting}
+        helpSlot={Boolean(chatInfo) || Boolean(storeSettings.showWhatsAppButton && askWhatsAppLink(storeSettings, ''))}
       />
 
       {/* Admin Login Modal */}
@@ -1020,17 +1026,15 @@ export function ShopApp({ initialProductId }: { initialProductId?: string } = {}
         onResetDone={() => setResetToken(null)}
       />
       {!isAdminMode && <HelpLauncher />}
-      <VersionBadge
-        raised={isAdminMode}
-        onOpen={
-          isAdminMode
-            ? () => {
-                setSettingsOpen((x) => ({ id: 'versions', n: x.n + 1 }));
-                setAdminTab('settings');
-              }
-            : undefined
-        }
-      />
+      {isAdminMode && (
+        <VersionBadge
+          raised
+          onOpen={() => {
+            setSettingsOpen((x) => ({ id: 'versions', n: x.n + 1 }));
+            setAdminTab('settings');
+          }}
+        />
+      )}
     </div>
     </ShopProvider>
   );

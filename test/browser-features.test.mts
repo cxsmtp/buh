@@ -254,13 +254,29 @@ test('settings → Email & admin account: a private mail server is refused; the 
   await ctx.close();
 });
 
-test('version badge: bottom left for everyone; for the owner it opens Settings → Versions with every release', { skip }, async () => {
+test('version badge: visible to everyone, bottom left, never over the products on a phone; for the owner it opens Settings → Versions with every release', { skip }, async () => {
+  // On a computer: floating bottom left.
+  const desk = await browser.newPage({ viewport: { width: 1280, height: 900 } });
+  await desk.goto(server.base, { waitUntil: 'domcontentloaded' });
+  const deskBadge = desk.getByLabel(/^Version BUH-\d{2}\.\d{2}\.\d{2}$/);
+  await deskBadge.waitFor();
+  const d = (await deskBadge.boundingBox())!;
+  assert.ok(d.x < 20 && d.y > 850, `bottom left (${d.x}, ${d.y})`);
+  await desk.close();
+  // On a phone (regression: it sat on the first product card): in the page's footer, bottom left, under every product.
   const shopper = await browser.newPage({ viewport: { width: 375, height: 800 } });
   await shopper.goto(server.base, { waitUntil: 'domcontentloaded' });
+  await shopper.locator('main article').first().waitFor();
   const badge = shopper.getByLabel(/^Version BUH-\d{2}\.\d{2}\.\d{2}$/);
   await badge.waitFor();
-  const box = (await badge.boundingBox())!;
-  assert.ok(box.x < 20 && box.y > 600, `bottom left (${box.x}, ${box.y})`);
+  assert.equal(await badge.evaluate((e) => getComputedStyle(e).position), 'static', 'not floating over the feed');
+  const box = await badge.evaluate((e) => { const r = e.getBoundingClientRect(); return { x: r.x, top: r.top + scrollY }; });
+  const lastCard = await shopper.locator('main article').last().evaluate((e) => e.getBoundingClientRect().bottom + scrollY);
+  assert.ok(box.x < 20 && box.top > lastCard, `bottom left, below the last product (${box.x}, ${box.top} > ${lastCard})`);
+  await badge.scrollIntoViewIfNeeded();
+  const nav = (await shopper.getByRole('navigation', { name: 'Shop' }).boundingBox())!;
+  const shown = (await badge.boundingBox())!;
+  assert.ok(shown.y + shown.height <= nav.y, 'above the tab bar when scrolled to');
   assert.deepEqual(await overflow(shopper), []);
   await shopper.close();
 

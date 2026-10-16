@@ -18,6 +18,8 @@ interface BottomNavProps {
   onOpenTrack: () => void;
   onToggleAdminMode: () => void;
   pendingOrdersCount?: number;
+  /** The Help (chat or WhatsApp) button sits in the bar's right-hand slot on phones. */
+  helpSlot?: boolean;
 }
 
 export const BottomNav: React.FC<BottomNavProps> = ({
@@ -33,6 +35,7 @@ export const BottomNav: React.FC<BottomNavProps> = ({
   onToggleAdminMode,
   pendingOrdersCount = 0,
   chatsWaiting = 0,
+  helpSlot = false,
 }) => {
   if (isAdminMode) {
     return (
@@ -129,12 +132,12 @@ export const BottomNav: React.FC<BottomNavProps> = ({
   }
 
   // The shop on a phone: Home, Search, Bag and Orders, like an app's tab bar (hidden on wider screens,
-  // where the header has them). The chat's Help button floats just above it.
+  // where the header has them). The Help button takes the slot at its right end, so it never floats over the feed.
   const tab = (active: boolean) =>
     `flex-1 flex flex-col items-center justify-center gap-0.5 h-14 text-[11px] ${active ? 'text-[#0f1c2e] font-semibold' : 'text-stone-600'}`;
   return (
     <nav aria-label="Shop" className="fixed bottom-0 inset-x-0 z-40 bg-[#fbf9f5]/95 backdrop-blur-md border-t border-[#e8e1d5] pb-safe md:hidden">
-      <div className="flex items-stretch max-w-md mx-auto">
+      <div className="flex items-stretch">
         <button type="button" onClick={onHome} aria-current={storeTab === 'home' ? 'page' : undefined} className={tab(storeTab === 'home')}>
           <Home className="w-6 h-6" aria-hidden="true" strokeWidth={storeTab === 'home' ? 2.25 : 1.75} />
           <span>Home</span>
@@ -158,6 +161,7 @@ export const BottomNav: React.FC<BottomNavProps> = ({
           <Truck className="w-6 h-6" aria-hidden="true" strokeWidth={1.75} />
           <span>Orders</span>
         </button>
+        {helpSlot && <span className="w-[4.5rem] shrink-0" aria-hidden="true" />}
       </div>
     </nav>
   );

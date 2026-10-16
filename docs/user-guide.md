@@ -11,7 +11,7 @@ The shop looks and works like a boutique's Instagram page, on a phone first.
 - **Filter** (next to the number of pieces) opens a sheet with only the choices that make a difference for the pieces in the shop: category, size, colour (worked out from each colour's swatch: blue, cream, red…), price range, **In stock only**, **On sale**, **New in**, and the sort (newest, price). Each choice shows how many pieces it leaves; **Show N pieces** applies them. Every filter on shows as a chip under the button: tap it to remove it, or **Clear all**.
 - **Search** (the tab bar on a phone, the magnifier on a computer) finds pieces by name, colour, category or fabric as you type; tap one to open it, or **See all** to show them in the shop.
 - **Links keep the view:** the address holds the search, filters and the open product, so a filtered view can be sent on WhatsApp and Back steps through what you looked at.
-- **On a phone** the tab bar at the bottom has **Home** (back to the top), **Search**, **Bag** and **Orders** (Track Order); the Help button sits just above it.
+- **On a phone** the tab bar at the bottom has **Home** (back to the top), **Search**, **Bag** and **Orders** (Track Order), with the **Help** button (chat, or WhatsApp) in its right-hand slot, so nothing floats over the products; the version number is at the very bottom of the page.
 - Everything works with the keyboard (Tab, Enter, Escape closes a sheet), and the shop moves less for people whose phone is set to reduce motion.
 
 ## For customers: placing an order
