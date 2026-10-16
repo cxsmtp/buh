@@ -25,7 +25,7 @@ jobs:
       - uses: actions/checkout@v4
 
       - name: Shellcheck the updater and the CI tests
-        run: shellcheck --shell=sh deploy/updater/updater.sh deploy/updater/bin/* test/fixtures/fake-docker.sh && shellcheck deploy/ci/zero-downtime-test.sh deploy/ci/single-container-test.sh
+        run: shellcheck --shell=sh deploy/updater/updater.sh deploy/updater/bin/* test/fixtures/fake-docker.sh && shellcheck deploy/ci/zero-downtime-test.sh deploy/ci/single-container-test.sh deploy/ci/setup-proxy-test.sh
 
       - name: Compose file is valid (production, and with the CI override)
         run: |
@@ -33,12 +33,15 @@ jobs:
           docker compose --profile autoupdate --profile green config --quiet
           docker compose -f docker-compose.yml -f deploy/ci/compose.ci.yml config --quiet
 
-      - name: Caddy accepts both Caddyfiles
+      - name: Caddy accepts the three Caddyfiles (Compose, CI, the buh-proxy image)
         run: |
           docker run --rm -v "$PWD/deploy:/etc/caddy:ro" -e DOMAIN=shop.example.com -e ACME_EMAIL=ci@example.com \
             caddy:2.8.4-alpine caddy validate --config /etc/caddy/Caddyfile --adapter caddyfile
           docker run --rm -v "$PWD/deploy:/etc/caddy:ro" \
             caddy:2.8.4-alpine caddy validate --config /etc/caddy/ci/Caddyfile --adapter caddyfile
+          docker build -q -f deploy/proxy/Dockerfile -t buh-proxy:check .
+          docker run --rm --entrypoint caddy -e DOMAIN=shop.example.com -e ACME_EMAIL=ci@example.com buh-proxy:check \
+            validate --config /etc/caddy/Caddyfile --adapter caddyfile
 
       - uses: actions/setup-node@v4
         with:
@@ -91,7 +94,7 @@ jobs:
 
   single:
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 45
     steps:
       - uses: actions/checkout@v4
 
@@ -109,3 +112,6 @@ jobs:
 
       - name: Single-container switch, rollback and self-healing under load
         run: deploy/ci/single-container-test.sh
+
+      - name: Images-only set-up (buh-updater setup) and the HTTPS proxy (buh-proxy), under load
+        run: deploy/ci/setup-proxy-test.sh

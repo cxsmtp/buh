@@ -68,7 +68,7 @@ UPD=(--security-opt label=disable -v "$ENGINE_SOCKET:/var/run/docker.sock" -v "$
   -e "IMAGE=$LATEST" -e UPDATE_CHECK_MINUTES=0 -e HOME=/tmp -e DOCKER_CONFIG=/state/docker-config
   -e PATH=/updater/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
   -e "SHOP_ENV=TZ=Asia/Dubai NEXT_PUBLIC_SUPPORT_EMAIL=help@ci.example" -e HEAL_CHECK_SECONDS=3 -e HEALTH_TIMEOUT=90
-  --read-only --tmpfs /tmp --cap-drop ALL --security-opt no-new-privileges:true --pids-limit 128 --entrypoint /bin/sh)
+  --read-only --tmpfs /tmp --cap-drop ALL --cap-add CHOWN --cap-add FOWNER --security-opt no-new-privileges:true --pids-limit 128 --entrypoint /bin/sh)
 updater_once() { # updater_once COMMAND [more docker run options]: one run, as the .bat's set-up step
   local cmd=$1
   shift
@@ -95,7 +95,7 @@ ask() { # ask LINE: the request, written the way the shop writes it (src/lib/ser
   # a whole temporary file, linked into place, as user 1001 in the sticky folder)
   ASKED_AFTER=$(status_json | jq -r .lastRequest.at)
   sleep 1 # the status gives the time to the second
-  docker exec "$NAME" node -e "const fs=require('fs'),t='/updater-control/.request-ci-'+process.pid;fs.writeFileSync(t,process.argv[1]+'\n',{flag:'wx',mode:0o644});try{fs.linkSync(t,'/updater-control/request')}finally{fs.rmSync(t,{force:true})}" "$1"
+  docker exec "$NAME" node -e "const fs=require('fs'),t='/updater-control/.request-ci-'+process.pid+'-'+require('crypto').randomBytes(6).toString('hex');fs.writeFileSync(t,process.argv[1]+'\n',{flag:'wx',mode:0o644});try{fs.linkSync(t,'/updater-control/request')}finally{fs.rmSync(t,{force:true})}" "$1"
 }
 owners_run() { # the owner's own routine: podman run with its settings (and any extra options)
   docker run -d --name "$NAME" -p "$PORT:3000" -v "$VOLUME:/data" -e TZ=Asia/Dubai -e NEXT_PUBLIC_SUPPORT_EMAIL=help@ci.example \
@@ -167,7 +167,7 @@ serves
 
 step "2. set-up as the .bat does it: volumes, updater code out of the image, adopt"
 for v in "$CONTROL" "$STATUS" "$STATE" "$CODE"; do docker volume create "$v" > /dev/null; done
-docker run --rm --pids-limit 64 --user 0 -v "$CONTROL:/c" -v "$STATUS:/s" --entrypoint /bin/sh "$UPDATER_IMAGE" -c 'chown 0:0 /c /s && chmod 1733 /c && chmod 755 /s'
+docker run --rm --pids-limit 64 --user 0 -v "$CONTROL:/c" -v "$STATUS:/s" --entrypoint /bin/sh "$UPDATER_IMAGE" -c 'touch /c/.updater-folder /s/.updater-folder && chown 0:0 /c /s /c/.updater-folder /s/.updater-folder && chmod 1733 /c && chmod 755 /s'
 docker run --rm --pids-limit 64 --user 0 -v "$CODE:/out" --entrypoint /bin/sh buh:test -c 'test -f /app/updater/updater.sh && rm -rf /out/* && cp -R /app/updater/. /out/ && chmod -R a+rX /out'
 
 before=$(started_at "$NAME")
@@ -202,6 +202,7 @@ docker rm -f buh-single-second > /dev/null
 
 start_load
 updater_once adopt > "$WORK/adopt.log" 2>&1 || { cat "$WORK/adopt.log"; fail "adopt failed"; }
+sleep 2 # a few more answers after the switch, for the count
 stop_load 1000
 cat "$WORK/adopt.log"
 echo "adopt closed the shop for about ${LAST_GAP}s"

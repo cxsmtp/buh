@@ -5,7 +5,14 @@
 #   ghcr.io/cxsmtp/buh:1.2.0     the version in package.json (BUH-01.02.00)
 #   ghcr.io/cxsmtp/buh:sha-…     every commit on main
 #
-# Pull requests build and test the image but do not publish it.
+# and, with the same tags, the two images a single-container Podman shop runs beside it
+# (no code on that computer or server):
+#
+#   ghcr.io/cxsmtp/buh-updater   the updater (deploy/updater/Dockerfile): `setup`, then updates
+#   ghcr.io/cxsmtp/buh-proxy     HTTPS in front of the shop (deploy/proxy/Dockerfile, Caddy)
+#
+# Pull requests build and test the images but do not publish them. Their behaviour with
+# real containers is tested in zero-downtime.yml (deploy/ci/setup-proxy-test.sh).
 name: Container image
 
 on:
@@ -24,6 +31,8 @@ concurrency:
 
 env:
   IMAGE: ghcr.io/${{ github.repository_owner }}/buh
+  UPDATER_IMAGE: ghcr.io/${{ github.repository_owner }}/buh-updater
+  PROXY_IMAGE: ghcr.io/${{ github.repository_owner }}/buh-proxy
 
 jobs:
   image:
@@ -93,3 +102,88 @@ jobs:
             org.opencontainers.image.version=${{ steps.version.outputs.version }}
             org.opencontainers.image.revision=${{ github.sha }}
           cache-from: type=gha
+
+  helpers:
+    # The updater and the proxy: small, built on pinned bases (docker:27.3.1-cli, caddy:2.8.4-alpine).
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Version from package.json
+        id: version
+        run: echo "version=$(node -p "require('./package.json').version")" >> "$GITHUB_OUTPUT"
+
+      - uses: docker/setup-buildx-action@v3
+
+      - name: Build the updater
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: deploy/updater/Dockerfile
+          platforms: linux/amd64
+          load: true
+          tags: buh-updater:test
+
+      - name: Build the proxy
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: deploy/proxy/Dockerfile
+          platforms: linux/amd64
+          load: true
+          tags: buh-proxy:test
+
+      - name: Smoke test (the updater reaches the engine; the proxy's config is valid, it is not root)
+        run: |
+          docker run --rm -v /var/run/docker.sock:/var/run/docker.sock buh-updater:test selfcheck
+          docker run --rm buh-updater:test setup 2>&1 | grep -q 'usage: setup'
+          docker run --rm --entrypoint caddy -e DOMAIN=shop.example.com -e ACME_EMAIL=ci@example.com buh-proxy:test \
+            validate --config /etc/caddy/Caddyfile --adapter caddyfile
+          test "$(docker run --rm --entrypoint id buh-proxy:test -u)" = "1000"
+          test "$(docker image inspect -f '{{index .Config.Labels "buh.role"}}' buh-updater:test)" = updater
+          test "$(docker image inspect -f '{{index .Config.Labels "buh.role"}}' buh-proxy:test)" = proxy
+
+      - name: Sign in to GitHub Container Registry
+        if: github.event_name != 'pull_request'
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Publish the updater
+        if: github.event_name != 'pull_request'
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: deploy/updater/Dockerfile
+          platforms: linux/amd64
+          push: true
+          tags: |
+            ${{ env.UPDATER_IMAGE }}:latest
+            ${{ env.UPDATER_IMAGE }}:${{ steps.version.outputs.version }}
+            ${{ env.UPDATER_IMAGE }}:sha-${{ github.sha }}
+          labels: |
+            org.opencontainers.image.source=https://github.com/${{ github.repository }}
+            org.opencontainers.image.title=Beautiful UAE Home updater
+            org.opencontainers.image.version=${{ steps.version.outputs.version }}
+            org.opencontainers.image.revision=${{ github.sha }}
+
+      - name: Publish the proxy
+        if: github.event_name != 'pull_request'
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: deploy/proxy/Dockerfile
+          platforms: linux/amd64
+          push: true
+          tags: |
+            ${{ env.PROXY_IMAGE }}:latest
+            ${{ env.PROXY_IMAGE }}:${{ steps.version.outputs.version }}
+            ${{ env.PROXY_IMAGE }}:sha-${{ github.sha }}
+          labels: |
+            org.opencontainers.image.source=https://github.com/${{ github.repository }}
+            org.opencontainers.image.title=Beautiful UAE Home HTTPS proxy
+            org.opencontainers.image.version=${{ steps.version.outputs.version }}
+            org.opencontainers.image.revision=${{ github.sha }}
