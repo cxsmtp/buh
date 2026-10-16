@@ -11,7 +11,7 @@
 # (`buh-updater setup … --proxy DOMAIN` starts it exactly so and keeps it up to date.)
 # Built from the repository root: docker build -f deploy/proxy/Dockerfile .
 # caddy:2.8.4-alpine, pinned by digest (a moved tag cannot change what is built; Dependabot proposes updates).
-FROM caddy:2.8.4-alpine@sha256:af32e97399febea808609119bb21544d0265c58a02836576e32a2d082c262c17
+FROM caddy:2.11.7-alpine@sha256:d8542f48d34a9cf4e4c11a478865229840e87e4c96ea3f439101f31a5d35f75f
 
 # Not root: the caddy binary carries the one capability it needs (binding 80 and 443),
 # which the container must grant (--cap-add NET_BIND_SERVICE).
