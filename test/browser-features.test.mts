@@ -450,7 +450,7 @@ test('Settings → Versions: "Installed on this server" (version, digest, when, 
       // The release that runs: its short digest, verified.
       const release = page.locator('li').filter({ has: page.locator('summary strong', { hasText: label }) });
       await release.getByText('sha256:2c1f00000000').waitFor();
-      await release.getByText('verified').waitFor();
+      await release.getByText('verified', { exact: true }).waitFor();
       await page.getByRole('alert').filter({ hasText: /^Version 9\.9\.9 was refused: it is published under another digest/ }).waitFor();
       assert.deepEqual(await overflow(page), [], `no sideways scroll at ${width}px`);
       assert.deepEqual(errors, []);
