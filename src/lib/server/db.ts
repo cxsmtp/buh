@@ -216,6 +216,35 @@ const MIGRATIONS: Array<(db: DB) => void> = [
       CREATE INDEX webauthn_challenges_by_expiry ON webauthn_challenges(expires_at);
     `);
   },
+  // 6: stock moves from the Admin Hub (the + / − buttons, "Received stock", a typed number, Undo).
+  //    One row per move, written in the same transaction as the stock it changes: who, why
+  //    (a reason code), and every size's old → new. The idempotency key makes a retried request
+  //    return the first answer instead of moving stock twice; a move can be undone once.
+  //    Product drafts: the step-by-step editor saves itself here as the owner goes.
+  (db) => {
+    db.exec(`
+      CREATE TABLE stock_moves (
+        id               INTEGER PRIMARY KEY,
+        idempotency_key  TEXT NOT NULL UNIQUE,
+        request_hash     TEXT NOT NULL,
+        product_id       TEXT NOT NULL,
+        at               TEXT NOT NULL,
+        actor            TEXT NOT NULL,
+        reason           TEXT NOT NULL,
+        changes          TEXT NOT NULL,      -- JSON: [{ sizeId, from, to }]
+        note             TEXT NOT NULL DEFAULT '',
+        undo_of          INTEGER
+      );
+      CREATE INDEX stock_moves_by_product ON stock_moves(product_id, id);
+      CREATE UNIQUE INDEX stock_moves_undo_once ON stock_moves(undo_of) WHERE undo_of IS NOT NULL;
+      CREATE TABLE product_drafts (
+        id          TEXT PRIMARY KEY,        -- 'new' or the product being edited
+        data        TEXT NOT NULL,
+        updated_at  TEXT NOT NULL,
+        updated_by  TEXT NOT NULL DEFAULT ''
+      );
+    `);
+  },
 ];
 
 let db: DB | null = null;

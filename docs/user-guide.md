@@ -73,15 +73,34 @@ Every change is recorded with who made it and when.
 
 ### Inventory
 
-**Inventory Stock** lists every product with its pieces per size (most designs are one or two pieces, so stock is kept per size).
+**Inventory** lists every product with a photo and its pieces per size as coloured chips: **red** sold out, **amber** low (at or below the warning level in Settings → Catalogue, 2 unless you change it), **green** in stock. Most designs are one or two pieces, so stock is kept per size.
 
-- **+ / −** next to a size adds or removes one piece straight away.
-- **Edit** opens everything: photos (up to 8; the first is the main one; reorder or remove them), name, prices, category, material, colours, sizes (add from your presets, change measurements and price differences) and pieces per size, and whether it is shown, featured or new.
-- **+ Add Product** (or **+ Add** on a phone) opens the same editor for a new product. Phone photos are shrunk before upload.
-- **Visible / Hidden** shows or hides a product; the arrows change its place in the shop.
-- **Remove** takes a product out of the shop for good, but keeps it for past orders; it can be restored (hidden) under **Removed**.
-- Filters: **Low** (at or below your warning level), **Sold out**, **Hidden**, **Removed**, and a search box.
-- If a customer buys while you are editing stock, **Save** says the stock changed and shows the new figure: check it and save again.
+- **Search** by name or SKU (your own stock code, set under the editor's **More details**).
+- **Show:** All, **Low** (a few pieces left in all), **Sold out** (none left in any size), **Hidden**, **Removed**; and a **Category** list. The two cards at the top (sold out, running low) open those lists, and the number on **Inventory** in the bottom bar is the same count.
+- Tap a product to open it: the sizes with **− / +**, then the quick actions below.
+- **Edit** opens the step-by-step editor; **+ Add product** starts a new one (see below).
+- **Hide / Show in shop**, **Sold out** (every size to 0, with Undo), **Duplicate** (a hidden copy with no stock, for another colour: change its photos and colour, then show it), **Share** (the product's link, through your phone's share sheet or copied), **History**, the arrows (its place in the shop) and **Remove** (out of the shop for good but kept for past orders; restore it, hidden, under **Removed**).
+
+### Managing stock from your phone
+
+On a phone the bottom bar is **Orders**, **Inventory**, **Chats** and **More** (Add product, Customers, Settings, View shop).
+
+- **− / +** next to a size takes away or adds one piece. It is saved at once: a message says what changed (for example `King 5 → 6`) with **Undo**. Several quick taps are saved together as one change.
+- **Tap the number** to type it (for example after counting the shelf); **Enter** saves it.
+- **Reason for − / +** (above the list) is recorded with each change: **Correction** (a count), **Sold offline** (a sale outside the shop), **Damaged**, or **Received**.
+- **Received stock** adds new pieces to several sizes at once, with an optional note (supplier, invoice).
+- **Changed on another device: refresh.** If another phone, a laptop or a customer's order changed the same stock since your screen last updated, your change is not saved (nothing is overwritten). Tap **Refresh**, check the numbers and try again.
+- A weak connection is fine: a change that did not get an answer is sent again, and the shop makes sure it counts once.
+- **History** shows the latest changes of a product: when, who, why, and every size's old → new. Every change is also in the audit log and in `stock_moves.csv` in each backup.
+
+**Adding a product from the phone** goes in four steps; **Next** moves on, and the step names at the top go back:
+
+1. **Photos:** **Take photo** opens the camera; **From gallery** picks several at once. Each is made smaller on the phone (at most 1600 px) and uploaded straight away. The first photo is the **cover**: tap the star to make another one the cover, or the arrows (or drag, on a computer) to change the order.
+2. **Details:** name, category and price; **More details** has the SKU, the "was" price, descriptions, fabric and colours.
+3. **Sizes:** tap a size (from your presets in Settings → Catalogue) to add it, then set its pieces with **− / +** or type them.
+4. **Publish:** shown in the shop (or **Save hidden**), new arrival, featured.
+
+The draft saves itself as you go ("Draft saved" at the top), so a phone call or a closed tab loses nothing; open **Add product** again (on any device) to continue, or **Start over**. Editing a product works the same way; if a customer buys while you edit its stock, **Save** shows the new figures to check.
 
 ### Chats
 
@@ -97,7 +116,7 @@ On each product, customers see **Ask in chat**, **Ask on WhatsApp** and **Ask on
 
 ### Customers
 
-**Customers & CRM** is built from the orders: one line per phone number, with the number of orders and the total spent.
+**Customers** (under **More** on a phone) is built from the orders: one line per phone number, with the number of orders and the total spent.
 
 ### Settings
 
@@ -176,4 +195,4 @@ Enter the Jeebly and Eco Express keys and use **Test connection**. Keys are kept
 
 ### Audit log
 
-`DATA_DIR/audit-YYYY-MM.jsonl` lists sign-ins (by password, passkey or recovery code), refused sign-ins, password changes, passkeys added or removed, new recovery codes, courier bookings and tests, and SMS tests. Each line is chained to the one before, so edits are detectable.
+`DATA_DIR/audit-YYYY-MM.jsonl` lists sign-ins (by password, passkey or recovery code), refused sign-ins, password changes, passkeys added or removed, new recovery codes, courier bookings and tests, SMS tests, and every stock change made in the Admin Hub (who, why, old → new). Each line is chained to the one before, so edits are detectable.

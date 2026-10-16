@@ -20,7 +20,9 @@ import { readTar, writeTar, type TarEntry } from './tar';
  *  - a consistent copy of the database (SQLite online backup, safe mid-sale),
  *    with the courier and SMS keys blanked (re-enter them after a restore);
  *  - flat files anyone can open in Excel: orders.csv, order_items.csv,
- *    customers.csv, products.csv, chats.csv;
+ *    customers.csv, products.csv, chats.csv, stock_moves.csv (every stock
+ *    change made in the Admin Hub: who, why, old → new);
+ *  - product drafts and the stock ledger are tables in the database copy;
  *  - the bank-transfer receipts, the product photos and the audit log;
  *  - the owner's passkeys (public keys only) and recovery codes (hashes
  *    only), in the database; a restore switches them off until reviewed,
@@ -132,6 +134,17 @@ function csvFiles(): TarEntry[] {
         (getDb()
           .prepare('SELECT m.thread_id, m.at, m.author, m.via, t.customer_name, t.contact, t.status, m.body FROM chat_messages m JOIN chat_threads t ON t.id = m.thread_id ORDER BY m.id')
           .all() as Array<Record<string, string>>).map((r) => [r.thread_id, r.at, r.author, r.via, r.customer_name, r.contact, r.status, r.body])
+      )),
+    },
+    {
+      name: 'stock_moves.csv',
+      data: Buffer.from(toCsv(
+        ['move_id', 'at', 'product_id', 'by', 'reason', 'changes', 'note', 'undo_of'],
+        (getDb().prepare('SELECT id, at, product_id, actor, reason, changes, note, undo_of FROM stock_moves ORDER BY id').all() as Array<Record<string, string | number | null>>).map((r) => [
+          r.id, r.at, r.product_id, r.actor, r.reason,
+          (JSON.parse(String(r.changes)) as Array<{ sizeId: string; from: number; to: number }>).map((c) => `${c.sizeId} ${c.from}→${c.to}`).join('; '),
+          r.note, r.undo_of ?? '',
+        ])
       )),
     },
     {

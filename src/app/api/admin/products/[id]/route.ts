@@ -9,7 +9,7 @@ export async function PATCH(req: Request, { params }: { params: Promise<{ id: st
     const session = await requireAdmin(req);
     const { id } = await params;
     const body = await readJsonBody(req, 12 * 1024 * 1024);
-    const product = updateProduct(id, body.product);
+    const product = updateProduct(id, body.product, session.email);
     audit('product.updated', { by: session.email, productId: id, fields: Object.keys((body.product as object) || {}) });
     return json({ product });
   } catch (err) {

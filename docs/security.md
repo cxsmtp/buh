@@ -112,7 +112,7 @@ Carrier endpoints are fixed in code.
 
 ## Audit log
 
-`DATA_DIR/audit-YYYY-MM.jsonl` records sign-ins, refusals, password changes, courier dispatches and tests, and SMS tests. Each line carries an HMAC over the previous line, so editing, deleting or reordering a line is detected (`verifyAuditLog`).
+`DATA_DIR/audit-YYYY-MM.jsonl` records sign-ins, refusals, password changes, courier dispatches and tests, SMS tests, and stock moves (who, reason, old → new). Each line carries an HMAC over the previous line, so editing, deleting or reordering a line is detected (`verifyAuditLog`).
 
 ## Headers
 
@@ -182,7 +182,7 @@ Every 12 hours (see the deployment guide) the shop backs itself up:
 
 - **A consistent database snapshot**, integrity-checked before it is used.
 - **CSV flat files.** A cell starting with `= + - @` is prefixed with `'`, so Excel never runs it as a formula.
-- **Receipts, photos and the audit log**, with a SHA-256 manifest.
+- **Receipts, photos and the audit log**, with a SHA-256 manifest. The stock ledger and product drafts are tables in the database copy; `stock_moves.csv` lists the ledger for Excel.
 - **Encryption (strongly recommended):** AES-256-GCM, with the key derived by scrypt (cost 2^17) from `BACKUP_PASSPHRASE`. The Admin Hub turns amber, and the log warns, while backups are emailed unencrypted or the passphrase is shorter than 12 characters.
 - **Courier and SMS keys are blanked** in the backup's copy of the database (and the copy is vacuumed, so the old values are not left in free pages). Re-enter them after a restore.
 - **A failure is emailed** when it starts, when the error changes and then once a day; the shop retries hourly.
@@ -197,6 +197,12 @@ Every 12 hours (see the deployment guide) the shop backs itself up:
 - **The customer is charged the total they saw.** Checkout sends the total it showed; if a price changed meanwhile, the server refuses the order (nothing taken) and checkout reloads the bag with the new total.
 - **At most 20 of one product per order, and at most 3 unconfirmed orders per phone**, so one verified number cannot tie up the stock.
 - **Stock edits cannot undo a sale:** the Admin Hub sends the stock it showed, and the server refuses the edit (409) if a sale happened in between.
+- **Stock moves from the Admin Hub** (`POST /api/admin/products/<id>/stock`: − / +, a typed number, Received stock, Sold out, Undo) are admin-only and same-site, with a 4 KB body cap and an allow-list of fields and reason codes (received, sold offline, damaged, correction).
+  - **Idempotent:** each change carries its own key; the same key again returns the first answer and moves nothing; the same key with other numbers is refused (409). A lost answer is retried with the same key.
+  - **Never from stale numbers:** each change says what the device saw for every size it changes; if the stock is different now (another device, a sale), nothing is changed (409, "changed on another device"). A typed number must say what was seen.
+  - **Recorded before it is reported:** the move (who, why, every size's old → new) is written to `stock_moves` in the same transaction as the stock, then to the audit log, before the answer. The product editor's stock changes are recorded the same way. Undo works once, and only if nothing changed those sizes since.
+- **Photos** uploaded from the editor (`POST /api/admin/images`) go through the same checks as every image (PNG, JPEG or WebP by their real bytes, at most 3 MB); the phone shrinks them first. **Drafts** (`/api/admin/products/drafts/<id>`) keep only the editor's own fields, accept only uploaded or https photo links, and are capped at 64 KB; nothing in a draft reaches the shop until it is published through the normal product checks.
+- **Duplicate** makes a hidden copy with no stock; its key makes a retried request return the same copy.
 - **Bank transfer is hidden until the real account is saved.** The IBAN must be a UAE IBAN that passes the mod-97 check.
 
 ## Public data and outbound calls added in BUH-02.00.00

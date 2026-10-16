@@ -1,4 +1,5 @@
 import crypto from 'node:crypto';
+import { audit } from './audit';
 import type { BedProfileMeasurement, Product } from '@/types';
 import { INITIAL_PRODUCTS } from '@/data/initialData';
 import { getDb, inTransaction } from './db';
@@ -6,6 +7,7 @@ import { HttpError } from './http';
 import { acceptImageRef } from './images';
 import { bump, changedElsewhere } from './live';
 import { getSettings } from './settings';
+import { insertMove, type SizeChange, type StockMove } from './stockLedger';
 
 /**
  * The catalogue. Stock is kept per product and size in product_stock, so an
@@ -104,6 +106,11 @@ export function invalidateProducts() {
   bump('catalog'); // open pages reload the catalogue
 }
 
+function auditMove(move: StockMove | null, title: string) {
+  if (!move) return;
+  audit('product.stock_moved', { by: move.actor, productId: move.productId, title, reason: move.reason, moveId: move.id, changes: move.changes.map((c) => `${c.sizeId}: ${c.from} → ${c.to}`), note: move.note });
+}
+
 /** Stock for the sizes given in the input: stockBySize, or (older callers) stockCount for the default size. */
 function stockFromInput(input: Obj, product: StoredProduct): Record<string, number> | undefined {
   if (input.stockBySize !== undefined) {
@@ -119,7 +126,7 @@ function stockFromInput(input: Obj, product: StoredProduct): Record<string, numb
   return undefined;
 }
 
-export function createProduct(input: unknown): StoredProduct {
+export function createProduct(input: unknown, actor = 'admin'): StoredProduct {
   const product = validateProduct(input);
   product.id = `prod-${crypto.randomBytes(6).toString('hex')}`;
   product.createdAt = new Date().toISOString();
@@ -128,14 +135,18 @@ export function createProduct(input: unknown): StoredProduct {
   void stockCount;
   void stockBySize;
   seedIfEmpty();
+  let movedNow: StockMove | null = null;
   inTransaction(() => {
     // New products go first in the catalogue.
     getDb()
       .prepare('INSERT INTO products (id, data, stock, active, position, updated_at) VALUES (?, ?, 0, ?, (SELECT COALESCE(MIN(position), 0) - 1 FROM products), ?)')
       .run(product.id, JSON.stringify(rest), active ? 1 : 0, new Date().toISOString());
     writeStock(product.id, stock);
+    const changes = Object.entries(stock).filter(([, qty]) => qty > 0).map(([sizeId, qty]) => ({ sizeId, from: 0, to: qty }));
+    if (changes.length) movedNow = insertMove(getDb(), { key: `new-${crypto.randomUUID()}`, hash: '', productId: product.id, actor, reason: 'received', changes, note: 'new product' });
   });
   invalidateProducts();
+  auditMove(movedNow, product.title);
   return getProduct(product.id)!;
 }
 
@@ -144,7 +155,7 @@ export function createProduct(input: unknown): StoredProduct {
  * sizes sent, and, with expectedStockBySize (what the admin saw), only if
  * nobody bought one meanwhile: otherwise 409 and nothing is saved.
  */
-export function updateProduct(id: string, input: unknown): StoredProduct {
+export function updateProduct(id: string, input: unknown, actor = 'admin'): StoredProduct {
   const existing = getProduct(id);
   if (!existing) throw new HttpError(404, 'Product not found.');
   const changes = { ...((input && typeof input === 'object' ? input : {}) as Obj) };
@@ -157,26 +168,32 @@ export function updateProduct(id: string, input: unknown): StoredProduct {
   void stockCount;
   void stockBySize;
   const db = getDb();
+  let movedNow: StockMove | null = null;
   inTransaction(() => {
     db.prepare('UPDATE products SET data = ?, active = ?, updated_at = ? WHERE id = ?').run(JSON.stringify(rest), active ? 1 : 0, new Date().toISOString(), id);
+    const moved: SizeChange[] = [];
     for (const [size, qty] of Object.entries(stock ?? {})) {
       const expected = expectedBySize?.[size];
+      const current = (db.prepare('SELECT qty FROM product_stock WHERE product_id = ? AND size_id = ?').get(id, size) as { qty: number } | undefined)?.qty ?? 0;
+      if (current !== qty) moved.push({ sizeId: size, from: current, to: qty });
       if (expected === undefined) {
         writeStock(id, { [size]: qty });
         continue;
       }
-      const current = (db.prepare('SELECT qty FROM product_stock WHERE product_id = ? AND size_id = ?').get(id, size) as { qty: number } | undefined)?.qty ?? 0;
       if (current !== expected) {
         const name = product.profiles.find((pr) => pr.id === size)?.name ?? size;
         throw new HttpError(409, `Stock for ${name} changed while you were editing (now ${current}). Check it and save again.`);
       }
       writeStock(id, { [size]: qty });
     }
+    // Every change of stock is in the ledger, with who made it (here: the product editor).
+    if (moved.length) movedNow = insertMove(db, { key: `edit-${crypto.randomUUID()}`, hash: '', productId: id, actor, reason: 'correction', changes: moved, note: 'product editor' });
     // Sizes no longer offered keep no stock.
     const offered = product.profiles.map((pr) => pr.id);
     db.prepare(`DELETE FROM product_stock WHERE product_id = ? AND size_id NOT IN (${offered.map(() => '?').join(',')})`).run(id, ...offered);
   });
   invalidateProducts();
+  auditMove(movedNow, product.title);
   return getProduct(id)!;
 }
 
@@ -207,6 +224,44 @@ export function adjustStock(id: string, sizeId: string, delta: number): StoredPr
   });
   invalidateProducts();
   return getProduct(id)!;
+}
+
+/**
+ * A copy of a product (for a colour variant): same photos, text, price and sizes, no stock,
+ * hidden until the owner shows it, placed right after the original. The same key again
+ * returns the first copy instead of making another.
+ */
+export function duplicateProduct(id: string, key: string, actor = 'admin'): { product: StoredProduct; replayed: boolean } {
+  if (!/^[A-Za-z0-9_-]{8,80}$/.test(key)) throw new HttpError(400, 'Give an idempotency key.');
+  const done = getDb().prepare('SELECT data FROM kv WHERE key = ?').get(`dup:${key}`) as { data: string } | undefined;
+  if (done) {
+    const copy = getProduct(JSON.parse(done.data) as string);
+    if (copy) return { product: copy, replayed: true };
+  }
+  const original = getProduct(id);
+  if (!original) throw new HttpError(404, 'Product not found.');
+  const copyId = `prod-${crypto.randomBytes(6).toString('hex')}`;
+  const { stockCount, stockBySize, active, archived, ...rest } = original;
+  void stockCount;
+  void stockBySize;
+  void active;
+  void archived;
+  const title = `${original.title} (copy)`.slice(0, 160);
+  const data = { ...rest, id: copyId, title, sku: undefined, createdAt: new Date().toISOString(), reviewsCount: 0 };
+  const db = getDb();
+  inTransaction(() => {
+    const again = db.prepare('SELECT data FROM kv WHERE key = ?').get(`dup:${key}`);
+    if (again) return;
+    const pos = (db.prepare('SELECT position FROM products WHERE id = ?').get(id) as { position: number }).position;
+    db.prepare('UPDATE products SET position = position + 1 WHERE position > ?').run(pos);
+    db.prepare('INSERT INTO products (id, data, stock, active, position, updated_at) VALUES (?, ?, 0, 0, ?, ?)').run(copyId, JSON.stringify(data), pos + 1, new Date().toISOString());
+    writeStock(copyId, Object.fromEntries(original.profiles.map((s) => [s.id, 0])));
+    db.prepare('INSERT INTO kv (key, data, updated_at) VALUES (?, ?, ?)').run(`dup:${key}`, JSON.stringify(copyId), new Date().toISOString());
+  });
+  invalidateProducts();
+  const stored = JSON.parse((db.prepare('SELECT data FROM kv WHERE key = ?').get(`dup:${key}`) as { data: string }).data) as string;
+  audit('product.duplicated', { by: actor, productId: id, copyId: stored, title });
+  return { product: getProduct(stored)!, replayed: stored !== copyId };
 }
 
 /** Remove from the shop for good (kept for past orders); restore brings it back hidden. */
@@ -286,6 +341,8 @@ export function validateProduct(input: unknown): StoredProduct {
   // A product may keep a category the owner later removed; new values must exist.
   const existing = typeof p.id === 'string' ? getProductRaw(p.id) : undefined;
   if (category !== existing?.category && !getSettings('catalog').categories.some((c) => c.id === category)) throw new HttpError(400, 'Unknown category: add it in Settings → Catalogue first.');
+  const sku = text(p.sku, 'SKU', 40);
+  if (sku && !/^[A-Za-z0-9][A-Za-z0-9 ._\/-]*$/.test(sku)) throw new HttpError(400, 'SKU may use letters, digits, spaces and . _ / -');
   const weave = text(p.weave, 'Weave', 20) || 'Sateen';
   if (!WEAVES.includes(weave)) throw new HttpError(400, 'Unknown weave.');
   const price = num(p.price, 'Price', 1, 100_000);
@@ -313,6 +370,7 @@ export function validateProduct(input: unknown): StoredProduct {
   return {
     id: typeof p.id === 'string' ? p.id : '',
     title,
+    sku: sku || undefined,
     slug: title.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '').slice(0, 80),
     description: text(p.description, 'Description', 4000),
     shortDescription: text(p.shortDescription, 'Short description', 300),

@@ -7,6 +7,7 @@
 import assert from 'node:assert/strict';
 import { after, before, test } from 'node:test';
 import { hasBuild, startServer, type RunningServer } from './server.mjs';
+import { openAdminSection } from './helpers.mjs';
 
 type PW = typeof import('playwright');
 const pw: PW | null = hasBuild ? await import('playwright').catch(() => null) : null;
@@ -191,10 +192,46 @@ for (const colorScheme of ['dark', 'light'] as const) {
       await a.locator('header button:has-text("Admin Hub")').click();
       const nav = a.getByRole('navigation', { name: 'Admin sections' });
       await nav.waitFor();
-      for (const tab of ['Orders', 'Chats', 'Stock', 'CRM', 'Settings']) {
-        await nav.getByRole('button', { name: new RegExp(tab) }).click();
+      for (const tab of ['Orders', 'Chats', 'Inventory', 'Customers', 'Settings']) {
+        await openAdminSection(a, new RegExp(`^${tab}`));
         await a.waitForTimeout(400);
         problems.push(...(await lowContrast(a, `admin ${tab}`)));
+        if (tab === 'Inventory') {
+          // The phone inventory: a product opened with its steppers, the Undo toast, Received stock,
+          // the history, the step-by-step editor, and the More menu.
+          await a.getByRole('button', { name: /^Stock and actions for/ }).first().click();
+          await a.getByRole('button', { name: /^One more/ }).first().click();
+          await a.getByRole('button', { name: 'Undo' }).waitFor();
+          problems.push(...(await lowContrast(a, 'inventory open, Undo toast')));
+          await a.getByRole('button', { name: /^Received stock for/ }).first().click();
+          await a.getByRole('dialog', { name: 'Received stock' }).waitFor();
+          await a.waitForTimeout(400);
+          problems.push(...(await lowContrast(a, 'received stock')));
+          await a.keyboard.press('Escape');
+          await a.getByRole('button', { name: /^Stock history of/ }).first().click();
+          await a.getByRole('dialog', { name: 'Stock history' }).getByText(/by /).first().waitFor();
+          await a.waitForTimeout(400);
+          problems.push(...(await lowContrast(a, 'stock history')));
+          await a.keyboard.press('Escape');
+          await a.getByRole('button', { name: 'Add product' }).first().click();
+          const wizard = a.getByRole('dialog', { name: 'Add a product' });
+          await wizard.waitFor();
+          await a.waitForTimeout(400); // the sheet has finished sliding in
+          problems.push(...(await lowContrast(a, 'editor: photos')));
+          for (const step of ['Details', 'Sizes', 'Publish']) {
+            await wizard.getByRole('navigation', { name: 'Steps' }).getByRole('button', { name: new RegExp(step) }).click();
+            await a.waitForTimeout(150);
+          }
+          problems.push(...(await lowContrast(a, 'editor: step shown')));
+          await a.keyboard.press('Escape');
+          if (width < 640) {
+            await nav.getByRole('button', { name: 'More' }).click();
+            await a.getByRole('dialog', { name: 'More' }).waitFor();
+            await a.waitForTimeout(400);
+            problems.push(...(await lowContrast(a, 'more menu')));
+            await a.keyboard.press('Escape');
+          }
+        }
       }
       const sections = a.getByRole('navigation', { name: 'Settings sections' }).getByRole('button');
       const count = await sections.count();

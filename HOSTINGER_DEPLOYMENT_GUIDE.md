@@ -88,7 +88,7 @@ Everything the shop stores lives in one Docker volume and is backed up every 12 
 The shop backs itself up every 12 hours, and straight after a restart if one is due. It emails the backup to `BACKUP_EMAIL` and keeps the newest 14 on the server. Each backup contains:
 
 - **The full database** (`shop.db`): every order, product, setting and booking. Courier and SMS keys are blanked: re-enter them after a restore.
-- **Flat files you can open in Excel:** `orders.csv`, `order_items.csv`, `customers.csv`, `products.csv`.
+- **Flat files you can open in Excel:** `orders.csv`, `order_items.csv`, `customers.csv`, `products.csv`, `chats.csv`, `stock_moves.csv` (every stock change: who, why, old → new).
 - **Bank-transfer receipts and product photos.**
 - **The audit log.**
 - **A checksum manifest:** a damaged file is detected.

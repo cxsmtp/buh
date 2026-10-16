@@ -12,6 +12,7 @@ import zlib from 'node:zlib';
 import { after, before, test } from 'node:test';
 import { hasBuild, startServer, type RunningServer } from './server.mjs';
 import { SETUP_CMD, SETUP_POWERSHELL } from '@/lib/podmanSetup';
+import { openAdminSection } from './helpers.mjs';
 
 type PW = typeof import('playwright');
 const pw: PW | null = hasBuild ? await import('playwright').catch(() => null) : null;
@@ -92,31 +93,38 @@ function png(): Buffer {
 
 test('the owner adds a one-of-a-kind product on a phone, sets pieces per size, and edits it', { skip }, async () => {
   const { ctx, page, errors } = await adminPage(375);
-  await page.getByRole('navigation', { name: 'Admin sections' }).getByRole('button', { name: /^\+ Add/ }).click();
+  await openAdminSection(page, /^Add product/);
   const editor = page.getByRole('dialog', { name: 'Add a product' });
   await editor.waitFor();
   assert.deepEqual(await overflow(page), [], 'editor fits a phone');
-  await editor.locator('input[type=file]').setInputFiles({ name: 'sheet.png', mimeType: 'image/png', buffer: png() });
-  await editor.getByAltText('Photo 1').waitFor();
+  await editor.getByLabel('Choose photos from the gallery').setInputFiles({ name: 'sheet.png', mimeType: 'image/png', buffer: png() });
+  await editor.getByAltText('Cover photo').waitFor();
+  await editor.getByRole('button', { name: /^Next: Details/ }).click();
   await editor.getByLabel('Name', { exact: true }).fill('Ajrakh Indigo One-Off');
   await editor.getByLabel('Price (AED)').fill('420');
-  await editor.getByRole('button', { name: /Queen Size Bed/ }).click(); // add the Queen preset
+  await editor.getByRole('button', { name: /^Next: Sizes/ }).click();
+  await editor.getByRole('button', { name: /Add size Queen Size Bed/ }).click(); // add the Queen preset
   await editor.getByRole('button', { name: 'One more King Size Bed (Most Popular)' }).click(); // King 1 → 2
-  await editor.getByRole('button', { name: 'Add to the shop' }).click();
+  await editor.getByRole('button', { name: /^Next: Publish/ }).click();
+  await editor.getByRole('button', { name: 'Publish', exact: true }).click();
   await editor.waitFor({ state: 'detached' });
 
-  const card = page.locator('div.rounded-2xl', { hasText: 'Ajrakh Indigo One-Off' }).last();
-  await card.getByText(/King \(180x200\): 2/).waitFor();
-  await card.getByText(/Queen \(160x200\): 1/).waitFor();
-  await card.getByRole('button', { name: /One fewer King/ }).click();
-  await card.getByText(/King \(180x200\): 1/).waitFor();
+  const row = page.getByRole('button', { name: 'Stock and actions for Ajrakh Indigo One-Off' });
+  await row.getByText('King 2').waitFor();
+  await row.getByText('Queen 1').waitFor();
+  await row.click();
+  await page.getByRole('button', { name: /^One fewer King/ }).click();
+  await row.getByText('King 1').waitFor();
+  await page.getByRole('button', { name: 'Undo' }).waitFor(); // saved
 
-  await card.getByRole('button', { name: 'Edit' }).click();
+  await page.getByRole('button', { name: 'Edit Ajrakh Indigo One-Off' }).click();
   const edit = page.getByRole('dialog', { name: /Edit Ajrakh Indigo One-Off/ });
+  await edit.getByRole('navigation', { name: 'Steps' }).getByRole('button', { name: /Details/ }).click();
   await edit.getByLabel('Price (AED)').fill('450');
+  await edit.getByRole('navigation', { name: 'Steps' }).getByRole('button', { name: /Publish/ }).click();
   await edit.getByRole('button', { name: 'Save changes' }).click();
   await edit.waitFor({ state: 'detached' });
-  await card.getByText('AED 450').first().waitFor();
+  await row.getByText('AED 450').first().waitFor();
 
   const p = (await (await fetch(`${server.base}/api/products`)).json()).products.find((x: { title: string }) => x.title === 'Ajrakh Indigo One-Off');
   assert.deepEqual(p.stockBySize, { king: 1, queen: 1 });
@@ -154,7 +162,7 @@ test('settings console: WhatsApp number and a festival theme show on the storefr
 
 test('a sold-out size cannot be bought; "Only 1 left" shows; the price updates live without a reload', { skip }, async () => {
   const p = (await (await fetch(`${server.base}/api/products`)).json()).products.find((x: { title: string }) => x.title === 'Ajrakh Indigo One-Off');
-  await api('POST', `/api/admin/products/${p.id}/stock`, { sizeId: 'queen', delta: -1 });
+  await api('POST', `/api/admin/products/${p.id}/stock`, { key: `features-${Date.now()}`, reason: 'sold_offline', changes: [{ sizeId: 'queen', delta: -1 }] });
   const page = await browser.newPage({ viewport: { width: 375, height: 800 } });
   await page.goto(server.base, { waitUntil: 'domcontentloaded' });
   await page.locator('h3, h4').filter({ hasText: 'Ajrakh Indigo One-Off' }).first().click();
@@ -244,7 +252,7 @@ test('forgot password on a phone: the same answer for any email; a reset link op
 
 test('settings → Email & admin account: a private mail server is refused; the sign-in email is shown', { skip }, async () => {
   const { ctx, page, errors } = await adminPage(375);
-  await page.getByRole('navigation', { name: 'Admin sections' }).getByRole('button', { name: /Settings/ }).click();
+  await openAdminSection(page, /Settings/);
   await page.getByRole('navigation', { name: 'Settings sections' }).getByRole('button', { name: 'Email & admin account' }).click();
   await page.getByLabel('Server', { exact: true }).fill('10.0.0.5');
   await page.getByRole('button', { name: 'Save email settings' }).click();
@@ -576,7 +584,7 @@ test('regression: a GPS reading near Sharjah never switches the emirate under an
 test('settings save themselves; a bad value is not saved (the working one stays); Undo puts the previous one back', { skip }, async () => {
   await api('PUT', '/api/admin/settings/store', { settings: { whatsappNumber: '+971501110000' } });
   const { ctx, page, errors } = await adminPage(375);
-  await page.getByRole('navigation', { name: 'Admin sections' }).getByRole('button', { name: /Settings/ }).click();
+  await openAdminSection(page, /Settings/);
   await page.getByRole('navigation', { name: 'Settings sections' }).getByRole('button', { name: 'Store & contact' }).click();
   const wa = page.getByLabel('WhatsApp number');
   await wa.fill('call me maybe');

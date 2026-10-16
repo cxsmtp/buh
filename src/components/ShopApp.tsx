@@ -6,6 +6,7 @@ import { DEFAULT_ASSISTANT, DEFAULT_CATALOG, DEFAULT_DELIVERY, DEFAULT_EMAIL_SET
 import { askWhatsAppLink, piecesLeft, refreshCart, ShopProvider, type FestivalView, type ShopInfo } from '@/lib/client/shop';
 import { captureLanding, decodeBag, type BagLine, type Landing } from '@/lib/client/landing';
 import { useLiveUpdates } from '@/lib/client/live';
+import { stockAlerts } from '@/lib/client/stock';
 import { INITIAL_BANK_DETAILS, INITIAL_BRAND_SETTINGS, INITIAL_COURIER_SETTINGS, INITIAL_SMS_SETTINGS } from '@/data/initialData';
 import { ADMIN_SIGNED_OUT_EVENT, getJson, postJson, sendJson } from '@/lib/apiClient';
 
@@ -551,6 +552,8 @@ export function ShopApp({ initialProductId }: { initialProductId?: string } = {}
 
   const totalCartCount = cart.reduce((sum, i) => sum + i.quantity, 0);
   const pendingOrdersCount = orders.filter((o) => o.status === 'pending_confirmation').length;
+  // Products on sale that are sold out or running low: the badge on Inventory.
+  const stockAlertCount = useMemo(() => stockAlerts(adminProducts, adminSettings.catalog.value.lowStockThreshold).count, [adminProducts, adminSettings.catalog.value.lowStockThreshold]);
 
   return (
     <ShopProvider value={shopInfo}>
@@ -600,8 +603,8 @@ export function ShopApp({ initialProductId }: { initialProductId?: string } = {}
                 { id: 'orders', label: 'Orders & Dispatches', badge: pendingOrdersCount },
                 { id: 'chats', label: 'Chats', badge: chatsWaiting },
                 { id: 'add-product', label: '+ Add Product' },
-                { id: 'inventory', label: 'Inventory Stock' },
-                { id: 'crm', label: 'Customers & CRM' },
+                { id: 'inventory', label: 'Inventory', badge: stockAlertCount },
+                { id: 'crm', label: 'Customers' },
                 { id: 'settings', label: '⚙️ Settings' },
               ].map((tab) => (
                 <button
@@ -657,6 +660,7 @@ export function ShopApp({ initialProductId }: { initialProductId?: string } = {}
                 startAdding={adminTab === 'add-product'}
                 products={adminProducts}
                 catalog={adminSettings.catalog.value}
+                onProductUpdated={(updated) => setAdminProducts((list) => list.map((x) => (x.id === updated.id ? { ...x, ...updated } : x)))}
                 onChanged={async () => {
                   await Promise.all([loadAdminData(), loadCatalog()]);
                 }}
@@ -1011,6 +1015,7 @@ export function ShopApp({ initialProductId }: { initialProductId?: string } = {}
         onToggleAdminMode={handleToggleAdminMode}
         pendingOrdersCount={pendingOrdersCount}
         chatsWaiting={chatsWaiting}
+        stockAlerts={stockAlertCount}
         helpSlot={Boolean(chatInfo) || Boolean(storeSettings.showWhatsAppButton && askWhatsAppLink(storeSettings, ''))}
       />
 
