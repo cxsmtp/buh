@@ -1611,7 +1611,9 @@ proxy_switch() {
   log "  it did not come up: $(printf '%s' "$px_out" | tail -n 2 | tr '\n' ' ') $(log_tail "$px_name")"
   docker rm -f "$px_name" > /dev/null 2>&1 || true
   if [ "$px_had" = 1 ]; then
-    docker rename "$px_name-previous" "$px_name" > /dev/null 2>&1 && docker start "$px_name" > /dev/null 2>&1 || true
+    if docker rename "$px_name-previous" "$px_name" > /dev/null 2>&1; then
+      docker start "$px_name" > /dev/null 2>&1 || true
+    fi
   fi
   printf '%s\n' "$px_new" >> "$STATE_DIR/bad-proxy-images"
   alert error "$2: the HTTPS proxy $(describe "$px_new") did not come up, so the one before was put back (if there was one). It is not tried again."
@@ -1867,7 +1869,7 @@ repair_folders() {
   rf_me=$(id -u)
   for rf_pair in "$CONTROL_DIR:1733" "$PUBLIC_DIR:755"; do
     rf_dir=${rf_pair%:*}
-    [ -d "$rf_dir" ] && [ ! -L "$rf_dir" ] || continue
+    if [ ! -d "$rf_dir" ] || [ -L "$rf_dir" ]; then continue; fi
     if [ ! -e "$rf_dir/.updater-folder" ] && [ ! -L "$rf_dir/.updater-folder" ]; then
       : > "$rf_dir/.updater-folder" 2> /dev/null || true
     fi
