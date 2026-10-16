@@ -414,7 +414,8 @@ test('skeletons while the shop loads (no spinner), in the chosen layout', { skip
 test('festival colour: the status bar (theme-color) follows the festival look', { skip }, async () => {
   const { ctx, page } = await open(412);
   const pub = await (await fetch(`${server.base}/api/settings/public`)).json();
-  const want = pub.festival?.festivalId ? pub.festival.theme.gradient[0] : '#0f1c2e';
+  // The deep shade of the festival's accent, or the shop's ink.
+  const want = pub.festival?.festivalId ? pub.festival.theme.bar : '#2b2127';
   await page.waitForFunction((c) => document.querySelector('meta[name=theme-color]')?.getAttribute('content') === c, want);
   await ctx.close();
 });

@@ -429,7 +429,7 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
 
             <div className="flex justify-between items-center">
               <span className="text-ink-muted font-medium">Delivery</span>
-              <span className="font-semibold text-gold flex items-center gap-1">
+              <span className="text-gold-deep flex items-center gap-1">
                 <span>{confirmedOrder.deliveryOption === 'same_day' ? `Same day (AED ${confirmedOrder.deliveryFee})` : `${confirmedOrder.courier.serviceability?.deliverySpeed || deliverySettings.standardDays}, free`}</span>
               </span>
             </div>

@@ -191,7 +191,7 @@ export const AdminBrandingTab: React.FC<AdminBrandingTabProps> = ({
             <Eye className="w-3.5 h-3.5" />
             <span>Live Storefront Header Preview</span>
           </span>
-          <span className="text-[10px] text-ink-muted">Updates live as you edit below</span>
+          <span className="text-[10px] text-sand">Updates live as you edit below</span>
         </div>
 
         {/* Live Header Logo & Title Preview */}

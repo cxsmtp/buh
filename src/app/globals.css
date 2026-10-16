@@ -81,6 +81,8 @@
  */
 :root {
   color-scheme: light;
+  /* Checkboxes, radios and range sliders in the palette, not the browser's blue. */
+  accent-color: var(--color-ink);
 }
 
 body {

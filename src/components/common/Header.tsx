@@ -52,7 +52,7 @@ export const Header: React.FC<HeaderProps> = ({ cartCount, onOpenCart, onOpenSea
         >
           <BrandLogo brand={brandSettings} />
           <span className="min-w-0">
-            <span className="block font-serif text-[15px] sm:text-lg text-ink leading-tight tracking-[0.12em] uppercase truncate">{name}</span>
+            <span className="block font-serif text-[15px] sm:text-lg text-ink leading-tight tracking-[0.06em] sm:tracking-[0.12em] uppercase truncate">{name}</span>
             {brandSettings?.tagline && <span className="hidden sm:block text-[10px] text-ink-muted tracking-[0.14em] uppercase truncate">{brandSettings.tagline}</span>}
           </span>
         </button>
