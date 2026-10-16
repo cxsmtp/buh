@@ -1,5 +1,18 @@
 # Changelog
 
+## BUH-02.06.00 — 2026-10-16 17:36 UTC · [#21](https://github.com/cxsmtp/buh/pull/21)
+
+- **Manage stock from your phone.** Admin Hub → Inventory: search and filters (low, sold out, hidden), stock per size in colour, big − / + buttons with Undo, a typed number, "Received stock" for several sizes at once, a reason for each change and its history; two phones changing the same item never overwrite each other, and a shaky connection never counts a change twice.
+- **Add a product in four steps from the phone.** Take or choose photos, reorder them and pick the cover, then name and price, sizes and stock, and publish; drafts save themselves. Quick actions: hide, sold out, duplicate for a colour variant, share the link. The phone's admin bar puts Orders, Inventory (with a low-stock badge) and Chats first.
+- **Big photos on phones.** One large photo per row like Instagram (or two, with the toggle next to Filter), sharp on every screen; tap a photo to zoom with pinch or double-tap.
+- **Install the shop as an app.** Customers and you can add it to the home screen: it opens full screen with its own icon, fast on repeat visits, with a calm page when offline; checkout, orders and the Admin Hub are never stored on the phone. A small card offers it once, never during checkout or chat.
+- **Faster for shoppers.** The Admin Hub now loads only when you open it, so every customer downloads about 54 KB less.
+- **Status.**
+  - **Benchmark:** same host, main (BUH-02.05.00) vs this branch, 3 alternating rounds, 0 failed requests. Storefront main 823 / 735 / 857 req/s, branch 814 / 872 / 893 (p95 118–180 vs 102–156 ms); courier check main 697 / 706 / 783, branch 746 / 710 / 753; catalogue main 714 / 771 / 884, branch 796 / 869 / 879. Level to faster.
+  - **Tests:** 436 passed, including stock moves (no double apply with the same key, conflicts between two devices, audit before done, undo rules), the product editor with photo upload, and the installable app (manifest, icons, offline page, nothing private cached, the emergency off switch) at 375, 412, 768 and 1280 px.
+  - **Dependency audit:** production 0 vulnerabilities; no new packages.
+  - **Security scan:** independent review of stock moves and the app (8 findings) fixed with tests; not yet tried on a real iPhone or Android install.
+
 ## BUH-02.05.00 — 2026-10-16 14:30 UTC · [#11](https://github.com/cxsmtp/buh/pull/11)
 
 - **Browse like Instagram on a phone.** Round collection "stories", a feed of big photos with prices and "Only 2 left", products that open full screen with swipeable photos, a Filter sheet (category, size, colour, price, in stock, on sale) whose choices can be shared as a link, search, and a bottom bar with Home, Search, Bag, Orders and Help.
