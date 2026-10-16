@@ -108,7 +108,10 @@ test('solemn days show only on the day, calmly, over anything else', () => {
   assert.equal(pickTheme({ today: '2030-04-21', events: easter }).themeId, 'easter');
   for (const id of ['good-friday', 'commemoration-day']) {
     const t = catalog.themeFor(id);
-    assert.ok(!/[%🎁🎉🎊🎆]|sale|offer|discount|gift|deliver/i.test([t.ornament, t.headline, ...t.marquee].join(' ')), id);
+    assert.ok(!/[%🎁🎉🎊🎆]|sale|offer|discount|gift|deliver/i.test([t.greeting, t.headline, ...t.marquee].join(' ')), id);
+    // Understated: stone grey and a quiet motif, never party ornaments.
+    assert.equal(t.palette, 'stone', id);
+    assert.ok(['olive', 'dove'].includes(t.motif), id);
   }
 });
 
@@ -285,13 +288,43 @@ test('the default fetcher refuses responses over 2 MB', async () => {
 
 // ---- Catalogue ------------------------------------------------------------------
 
-test('every accent reaches 3:1 contrast on white and on the brand navy', () => {
-  for (const [id, t] of [['default', catalog.DEFAULT_THEME] as const, ...catalog.FESTIVALS.map((f) => [f.id, f.theme] as const)]) {
-    assert.ok(catalog.contrastRatio(t.accent, '#ffffff') >= 3, `${id} accent on white`);
-    assert.ok(catalog.contrastRatio(t.accent, catalog.BRAND_NAVY) >= 3, `${id} accent on navy`);
+test('every festive accent is readable on the shop\'s ivory and on its own greeting band', () => {
+  const ivory = catalog.BRAND_IVORY;
+  for (const [id, a] of Object.entries(catalog.FESTIVE_ACCENTS)) {
+    assert.ok(catalog.contrastRatio(a.accent, ivory) >= 4.5, `${id} accent on ivory`);
+    assert.ok(catalog.contrastRatio(a.accent, '#ffffff') >= 4.5, `${id} accent on white`);
+    assert.ok(catalog.contrastRatio(a.accent, a.soft) >= 4.5, `${id} accent on its band`);
+    assert.ok(catalog.contrastRatio('#5a4c53', a.soft) >= 4.5, `${id}: the band's second line (ink-soft)`);
+    assert.ok(catalog.contrastRatio('#ffffff', a.bar) >= 4.5, `${id}: the status bar's white text`);
+    // The motif and the ring are fine lines: visible on the band (3:1 for the accent-coloured motif).
+    assert.ok(catalog.contrastRatio(a.accent, a.soft) >= 3, `${id} motif`);
   }
-  assert.ok(catalog.contrastRatio(catalog.BRAND_GOLD, '#ffffff') < 3, 'why the brand gold is only the soft tint');
+  for (const [id, t] of [['default', catalog.DEFAULT_THEME] as const, ...catalog.FESTIVALS.map((f) => [f.id, f.theme] as const)]) {
+    assert.deepEqual([t.accent, t.accentSoft, t.glow, t.bar], Object.values(catalog.FESTIVE_ACCENTS[t.palette]), `${id} uses its curated accent only`);
+  }
+  assert.ok(catalog.contrastRatio(catalog.BRAND_GOLD, '#ffffff') < 3, 'why the champagne gold is never text on white');
   assert.equal(catalog.contrastRatio('#000000', '#ffffff').toFixed(0), '21');
+});
+
+test('each festival keeps to the palette: Eid in emerald, Diwali in saffron, Christmas in berry, National Day with a nod to the flag', () => {
+  const look = (id: string) => [catalog.themeFor(id).palette, catalog.themeFor(id).motif];
+  assert.deepEqual(look('eid-al-fitr'), ['emerald', 'crescent']);
+  assert.deepEqual(look('eid-al-adha'), ['emerald', 'crescent']);
+  assert.deepEqual(look('ramadan'), ['emerald', 'lantern']);
+  assert.deepEqual(look('diwali'), ['saffron', 'diya']);
+  assert.deepEqual(look('christmas'), ['berry', 'snowflake']);
+  assert.deepEqual(look('uae-national-day'), ['emerald', 'flag']);
+  assert.deepEqual(look('default'), ['gold', 'sparkle']);
+  // A short, gracious greeting: no emoji, no shouting.
+  const emoji = /\p{Extended_Pictographic}/u;
+  for (const f of catalog.FESTIVALS) {
+    const t = f.theme;
+    for (const line of [t.greeting, t.headline, ...t.marquee]) {
+      assert.ok(!emoji.test(line), `${f.id}: no emoji in "${line}"`);
+      assert.ok(!/!|[A-Z]{4,}/.test(line), `${f.id}: no shouting in "${line}"`);
+    }
+    assert.ok(t.greeting.length <= 40, `${f.id} greeting is short`);
+  }
 });
 
 test('the catalogue is complete and well-formed', () => {
@@ -308,8 +341,9 @@ test('the catalogue is complete and well-formed', () => {
     assert.ok(f.durationDays >= 1 && f.durationDays <= 30, f.id);
     assert.ok(f.tier === 1 || f.tier === 2, f.id);
     const t = f.theme;
-    assert.ok([t.accent, t.accentSoft, ...t.gradient].every((c) => hex.test(c)), `${f.id} colours`);
-    assert.ok(t.ornament.length >= 1 && [...t.ornament].length <= 8, `${f.id} ornament`);
+    assert.ok([t.accent, t.accentSoft, t.glow, t.bar].every((c) => hex.test(c)), `${f.id} colours`);
+    assert.ok(t.palette in catalog.FESTIVE_ACCENTS, `${f.id} palette`);
+    assert.ok((catalog.MOTIFS as readonly string[]).includes(t.motif), `${f.id} motif`);
     assert.ok(t.greeting && t.headline.length <= 80, `${f.id} text`);
     assert.ok(t.marquee.length >= 1 && t.marquee.length <= 3, `${f.id} marquee`);
     if (f.parent) assert.ok(ids.includes(f.parent), `${f.id} parent`);

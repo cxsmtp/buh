@@ -4,6 +4,8 @@ import React, { useEffect, useState } from 'react';
 import { Loader2, RefreshCw } from 'lucide-react';
 import type { ThemeSettings } from '@/types';
 import { DEFAULT_THEME, FESTIVALS, themeFor } from '@/lib/festivals/catalog';
+import { FestiveGreeting } from '@/components/store/FestiveGreeting';
+import { FestiveMotif } from '@/components/store/FestiveMotif';
 import { getJson, postJson } from '@/lib/apiClient';
 
 /**
@@ -73,23 +75,42 @@ export function ThemeSettingsCard({ value, onSave }: { value: ThemeSettings; onS
   };
 
   const current = overview?.pick.festivalId ? FESTIVALS.find((f) => f.id === overview.pick.festivalId) : null;
-  const preview = current ? current.theme : DEFAULT_THEME;
+  // Preview any look here before choosing it (nothing is saved until you pick it above).
+  const [previewId, setPreviewId] = useState<string | null>(null);
+  const shownId = previewId ?? current?.id ?? 'default';
+  const shown = FESTIVALS.find((f) => f.id === shownId) ?? null;
+  const preview = shown ? shown.theme : DEFAULT_THEME;
 
   return (
     <div className="space-y-5 text-xs">
       {/* Showing now */}
-      <div className="rounded-2xl p-4 text-white" style={{ backgroundImage: `linear-gradient(110deg, ${preview.gradient[0]}, ${preview.gradient[1]})` }}>
-        <div className="text-[10px] uppercase tracking-wider opacity-80">Showing now</div>
-        <div className="text-base font-bold">
-          {preview.ornament} {current ? current.name : 'Everyday look'}
+      <section aria-label="Preview" className="space-y-2.5 rounded-2xl border border-line bg-ivory p-3.5">
+        <div className="flex flex-wrap items-center gap-2">
+          <span className="label-caps text-ink-muted">{previewId ? 'Preview' : 'Showing now'}</span>
+          <span className="font-serif text-base text-ink">{shown ? shown.name : 'Everyday look'}</span>
+          <select
+            className="ml-auto min-w-0 max-w-full px-2.5 py-1.5 rounded-lg border border-line-strong bg-surface"
+            value={shownId}
+            onChange={(e) => setPreviewId(e.target.value)}
+            aria-label="Preview a look"
+          >
+            <option value="default">Everyday look</option>
+            {FESTIVALS.map((f) => (
+              <option key={f.id} value={f.id}>{f.name}</option>
+            ))}
+          </select>
         </div>
-        {current && <div className="opacity-90">{preview.greeting} · {preview.headline}</div>}
-        {overview && <div className="mt-1 opacity-75">{overview.pick.reason}</div>}
-      </div>
+        {shown ? <FestiveGreeting theme={preview} /> : <p className="text-ink-soft">No greeting: the shop shows its everyday gold.</p>}
+        <div className="rounded-lg bg-ink text-sand text-[11px] tracking-[0.06em] px-3 py-2 text-center truncate" aria-label="Announcement bar preview">
+          {preview.marquee[0]}
+        </div>
+        {overview && !previewId && <p className="text-ink-muted">{overview.pick.reason}</p>}
+        {previewId && <button type="button" className="text-ink underline underline-offset-4" onClick={() => setPreviewId(null)}>Back to what the shop shows now</button>}
+      </section>
 
       {/* Mode */}
       <fieldset className="space-y-2">
-        <legend className="font-bold text-sm text-[#0f1c2e] mb-1">How the look is chosen</legend>
+        <legend className="font-bold text-sm text-ink mb-1">How the look is chosen</legend>
         {(
           [
             ['auto', 'Automatic', 'Each festival from 3 weeks before until 1 week after (major ones); smaller ones for a few days around them.'],
@@ -100,14 +121,14 @@ export function ThemeSettingsCard({ value, onSave }: { value: ThemeSettings; onS
           <label key={mode} className="flex items-start gap-2">
             <input type="radio" name="theme-mode" className="mt-0.5" checked={d.mode === mode} disabled={saving} onChange={() => void save({ ...d, mode })} />
             <span>
-              <strong className="text-stone-800">{title}</strong>
-              <span className="block text-stone-500">{hint}</span>
+              <strong className="text-ink">{title}</strong>
+              <span className="block text-ink-muted">{hint}</span>
             </span>
           </label>
         ))}
         {d.mode === 'manual' && (
           <select
-            className="mt-1 w-full sm:w-80 px-2.5 py-2 rounded-lg border border-stone-300 bg-white"
+            className="mt-1 w-full sm:w-80 px-2.5 py-2 rounded-lg border border-line-strong bg-surface"
             value={d.themeId}
             onChange={(e) => void save({ ...d, themeId: e.target.value })}
             aria-label="Theme to show"
@@ -115,7 +136,7 @@ export function ThemeSettingsCard({ value, onSave }: { value: ThemeSettings; onS
             <option value="default">Everyday look</option>
             {FESTIVALS.map((f) => (
               <option key={f.id} value={f.id}>
-                {themeFor(f.id).ornament} {f.name}
+                {f.name}
               </option>
             ))}
           </select>
@@ -130,26 +151,26 @@ export function ThemeSettingsCard({ value, onSave }: { value: ThemeSettings; onS
       {/* Coming up */}
       <section className="space-y-2">
         <div className="flex items-center gap-2">
-          <h3 className="font-bold text-sm text-[#0f1c2e]">Coming up</h3>
-          <button type="button" onClick={() => void refresh()} disabled={refreshing} className="ml-auto px-2.5 py-1 rounded-lg border border-stone-300 font-semibold flex items-center gap-1 disabled:opacity-50">
+          <h3 className="font-bold text-sm text-ink">Coming up</h3>
+          <button type="button" onClick={() => void refresh()} disabled={refreshing} className="ml-auto px-2.5 py-1 rounded-lg border border-line-strong font-semibold flex items-center gap-1 disabled:opacity-50">
             {refreshing ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <RefreshCw className="w-3.5 h-3.5" />} Refresh dates now
           </button>
         </div>
         {overview?.lastRefresh ? (
-          <p className="text-stone-500">
+          <p className="text-ink-muted">
             Dates last checked online {new Date(overview.lastRefresh.at).toLocaleString()}
             {overview.lastRefresh.ok ? '.' : ` (some calendars unreachable; built-in dates used for those).`}
           </p>
         ) : (
-          <p className="text-stone-500">Dates are built in, and checked online weekly once the shop is running.</p>
+          <p className="text-ink-muted">Dates are built in, and checked online weekly once the shop is running.</p>
         )}
-        <ul className="divide-y divide-stone-100 border border-stone-200 rounded-xl bg-white">
+        <ul className="divide-y divide-line border border-line rounded-xl bg-surface">
           {(overview?.upcoming ?? []).map((u) => (
             <li key={`${u.id}-${u.start}`} className="flex flex-wrap items-center gap-x-3 gap-y-1 p-2.5">
-              <span aria-hidden="true">{themeFor(u.id).ornament}</span>
-              <span className={`font-semibold ${u.disabled ? 'line-through text-stone-500' : 'text-stone-800'}`}>{u.name}</span>
-              <span className="text-stone-500">{fmt(u.start)}{u.end !== u.start ? ` – ${fmt(u.end)}` : ''}</span>
-              <span className="text-stone-500">look {fmt(u.themeFrom)} → {fmt(u.themeUntil)}</span>
+              <span className="text-gold-deep"><FestiveMotif motif={themeFor(u.id).motif} className="w-4 h-4" /></span>
+              <span className={`font-semibold ${u.disabled ? 'line-through text-ink-muted' : 'text-ink'}`}>{u.name}</span>
+              <span className="text-ink-muted">{fmt(u.start)}{u.end !== u.start ? ` – ${fmt(u.end)}` : ''}</span>
+              <span className="text-ink-muted">look {fmt(u.themeFrom)} → {fmt(u.themeUntil)}</span>
               <label className="ml-auto flex items-center gap-1.5">
                 <input
                   type="checkbox"
@@ -162,11 +183,11 @@ export function ThemeSettingsCard({ value, onSave }: { value: ThemeSettings; onS
               </label>
             </li>
           ))}
-          {!overview && <li className="p-3 text-stone-500">Loading…</li>}
+          {!overview && <li className="p-3 text-ink-muted">Loading…</li>}
         </ul>
       </section>
 
-      {status && <p role="status" className={`font-semibold ${status.ok ? 'text-emerald-700' : 'text-red-700'}`}>{status.text}</p>}
+      {status && <p role="status" className={`font-semibold ${status.ok ? 'text-success' : 'text-danger'}`}>{status.text}</p>}
     </div>
   );
 }
