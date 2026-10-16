@@ -1,14 +1,42 @@
 import type { Metadata, Viewport } from "next";
+import localFont from "next/font/local";
+import { THEME_COLOR } from "@/lib/design/tokens";
 import "./globals.css";
 
+/*
+ * The shop's two typefaces, served from this site (no font requests to other hosts): Cormorant
+ * Garamond, an elegant serif for headings and the shop's name, and Inter for everything else.
+ * Both under the SIL Open Font License (src/app/fonts/).
+ */
+const display = localFont({
+  src: [
+    { path: "./fonts/cormorant-garamond-latin-500-normal.woff2", weight: "500", style: "normal" },
+    { path: "./fonts/cormorant-garamond-latin-500-italic.woff2", weight: "500", style: "italic" },
+    { path: "./fonts/cormorant-garamond-latin-600-normal.woff2", weight: "600", style: "normal" },
+  ],
+  variable: "--font-display",
+  display: "swap",
+  fallback: ["Georgia", "Times New Roman", "serif"],
+});
+const ui = localFont({
+  src: "./fonts/inter-latin-wght-normal.woff2",
+  weight: "100 900",
+  variable: "--font-ui",
+  display: "swap",
+  fallback: ["system-ui", "-apple-system", "Segoe UI", "Roboto", "Arial", "sans-serif"],
+});
+
 export const viewport: Viewport = {
-  themeColor: "#0f1c2e",
+  themeColor: THEME_COLOR,
   width: "device-width",
   initialScale: 1,
   maximumScale: 5,
   // The page reaches under a phone's notch and home bar; the header, tab bar and sheets pad
   // themselves by the safe-area insets (globals.css), like an app.
   viewportFit: "cover",
+  // The on-screen keyboard shrinks the page instead of covering it, so a sheet's footer button
+  // stays above the keyboard (Chrome on Android; iPhones do this by themselves).
+  interactiveWidget: "resizes-content",
 };
 
 export const metadata: Metadata = {
@@ -41,8 +69,8 @@ export default function RootLayout({
   children: React.ReactNode;
 }) {
   return (
-    <html lang="en" className="h-full antialiased" suppressHydrationWarning>
-      <body className="min-h-full flex flex-col bg-[#fbf9f5] text-[#1c1815] selection:bg-[#c5a059]/30">
+    <html lang="en" className={`h-full antialiased ${display.variable} ${ui.variable}`} suppressHydrationWarning>
+      <body className="min-h-full flex flex-col bg-ivory text-ink selection:bg-gold/30">
         {children}
       </body>
     </html>

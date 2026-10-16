@@ -119,6 +119,7 @@ Carrier endpoints are fixed in code.
 Every page sends:
 
 - **Content Security Policy:** scripts and connections only to this site, no plugins, no `<base>`, no framing. Workers only from this site (`worker-src 'self' blob:`: the service worker, and the order confirmation's confetti, drawn in a worker from a `blob:` URL) and the app manifest only from this site (`manifest-src 'self'`).
+  - Fonts (Cormorant Garamond and Inter, SIL Open Font License) are files of the shop itself (`src/app/fonts/`, served under `/_next/static/`), so `font-src 'self'` stays: no font host sees visitors.
   - Exception, for Firebase phone sign-in: reCAPTCHA scripts and frames (`www.google.com/recaptcha/`, `www.gstatic.com/recaptcha/`, `recaptcha.google.com/recaptcha/`), `apis.google.com`, frames from `*.firebaseapp.com`, and connections to `identitytoolkit.googleapis.com` and `securetoken.googleapis.com`.
   - **Trade-off:** the policy is fixed at build time (a per-request one costs too much, below), so these Google hosts are allowed even while Firebase is off. They are Google-run, path-limited where CSP allows, and nothing on the page loads from them unless Firebase is switched on. A custom auth domain (not `<project>.firebaseapp.com`) is not covered; keep the default.
 - `X-Frame-Options: DENY`, `nosniff`, `Cross-Origin-Opener-Policy: same-origin`, HSTS, and a `Permissions-Policy` that allows only geolocation (for the address pin).

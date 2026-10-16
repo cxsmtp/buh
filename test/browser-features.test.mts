@@ -135,7 +135,7 @@ test('the owner adds a one-of-a-kind product on a phone, sets pieces per size, a
 
 test('settings console: WhatsApp number and a festival theme show on the storefront straight away', { skip }, async () => {
   const { ctx, page } = await adminPage(1280);
-  await page.getByRole('button', { name: /⚙️ Settings/ }).click();
+  await page.getByRole('button', { name: /^Settings$/ }).first().click();
   const nav = page.getByRole('navigation', { name: 'Settings sections' });
   await nav.getByRole('button', { name: 'Store & contact' }).click();
   await page.getByLabel('WhatsApp number').fill('050 765 4321');
@@ -204,7 +204,7 @@ test('checkout remembers the customer’s details; a bag link restores the bag i
   const bag = Buffer.from(JSON.stringify([[p.id, p.defaultProfileId, '', 1]])).toString('base64url');
   const fresh = await browser.newPage({ viewport: { width: 375, height: 800 } });
   await fresh.goto(`${server.base}/?bag=${bag}`, { waitUntil: 'domcontentloaded' });
-  await fresh.getByText('Your Shopping Bag').waitFor();
+  await fresh.getByText('Your bag').waitFor();
   await fresh.getByText(p.title).first().waitFor();
   assert.ok(!fresh.url().includes('bag='), 'the link is tidied away');
   await fresh.close();

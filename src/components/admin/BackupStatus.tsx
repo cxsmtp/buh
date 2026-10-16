@@ -52,10 +52,10 @@ export const BackupStatus: React.FC = () => {
   if (!health) return null;
   const tone =
     health.level === 'ok'
-      ? 'bg-emerald-50 border-emerald-200 text-emerald-900'
+      ? 'bg-success-soft border-success-line text-success'
       : health.level === 'warning'
-      ? 'bg-amber-50 border-amber-200 text-amber-950'
-      : 'bg-red-50 border-red-200 text-red-900';
+      ? 'bg-warning-soft border-warning-line text-warning'
+      : 'bg-danger-soft border-danger-line text-danger';
   const Icon = health.level === 'ok' ? CheckCircle2 : health.level === 'warning' ? AlertTriangle : XCircle;
   const detail =
     health.level === 'failing'
@@ -82,7 +82,7 @@ export const BackupStatus: React.FC = () => {
         type="button"
         onClick={runNow}
         disabled={running}
-        className="ml-auto px-2.5 py-1 rounded-lg border border-current/30 bg-white/70 hover:bg-white font-semibold flex items-center gap-1 disabled:opacity-60"
+        className="ml-auto px-2.5 py-1 rounded-lg border border-current/30 bg-surface/70 hover:bg-surface font-semibold flex items-center gap-1 disabled:opacity-60"
       >
         {running && <Loader2 className="w-3 h-3 animate-spin" />}
         {running ? 'Backing up…' : 'Back up now'}

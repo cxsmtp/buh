@@ -1,14 +1,15 @@
 import crypto from 'node:crypto';
 import type { MetadataRoute } from 'next';
 import type { BrandSettings } from '@/types';
+import { APP_BACKGROUND_COLOR, PALETTE, THEME_COLOR } from '@/lib/design/tokens';
 
 /**
  * The installable app (web app manifest) and its icons, from Settings → Branding: the shop's name
  * on the home screen, and the logo (or its letters on the brand colour) as the icon.
  */
 
-export const APP_BACKGROUND = '#fbf9f5';
-export const APP_THEME = '#0f1c2e';
+export const APP_BACKGROUND = APP_BACKGROUND_COLOR;
+export const APP_THEME = THEME_COLOR;
 const DEFAULT_NAME = 'Beautiful UAE Home';
 
 /** "BEAUTIFUL UAE HOME" reads better as "Beautiful UAE Home" under an icon (short words stay as typed). */
@@ -83,6 +84,6 @@ export const ICON_FILES: Record<string, { size: number; maskable: boolean }> = {
 };
 
 /** A colour safe to put in an image: #rgb or #rrggbb, else the brand gold. */
-export function safeColor(c: string | undefined, fallback = '#c5a059'): string {
+export function safeColor(c: string | undefined, fallback: string = PALETTE.gold): string {
   return c && /^#([0-9a-f]{3}|[0-9a-f]{6})$/i.test(c) ? c : fallback;
 }

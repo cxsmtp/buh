@@ -1,5 +1,6 @@
 import { BankTransferDetails, BrandSettings, CourierSettings, Customer, Order, Product, SmsGatewaySettings } from '@/types';
 import { DEFAULT_BED_PROFILES } from './bedProfiles';
+import { DEFAULT_MARQUEE } from '@/lib/marquee';
 
 export const UAE_EMIRATES = [
   'Dubai',
@@ -433,17 +434,11 @@ export const INITIAL_BRAND_SETTINGS: BrandSettings = {
   logoType: 'text',
   logoText: 'BU',
   logoImageUrl: '',
-  accentColor: '#c5a059',
+  accentColor: '#c2a36b',
   marquee: {
     enabled: true,
     speedSeconds: 26,
-    messages: [
-      '🌟 Exclusive UAE Edition: Handprinted & Machine-Printed Artisan Block Linens',
-      '⚡ Express Delivery across Dubai, Abu Dhabi, Sharjah & all 7 Emirates within 24-48 Hours',
-      '🚚 Doorstep Cash on Delivery (COD) & Instant Emirates NBD Bank Transfer Supported',
-      '✨ Tailored 40cm Deep Pocket Bed Sheets engineered for UAE Master Bed Mattresses',
-      '🌿 100% Breathable Egyptian Giza Cotton & Pure Flax Linens for Arabian Comfort',
-    ],
+    messages: [...DEFAULT_MARQUEE],
   },
 };
 

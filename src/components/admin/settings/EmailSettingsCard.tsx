@@ -13,8 +13,8 @@ import { getJson, postJson, sendJson } from '@/lib/apiClient';
  * .env.production. The password is write-only: it is never sent back.
  */
 
-const field = 'w-full px-3 py-2 rounded-xl border border-stone-300 bg-white text-stone-900 text-sm focus:outline-none focus:ring-2 focus:ring-[#c5a059]';
-const label = 'block text-xs font-semibold text-stone-700 mb-1';
+const field = 'w-full px-3 py-2 rounded-xl border border-line-strong bg-surface text-ink text-sm focus:outline-none focus:ring-2 focus:ring-gold';
+const label = 'block text-xs font-semibold text-ink-soft mb-1';
 
 export function EmailSettingsCard({
   value,
@@ -63,8 +63,8 @@ export function EmailSettingsCard({
   return (
     <div className="space-y-6 text-sm">
       <section className="space-y-3">
-        <h3 className="font-bold text-[#0f1c2e] flex items-center gap-2"><Mail className="w-4 h-4 text-[#c5a059]" /> Mail server (SMTP)</h3>
-        <p className="text-xs text-stone-500">
+        <h3 className="font-bold text-ink flex items-center gap-2"><Mail className="w-4 h-4 text-gold" /> Mail server (SMTP)</h3>
+        <p className="text-xs text-ink-muted">
           Your email provider&apos;s SMTP details (Hostinger: smtp.hostinger.com, port 465, TLS; Gmail: smtp.gmail.com, port 587, STARTTLS, with an app password).
           Leave the server empty to use SMTP_* from .env.production.
         </p>
@@ -96,7 +96,7 @@ export function EmailSettingsCard({
               </select>
             </div>
             {(d.smtpPort === 465) !== (d.smtpSecurity === 'tls') && (
-              <p role="status" className="col-span-2 text-xs font-semibold text-amber-900">
+              <p role="status" className="col-span-2 text-xs font-semibold text-warning">
                 Port {d.smtpPort} usually needs Security “{d.smtpPort === 465 ? 'TLS' : 'STARTTLS'}”.{' '}
                 <button type="button" className="underline" onClick={() => set('smtpSecurity', d.smtpPort === 465 ? 'tls' : 'starttls')}>
                   Use {d.smtpPort === 465 ? 'TLS' : 'STARTTLS'}
@@ -128,12 +128,12 @@ export function EmailSettingsCard({
           <div>
             <label className={label} htmlFor="em-to">Send backups and alerts to</label>
             <input id="em-to" className={field} placeholder="you@example.com, partner@example.com" value={d.sendTo} maxLength={600} onChange={(e) => set('sendTo', e.target.value)} />
-            <p className="text-[11px] text-stone-500 mt-1">Up to 5, separated by commas. Empty uses BACKUP_EMAIL.</p>
+            <p className="text-[11px] text-ink-muted mt-1">Up to 5, separated by commas. Empty uses BACKUP_EMAIL.</p>
           </div>
         </div>
-        <details className="rounded-xl border border-stone-200 p-3" open={Boolean(d.imapHost)}>
-          <summary className="text-xs font-bold text-[#0f1c2e] cursor-pointer">Answer chats by replying to the email (mailbox, IMAP)</summary>
-          <p className="text-xs text-stone-500 mt-2">
+        <details className="rounded-xl border border-line p-3" open={Boolean(d.imapHost)}>
+          <summary className="text-xs font-bold text-ink cursor-pointer">Answer chats by replying to the email (mailbox, IMAP)</summary>
+          <p className="text-xs text-ink-muted mt-2">
             When a customer asks for a person, you get an email. If the shop can read the mailbox those replies go to, your reply appears in the customer&apos;s chat.
             Hostinger: imap.hostinger.com; Gmail: imap.gmail.com (with an app password). Leave the server empty to switch this off.
           </p>
@@ -153,20 +153,20 @@ export function EmailSettingsCard({
           </div>
         </details>
         <div className="flex flex-wrap gap-2">
-          <button type="button" onClick={() => void save()} disabled={saving} className="px-4 py-2 rounded-xl bg-[#0f1c2e] text-white text-xs font-bold flex items-center gap-1.5 disabled:opacity-60">
+          <button type="button" onClick={() => void save()} disabled={saving} className="px-4 py-2 rounded-xl bg-ink text-white text-xs font-bold flex items-center gap-1.5 disabled:opacity-60">
             {saving && <Loader2 className="w-3.5 h-3.5 animate-spin" />} Save email settings
           </button>
         {auto && autosave.bar}
         {unsavedPassword && (
-          <p role="status" className="text-xs font-semibold text-amber-900">
+          <p role="status" className="text-xs font-semibold text-warning">
             The password you typed is not saved yet: press “Save email settings” (or “Send a test email”, which saves it first).
           </p>
         )}
-          <button type="button" onClick={() => void test()} disabled={testing} className="px-4 py-2 rounded-xl border border-stone-300 text-xs font-bold flex items-center gap-1.5 disabled:opacity-60">
+          <button type="button" onClick={() => void test()} disabled={testing} className="px-4 py-2 rounded-xl border border-line-strong text-xs font-bold flex items-center gap-1.5 disabled:opacity-60">
             {testing ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Send className="w-3.5 h-3.5" />} Send a test email
           </button>
         </div>
-        {status && <p role="status" className={`text-xs font-semibold ${status.ok ? 'text-emerald-700' : 'text-red-700'}`}>{status.text}</p>}
+        {status && <p role="status" className={`text-xs font-semibold ${status.ok ? 'text-success' : 'text-danger'}`}>{status.text}</p>}
       </section>
 
       <AdminAccountCard />
@@ -202,15 +202,15 @@ function AdminAccountCard() {
   };
 
   return (
-    <section className="space-y-3 border-t border-stone-200 pt-5">
-      <h3 className="font-bold text-[#0f1c2e] flex items-center gap-2"><UserCog className="w-4 h-4 text-[#c5a059]" /> Admin account</h3>
+    <section className="space-y-3 border-t border-line pt-5">
+      <h3 className="font-bold text-ink flex items-center gap-2"><UserCog className="w-4 h-4 text-gold" /> Admin account</h3>
       {info?.managedByEnv ? (
-        <p className="text-xs text-stone-600">
+        <p className="text-xs text-ink-soft">
           Signed in as <strong>{info.email}</strong>. This account is set by ADMIN_EMAIL / ADMIN_PASSWORD_HASH in .env.production, so change it there.
         </p>
       ) : (
         <form onSubmit={(e) => void save(e)} className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-          <p className="sm:col-span-2 text-xs text-stone-500">The email you sign in with. &ldquo;Forgot password?&rdquo; sends the reset link here, so use a mailbox you read. For a way in without email, add a passkey or recovery codes in &ldquo;Passkeys &amp; recovery codes&rdquo;.</p>
+          <p className="sm:col-span-2 text-xs text-ink-muted">The email you sign in with. &ldquo;Forgot password?&rdquo; sends the reset link here, so use a mailbox you read. For a way in without email, add a passkey or recovery codes in &ldquo;Passkeys &amp; recovery codes&rdquo;.</p>
           <div>
             <label className={label} htmlFor="acct-email">Sign-in email</label>
             <input id="acct-email" className={field} type="email" required autoComplete="username" value={email} maxLength={254} onChange={(e) => setEmail(e.target.value)} />
@@ -220,13 +220,13 @@ function AdminAccountCard() {
             <input id="acct-pass" className={field} type="password" required autoComplete="current-password" value={password} maxLength={256} onChange={(e) => setPassword(e.target.value)} />
           </div>
           <div className="sm:col-span-2">
-            <button type="submit" disabled={busy || !info || email.trim().toLowerCase() === info.email} className="px-4 py-2 rounded-xl bg-[#0f1c2e] text-white text-xs font-bold flex items-center gap-1.5 disabled:opacity-50">
+            <button type="submit" disabled={busy || !info || email.trim().toLowerCase() === info.email} className="px-4 py-2 rounded-xl bg-ink text-white text-xs font-bold flex items-center gap-1.5 disabled:opacity-50">
               {busy && <Loader2 className="w-3.5 h-3.5 animate-spin" />} Change sign-in email
             </button>
           </div>
         </form>
       )}
-      {status && <p role="status" className={`text-xs font-semibold ${status.ok ? 'text-emerald-700' : 'text-red-700'}`}>{status.text}</p>}
+      {status && <p role="status" className={`text-xs font-semibold ${status.ok ? 'text-success' : 'text-danger'}`}>{status.text}</p>}
     </section>
   );
 }

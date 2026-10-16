@@ -55,23 +55,23 @@ export const OrderTrackerModal: React.FC<OrderTrackerModalProps> = ({
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4 overscroll-contain sheet-fade">
-      <div className="bg-white rounded-3xl max-w-lg w-full p-5 shadow-2xl space-y-4">
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-ink/45 p-3 sm:p-4 overscroll-contain sheet-fade" role="dialog" aria-modal="true" aria-labelledby="track-title">
+      <div className="bg-surface rounded-3xl max-w-lg w-full min-w-0 max-h-[calc(100dvh-1.5rem)] overflow-y-auto overflow-x-hidden overscroll-contain p-5 border border-line space-y-4">
         {/* Header */}
-        <div className="flex items-center justify-between pb-3 border-b border-stone-200">
-          <div className="flex items-center gap-2">
-            <Truck className="w-5 h-5 text-[#c5a059]" />
-            <h2 className="font-serif font-bold text-base text-[#0f1c2e]">
-              Track Your UAE Bedding Order
+        <div className="sticky top-0 z-10 -mx-5 -mt-5 px-5 pt-4 pb-3 bg-surface flex items-center justify-between gap-3 border-b border-line">
+          <div className="flex items-center gap-2 min-w-0">
+            <Truck className="w-5 h-5 text-gold-deep shrink-0" strokeWidth={1.5} />
+            <h2 id="track-title" className="font-serif text-2xl text-ink">
+              Track your order
             </h2>
           </div>
           <button
             type="button"
             onClick={onClose}
             aria-label="Close Track Order"
-            className="p-1 text-stone-500 hover:text-stone-700 rounded-full hover:bg-stone-100"
+            className="shrink-0 w-10 h-10 -mr-2 flex items-center justify-center text-ink rounded-full hover:bg-sand"
           >
-            <X className="w-5 h-5" />
+            <X className="w-5 h-5" strokeWidth={1.5} />
           </button>
         </div>
 
@@ -85,7 +85,7 @@ export const OrderTrackerModal: React.FC<OrderTrackerModalProps> = ({
             value={orderId}
             maxLength={40}
             onChange={(e) => setOrderId(e.target.value)}
-            className="w-full px-3.5 py-2.5 rounded-xl border border-stone-300 text-xs font-mono uppercase focus:outline-none focus:ring-2 focus:ring-[#c5a059]"
+            className="w-full px-3.5 py-2.5 rounded-xl border border-line-strong text-xs font-mono uppercase focus:outline-none focus:ring-2 focus:ring-gold"
           />
           <input
             type="tel"
@@ -95,12 +95,12 @@ export const OrderTrackerModal: React.FC<OrderTrackerModalProps> = ({
             value={phone}
             maxLength={20}
             onChange={(e) => setPhone(e.target.value)}
-            className="w-full px-3.5 py-2.5 rounded-xl border border-stone-300 text-xs focus:outline-none focus:ring-2 focus:ring-[#c5a059]"
+            className="w-full px-3.5 py-2.5 rounded-xl border border-line-strong text-xs focus:outline-none focus:ring-2 focus:ring-gold"
           />
           <button
             type="submit"
             disabled={searching}
-            className="bg-[#0f1c2e] hover:bg-stone-800 disabled:opacity-60 text-white px-4 py-2.5 rounded-xl text-xs font-semibold flex items-center justify-center gap-1.5 transition-colors"
+            className="bg-ink hover:bg-ink disabled:opacity-60 text-white px-4 py-2.5 rounded-xl text-xs font-semibold flex items-center justify-center gap-1.5 transition-colors"
           >
             <Search className="w-4 h-4" />
             <span>{searching ? 'Finding…' : 'Track'}</span>
@@ -111,23 +111,23 @@ export const OrderTrackerModal: React.FC<OrderTrackerModalProps> = ({
         {hasSearched && (
           <div>
             {searchResult ? (
-              <div className="bg-stone-50 rounded-2xl p-4 border border-stone-200 text-xs space-y-3 animate-in fade-in-50">
-                <div className="flex justify-between items-start pb-2 border-b border-stone-200">
+              <div className="bg-ivory rounded-2xl p-4 border border-line text-xs space-y-3 animate-in fade-in-50">
+                <div className="flex justify-between items-start pb-2 border-b border-line">
                   <div>
-                    <span className="font-mono font-bold text-sm text-[#0f1c2e]">
+                    <span className="font-mono font-semibold text-sm text-ink">
                       {searchResult.id}
                     </span>
-                    <div className="text-[10px] text-stone-500">
+                    <div className="text-[10px] text-ink-muted">
                       Placed on {new Date(searchResult.createdAt).toLocaleDateString()}
                     </div>
                   </div>
                   <span
-                    className={`px-2.5 py-1 rounded-full text-[10px] font-bold uppercase tracking-wider ${
+                    className={`px-2.5 py-1 rounded-full text-[10px] font-semibold uppercase tracking-wider ${
                       searchResult.status === 'dispatched'
-                        ? 'bg-blue-100 text-blue-800'
+                        ? 'bg-sand text-ink'
                         : searchResult.status === 'confirmed'
-                        ? 'bg-emerald-100 text-emerald-800'
-                        : 'bg-amber-100 text-amber-800'
+                        ? 'bg-success-soft text-success'
+                        : 'bg-warning-soft text-warning'
                     }`}
                   >
                     {searchResult.status.replace(/_/g, ' ')}
@@ -135,24 +135,24 @@ export const OrderTrackerModal: React.FC<OrderTrackerModalProps> = ({
                 </div>
 
                 {/* Courier Details */}
-                <div className="bg-white p-3 rounded-xl border border-stone-200 space-y-2">
+                <div className="bg-surface p-3 rounded-xl border border-line space-y-2">
                   <div className="flex justify-between items-center">
-                    <span className="text-stone-500 font-medium">Delivery Service:</span>
-                    <strong className="text-[#0f1c2e]">
+                    <span className="text-ink-muted font-medium">Delivery Service:</span>
+                    <strong className="text-ink">
                       UAE Priority Express Delivery
                     </strong>
                   </div>
 
                   <div className="flex justify-between items-center">
-                    <span className="text-stone-500 font-medium">Airway Bill (AWB):</span>
-                    <span className="font-mono font-bold text-amber-700">
+                    <span className="text-ink-muted font-medium">Airway Bill (AWB):</span>
+                    <span className="font-mono font-semibold text-warning">
                       {searchResult.courier.awbNumber || 'Assigned when your order is dispatched'}
                     </span>
                   </div>
 
                   <div className="flex justify-between items-center">
-                    <span className="text-stone-500 font-medium">Status Note:</span>
-                    <span className="font-medium text-stone-800">
+                    <span className="text-ink-muted font-medium">Status Note:</span>
+                    <span className="font-medium text-ink">
                       {searchResult.courier.status}
                     </span>
                   </div>
@@ -162,7 +162,7 @@ export const OrderTrackerModal: React.FC<OrderTrackerModalProps> = ({
                       href={safeHref(searchResult.courier.trackingUrl)}
                       target="_blank"
                       rel="noopener noreferrer"
-                      className="mt-1 flex items-center justify-center gap-1.5 w-full bg-[#c5a059]/15 hover:bg-[#c5a059]/25 text-amber-900 font-semibold py-2 rounded-lg transition-colors text-xs"
+                      className="mt-1 flex items-center justify-center gap-1.5 w-full bg-gold/15 hover:bg-gold/25 text-warning font-semibold py-2 rounded-lg transition-colors text-xs"
                     >
                       <span>Open Live Carrier Tracking Page</span>
                       <ExternalLink className="w-3.5 h-3.5" />
@@ -172,29 +172,29 @@ export const OrderTrackerModal: React.FC<OrderTrackerModalProps> = ({
 
                 {/* Items */}
                 <div>
-                  <span className="font-bold text-stone-700 block mb-1">Items in this Parcel:</span>
+                  <span className="font-semibold text-ink-soft block mb-1">Items in this Parcel:</span>
                   <div className="space-y-1">
                     {searchResult.items.map((i, idx) => (
-                      <div key={idx} className="flex justify-between text-stone-600 text-[11px]">
+                      <div key={idx} className="flex justify-between text-ink-soft text-[11px]">
                         <span>
                           {i.quantity}x {i.title} ({i.profileName})
                         </span>
-                        <span className="font-semibold text-stone-900">AED {i.totalPrice}</span>
+                        <span className="font-semibold text-ink">AED {i.totalPrice}</span>
                       </div>
                     ))}
                   </div>
                 </div>
 
                 {/* Destination */}
-                <div className="flex items-center gap-1.5 text-stone-500 text-[11px] pt-1">
-                  <MapPin className="w-3.5 h-3.5 text-[#c5a059]" />
+                <div className="flex items-center gap-1.5 text-ink-muted text-[11px] pt-1">
+                  <MapPin className="w-3.5 h-3.5 text-gold" />
                   <span>
                     Delivering to {searchResult.firstName} in {searchResult.area}, {searchResult.emirate}
                   </span>
                 </div>
               </div>
             ) : (
-              <div className="text-center py-6 text-stone-500 text-xs bg-stone-50 rounded-2xl border border-stone-200">
+              <div className="text-center py-6 text-ink-muted text-xs bg-ivory rounded-2xl border border-line">
                 {message}
               </div>
             )}

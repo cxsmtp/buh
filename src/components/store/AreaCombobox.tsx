@@ -115,7 +115,7 @@ export function AreaCombobox({ id, value, emirate, placeholder, className, requi
         role="listbox"
         aria-label="Area suggestions"
         hidden={!shown}
-        className="absolute left-0 right-0 top-full z-30 mt-1 max-h-64 overflow-y-auto overscroll-contain rounded-xl border border-stone-300 bg-white py-1 shadow-xl"
+        className="absolute left-0 right-0 top-full z-30 mt-1 max-h-64 overflow-y-auto overscroll-contain rounded-xl border border-line-strong bg-surface py-1"
       >
         {shown &&
           matches.map((m, i) => {
@@ -134,12 +134,12 @@ export function AreaCombobox({ id, value, emirate, placeholder, className, requi
                 onMouseDown={(e) => e.preventDefault()}
                 onClick={() => pick(i)}
                 onMouseMove={() => active !== i && setActive(i)}
-                className={`flex cursor-pointer items-baseline justify-between gap-2 px-3 py-2.5 text-xs ${i === firstOther && i > 0 ? 'border-t border-stone-200' : ''} ${
-                  i === active ? 'bg-amber-100 text-stone-900' : 'bg-white text-stone-900'
+                className={`flex cursor-pointer items-baseline justify-between gap-2 px-3 py-2.5 text-xs ${i === firstOther && i > 0 ? 'border-t border-line' : ''} ${
+                  i === active ? 'bg-warning-soft text-ink' : 'bg-surface text-ink'
                 }`}
               >
                 <span className="min-w-0 font-semibold break-words">{m.area.name}</span>
-                {hint && <span className="shrink-0 text-[11px] text-stone-600">{hint}</span>}
+                {hint && <span className="shrink-0 text-[11px] text-ink-soft">{hint}</span>}
               </li>
             );
           })}

@@ -114,9 +114,9 @@ function withSaved(base: Draft, saved: Record<string, unknown>): Draft {
   return out as unknown as Draft;
 }
 
-const field = 'w-full min-h-11 px-3 py-2 rounded-xl border border-stone-300 bg-white text-stone-900 text-base sm:text-sm focus:outline-none focus:ring-2 focus:ring-[#c5a059]';
-const label = 'block text-sm font-semibold text-stone-800 mb-1';
-const stepBtn = 'w-12 h-12 rounded-xl border border-stone-300 bg-white flex items-center justify-center disabled:opacity-30';
+const field = 'w-full min-h-11 px-3 py-2 rounded-xl border border-line-strong bg-surface text-ink text-base sm:text-sm focus:outline-none focus:ring-2 focus:ring-gold';
+const label = 'block text-sm font-semibold text-ink mb-1';
+const stepBtn = 'w-12 h-12 rounded-xl border border-line-strong bg-surface flex items-center justify-center disabled:opacity-30';
 
 export function ProductEditor({
   product,
@@ -364,21 +364,21 @@ export function ProductEditor({
   const cover = draft.photos[0];
 
   return (
-    <Sheet labelledBy={titleId} onClose={onClose} variant="full" wide className="bg-stone-50">
-      <div className="flex items-center gap-2 px-4 py-3 border-b border-stone-200 bg-white">
-        <h2 id={titleId} className="font-serif font-bold text-base text-[#0f1c2e] truncate flex-1">
+    <Sheet labelledBy={titleId} onClose={onClose} variant="full" wide className="bg-ivory">
+      <div className="flex items-center gap-2 px-4 py-3 border-b border-line bg-surface">
+        <h2 id={titleId} className="font-serif font-bold text-base text-ink truncate flex-1">
           {product ? `Edit ${product.title}` : 'Add a product'}
         </h2>
-        <span className="text-[11px] text-stone-600 shrink-0" role="status">
+        <span className="text-[11px] text-ink-soft shrink-0" role="status">
           {draftStatus === 'saving' ? 'Saving draft…' : draftStatus === 'saved' ? 'Draft saved' : draftStatus === 'error' ? 'Draft not saved' : ''}
         </span>
-        <button type="button" onClick={onClose} className="min-h-11 min-w-11 flex items-center justify-center rounded-full text-stone-600 hover:bg-stone-100" aria-label="Close (the draft is kept)">
+        <button type="button" onClick={onClose} className="min-h-11 min-w-11 flex items-center justify-center rounded-full text-ink-soft hover:bg-sand" aria-label="Close (the draft is kept)">
           <X className="w-5 h-5" aria-hidden="true" />
         </button>
       </div>
 
       {/* Where you are: tap a step to go there. */}
-      <nav aria-label="Steps" className="bg-white border-b border-stone-200 px-2">
+      <nav aria-label="Steps" className="bg-surface border-b border-line px-2">
         <ol className="flex">
           {STEPS.map((name, i) => (
             <li key={name} className="flex-1 min-w-0">
@@ -386,9 +386,9 @@ export function ProductEditor({
                 type="button"
                 onClick={() => go(i)}
                 aria-current={i === step ? 'step' : undefined}
-                className={`w-full min-h-11 px-1 text-[11px] sm:text-xs font-semibold border-b-2 flex items-center justify-center gap-1 ${i === step ? 'border-[#0f1c2e] text-[#0f1c2e]' : 'border-transparent text-stone-600'}`}
+                className={`w-full min-h-11 px-1 text-[11px] sm:text-xs font-semibold border-b-2 flex items-center justify-center gap-1 ${i === step ? 'border-ink text-ink' : 'border-transparent text-ink-soft'}`}
               >
-                <span className={`w-5 h-5 shrink-0 rounded-full text-[10px] flex items-center justify-center ${i < step ? 'bg-emerald-700 text-white' : i === step ? 'bg-[#0f1c2e] text-white' : 'bg-stone-200 text-stone-800'}`}>
+                <span className={`w-5 h-5 shrink-0 rounded-full text-[10px] flex items-center justify-center ${i < step ? 'bg-success text-white' : i === step ? 'bg-ink text-white' : 'bg-sand-deep text-ink'}`}>
                   {i < step ? <Check className="w-3 h-3" aria-hidden="true" /> : i + 1}
                 </span>
                 <span className="truncate">{name}</span>
@@ -400,7 +400,7 @@ export function ProductEditor({
 
       <div className="flex-1 overflow-y-auto px-4 py-4 space-y-4 text-sm">
         {resumedAt && (
-          <div className="rounded-xl border border-stone-300 bg-white px-3 py-2 text-xs text-stone-800 flex flex-wrap items-center gap-2">
+          <div className="rounded-xl border border-line-strong bg-surface px-3 py-2 text-xs text-ink flex flex-wrap items-center gap-2">
             <span>Continuing your draft from {new Date(resumedAt).toLocaleString()}.</span>
             <button type="button" onClick={() => void startOver()} className="min-h-11 px-2 font-semibold underline">
               Start over
@@ -410,22 +410,22 @@ export function ProductEditor({
 
         {step === 0 && (
           <section className="space-y-3" aria-label="Photos">
-            <p className="text-stone-700">
+            <p className="text-ink-soft">
               Photos first. The <strong>cover</strong> (the first) is what shoppers see in the list. Drag to reorder, or use the arrows. Up to {MAX_PHOTOS}.
             </p>
             <div className="grid grid-cols-2 gap-2">
-              <label className="min-h-14 rounded-2xl bg-[#0f1c2e] text-white font-bold flex items-center justify-center gap-2 cursor-pointer focus-within:ring-2 focus-within:ring-[#c5a059]">
+              <label className="min-h-14 rounded-2xl bg-ink text-white font-bold flex items-center justify-center gap-2 cursor-pointer focus-within:ring-2 focus-within:ring-gold">
                 <Camera className="w-5 h-5" aria-hidden="true" /> Take photo
                 <input type="file" accept="image/*" capture="environment" className="sr-only" aria-label="Take a photo with the camera" onChange={(e) => { void addPhotos(e.target.files); e.target.value = ''; }} disabled={draft.photos.length + uploading >= MAX_PHOTOS} />
               </label>
-              <label className="min-h-14 rounded-2xl border-2 border-[#0f1c2e] bg-white text-[#0f1c2e] font-bold flex items-center justify-center gap-2 cursor-pointer focus-within:ring-2 focus-within:ring-[#c5a059]">
+              <label className="min-h-14 rounded-2xl border-2 border-ink bg-surface text-ink font-bold flex items-center justify-center gap-2 cursor-pointer focus-within:ring-2 focus-within:ring-gold">
                 <ImagePlus className="w-5 h-5" aria-hidden="true" /> From gallery
                 <input type="file" accept="image/*" multiple className="sr-only" aria-label="Choose photos from the gallery" onChange={(e) => { void addPhotos(e.target.files); e.target.value = ''; }} disabled={draft.photos.length + uploading >= MAX_PHOTOS} />
               </label>
             </div>
             {draft.photos.length === 0 && uploading === 0 && (
-              <div className="rounded-2xl border-2 border-dashed border-stone-300 bg-white px-4 py-10 text-center text-stone-600">
-                <Camera className="w-8 h-8 mx-auto mb-2 text-stone-400" aria-hidden="true" />
+              <div className="rounded-2xl border-2 border-dashed border-line-strong bg-surface px-4 py-10 text-center text-ink-soft">
+                <Camera className="w-8 h-8 mx-auto mb-2 text-ink-muted" aria-hidden="true" />
                 No photos yet. Take one, or choose several from the gallery.
               </div>
             )}
@@ -442,16 +442,16 @@ export function ProductEditor({
                     setDragFrom(null);
                   }}
                   onDragEnd={() => setDragFrom(null)}
-                  className={`relative rounded-xl overflow-hidden border-2 bg-white ${i === 0 ? 'border-[#c5a059]' : 'border-stone-200'} ${dragFrom === i ? 'opacity-50' : ''}`}
+                  className={`relative rounded-xl overflow-hidden border-2 bg-surface ${i === 0 ? 'border-gold' : 'border-line'} ${dragFrom === i ? 'opacity-50' : ''}`}
                   data-photo-index={i}
                 >
                   {/* eslint-disable-next-line @next/next/no-img-element */}
                   <img src={src} alt={i === 0 ? 'Cover photo' : `Photo ${i + 1}`} className="w-full aspect-square object-cover" draggable={false} />
                   <span className="absolute top-1 left-1 flex items-center gap-1">
                     <GripVertical className="w-4 h-4 text-white drop-shadow" aria-hidden="true" />
-                    {i === 0 && <span className="text-[11px] font-bold bg-[#0f1c2e] text-white px-1.5 py-0.5 rounded">Cover</span>}
+                    {i === 0 && <span className="text-[11px] font-bold bg-ink text-white px-1.5 py-0.5 rounded">Cover</span>}
                   </span>
-                  <div className="grid grid-cols-4 bg-white border-t border-stone-200">
+                  <div className="grid grid-cols-4 bg-surface border-t border-line">
                     <button type="button" onClick={() => movePhoto(i, i - 1)} disabled={i === 0} className="min-h-11 flex items-center justify-center disabled:opacity-30" aria-label={`Move photo ${i + 1} earlier`}>
                       <ArrowLeft className="w-4 h-4" aria-hidden="true" />
                     </button>
@@ -461,23 +461,23 @@ export function ProductEditor({
                     <button type="button" onClick={() => movePhoto(i, i + 1)} disabled={i === draft.photos.length - 1} className="min-h-11 flex items-center justify-center disabled:opacity-30" aria-label={`Move photo ${i + 1} later`}>
                       <ArrowRight className="w-4 h-4" aria-hidden="true" />
                     </button>
-                    <button type="button" onClick={() => set('photos', draft.photos.filter((_, j) => j !== i))} className="min-h-11 flex items-center justify-center text-red-800" aria-label={`Remove photo ${i + 1}`}>
+                    <button type="button" onClick={() => set('photos', draft.photos.filter((_, j) => j !== i))} className="min-h-11 flex items-center justify-center text-danger" aria-label={`Remove photo ${i + 1}`}>
                       <Trash2 className="w-4 h-4" aria-hidden="true" />
                     </button>
                   </div>
                 </li>
               ))}
               {Array.from({ length: uploading }, (_, i) => (
-                <li key={`up-${i}`} className="rounded-xl border-2 border-dashed border-stone-300 bg-white aspect-square flex flex-col items-center justify-center gap-1 text-stone-600" aria-label="Uploading a photo">
+                <li key={`up-${i}`} className="rounded-xl border-2 border-dashed border-line-strong bg-surface aspect-square flex flex-col items-center justify-center gap-1 text-ink-soft" aria-label="Uploading a photo">
                   <Loader2 className="w-5 h-5 animate-spin" aria-hidden="true" />
                   <span className="text-[11px]">Uploading…</span>
                 </li>
               ))}
             </ol>
             {cover && originals[cover] && (
-              <details className="rounded-xl border border-stone-200 bg-white px-3 py-2">
+              <details className="rounded-xl border border-line bg-surface px-3 py-2">
                 <summary className="min-h-11 flex items-center gap-2 font-semibold cursor-pointer">
-                  <Sparkles className="w-4 h-4 text-[#8a6a2c]" aria-hidden="true" /> Room-style filter for the cover (optional)
+                  <Sparkles className="w-4 h-4 text-gold-deep" aria-hidden="true" /> Room-style filter for the cover (optional)
                 </summary>
                 <div className="flex flex-wrap items-center gap-2 pb-2">
                   <select value={aiPreset} onChange={(e) => setAiPreset(e.target.value)} className={`${field} sm:w-auto`} aria-label="Room style">
@@ -487,7 +487,7 @@ export function ProductEditor({
                       </option>
                     ))}
                   </select>
-                  <button type="button" onClick={() => void styleWithAi()} disabled={uploading > 0} className="min-h-11 px-3 rounded-xl bg-[#0f1c2e] text-white font-semibold disabled:opacity-50">
+                  <button type="button" onClick={() => void styleWithAi()} disabled={uploading > 0} className="min-h-11 px-3 rounded-xl bg-ink text-white font-semibold disabled:opacity-50">
                     Apply
                   </button>
                 </div>
@@ -531,7 +531,7 @@ export function ProductEditor({
                 <input id="pe-compare" className={field} type="number" min={0} step="0.01" inputMode="decimal" value={draft.compareAtPrice} onChange={(e) => set('compareAtPrice', e.target.value)} />
               </div>
             </div>
-            <details className="rounded-xl border border-stone-200 bg-white px-3 py-1">
+            <details className="rounded-xl border border-line bg-surface px-3 py-1">
               <summary className="min-h-11 flex items-center gap-2 font-semibold cursor-pointer">
                 <ChevronDown className="w-4 h-4" aria-hidden="true" /> More details (SKU, description, fabric, colours)
               </summary>
@@ -580,15 +580,15 @@ export function ProductEditor({
                   <legend className={label}>Colours</legend>
                   {draft.colors.map((c, i) => (
                     <div key={i} className="flex items-center gap-2">
-                      <input type="color" value={c.hex} onChange={(e) => set('colors', draft.colors.map((x, j) => (j === i ? { ...x, hex: e.target.value } : x)))} className="w-11 h-11 rounded-lg border border-stone-300 shrink-0" aria-label={`Colour ${i + 1} swatch`} />
+                      <input type="color" value={c.hex} onChange={(e) => set('colors', draft.colors.map((x, j) => (j === i ? { ...x, hex: e.target.value } : x)))} className="w-11 h-11 rounded-lg border border-line-strong shrink-0" aria-label={`Colour ${i + 1} swatch`} />
                       <input className={field} value={c.name} maxLength={40} onChange={(e) => set('colors', draft.colors.map((x, j) => (j === i ? { ...x, name: e.target.value } : x)))} aria-label={`Colour ${i + 1} name`} />
-                      <button type="button" onClick={() => set('colors', draft.colors.filter((_, j) => j !== i))} disabled={draft.colors.length === 1} className="min-h-11 min-w-11 flex items-center justify-center text-stone-600 disabled:opacity-30" aria-label={`Remove colour ${i + 1}`}>
+                      <button type="button" onClick={() => set('colors', draft.colors.filter((_, j) => j !== i))} disabled={draft.colors.length === 1} className="min-h-11 min-w-11 flex items-center justify-center text-ink-soft disabled:opacity-30" aria-label={`Remove colour ${i + 1}`}>
                         <Trash2 className="w-4 h-4" aria-hidden="true" />
                       </button>
                     </div>
                   ))}
                   {draft.colors.length < 12 && (
-                    <button type="button" onClick={() => set('colors', [...draft.colors, { name: '', hex: '#ffffff' }])} className="min-h-11 text-sm font-semibold text-[#0f1c2e] flex items-center gap-1">
+                    <button type="button" onClick={() => set('colors', [...draft.colors, { name: '', hex: '#ffffff' }])} className="min-h-11 text-sm font-semibold text-ink flex items-center gap-1">
                       <Plus className="w-4 h-4" aria-hidden="true" /> Add a colour
                     </button>
                   )}
@@ -600,24 +600,24 @@ export function ProductEditor({
 
         {step === 2 && (
           <section className="space-y-3" aria-label="Sizes and stock">
-            <p className="text-stone-700">
-              Sizes and pieces in stock <span className="text-stone-600">({totalStock} in total)</span>. Tap a size below to add it.
+            <p className="text-ink-soft">
+              Sizes and pieces in stock <span className="text-ink-soft">({totalStock} in total)</span>. Tap a size below to add it.
             </p>
             <ul className="space-y-2">
               {draft.sizes.map((s) => {
                 const qty = draft.stock[s.id] ?? 0;
                 const open = openSize === s.id;
                 return (
-                  <li key={s.id} className="rounded-xl border border-stone-200 bg-white">
+                  <li key={s.id} className="rounded-xl border border-line bg-surface">
                     <div className="flex items-center gap-2 p-2">
                       <span className="min-w-0 flex-1">
-                        <span className="block font-semibold text-stone-900 truncate">{shortSizeName(s)}</span>
-                        <span className="block text-[11px] text-stone-600 truncate">{s.mattressSize}</span>
+                        <span className="block font-semibold text-ink truncate">{shortSizeName(s)}</span>
+                        <span className="block text-[11px] text-ink-soft truncate">{s.mattressSize}</span>
                       </span>
                       <button type="button" onClick={() => setQty(s.id, qty - 1)} disabled={qty === 0} className={stepBtn} aria-label={`One fewer ${s.name}`}>
                         <Minus className="w-5 h-5" aria-hidden="true" />
                       </button>
-                      <input type="number" inputMode="numeric" min={0} value={qty} onFocus={(e) => e.target.select()} onChange={(e) => setQty(s.id, Number(e.target.value))} className={`w-16 h-12 text-center rounded-xl border-2 text-lg font-bold ${qty === 0 ? 'border-red-300 text-red-800' : 'border-stone-300'}`} aria-label={`Pieces of ${s.name} in stock`} />
+                      <input type="number" inputMode="numeric" min={0} value={qty} onFocus={(e) => e.target.select()} onChange={(e) => setQty(s.id, Number(e.target.value))} className={`w-16 h-12 text-center rounded-xl border-2 text-lg font-bold ${qty === 0 ? 'border-danger-line text-danger' : 'border-line-strong'}`} aria-label={`Pieces of ${s.name} in stock`} />
                       <button type="button" onClick={() => setQty(s.id, qty + 1)} className={stepBtn} aria-label={`One more ${s.name}`}>
                         <Plus className="w-5 h-5" aria-hidden="true" />
                       </button>
@@ -626,15 +626,15 @@ export function ProductEditor({
                       <label className="min-h-11 flex items-center gap-2 pr-2" title="The size shown first">
                         <input type="radio" name="pe-default" className="w-5 h-5" checked={draft.defaultProfileId === s.id} onChange={() => set('defaultProfileId', s.id)} /> Shown first
                       </label>
-                      <button type="button" onClick={() => setOpenSize(open ? null : s.id)} aria-expanded={open} className="min-h-11 px-2 font-semibold text-[#0f1c2e] underline">
+                      <button type="button" onClick={() => setOpenSize(open ? null : s.id)} aria-expanded={open} className="min-h-11 px-2 font-semibold text-ink underline">
                         {open ? 'Done' : 'Measurements & price'}
                       </button>
-                      <button type="button" onClick={() => removeSize(s.id)} disabled={draft.sizes.length === 1} className="ml-auto min-h-11 min-w-11 flex items-center justify-center text-stone-600 disabled:opacity-30" aria-label={`Remove ${s.name}`}>
+                      <button type="button" onClick={() => removeSize(s.id)} disabled={draft.sizes.length === 1} className="ml-auto min-h-11 min-w-11 flex items-center justify-center text-ink-soft disabled:opacity-30" aria-label={`Remove ${s.name}`}>
                         <Trash2 className="w-4 h-4" aria-hidden="true" />
                       </button>
                     </div>
                     {open && (
-                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 p-2.5 border-t border-stone-100 text-xs">
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 p-2.5 border-t border-line text-xs">
                         {(
                           [
                             ['name', 'Name shown'],
@@ -648,16 +648,16 @@ export function ProductEditor({
                           ] as Array<[keyof BedProfileMeasurement, string]>
                         ).map(([k, l]) => (
                           <label key={k} className="block">
-                            <span className="text-stone-700">{l}</span>
+                            <span className="text-ink-soft">{l}</span>
                             <input className={field} value={String(s[k] ?? '')} maxLength={80} onChange={(e) => updateSize(s.id, { [k]: e.target.value })} />
                           </label>
                         ))}
                         <label className="block">
-                          <span className="text-stone-700">Price difference (AED, + or −)</span>
+                          <span className="text-ink-soft">Price difference (AED, + or −)</span>
                           <input className={field} type="number" step="0.01" value={s.priceDelta} onChange={(e) => updateSize(s.id, { priceDelta: Number(e.target.value) || 0 })} />
                         </label>
                         <label className="block">
-                          <span className="text-stone-700">Pieces in the set</span>
+                          <span className="text-ink-soft">Pieces in the set</span>
                           <input className={field} type="number" min={1} max={20} value={s.piecesIncluded} onChange={(e) => updateSize(s.id, { piecesIncluded: Math.max(1, Number(e.target.value) || 1) })} />
                         </label>
                       </div>
@@ -669,30 +669,30 @@ export function ProductEditor({
             {unusedPresets.length > 0 && (
               <div className="flex flex-wrap gap-2" role="group" aria-label="Add a size">
                 {unusedPresets.map((s) => (
-                  <button key={s.id} type="button" onClick={() => addSize(s.id)} className="min-h-11 text-xs font-semibold px-3 rounded-full border border-stone-300 bg-white hover:border-[#c5a059] flex items-center gap-1" aria-label={`Add size ${s.name}`}>
+                  <button key={s.id} type="button" onClick={() => addSize(s.id)} className="min-h-11 text-xs font-semibold px-3 rounded-full border border-line-strong bg-surface hover:border-gold flex items-center gap-1" aria-label={`Add size ${s.name}`}>
                     <Plus className="w-3.5 h-3.5" aria-hidden="true" /> {shortSizeName(s)}
                   </button>
                 ))}
               </div>
             )}
-            <p className="text-xs text-stone-600">Size presets (names, measurements, price differences) are set in Settings → Catalogue.</p>
+            <p className="text-xs text-ink-soft">Size presets (names, measurements, price differences) are set in Settings → Catalogue.</p>
           </section>
         )}
 
         {step === 3 && (
           <section className="space-y-3" aria-label="Publish">
-            <div className="flex gap-3 rounded-2xl border border-stone-200 bg-white p-3">
+            <div className="flex gap-3 rounded-2xl border border-line bg-surface p-3">
               {/* eslint-disable-next-line @next/next/no-img-element */}
               {cover && <img src={cover} alt="" className="w-20 h-20 rounded-xl object-cover shrink-0" />}
               <div className="min-w-0">
-                <div className="font-bold text-[#0f1c2e] break-words">{draft.title || 'No name yet'}</div>
-                <div className="text-xs text-stone-700">
+                <div className="font-bold text-ink break-words">{draft.title || 'No name yet'}</div>
+                <div className="text-xs text-ink-soft">
                   AED {draft.price || '—'} · {catalog.categories.find((c) => c.id === draft.category)?.label ?? draft.category} · {draft.photos.length} {draft.photos.length === 1 ? 'photo' : 'photos'}
                 </div>
-                <div className="mt-1 text-xs text-stone-800">{draft.sizes.map((s) => `${shortSizeName(s)} ${draft.stock[s.id] ?? 0}`).join(' · ')}</div>
+                <div className="mt-1 text-xs text-ink">{draft.sizes.map((s) => `${shortSizeName(s)} ${draft.stock[s.id] ?? 0}`).join(' · ')}</div>
               </div>
             </div>
-            <div className="rounded-2xl border border-stone-200 bg-white divide-y divide-stone-100">
+            <div className="rounded-2xl border border-line bg-surface divide-y divide-line">
               {(
                 [
                   ['active', 'Shown in the shop', 'Off: saved but hidden until you show it.'],
@@ -703,8 +703,8 @@ export function ProductEditor({
                 <label key={k} className="flex items-center gap-3 px-3 min-h-14">
                   <input type="checkbox" className="w-5 h-5" checked={draft[k]} onChange={(e) => set(k, e.target.checked)} />
                   <span>
-                    <span className="block font-semibold text-stone-900">{l}</span>
-                    <span className="block text-xs text-stone-600">{hint}</span>
+                    <span className="block font-semibold text-ink">{l}</span>
+                    <span className="block text-xs text-ink-soft">{hint}</span>
                   </span>
                 </label>
               ))}
@@ -713,28 +713,28 @@ export function ProductEditor({
         )}
       </div>
 
-      <div className="border-t border-stone-200 bg-white px-4 py-3 space-y-2 pb-[max(0.75rem,env(safe-area-inset-bottom))]">
+      <div className="border-t border-line bg-surface px-4 py-3 space-y-2 pb-[max(0.75rem,env(safe-area-inset-bottom))]">
         {error && (
-          <p role="alert" className="text-xs text-red-800 bg-red-50 border border-red-200 rounded-lg px-3 py-2 font-medium">
+          <p role="alert" className="text-xs text-danger bg-danger-soft border border-danger-line rounded-lg px-3 py-2 font-medium">
             {error}
           </p>
         )}
         <div className="flex gap-2">
           {step > 0 ? (
-            <button type="button" onClick={() => go(step - 1)} className="min-h-12 px-4 rounded-xl border border-stone-300 bg-white text-sm font-semibold flex items-center gap-1">
+            <button type="button" onClick={() => go(step - 1)} className="min-h-12 px-4 rounded-xl border border-line-strong bg-surface text-sm font-semibold flex items-center gap-1">
               <ArrowLeft className="w-4 h-4" aria-hidden="true" /> Back
             </button>
           ) : (
-            <button type="button" onClick={onClose} className="min-h-12 px-4 rounded-xl border border-stone-300 bg-white text-sm font-semibold">
+            <button type="button" onClick={onClose} className="min-h-12 px-4 rounded-xl border border-line-strong bg-surface text-sm font-semibold">
               Cancel
             </button>
           )}
           {step < STEPS.length - 1 ? (
-            <button type="button" onClick={() => go(step + 1)} disabled={step === 0 && uploading > 0} className="flex-1 min-h-12 rounded-xl bg-[#0f1c2e] text-white text-sm font-bold flex items-center justify-center gap-1 disabled:opacity-50">
+            <button type="button" onClick={() => go(step + 1)} disabled={step === 0 && uploading > 0} className="flex-1 min-h-12 rounded-xl bg-ink text-white text-sm font-bold flex items-center justify-center gap-1 disabled:opacity-50">
               Next: {STEPS[step + 1]} <ArrowRight className="w-4 h-4" aria-hidden="true" />
             </button>
           ) : (
-            <button type="button" onClick={() => void save()} disabled={saving || uploading > 0} className="flex-1 min-h-12 rounded-xl bg-[#0f1c2e] text-white text-sm font-bold disabled:opacity-50 flex items-center justify-center gap-2">
+            <button type="button" onClick={() => void save()} disabled={saving || uploading > 0} className="flex-1 min-h-12 rounded-xl bg-ink text-white text-sm font-bold disabled:opacity-50 flex items-center justify-center gap-2">
               {saving && <Loader2 className="w-4 h-4 animate-spin" aria-hidden="true" />}
               {product ? 'Save changes' : draft.active ? 'Publish' : 'Save hidden'}
             </button>

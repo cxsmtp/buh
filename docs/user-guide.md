@@ -2,17 +2,40 @@
 
 ## For customers: browsing the shop
 
-The shop looks and works like a boutique's Instagram page, on a phone first.
+The shop looks and works like a boutique's Instagram page, on a phone first: quiet, with a lot of air, the photographs first, and one palette throughout (see **The look** below).
+
+- **The announcement bar** at the very top: up to three short lines (Settings → Store & contact). It drifts slowly, stops while a finger, the pointer or the keyboard is on it, and stays still in the middle when its lines fit or there is only one. On a phone set to reduce motion it never moves (on a phone it then shows just the first line).
 
 - **At the top:** the shop's logo, name, tagline and address (Settings → Branding & bank, Store & contact), how delivery and payment work, and the festival greeting when one is on.
 - **Round story chips:** **All**, **New in** and **On sale** (each only when it shows fewer pieces than All), then one per category, in the order of Settings → Catalogue, each with a photo from inside it. A category with no pieces in the shop has no chip. One tap shows just that.
-- **The feed:** on a phone, one big photo per row, edge to edge, like Instagram; the two buttons next to **Filter** switch to two across and back, and the phone remembers the choice. Tablets show two (upright) or three (sideways) across, a computer four. Each piece has the name, the price (and the price before, crossed out, when it is reduced) and **Only 1 left** or **Sold out** from the real stock.
+- **The feed:** on a phone, always one large photo per row, edge to edge, like a boutique's own feed (the two-across grid looked cramped, so it is gone). Tablets show two (upright) or three (sideways) across, a computer four. Each piece has the name, the price (and, when it is reduced, the price before crossed out with a small **Reduced** mark: no red SALE badges) and **Only 1 left** or **Sold out** from the real stock.
 - **Tap a photo** and the product opens full screen: swipe the photos (or use the arrows, the dots or the arrow keys); tap a photo again (or the expand button) to see it full screen and pinch, double-tap or use **+** / **−** to look at the print up close (Back or ✕ closes it). Choose the size and colour, **Add to Bag**, or **Ask in chat / on WhatsApp / on Instagram**. **Share** sends its link. The phone's Back button closes it.
 - **Filter** (next to the number of pieces) opens a sheet with only the choices that make a difference for the pieces in the shop: category, size, colour (worked out from each colour's swatch: blue, cream, red…), price range, **In stock only**, **On sale**, **New in**, and the sort (newest, price). Each choice shows how many pieces it leaves; **Show N pieces** applies them. Every filter on shows as a chip under the button: tap it to remove it, or **Clear all**.
 - **Search** (the tab bar on a phone, the magnifier on a computer) finds pieces by name, colour, category or fabric as you type; tap one to open it, or **See all** to show them in the shop.
 - **Links keep the view:** the address holds the search, filters and the open product, so a filtered view can be sent on WhatsApp and Back steps through what you looked at.
 - **On a phone** the tab bar at the bottom has **Home** (back to the top), **Search**, **Bag** and **Orders** (Track Order), with the **Help** button (chat, or WhatsApp) in its right-hand slot, so nothing floats over the products; the version number is at the very bottom of the page.
+- **Every phone:** the shop fits screens from 320 px wide (small Androids) to large phones, upright or sideways, and with the phone's text set to its largest: nothing needs sideways scrolling. Every sheet (product, bag, checkout, filters, search, chat, order tracking, sign-in) keeps its title and **✕** at the top and its main button (Add to Bag, Proceed to Checkout, Place order, Show N pieces) at the bottom, above the keyboard and the home bar.
 - Everything works with the keyboard (Tab, Enter, Escape closes a sheet), and the shop moves less for people whose phone is set to reduce motion.
+
+### The look
+
+One palette, defined once and used by every page, the Admin Hub, the offline page, the app icon and the phone's status bar:
+
+| Token | Colour | Used for |
+| --- | --- | --- |
+| ivory | #faf6ef | the page, like undyed linen |
+| surface | #fffdf9 | sheets and cards |
+| sand / sand-deep | #f2ebdf / #e8decd | soft panels, photo placeholders |
+| ink | #2b2127 | text and the main buttons: a deep aubergine-charcoal, warmer than black |
+| ink-soft / ink-muted | #5a4c53 / #6a5c62 | secondary text |
+| gold | #c2a36b | champagne gold: rings, hairlines, ornaments, text on ink |
+| gold-deep | #82612c | antique gold for gold text on light backgrounds |
+| rose (soft, deep) | #c49a98 (#f4e8e5, #8a5659) | the quiet secondary: the Reduced mark, festive touches |
+| success, warning, danger | #3d6a4e, #85601c, #9a3e39 | sage, ochre and brick, each with a soft tint and a line |
+| line / line-strong | #e5dac9 / #cbbba3 | hairline borders and dividers |
+
+Headings are set in **Cormorant Garamond** (an elegant serif) and everything else in **Inter**; both are served by the shop itself. Labels are small spaced capitals; borders are hairlines rather than shadows; corners are the same everywhere. Every text colour reaches the WCAG AA contrast the tests check.
+
 
 ## Install the shop as an app
 
@@ -30,7 +53,7 @@ The shop can sit on the home screen of a phone or tablet and open full screen, w
 **For the owner**
 
 - The app's name and icon come from **Settings → Branding & bank**: the store name (a name in capitals shows as "Beautiful UAE Home"; the label under the icon is shortened to fit, e.g. "UAE Home") and the logo (a PNG or JPEG logo on white, or the logo's letters on the brand colour). A new logo reaches installed phones when they next check, usually within a day.
-- During a festival the phone's status bar takes the festival's colour.
+- During a festival the phone's status bar takes the deep shade of the festival's accent; otherwise the shop's ink.
 - Installing needs the shop on **https://** (the deployment's Caddy gives it). Install it on your own phone the same way; the Admin Hub works in the app too.
 - What the app keeps on the phone, and what it never keeps: docs/security.md, "The installed app".
 - **If the app misbehaves on phones** (an emergency): set `SW_RESET=true` in the shop's settings and restart the shop. Each phone that opens the shop then drops the app's saved copy and works as a plain website (the icon stays; it opens the website). For a phone that is still stuck, open `https://yourdomain/reset-app` on it: it also clears that phone's bag. When things are fixed, set `SW_RESET=false` (or remove it) and restart: phones pick the app up again on their next visit.
@@ -95,7 +118,7 @@ Every change is recorded with who made it and when.
 
 ### Inventory
 
-**Inventory** lists every product with a photo and its pieces per size as coloured chips: **red** sold out, **amber** low (at or below the warning level in Settings → Catalogue, 2 unless you change it), **green** in stock. Most designs are one or two pieces, so stock is kept per size.
+**Inventory** lists every product with a photo and its pieces per size as coloured chips: **brick red** sold out, **ochre** low (at or below the warning level in Settings → Catalogue, 2 unless you change it), **sage green** in stock. Most designs are one or two pieces, so stock is kept per size.
 
 - **Search** by name or SKU (your own stock code, set under the editor's **More details**).
 - **Show:** All, **Low** (a few pieces left in all), **Sold out** (none left in any size), **Hidden**, **Removed**; and a **Category** list. The two cards at the top (sold out, running low) open those lists, and the number on **Inventory** in the bottom bar is the same count.
@@ -142,17 +165,18 @@ On each product, customers see **Ask in chat**, **Ask on WhatsApp** and **Ask on
 
 ### Settings
 
-**⚙️ Settings** holds every option, in sections. Changes **save themselves** a moment after you stop typing ("Saved automatically · Undo"); **Undo** puts back what was there before your current round of changes, and Settings → System & backups → history keeps earlier versions. A change that isn't valid is not saved, and new mail settings are tried first: if they can't connect, the working ones stay. Passwords and keys are saved only when you press **Save**.
+**Settings** holds every option, in sections. Changes **save themselves** a moment after you stop typing ("Saved automatically · Undo"); **Undo** puts back what was there before your current round of changes, and Settings → System & backups → history keeps earlier versions. A change that isn't valid is not saved, and new mail settings are tried first: if they can't connect, the working ones stay. Passwords and keys are saved only when you press **Save**.
 
-**⚙️ Settings** sections:
+**Settings** sections:
 
 - **Store & contact:** your WhatsApp number (change it any time; empty hides the WhatsApp buttons), the message a chat opens with, the floating WhatsApp button, the support email, Instagram, TikTok and Facebook, which of **Ask on WhatsApp / Instagram** show, the address, and whether visitors abroad see their own currency.
+- **Announcement bar** (at the end of Store & contact): **Show the bar**, and up to **3 lines of up to 60 characters** each (a counter shows how many; emoji are left out; the shop refuses longer or more). **Use the suggested lines** puts back the defaults: *Free delivery across the UAE in 1–2 days*, *Cash on delivery*, *Handmade in small batches*. The **Preview** is the bar as customers see it. Press **Save announcements**. While a festival is on, its greeting takes the first place in the bar (Settings → Festival themes → **Festival lines in the scrolling bar**), still three lines at most.
 - **Chat assistant:** see Chats above.
 - **Delivery:** the emirates you deliver to, areas you don't serve (a short form counts: "JVC" also covers "Jumeirah Village Circle (JVC)"), the delivery time customers see (1–2 days), and same-day delivery: switch it on, set the extra charge, the cut-off time (UAE) and where it's offered. Customers see a green tick for their area and choose standard or same day; the courier is never named to them.
 - **Email & admin account:** the mail server, where backups and alerts go, the mailbox for chat replies, and your sign-in email.
 - **Passkeys & recovery codes:** your ways back in if you forget the password (see above).
 - **Catalogue:** the size presets offered when adding a product (name, measurements, price difference, pieces in the set), the categories shown in the shop (each category with pieces in it is a round story chip at the top of the shop, in this order, with its first piece's photo; **New in** and **On sale** chips come from each product's **New arrival** tick and its **Was (AED)** price), and the **Only N left** level.
-- **Branding & bank:** logo, colours, the scrolling bar, and bank-transfer details.
+- **Branding & bank:** the shop's name, tagline and logo (the logo's letters sit on one of the palette's tones: champagne gold, antique gold, ink or dusty rose), and bank-transfer details.
 - **Festival themes:** see below.
 - **Phone verification:** the SMS gateway (see below).
 - **Couriers:** see below.
@@ -160,10 +184,29 @@ On each product, customers see **Ask in chat**, **Ask on WhatsApp** and **Ask on
 
 ### Festival themes
 
-From 3 weeks before a major festival until 1 week after, the banner shows its greeting and colours and the scrolling bar its lines (smaller festivals: about a week before to two days after; solemn days such as Good Friday and Commemoration Day only on the day, with a calm look). 32 festivals are included: the UAE's national days, Ramadan and the Eids, Diwali, Holi, Onam, Navratri, Vaisakhi, Christmas, Easter (and the Orthodox ones), Lunar New Year, Nowruz and more.
+From 3 weeks before a major festival until 1 week after, a soft greeting band sits at the top of the shop and the announcement bar opens with its greeting (smaller festivals: about a week before to two days after; solemn days such as Good Friday and Commemoration Day only on the day, with a calm look). 32 festivals are included: the UAE's national days, Ramadan and the Eids, Diwali, Holi, Onam, Navratri, Vaisakhi, Christmas, Easter (and the Orthodox ones), Lunar New Year, Nowruz and more.
+
+A festival never brings loud colours of its own: it shifts the shop's accent to one of a few curated tones that sit with the ivory and gold, and adds one delicate line motif to the greeting band (faintly repeated behind it) and to the ring of the chosen story chip:
+
+| Festivals | Accent | Motif |
+| --- | --- | --- |
+| Eid al-Fitr, Eid al-Adha | deep emerald and gold | crescent and star |
+| Ramadan, Mawlid | deep emerald | lantern |
+| UAE National Day, Flag Day | deep emerald, with a quiet nod to the flag | four fine bands in muted flag colours |
+| Diwali, Gurpurab | warm saffron and gold | diya |
+| Onam, Vishu, Pongal, Vaisakhi, Ganesh Chaturthi | saffron | blossom, sun, wheat, lotus |
+| Christmas, Orthodox Christmas, Lunar New Year, Valentine's Day | deep berry and gold | snowflake, star, cloud, heart |
+| Holi, Navratri, Raksha Bandhan, Mother's Day, Women's Day | dusty rose | rangoli, lotus, blossom |
+| Hijri New Year, Isra and Mi'raj, Laylat al-Qadr, New Year | midnight blue and gold | crescent, star, sparkle |
+| Easter, Orthodox Easter, Nowruz | sage | blossom, olive, sprout |
+| Good Friday, Commemoration Day | stone grey (calm) | olive branch |
+
+The greeting is a short, gracious line (for example *Eid Mubarak* with *Fresh linen for Eid mornings and the guests who follow*); the phone's status bar takes the accent's deep shade.
+
 
 - Dates are built in and checked online every week from public holiday calendars (UAE official dates win for the Islamic festivals); **Refresh dates now** checks straight away.
 - **Always this look** keeps one theme; **Everyday look only** turns themes off; untick **Show** to skip a festival.
+- **Preview** (at the top of the section) shows any festival's greeting band and bar line before you choose it; nothing changes in the shop until you pick it under **Always this look**.
 
 ### Instagram, WhatsApp and the product feed
 
@@ -177,7 +220,7 @@ Every morning at 8:00 (UAE) an email to the backup address lists yesterday's ord
 
 ### Bank details
 
-Under **⚙️ Settings → Branding & bank → Bank transfer details**. Customers paying by transfer see exactly these at checkout, with your instructions.
+Under **Settings → Branding & bank → Bank transfer details**. Customers paying by transfer see exactly these at checkout, with your instructions.
 
 - **Bank transfer only appears at checkout once the bank name, account name and IBAN are saved.**
 - The IBAN is checked (AE plus 21 digits, with its check digits), so most typos are caught.

@@ -239,18 +239,18 @@ export const PhoneVerification: React.FC<PhoneVerificationProps> = ({
   // ── Verified ───────────────────────────────────────────────────────────
   if (verified && info.kind === 'uae') {
     return (
-      <div className="sm:col-span-2 rounded-2xl border border-emerald-200 bg-gradient-to-br from-emerald-50 to-white p-3.5 flex items-center gap-3 animate-in fade-in-50">
-        <div className="w-10 h-10 rounded-xl bg-emerald-600 text-white flex items-center justify-center shadow-sm shrink-0">
+      <div className="sm:col-span-2 rounded-2xl border border-success-line bg-gradient-to-br from-success-soft to-white p-3.5 flex items-center gap-3 animate-in fade-in-50">
+        <div className="w-10 h-10 rounded-xl bg-success text-white flex items-center justify-center shrink-0">
           <BadgeCheck className="w-5 h-5" />
         </div>
         <div className="flex-1 min-w-0">
-          <p className="text-xs font-bold text-emerald-900">Mobile number verified</p>
-          <p className="text-[11px] text-emerald-800/80 font-mono">+971 {formatLocal(info.local)}</p>
+          <p className="text-xs font-semibold text-success">Mobile number verified</p>
+          <p className="text-[11px] text-success/80 font-mono">+971 {formatLocal(info.local)}</p>
         </div>
         <button
           type="button"
           onClick={changeNumber}
-          className="text-[11px] font-semibold text-emerald-900 hover:text-emerald-700 flex items-center gap-1 px-2 py-1 rounded-lg hover:bg-emerald-100 transition-colors"
+          className="text-[11px] font-semibold text-success hover:text-success flex items-center gap-1 px-2 py-1 rounded-lg hover:bg-success-soft transition-colors"
         >
           <Pencil className="w-3 h-3" />
           Change
@@ -264,35 +264,35 @@ export const PhoneVerification: React.FC<PhoneVerificationProps> = ({
   )}`;
 
   return (
-    <div className="sm:col-span-2 rounded-2xl border border-stone-200 bg-white overflow-hidden shadow-xs">
+    <div className="sm:col-span-2 rounded-2xl border border-line bg-surface overflow-hidden">
       {/* Title strip */}
-      <div className="flex items-center gap-2.5 px-3.5 py-2.5 bg-gradient-to-r from-[#0f1c2e] to-[#1b2d47] text-white">
-        <ShieldCheck className="w-4 h-4 text-[#c5a059]" />
+      <div className="flex items-center gap-2.5 px-3.5 py-2.5 bg-gradient-to-r from-ink to-ink-2 text-white">
+        <ShieldCheck className="w-4 h-4 text-gold" />
         <div className="flex-1">
-          <p className="text-[11px] font-bold tracking-wide">Verify your UAE mobile to place your order</p>
-          <p className="text-[10px] text-stone-300">Free • takes 30 seconds • protects your delivery</p>
+          <p className="text-[11px] font-semibold tracking-wide">Verify your UAE mobile to place your order</p>
+          <p className="text-[10px] text-sand">Free • takes 30 seconds • protects your delivery</p>
         </div>
-        <span className="text-[10px] font-bold bg-[#c5a059] text-[#0f1c2e] px-2 py-0.5 rounded-full">Required</span>
+        <span className="text-[10px] font-semibold bg-gold text-ink px-2 py-0.5 rounded-full">Required</span>
       </div>
 
       <div className="p-3.5 space-y-3">
         {stage === 'enter' && (
           <>
-            <label htmlFor="checkout-phone" className="block text-xs font-semibold text-stone-800">
-              UAE Mobile Number <span className="text-red-500">*</span>
+            <label htmlFor="checkout-phone" className="block text-xs font-semibold text-ink">
+              UAE Mobile Number <span className="text-danger">*</span>
             </label>
             <div className="flex flex-col min-[380px]:flex-row gap-2">
               <div
-                className={`flex-1 min-w-0 flex items-center rounded-xl border bg-white transition-shadow focus-within:ring-2 focus-within:ring-[#c5a059] ${
-                  info.kind === 'invalid' || info.kind === 'international' ? 'border-amber-400' : 'border-stone-300'
+                className={`flex-1 min-w-0 flex items-center rounded-xl border bg-surface transition-shadow focus-within:ring-2 focus-within:ring-gold ${
+                  info.kind === 'invalid' || info.kind === 'international' ? 'border-gold' : 'border-line-strong'
                 }`}
               >
-                <span className="flex items-center gap-1.5 pl-3 pr-2.5 py-2.5 border-r border-stone-200 text-xs font-semibold text-stone-700 select-none">
+                <span className="flex items-center gap-1.5 pl-3 pr-2.5 py-2.5 border-r border-line text-xs font-semibold text-ink-soft select-none">
                   {info.kind === 'international' ? (
-                    <Globe2 className="w-3.5 h-3.5 text-stone-500" aria-label="International number" />
+                    <Globe2 className="w-3.5 h-3.5 text-ink-muted" aria-label="International number" />
                   ) : (
                     <>
-                      <span aria-hidden>🇦🇪</span>+971
+                      <span className="label-caps !text-[10px] text-ink-muted" aria-hidden>UAE</span>+971
                     </>
                   )}
                 </span>
@@ -316,47 +316,47 @@ export const PhoneVerification: React.FC<PhoneVerificationProps> = ({
                       void sendCode();
                     }
                   }}
-                  className="flex-1 min-w-0 px-3 py-2.5 bg-transparent text-stone-900 placeholder:text-stone-400 font-medium text-xs tracking-wide focus:outline-none"
+                  className="flex-1 min-w-0 px-3 py-2.5 bg-transparent text-ink placeholder:text-ink-muted font-medium text-xs tracking-wide focus:outline-none"
                 />
               </div>
               <button
                 type="button"
                 onClick={sendCode}
                 disabled={sending || info.kind !== 'uae' || wait > 0}
-                className="px-4 py-2.5 bg-[#0f1c2e] hover:bg-stone-800 disabled:bg-stone-300 disabled:cursor-not-allowed text-white rounded-xl text-[11px] font-bold shrink-0 transition-colors flex items-center justify-center gap-1.5"
+                className="px-4 py-2.5 bg-ink hover:bg-ink disabled:bg-line-strong disabled:cursor-not-allowed text-white rounded-xl text-[11px] font-semibold shrink-0 transition-colors flex items-center justify-center gap-1.5"
               >
-                {sending ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <MessageSquareText className="w-3.5 h-3.5 text-amber-300" />}
+                {sending ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <MessageSquareText className="w-3.5 h-3.5 text-gold-light" />}
                 {sending ? 'Sending…' : wait > 0 ? `Wait ${wait}s` : 'Send code'}
               </button>
             </div>
 
             {info.kind === 'uae' && (
-              <p className="text-[11px] text-emerald-700 font-medium flex items-center gap-1">
+              <p className="text-[11px] text-success font-medium flex items-center gap-1">
                 <Smartphone className="w-3 h-3" /> +971 {formatLocal(info.local)} — we&apos;ll text you a 6-digit code.
               </p>
             )}
             {info.kind === 'invalid' && (
-              <p className="text-[11px] text-amber-800">UAE mobile numbers start with 50, 52, 54, 55, 56 or 58 and have 9 digits.</p>
+              <p className="text-[11px] text-warning">UAE mobile numbers start with 50, 52, 54, 55, 56 or 58 and have 9 digits.</p>
             )}
 
             {info.kind === 'international' && (
-              <div className="rounded-xl border border-[#c5a059]/40 bg-gradient-to-br from-amber-50 to-stone-50 p-3.5 space-y-2.5 animate-in fade-in-50">
+              <div className="rounded-xl border border-gold/40 bg-gradient-to-br from-warning-soft to-ivory p-3.5 space-y-2.5 animate-in fade-in-50">
                 <div className="flex items-start gap-2.5">
-                  <div className="w-8 h-8 rounded-lg bg-white border border-amber-200 flex items-center justify-center shrink-0">
-                    <Globe2 className="w-4 h-4 text-[#c5a059]" />
+                  <div className="w-8 h-8 rounded-lg bg-surface border border-warning-line flex items-center justify-center shrink-0">
+                    <Globe2 className="w-4 h-4 text-gold" />
                   </div>
                   <div className="space-y-0.5">
-                    <p className="text-xs font-bold text-[#0f1c2e]">Ordering from outside the UAE?</p>
-                    <p className="text-[11px] text-stone-600 leading-relaxed">
+                    <p className="text-xs font-semibold text-ink">Ordering from outside the UAE?</p>
+                    <p className="text-[11px] text-ink-soft leading-relaxed">
                       Online checkout verifies UAE mobile numbers only. Email us and our team will arrange your order, delivery and payment personally.
                     </p>
                   </div>
                 </div>
                 <a
                   href={mailto}
-                  className="flex items-center justify-center gap-2 w-full bg-[#0f1c2e] hover:bg-stone-800 text-white font-bold text-[11px] py-2.5 rounded-xl transition-colors"
+                  className="flex items-center justify-center gap-2 w-full bg-ink hover:bg-ink text-white font-semibold text-[11px] py-2.5 rounded-xl transition-colors"
                 >
-                  <Mail className="w-3.5 h-3.5 text-amber-300" />
+                  <Mail className="w-3.5 h-3.5 text-gold-light" />
                   Email {supportEmail}
                 </a>
               </div>
@@ -367,11 +367,11 @@ export const PhoneVerification: React.FC<PhoneVerificationProps> = ({
         {stage === 'code' && (
           <div className="space-y-3 animate-in fade-in-50">
             <div className="flex items-center justify-between gap-2">
-              <p className="text-[11px] text-stone-600 leading-relaxed">{notice}</p>
+              <p className="text-[11px] text-ink-soft leading-relaxed">{notice}</p>
               <button
                 type="button"
                 onClick={changeNumber}
-                className="text-[11px] font-semibold text-stone-700 hover:text-[#0f1c2e] flex items-center gap-1 shrink-0"
+                className="text-[11px] font-semibold text-ink-soft hover:text-ink flex items-center gap-1 shrink-0"
               >
                 <Pencil className="w-3 h-3" /> Edit number
               </button>
@@ -402,15 +402,15 @@ export const PhoneVerification: React.FC<PhoneVerificationProps> = ({
                   }}
                   onKeyDown={(e) => onKeyDown(i, e)}
                   onFocus={(e) => e.target.select()}
-                  className={`w-10 h-12 sm:w-11 sm:h-13 text-center text-lg font-bold font-mono rounded-xl border bg-white text-[#0f1c2e] transition-all focus:outline-none focus:ring-2 focus:ring-[#c5a059] focus:border-[#c5a059] ${
-                    d ? 'border-[#c5a059] bg-amber-50/50' : 'border-stone-300'
-                  } ${error ? 'border-red-300' : ''}`}
+                  className={`w-10 h-12 sm:w-11 sm:h-13 text-center text-lg font-semibold font-mono rounded-xl border bg-surface text-ink transition-all focus:outline-none focus:ring-2 focus:ring-gold focus:border-gold ${
+                    d ? 'border-gold bg-warning-soft/50' : 'border-line-strong'
+                  } ${error ? 'border-danger-line' : ''}`}
                 />
               ))}
             </div>
 
             <div className="flex items-center justify-between text-[11px]">
-              <span className="text-stone-500 flex items-center gap-1">
+              <span className="text-ink-muted flex items-center gap-1">
                 {checking ? (
                   <>
                     <Loader2 className="w-3 h-3 animate-spin" /> Checking…
@@ -423,7 +423,7 @@ export const PhoneVerification: React.FC<PhoneVerificationProps> = ({
                 type="button"
                 onClick={sendCode}
                 disabled={sending || wait > 0}
-                className="font-semibold text-[#0f1c2e] hover:underline disabled:text-stone-400 disabled:no-underline flex items-center gap-1"
+                className="font-semibold text-ink hover:underline disabled:text-ink-muted disabled:no-underline flex items-center gap-1"
               >
                 <RotateCcw className="w-3 h-3" />
                 {wait > 0 ? `Resend in ${wait}s` : 'Resend code'}
@@ -435,7 +435,7 @@ export const PhoneVerification: React.FC<PhoneVerificationProps> = ({
                 type="button"
                 disabled={checking}
                 onClick={() => onDigit(0, sandboxCode)}
-                className="w-full text-[11px] text-amber-900 bg-amber-50 border border-dashed border-amber-300 rounded-xl py-2 hover:bg-amber-100 transition-colors"
+                className="w-full text-[11px] text-warning bg-warning-soft border border-dashed border-warning-line rounded-xl py-2 hover:bg-warning-soft transition-colors"
               >
                 Test mode (no SMS gateway yet): tap to use code <strong className="font-mono tracking-widest">{sandboxCode}</strong>
               </button>
@@ -444,7 +444,7 @@ export const PhoneVerification: React.FC<PhoneVerificationProps> = ({
         )}
 
         {error && (
-          <p role="alert" className="text-[11px] text-red-700 bg-red-50 border border-red-200 rounded-lg px-2.5 py-1.5 font-medium">
+          <p role="alert" className="text-[11px] text-danger bg-danger-soft border border-danger-line rounded-lg px-2.5 py-1.5 font-medium">
             {error}
           </p>
         )}

@@ -21,32 +21,32 @@ export const ShippingLabelModal: React.FC<ShippingLabelModalProps> = ({ order, o
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 backdrop-blur-sm p-4 overflow-y-auto">
-      <div className="bg-white rounded-3xl max-w-xl w-full p-4 sm:p-6 shadow-2xl space-y-4">
-        {/* Header Actions */}
-        <div className="flex items-center justify-between pb-3 border-b border-stone-200">
-          <div>
-            <h3 className="font-serif font-bold text-base text-[#0f1c2e]">
-              Courier Shipping Label / Airway Bill (AWB)
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-ink/45 p-3 sm:p-4 overscroll-contain" role="dialog" aria-modal="true" aria-labelledby="label-title">
+      <div className="bg-surface rounded-3xl max-w-xl w-full min-w-0 max-h-[calc(100dvh-1.5rem)] overflow-y-auto overflow-x-hidden overscroll-contain p-4 sm:p-6 border border-line space-y-4">
+        {/* Header Actions (stay in view) */}
+        <div className="sticky top-0 z-10 -mx-4 -mt-4 px-4 pt-4 sm:-mx-6 sm:-mt-6 sm:px-6 sm:pt-6 pb-3 bg-surface flex items-start justify-between gap-2 border-b border-line">
+          <div className="min-w-0">
+            <h3 id="label-title" className="font-serif text-xl text-ink">
+              Shipping label (AWB)
             </h3>
-            <p className="text-xs text-stone-500">
+            <p className="text-xs text-ink-muted">
               Formatted for 4x6 Thermal Label Printer or Standard A4
             </p>
           </div>
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-2 shrink-0">
             <button
               onClick={handlePrint}
-              className="flex items-center gap-1.5 bg-[#0f1c2e] hover:bg-stone-800 text-white font-semibold text-xs px-3.5 py-2 rounded-xl shadow transition-all"
+              className="flex items-center gap-1.5 bg-ink hover:bg-ink text-white font-semibold text-xs px-3.5 py-2 rounded-xl shadow transition-all"
             >
-              <Printer className="w-4 h-4 text-amber-300" />
+              <Printer className="w-4 h-4 text-gold-light" />
               <span>Print Label</span>
             </button>
             <button
               onClick={onClose}
               aria-label="Close label"
-              className="p-1.5 text-stone-500 hover:text-stone-700 rounded-full hover:bg-stone-100"
+              className="w-10 h-10 flex items-center justify-center text-ink rounded-full hover:bg-sand"
             >
-              <X className="w-5 h-5" />
+              <X className="w-5 h-5" strokeWidth={1.5} />
             </button>
           </div>
         </div>
@@ -54,7 +54,7 @@ export const ShippingLabelModal: React.FC<ShippingLabelModalProps> = ({ order, o
         {/* PRINTABLE AWB CONTAINER */}
         <div
           id="printable-shipping-label"
-          className="border-2 border-black p-4 bg-white text-black font-sans text-xs space-y-3 rounded-xl shadow-sm"
+          className="border-2 border-black p-4 bg-surface text-black font-sans text-xs space-y-3 rounded-xl shadow-sm"
         >
           {/* Top Carrier Header */}
           <div className="flex items-center justify-between border-b-2 border-black pb-2.5">
@@ -64,22 +64,22 @@ export const ShippingLabelModal: React.FC<ShippingLabelModalProps> = ({ order, o
               </div>
               <div>
                 <span className="font-black text-sm tracking-wide block">{courierTitle}</span>
-                <span className="text-[10px] text-stone-600 font-semibold uppercase">
+                <span className="text-[10px] text-ink-soft font-semibold uppercase">
                   {isJeebly ? 'Next-Day Scheduled Delivery' : 'Priority Express Domestic'}
                 </span>
               </div>
             </div>
 
             <div className="text-right">
-              <span className="text-[10px] font-bold text-stone-500 block">AWB NUMBER</span>
+              <span className="text-[10px] font-bold text-ink-muted block">AWB NUMBER</span>
               <span className="font-mono font-black text-sm">{order.courier.awbNumber}</span>
             </div>
           </div>
 
           {/* Barcode & Routing Section */}
-          <div className="flex items-center justify-between py-2 border-b-2 border-black bg-stone-50 p-2 rounded">
+          <div className="flex items-center justify-between py-2 border-b-2 border-black bg-ivory p-2 rounded">
             <div className="space-y-1">
-              <div className="text-[10px] uppercase font-bold text-stone-600">
+              <div className="text-[10px] uppercase font-bold text-ink-soft">
                 Tracking Barcode (Scan at Hub)
               </div>
               {/* Simulated High-Density Code-128 Barcode */}
@@ -105,7 +105,7 @@ export const ShippingLabelModal: React.FC<ShippingLabelModalProps> = ({ order, o
               <div className="bg-black text-white font-black text-sm px-3 py-1.5 rounded uppercase tracking-wider">
                 {order.customer.emirate.toUpperCase()}
               </div>
-              <span className="text-[10px] font-bold mt-1 text-stone-700">
+              <span className="text-[10px] font-bold mt-1 text-ink-soft">
                 HUB: {order.customer.emirate.slice(0, 3).toUpperCase()}-CENTRAL
               </span>
             </div>
@@ -114,10 +114,10 @@ export const ShippingLabelModal: React.FC<ShippingLabelModalProps> = ({ order, o
           {/* Consignee (Receiver) Section */}
           <div className="border-b-2 border-black pb-2 space-y-1">
             <div className="flex items-center justify-between">
-              <span className="text-[10px] font-black uppercase text-stone-600 tracking-wider">
+              <span className="text-[10px] font-black uppercase text-ink-soft tracking-wider">
                 DELIVER TO (CONSIGNEE):
               </span>
-              <span className="text-[10px] font-bold text-stone-700">
+              <span className="text-[10px] font-bold text-ink-soft">
                 Order Ref: {order.id}
               </span>
             </div>
@@ -130,17 +130,17 @@ export const ShippingLabelModal: React.FC<ShippingLabelModalProps> = ({ order, o
               Tel: {order.customer.phone}
             </div>
 
-            <div className="text-xs leading-tight font-medium text-stone-800">
+            <div className="text-xs leading-tight font-medium text-ink">
               {order.customer.buildingVilla}, {order.customer.flatVillaNo}, {order.customer.streetAddress}
             </div>
 
-            <div className="text-xs font-bold text-stone-900">
+            <div className="text-xs font-bold text-ink">
               Area: {order.customer.area}, Emirate: {order.customer.emirate}
             </div>
 
             {order.customer.landmark && (
-              <div className="text-[11px] bg-amber-50 p-1 rounded font-semibold text-amber-950 border border-amber-200">
-                📍 Landmark: {order.customer.landmark}
+              <div className="text-[11px] bg-warning-soft p-1 rounded font-semibold text-warning border border-warning-line">
+                Landmark: {order.customer.landmark}
               </div>
             )}
           </div>
@@ -149,8 +149,8 @@ export const ShippingLabelModal: React.FC<ShippingLabelModalProps> = ({ order, o
           <div
             className={`p-3 rounded-lg border-2 text-center ${
               isCod
-                ? 'border-red-600 bg-red-50 text-red-950'
-                : 'border-emerald-700 bg-emerald-50 text-emerald-950'
+                ? 'border-danger bg-danger-soft text-danger'
+                : 'border-success bg-success-soft text-success'
             }`}
           >
             {isCod ? (
@@ -158,7 +158,7 @@ export const ShippingLabelModal: React.FC<ShippingLabelModalProps> = ({ order, o
                 <span className="text-xs font-black uppercase tracking-wider block">
                   ★ CASH ON DELIVERY (COD) ★
                 </span>
-                <div className="font-mono font-black text-xl text-red-600">
+                <div className="font-mono font-black text-xl text-danger">
                   COLLECT: AED {order.total}.00
                 </div>
                 <span className="text-[10px] font-bold block">
@@ -170,7 +170,7 @@ export const ShippingLabelModal: React.FC<ShippingLabelModalProps> = ({ order, o
                 <span className="text-xs font-black uppercase tracking-wider block">
                   ✓ PREPAID ORDER - DO NOT COLLECT CASH ✓
                 </span>
-                <div className="font-mono font-black text-base text-emerald-700">
+                <div className="font-mono font-black text-base text-success">
                   PAYMENT SETTLED ONLINE / BANK TRANSFER
                 </div>
                 <span className="text-[10px] font-bold block">
@@ -181,16 +181,16 @@ export const ShippingLabelModal: React.FC<ShippingLabelModalProps> = ({ order, o
           </div>
 
           {/* Shipper & Parcel Info */}
-          <div className="grid grid-cols-2 gap-2 text-[10px] pt-1 border-t border-stone-300">
+          <div className="grid grid-cols-2 gap-2 text-[10px] pt-1 border-t border-line-strong">
             <div>
-              <span className="font-black text-stone-500 uppercase block">FROM (SHIPPER):</span>
+              <span className="font-black text-ink-muted uppercase block">FROM (SHIPPER):</span>
               <strong className="block text-black">BEAUTIFUL UAE HOME LLC</strong>
               <span>WH 14, Al Quoz 3, Sheikh Zayed Rd</span>
               <span className="block">Dubai, UAE • +971 50 829 4110</span>
             </div>
 
             <div className="text-right">
-              <span className="font-black text-stone-500 uppercase block">SHIPMENT DETAILS:</span>
+              <span className="font-black text-ink-muted uppercase block">SHIPMENT DETAILS:</span>
               <span>Weight: <strong>{order.courier.weightKg || 2.5} KG</strong></span>
               <span className="block">Pieces: <strong>{order.courier.pieces || 1} PKG</strong></span>
               <span>Contents: <strong>Luxury Bedding Set</strong></span>
@@ -199,13 +199,13 @@ export const ShippingLabelModal: React.FC<ShippingLabelModalProps> = ({ order, o
         </div>
 
         {/* Footer print action */}
-        <div className="flex items-center justify-between text-xs text-stone-500 pt-2">
+        <div className="flex items-center justify-between text-xs text-ink-muted pt-2">
           <span>Official Carrier Compliant Format</span>
           <button
             onClick={handlePrint}
-            className="flex items-center gap-1.5 text-stone-900 font-bold hover:underline"
+            className="flex items-center gap-1.5 text-ink font-bold hover:underline"
           >
-            <Printer className="w-4 h-4 text-[#c5a059]" />
+            <Printer className="w-4 h-4 text-gold" />
             <span>Send to Thermal / AirPrint</span>
           </button>
         </div>

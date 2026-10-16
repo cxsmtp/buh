@@ -10,7 +10,7 @@ import { useLiveUpdates } from '@/lib/client/live';
 import { stockAlerts } from '@/lib/client/stock';
 import { INITIAL_BANK_DETAILS, INITIAL_BRAND_SETTINGS, INITIAL_COURIER_SETTINGS, INITIAL_SMS_SETTINGS } from '@/data/initialData';
 import { ADMIN_SIGNED_OUT_EVENT, getJson, postJson, sendJson } from '@/lib/apiClient';
-import { applyUpdate, checkForUpdate, registerServiceWorker, setFeedLayout, useFeedLayout, useUpdateWaiting } from '@/lib/client/pwa';
+import { applyUpdate, checkForUpdate, registerServiceWorker, useUpdateWaiting } from '@/lib/client/pwa';
 
 /** Settings as the admin hub receives them: secrets blank, with which are saved. */
 interface AdminSetting<T> {
@@ -110,6 +110,7 @@ const RestoreNotice = dynamic(() => import('@/components/admin/RestoreNotice').t
 const CatalogSettingsCard = dynamic(() => import('@/components/admin/settings/CatalogSettingsCard').then((m) => m.CatalogSettingsCard), { ssr: false });
 const SettingsConsole = dynamic(() => import('@/components/admin/settings/SettingsConsole').then((m) => m.SettingsConsole), { ssr: false });
 const StoreSettingsCard = dynamic(() => import('@/components/admin/settings/StoreSettingsCard').then((m) => m.StoreSettingsCard), { ssr: false });
+const MarqueeSettingsCard = dynamic(() => import('@/components/admin/settings/MarqueeSettingsCard').then((m) => m.MarqueeSettingsCard), { ssr: false });
 const ThemeSettingsCard = dynamic(() => import('@/components/admin/settings/ThemeSettingsCard').then((m) => m.ThemeSettingsCard), { ssr: false });
 const SettingsHistoryCard = dynamic(() => import('@/components/admin/settings/SettingsHistoryCard').then((m) => m.SettingsHistoryCard), { ssr: false });
 const EmailSettingsCard = dynamic(() => import('@/components/admin/settings/EmailSettingsCard').then((m) => m.EmailSettingsCard), { ssr: false });
@@ -122,10 +123,12 @@ const SystemHealthCard = dynamic(() => import('@/components/admin/settings/Syste
 
 import { HelpLauncher } from '@/components/store/HelpLauncher';
 import { InstallPrompt } from '@/components/store/InstallPrompt';
-import { BRAND_NAVY } from '@/lib/festivals/catalog';
+import { THEME_COLOR } from '@/lib/design/tokens';
+import type { BrandDraft } from '@/components/admin/AdminBrandingTab';
 import { VersionBadge } from '@/components/common/VersionBadge';
 
-import { LayoutGrid, SlidersHorizontal, Square, X } from 'lucide-react';
+import { Archive, Box, Feather, KeyRound, LayoutGrid, Mail, MessageSquare, Palette, ShieldCheck, SlidersHorizontal, Smartphone, Store, Truck, X } from 'lucide-react';
+import { festiveVars } from '@/components/store/FestiveGreeting';
 import { EMPTY_FILTERS, SORTS, activeChips, activeCount, applyFilters, buildStories, filtersToSearch, parseFilters, type Filters } from '@/lib/catalogFilter';
 
 const prefersReducedMotion = () => typeof window !== 'undefined' && window.matchMedia?.('(prefers-reduced-motion: reduce)').matches;
@@ -406,9 +409,9 @@ export function ShopApp({ initialProductId }: { initialProductId?: string } = {}
   }, [newVersion, isAdminMode, isCheckoutOpen, isCartOpen, isTrackerOpen, selectedProduct]);
 
   // The phone's status bar (and the installed app's title bar) takes the festival's colour while
-  // a festival's look is on, else the brand navy.
+  // a festival's look is on, else the shop's ink.
   useEffect(() => {
-    const color = festival?.festivalId ? festival.theme.gradient[0] : BRAND_NAVY;
+    const color = festival?.festivalId ? festival.theme.bar : THEME_COLOR;
     let metas = document.querySelectorAll<HTMLMetaElement>('meta[name="theme-color"]');
     if (!metas.length) {
       const m = document.createElement('meta');
@@ -446,7 +449,7 @@ export function ShopApp({ initialProductId }: { initialProductId?: string } = {}
     onUndone: (key: string) => setUndone((u) => ({ ...u, [key]: (u[key] ?? 0) + 1 })),
   };
 
-  const handleUpdateBrandSettings = (newSettings: BrandSettings) => saveSettings('brand', newSettings);
+  const handleUpdateBrandSettings = (newSettings: BrandDraft) => saveSettings('brand', newSettings);
   const handleUpdateBank = (bank: BankTransferDetails) => saveSettings('bank', bank);
   const handleUpdateSmsSettings = (newSettings: SmsGatewaySettings) => saveSettings('sms', newSettings);
   const handleUpdateSettings = (newSettings: CourierSettings) => saveSettings('courier', newSettings);
@@ -536,12 +539,10 @@ export function ShopApp({ initialProductId }: { initialProductId?: string } = {}
   const activeStory = stories.find((s) => s.isActive(filters))?.id ?? null;
   const chips = useMemo(() => activeChips(filters, products, categories), [filters, products, categories]);
   const filterCount = activeCount(filters);
-  // Phones: one big photo per row (the default) or two across, remembered on this device.
-  const feedLayout = useFeedLayout();
-  const feedGrid =
-    feedLayout === 'one'
-      ? 'grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-y-8 sm:gap-y-6 sm:gap-x-5'
-      : 'grid grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-x-3 gap-y-6 sm:gap-x-5';
+  // Phones: always one large photo per row, edge to edge, like a boutique's feed (a cramped two-up
+  // grid read as "cheap"); wider screens a roomy grid.
+  const feedLayout = 'one' as const;
+  const feedGrid = 'grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-y-10 sm:gap-y-10 sm:gap-x-6';
   const feedKey = filtersToSearch(filters, '');
 
   /** Show other products: a new step in the browser's history (Back returns to this view). */
@@ -606,9 +607,9 @@ export function ShopApp({ initialProductId }: { initialProductId?: string } = {}
 
   return (
     <ShopProvider value={shopInfo}>
-    <div className="min-h-screen flex flex-col font-sans px-safe">
+    <div className="min-h-screen flex flex-col font-sans px-safe" style={festival?.festivalId ? festiveVars(festival.theme) : undefined}>
       {newVersion && (
-        <div role="status" className="bg-[#0f1c2e] text-white text-xs px-3 py-1.5 flex items-center justify-center gap-3">
+        <div role="status" className="bg-ink text-white text-xs px-3 py-1.5 flex items-center justify-center gap-3">
           <span>New version ready</span>
           <button type="button" className="font-bold underline min-h-8" onClick={() => applyUpdate()}>Refresh</button>
           <span className="opacity-60 hidden sm:inline">(your bag is kept)</span>
@@ -647,27 +648,27 @@ export function ShopApp({ initialProductId }: { initialProductId?: string } = {}
           /* ================= ADMIN MOBILE HUB ================= */
           <div className="py-4 space-y-4">
             {/* Admin Desktop/Tablet Navigation Tabs */}
-            <div className="hidden sm:flex items-center gap-2 border-b border-stone-200 pb-2 overflow-x-auto no-scrollbar">
+            <div className="hidden sm:flex items-center gap-2 border-b border-line pb-2 overflow-x-auto no-scrollbar">
               {[
                 { id: 'orders', label: 'Orders & Dispatches', badge: pendingOrdersCount },
                 { id: 'chats', label: 'Chats', badge: chatsWaiting },
-                { id: 'add-product', label: '+ Add Product' },
+                { id: 'add-product', label: 'Add product' },
                 { id: 'inventory', label: 'Inventory', badge: stockAlertCount },
                 { id: 'crm', label: 'Customers' },
-                { id: 'settings', label: '⚙️ Settings' },
+                { id: 'settings', label: 'Settings' },
               ].map((tab) => (
                 <button
                   key={tab.id}
                   onClick={() => setAdminTab(tab.id as typeof adminTab)}
                   className={`px-4 py-2 rounded-xl text-xs font-bold transition-all flex items-center gap-1.5 shrink-0 ${
                     adminTab === tab.id
-                      ? 'bg-[#0f1c2e] text-white shadow-sm'
-                      : 'bg-white text-stone-700 hover:bg-stone-100 border border-stone-200'
+                      ? 'bg-ink text-white shadow-sm'
+                      : 'bg-surface text-ink-soft hover:bg-sand border border-line'
                   }`}
                 >
                   <span>{tab.label}</span>
                   {tab.badge && tab.badge > 0 ? (
-                    <span className="w-4 h-4 rounded-full bg-amber-400 text-stone-900 text-[10px] font-bold flex items-center justify-center">
+                    <span className="w-4 h-4 rounded-full bg-gold text-ink text-[10px] font-bold flex items-center justify-center">
                       {tab.badge}
                     </span>
                   ) : null}
@@ -676,7 +677,7 @@ export function ShopApp({ initialProductId }: { initialProductId?: string } = {}
             </div>
 
             {newOrderNotice && (
-              <div role="status" className="rounded-2xl border border-emerald-200 bg-emerald-50 text-emerald-900 px-3.5 py-2.5 text-xs flex items-center gap-2">
+              <div role="status" className="rounded-2xl border border-success-line bg-success-soft text-success px-3.5 py-2.5 text-xs flex items-center gap-2">
                 <strong>Orders updated</strong>
                 <span className="opacity-80">A new or changed order just came in.</span>
                 <button type="button" className="ml-auto font-semibold underline" onClick={() => { setAdminTab('orders'); setNewOrderNotice(false); }}>View orders</button>
@@ -691,7 +692,7 @@ export function ShopApp({ initialProductId }: { initialProductId?: string } = {}
               }}
             />
             {adminLoadError && (
-              <p role="alert" className="text-xs text-red-800 bg-red-50 border border-red-200 rounded-xl px-3 py-2">{adminLoadError}</p>
+              <p role="alert" className="text-xs text-danger bg-danger-soft border border-danger-line rounded-xl px-3 py-2">{adminLoadError}</p>
             )}
 
             {/* Active Admin Tab Content */}
@@ -730,22 +731,27 @@ export function ShopApp({ initialProductId }: { initialProductId?: string } = {}
                   {
                     id: 'store',
                     label: 'Store & contact',
-                    icon: '🏬',
-                    hint: 'WhatsApp, email, social accounts, address and currency display.',
-                    content: <StoreSettingsCard key={`store-${adminSettingsLoaded}-${settingsEpoch}-${undone['store'] ?? 0}`} value={adminSettings.store.value} onSave={(v) => saveSettings('store', v)} auto={autoSaveHooks} />,
+                    icon: <Store />,
+                    hint: 'WhatsApp, email, social accounts, address, currency display and the announcement bar.',
+                    content: (
+                      <>
+                        <StoreSettingsCard key={`store-${adminSettingsLoaded}-${settingsEpoch}-${undone['store'] ?? 0}`} value={adminSettings.store.value} onSave={(v) => saveSettings('store', v)} auto={autoSaveHooks} />
+                        <MarqueeSettingsCard key={`marquee-${publicSettingsLoaded}-${settingsEpoch}-${undone['brand'] ?? 0}`} brand={brandSettings} onSave={(v) => saveSettings('brand', v)} />
+                      </>
+                    ),
                   },
                   {
                     id: 'catalog',
                     label: 'Catalogue',
-                    icon: '📐',
+                    icon: <LayoutGrid />,
                     hint: 'Size presets, categories and the low-stock warning.',
                     content: <CatalogSettingsCard key={`catalog-${adminSettingsLoaded}-${settingsEpoch}-${undone['catalog'] ?? 0}`} value={adminSettings.catalog.value} onSave={(v) => saveSettings('catalog', v)} auto={autoSaveHooks} />,
                   },
                   {
                     id: 'branding',
                     label: 'Branding & bank',
-                    icon: '🎨',
-                    hint: 'Logo, colours, the marquee and bank-transfer details.',
+                    icon: <Palette />,
+                    hint: 'Logo, name, tagline and bank-transfer details.',
                     content: (
                       <AdminBrandingTab
                         key={`branding-${publicSettingsLoaded}-${settingsEpoch}-${undone['brand'] ?? 0}-${undone['bank'] ?? 0}`}
@@ -760,14 +766,14 @@ export function ShopApp({ initialProductId }: { initialProductId?: string } = {}
                   {
                     id: 'themes',
                     label: 'Festival themes',
-                    icon: '🎉',
+                    icon: <Feather />,
                     hint: 'Eid, Diwali, Christmas, Lunar New Year and 30 more: picked automatically, or chosen by you.',
                     content: <ThemeSettingsCard key={`theme-${adminSettingsLoaded}-${settingsEpoch}`} value={adminSettings.theme.value} onSave={(v) => saveSettings('theme', v)} />,
                   },
                   {
                     id: 'sms',
                     label: 'Phone verification',
-                    icon: '📱',
+                    icon: <Smartphone />,
                     hint: 'The SMS gateway that sends checkout codes.',
                     content: (
                       <AdminSmsTab
@@ -782,7 +788,7 @@ export function ShopApp({ initialProductId }: { initialProductId?: string } = {}
                   {
                     id: 'couriers',
                     label: 'Couriers',
-                    icon: '🚚',
+                    icon: <Truck />,
                     hint: 'Jeebly and Eco Express keys, pickup details and routing.',
                     content: (
                       <AdminCouriersTab
@@ -797,14 +803,14 @@ export function ShopApp({ initialProductId }: { initialProductId?: string } = {}
                   {
                     id: 'delivery',
                     label: 'Delivery',
-                    icon: '📦',
+                    icon: <Box />,
                     hint: 'Where you deliver, the time customers see, and same-day delivery with its charge.',
                     content: <DeliverySettingsCard key={`delivery-${adminSettingsLoaded}-${settingsEpoch}-${undone['delivery'] ?? 0}`} value={adminSettings.delivery.value} onSave={(v) => saveSettings('delivery', v)} auto={autoSaveHooks} />,
                   },
                   {
                     id: 'assistant',
                     label: 'Chat assistant',
-                    icon: '💬',
+                    icon: <MessageSquare />,
                     hint: 'What the shop’s chat answers by itself (its memory), and when it hands over to you.',
                     content: (
                       <AssistantSettingsCard
@@ -819,7 +825,7 @@ export function ShopApp({ initialProductId }: { initialProductId?: string } = {}
                   {
                     id: 'email',
                     label: 'Email & admin account',
-                    icon: '✉️',
+                    icon: <Mail />,
                     hint: 'The mail server for backups, alerts and password resets; your sign-in email.',
                     content: (
                       <EmailSettingsCard
@@ -835,24 +841,24 @@ export function ShopApp({ initialProductId }: { initialProductId?: string } = {}
                   {
                     id: 'signin',
                     label: 'Passkeys & recovery codes',
-                    icon: '🔑',
+                    icon: <KeyRound />,
                     hint: 'Ways back in if you forget your password: a passkey on your phone, and one-time recovery codes.',
                     content: <SignInRecoveryCard />,
                   },
                   {
                     id: 'versions',
                     label: 'Versions',
-                    icon: '🕘',
+                    icon: <Archive />,
                     hint: 'Every release and what changed; switch to any of them without closing the shop.',
                     content: <VersionsCard />,
                   },
                   {
                     id: 'system',
                     label: 'System & backups',
-                    icon: '🛡️',
+                    icon: <ShieldCheck />,
                     hint: 'Backups, earlier versions of the settings, version and health.',
                     content: (
-                      <div className="space-y-3 text-xs text-stone-700">
+                      <div className="space-y-3 text-xs text-ink-soft">
                         <SystemHealthCard />
                         <BackupStatus />
                         <SettingsHistoryCard
@@ -881,47 +887,27 @@ export function ShopApp({ initialProductId }: { initialProductId?: string } = {}
               activeId={activeStory}
               onPick={(story) => showFilters(story.apply(filters))}
               logo={<BrandLogo brand={brandSettings} className="w-16 h-16 text-xl" />}
+              motif={festival?.festivalId && festival.showBanner ? festival.theme.motif : null}
             />
 
             <div ref={resultsRef} className="scroll-mt-16 space-y-3">
               {/* Count, and Filter (a bottom sheet) only when wanted */}
-              <div className="flex items-center justify-between gap-3">
-                <p className="text-sm text-stone-700" aria-live="polite">
+              <div className="flex flex-wrap items-center justify-between gap-3 border-t border-line pt-4">
+                <p className="label-caps text-ink-muted" aria-live="polite">
                   {catalogLoaded ? `${filteredProducts.length} ${filteredProducts.length === 1 ? 'piece' : 'pieces'}` : ''}
                 </p>
                 <div className="flex items-center gap-2">
-                {/* Phones: one big photo per row, or two across (wider screens always show a grid). */}
-                <div role="group" aria-label="Photo size" className="sm:hidden flex items-center rounded-full border border-stone-300 bg-white p-0.5">
-                  <button
-                    type="button"
-                    aria-pressed={feedLayout === 'one'}
-                    aria-label="Show one big photo per row"
-                    onClick={() => setFeedLayout('one')}
-                    className={`w-9 h-9 rounded-full flex items-center justify-center ${feedLayout === 'one' ? 'bg-[#0f1c2e] text-white' : 'text-stone-700'}`}
-                  >
-                    <Square className="w-4 h-4" aria-hidden="true" />
-                  </button>
-                  <button
-                    type="button"
-                    aria-pressed={feedLayout === 'grid'}
-                    aria-label="Show two photos per row"
-                    onClick={() => setFeedLayout('grid')}
-                    className={`w-9 h-9 rounded-full flex items-center justify-center ${feedLayout === 'grid' ? 'bg-[#0f1c2e] text-white' : 'text-stone-700'}`}
-                  >
-                    <LayoutGrid className="w-4 h-4" aria-hidden="true" />
-                  </button>
-                </div>
                 <button
                   type="button"
                   onClick={() => setFilterOpen(true)}
                   aria-haspopup="dialog"
                   aria-label={filterCount ? `Filter and sort, ${filterCount} on` : 'Filter and sort'}
-                  className="inline-flex items-center gap-2 h-10 px-4 rounded-full border border-stone-300 bg-white text-sm font-medium text-stone-900 hover:border-stone-500"
+                  className="inline-flex items-center gap-2 h-10 px-4 rounded-full border border-line-strong bg-transparent text-[13px] tracking-[0.04em] text-ink hover:border-ink-muted min-w-0"
                 >
-                  <SlidersHorizontal className="w-4 h-4" aria-hidden="true" />
+                  <SlidersHorizontal className="w-4 h-4 shrink-0" aria-hidden="true" strokeWidth={1.5} />
                   <span>Filter</span>
                   {filterCount > 0 && (
-                    <span className="min-w-5 h-5 px-1 rounded-full bg-[#0f1c2e] text-white text-[11px] font-bold flex items-center justify-center" aria-hidden="true">
+                    <span className="min-w-5 h-5 px-1 rounded-full bg-ink text-white text-[11px] font-bold flex items-center justify-center" aria-hidden="true">
                       {filterCount}
                     </span>
                   )}
@@ -937,7 +923,7 @@ export function ShopApp({ initialProductId }: { initialProductId?: string } = {}
                       type="button"
                       onClick={() => showFilters(chip.without)}
                       aria-label={`Remove filter: ${chip.label}`}
-                      className="inline-flex items-center gap-1 pl-3 pr-2 h-8 rounded-full bg-[#f4eee3] border border-[#e4dccd] text-xs font-medium text-stone-900 hover:border-stone-400 max-w-full"
+                      className="inline-flex items-center gap-1 pl-3 pr-2 h-8 rounded-full bg-sand border border-line text-xs font-medium text-ink hover:border-line-strong max-w-full"
                     >
                       <span className="truncate">{chip.label}</span>
                       <X className="w-3.5 h-3.5 shrink-0" aria-hidden="true" />
@@ -948,14 +934,14 @@ export function ShopApp({ initialProductId }: { initialProductId?: string } = {}
                       type="button"
                       onClick={() => showFilters({ ...filters, sort: 'featured' })}
                       aria-label={`Remove sort: ${SORTS.find((x) => x.id === filters.sort)?.label}`}
-                      className="inline-flex items-center gap-1 pl-3 pr-2 h-8 rounded-full bg-white border border-stone-300 text-xs font-medium text-stone-900 hover:border-stone-500"
+                      className="inline-flex items-center gap-1 pl-3 pr-2 h-8 rounded-full bg-surface border border-line-strong text-xs font-medium text-ink hover:border-ink-muted"
                     >
                       <span>{SORTS.find((x) => x.id === filters.sort)?.label}</span>
                       <X className="w-3.5 h-3.5" aria-hidden="true" />
                     </button>
                   )}
                   {chips.length + (filters.sort !== 'featured' ? 1 : 0) > 1 && (
-                    <button type="button" onClick={() => showFilters(EMPTY_FILTERS)} className="h-8 px-2 text-xs font-semibold text-stone-900 underline underline-offset-4">
+                    <button type="button" onClick={() => showFilters(EMPTY_FILTERS)} className="h-8 px-2 text-xs font-semibold text-ink underline underline-offset-4">
                       Clear all
                     </button>
                   )}
@@ -963,18 +949,18 @@ export function ShopApp({ initialProductId }: { initialProductId?: string } = {}
               )}
 
               {catalogError && (
-                <p role="alert" className="text-sm text-red-800 bg-red-50 border border-red-200 rounded-xl px-3 py-2">{catalogError}</p>
+                <p role="alert" className="text-sm text-danger bg-danger-soft border border-danger-line rounded-xl px-3 py-2">{catalogError}</p>
               )}
 
               {/* The feed: big photos (on phones one per row, edge to edge, or two across) */}
               {!catalogLoaded && !catalogError ? (
                 <div className={feedGrid} aria-hidden="true" data-testid="feed-skeleton">
                   {[0, 1, 2, 3].map((i) => (
-                    <div key={i} className={`space-y-2 ${feedLayout === 'one' ? '-mx-4 sm:mx-0' : ''}`}>
-                      <div className={`aspect-[4/5] bg-[#efe8dc] motion-safe:animate-pulse ${feedLayout === 'one' ? 'sm:rounded-2xl' : 'rounded-2xl'}`} />
-                      <div className={`space-y-2 ${feedLayout === 'one' ? 'px-4 sm:px-0' : ''}`}>
-                        <div className="h-3 rounded bg-[#efe8dc] w-4/5 motion-safe:animate-pulse" />
-                        <div className="h-3 rounded bg-[#efe8dc] w-1/3 motion-safe:animate-pulse" />
+                    <div key={i} className={`space-y-2 ${'-mx-4 sm:mx-0'}`}>
+                      <div className={`aspect-[4/5] bg-sand-deep motion-safe:animate-pulse ${'sm:rounded-lg'}`} />
+                      <div className={`space-y-2 ${'px-4 sm:px-0'}`}>
+                        <div className="h-3 rounded bg-sand-deep w-4/5 motion-safe:animate-pulse" />
+                        <div className="h-3 rounded bg-sand-deep w-1/3 motion-safe:animate-pulse" />
                       </div>
                     </div>
                   ))}
@@ -982,14 +968,14 @@ export function ShopApp({ initialProductId }: { initialProductId?: string } = {}
               ) : filteredProducts.length > 0 ? (
                 <div key={feedKey} className={`${feedGrid} feed-in`} data-testid="feed">
                   {filteredProducts.map((prod, i) => (
-                    <ProductCard key={prod.id} product={prod} onSelect={openProduct} eager={i < (feedLayout === 'one' ? 2 : 4)} layout={feedLayout} />
+                    <ProductCard key={prod.id} product={prod} onSelect={openProduct} eager={i < 2} layout={feedLayout} />
                   ))}
                 </div>
               ) : catalogLoaded ? (
-                <div className="rounded-2xl border border-dashed border-stone-300 px-4 py-10 text-center space-y-3">
-                  <p className="text-sm text-stone-800">{products.length ? 'Nothing matches these filters.' : 'New pieces are on their way. Please check back soon.'}</p>
+                <div className="rounded-2xl border border-dashed border-line-strong px-4 py-10 text-center space-y-3">
+                  <p className="text-sm text-ink">{products.length ? 'Nothing matches these filters.' : 'New pieces are on their way. Please check back soon.'}</p>
                   {products.length > 0 && (
-                    <button type="button" onClick={() => showFilters(EMPTY_FILTERS)} className="rounded-full bg-[#0f1c2e] text-white text-sm font-semibold px-5 py-2.5">
+                    <button type="button" onClick={() => showFilters(EMPTY_FILTERS)} className="rounded-full bg-ink text-white text-sm font-semibold px-5 py-2.5">
                       Show everything
                     </button>
                   )}
@@ -998,9 +984,10 @@ export function ShopApp({ initialProductId }: { initialProductId?: string } = {}
             </div>
 
             {/* The shop's promise */}
-            <div className="rounded-3xl bg-[#f4eee3] px-5 py-7 sm:p-8 text-center my-6 space-y-2">
-              <h2 className="font-serif text-lg sm:text-xl font-bold text-[#0f1c2e]">The {brandSettings.storeName || 'Beautiful UAE Home'} promise</h2>
-              <p className="text-stone-700 text-[13px] sm:text-sm max-w-xl mx-auto leading-relaxed">
+            <div className="border-y border-line px-5 py-10 sm:py-12 text-center my-8 space-y-3">
+              <p className="label-caps text-gold-deep">Our promise</p>
+              <h2 className="font-serif text-2xl sm:text-3xl text-ink">Made slowly, delivered with care</h2>
+              <p className="text-ink-soft text-[13px] sm:text-sm max-w-xl mx-auto leading-relaxed">
                 Every set is made with slow handcraft, fitted for deep Gulf mattresses, and delivered to your door in all seven emirates, with cash on delivery or bank transfer.
               </p>
             </div>

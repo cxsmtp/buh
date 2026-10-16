@@ -14,8 +14,8 @@ import { reply } from '@/lib/assistant';
  * and loaded back, e.g. to keep a copy or to edit it on a computer.
  */
 
-const field = 'w-full px-3 py-2 rounded-xl border border-stone-300 bg-white text-stone-900 text-sm focus:outline-none focus:ring-2 focus:ring-[#c5a059]';
-const label = 'block text-xs font-semibold text-stone-700 mb-1';
+const field = 'w-full px-3 py-2 rounded-xl border border-line-strong bg-surface text-ink text-sm focus:outline-none focus:ring-2 focus:ring-gold';
+const label = 'block text-xs font-semibold text-ink-soft mb-1';
 
 const newId = (entries: AssistantEntry[]) => {
   let n = entries.length + 1;
@@ -108,24 +108,24 @@ export function AssistantSettingsCard({ value, sizes, onSave, auto }: { value: A
 
       <section className="space-y-2">
         <div className="flex flex-wrap items-center gap-2">
-          <h3 className="font-bold text-[#0f1c2e]">What it knows ({d.entries.length})</h3>
+          <h3 className="font-bold text-ink">What it knows ({d.entries.length})</h3>
           <div className="ml-auto flex flex-wrap gap-1.5 text-xs">
-            <button type="button" onClick={download} className="px-2.5 py-1.5 rounded-lg border border-stone-300 font-semibold inline-flex items-center gap-1"><Download className="w-3.5 h-3.5" /> Download memory</button>
-            <label className="px-2.5 py-1.5 rounded-lg border border-stone-300 font-semibold inline-flex items-center gap-1 cursor-pointer">
+            <button type="button" onClick={download} className="px-2.5 py-1.5 rounded-lg border border-line-strong font-semibold inline-flex items-center gap-1"><Download className="w-3.5 h-3.5" /> Download memory</button>
+            <label className="px-2.5 py-1.5 rounded-lg border border-line-strong font-semibold inline-flex items-center gap-1 cursor-pointer">
               <Upload className="w-3.5 h-3.5" /> Load from file
               <input type="file" accept="application/json,.json" className="sr-only" onChange={(e) => void load(e.target.files?.[0])} />
             </label>
           </div>
         </div>
-        <p className="text-xs text-stone-500">
+        <p className="text-xs text-ink-muted">
           It replies with an answer when the question contains its keywords. Anything it has no answer for goes to you (Admin Hub → Chats, and by email). It never invents prices or discounts: only what you write here.
         </p>
         <ol className="space-y-2">
           {d.entries.map((e, i) => (
-            <li key={i} className="rounded-2xl border border-stone-200 bg-white p-3 space-y-2">
+            <li key={i} className="rounded-2xl border border-line bg-surface p-3 space-y-2">
               <div className="flex items-center gap-2">
                 <input aria-label={`Answer ${i + 1}: question`} className={`${field} font-semibold`} value={e.question} maxLength={200} placeholder="The question, e.g. Do you deliver to Oman?" onChange={(ev) => setEntry(i, { question: ev.target.value })} />
-                <button type="button" onClick={() => set('entries', d.entries.filter((_, j) => j !== i))} className="p-2 rounded-lg border border-red-200 text-red-700 shrink-0" aria-label={`Remove answer ${i + 1}`}>
+                <button type="button" onClick={() => set('entries', d.entries.filter((_, j) => j !== i))} className="p-2 rounded-lg border border-danger-line text-danger shrink-0" aria-label={`Remove answer ${i + 1}`}>
                   <Trash2 className="w-4 h-4" />
                 </button>
               </div>
@@ -134,17 +134,17 @@ export function AssistantSettingsCard({ value, sizes, onSave, auto }: { value: A
             </li>
           ))}
         </ol>
-        <button type="button" onClick={() => set('entries', [...d.entries, { id: newId(d.entries), question: '', keywords: [], answer: '' }])} className="px-3 py-2 rounded-xl border border-dashed border-stone-400 text-xs font-bold inline-flex items-center gap-1.5">
+        <button type="button" onClick={() => set('entries', [...d.entries, { id: newId(d.entries), question: '', keywords: [], answer: '' }])} className="px-3 py-2 rounded-xl border border-dashed border-line-strong text-xs font-bold inline-flex items-center gap-1.5">
           <Plus className="w-4 h-4" /> Add an answer
         </button>
       </section>
 
-      <section className="rounded-2xl bg-stone-50 border border-stone-200 p-3 space-y-2">
+      <section className="rounded-2xl bg-ivory border border-line p-3 space-y-2">
         <label className={label} htmlFor="as-try">Try it (with the answers above, before saving)</label>
         <input id="as-try" className={field} value={trial} placeholder="e.g. What size is a king sheet?" onChange={(e) => setTrial(e.target.value)} />
         {answer && (
           <div className="text-xs flex gap-2">
-            <Bot className="w-4 h-4 text-[#c5a059] shrink-0 mt-0.5" />
+            <Bot className="w-4 h-4 text-gold shrink-0 mt-0.5" />
             <p className="whitespace-pre-wrap" role="status">
               {answer.kind === 'handover'
                 ? answer.reason === 'asked'
@@ -157,11 +157,11 @@ export function AssistantSettingsCard({ value, sizes, onSave, auto }: { value: A
       </section>
 
       <div className="flex flex-wrap items-center gap-3">
-        <button type="button" onClick={() => void save()} disabled={saving} className="px-4 py-2 rounded-xl bg-[#0f1c2e] text-white text-xs font-bold flex items-center gap-1.5 disabled:opacity-60">
+        <button type="button" onClick={() => void save()} disabled={saving} className="px-4 py-2 rounded-xl bg-ink text-white text-xs font-bold flex items-center gap-1.5 disabled:opacity-60">
           {saving && <Loader2 className="w-3.5 h-3.5 animate-spin" />} Save chat assistant
         </button>
         {auto && autosave.bar}
-        {status && <p role="status" className={`text-xs font-semibold ${status.ok ? 'text-emerald-700' : 'text-red-700'}`}>{status.text}</p>}
+        {status && <p role="status" className={`text-xs font-semibold ${status.ok ? 'text-success' : 'text-danger'}`}>{status.text}</p>}
       </div>
     </div>
   );

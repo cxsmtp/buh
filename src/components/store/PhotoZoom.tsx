@@ -172,7 +172,7 @@ export function PhotoZoom({ images, start, title, onClose }: PhotoZoomProps) {
   };
 
   const s = photoSources(images[index], [720, 1080, 1440, 2048]);
-  const btn = 'w-11 h-11 rounded-full bg-white/15 text-white flex items-center justify-center hover:bg-white/25 disabled:opacity-30 backdrop-blur';
+  const btn = 'w-11 h-11 rounded-full bg-surface/15 text-white flex items-center justify-center hover:bg-surface/25 disabled:opacity-30 backdrop-blur';
 
   return createPortal(
     <div

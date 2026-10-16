@@ -60,7 +60,7 @@ export function LocalPrice({ aed, className = '' }: { aed: number; className?: s
   }, [aed, store.showLocalCurrency]);
   if (!shown) return null;
   return (
-    <span className={`text-stone-500 font-normal ${className}`} title="Approximate; you pay in AED">
+    <span className={`text-ink-muted font-normal ${className}`} title="Approximate; you pay in AED">
       ≈ {shown}
     </span>
   );

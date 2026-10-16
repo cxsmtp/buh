@@ -132,31 +132,31 @@ export function useAutoSave<T>({ settingsKey, value, onSaved, onUndone, onSent, 
 }
 
 function AutoSaveBar({ status, canUndo, onUndo }: { status: Status; canUndo: boolean; onUndo: () => void }) {
-  if (status.kind === 'idle') return <p className="text-[11px] text-stone-500">Changes save automatically.</p>;
+  if (status.kind === 'idle') return <p className="text-[11px] text-ink-muted">Changes save automatically.</p>;
   if (status.kind === 'saving')
     return (
-      <p className="text-[11px] text-stone-600 flex items-center gap-1" role="status">
+      <p className="text-[11px] text-ink-soft flex items-center gap-1" role="status">
         <Loader2 className="w-3.5 h-3.5 animate-spin" /> Saving…
       </p>
     );
   if (status.kind === 'error')
     return (
-      <p className="text-xs text-red-700 font-semibold flex items-start gap-1" role="alert">
+      <p className="text-xs text-danger font-semibold flex items-start gap-1" role="alert">
         <ShieldAlert className="w-4 h-4 shrink-0" /> {status.text}
       </p>
     );
   if (status.kind === 'needs-save')
     return (
-      <p className="text-xs text-amber-900 font-semibold flex items-start gap-1" role="status">
+      <p className="text-xs text-warning font-semibold flex items-start gap-1" role="status">
         <Info className="w-4 h-4 shrink-0" /> {status.text}
       </p>
     );
   return (
-    <p className="text-xs text-emerald-800 font-semibold flex flex-wrap items-center gap-2" role="status">
+    <p className="text-xs text-success font-semibold flex flex-wrap items-center gap-2" role="status">
       <Check className="w-4 h-4" /> Saved automatically.
-      {status.note && <span className="text-amber-800 font-normal">{status.note}</span>}
+      {status.note && <span className="text-warning font-normal">{status.note}</span>}
       {canUndo && (
-        <button type="button" onClick={onUndo} className="inline-flex items-center gap-1 underline text-stone-700">
+        <button type="button" onClick={onUndo} className="inline-flex items-center gap-1 underline text-ink-soft">
           <RotateCcw className="w-3.5 h-3.5" /> Undo
         </button>
       )}

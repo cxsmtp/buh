@@ -1,6 +1,7 @@
 import net from 'node:net';
 import type { AssistantSettings, BankTransferDetails, DeliverySettings, Emirate, BedProfileMeasurement, BrandSettings, CatalogSettings, CourierSettings, EmailSettings, FirebaseWebConfig, PhoneVerificationConfig, SmsGatewaySettings, StoreSettings, ThemeSettings } from '@/types';
 import { FESTIVALS } from '@/lib/festivals/catalog';
+import { marqueeItems, marqueeProblem, stripEmoji } from '@/lib/marquee';
 import { DEFAULT_ASSISTANT, DEFAULT_CATALOG, DEFAULT_DELIVERY, DEFAULT_EMAIL_SETTINGS, DEFAULT_STORE, DEFAULT_THEME_SETTINGS } from '@/data/catalogDefaults';
 import { INITIAL_BANK_DETAILS, INITIAL_BRAND_SETTINGS, INITIAL_COURIER_SETTINGS, INITIAL_SMS_SETTINGS } from '@/data/initialData';
 import { getDb } from './db';
@@ -91,6 +92,11 @@ export function getSettings<K extends SettingsKey>(key: K): SettingsMap[K] {
   const row = getDb().prepare('SELECT data FROM settings WHERE key = ?').get(key) as { data: string } | undefined;
   const stored = row ? JSON.parse(row.data) : {};
   const merged = deepMerge(DEFAULTS[key], stored) as SettingsMap[K];
+  // Shops still showing the old, long announcement lines get today's short ones.
+  if (key === 'brand') {
+    const brand = merged as unknown as BrandSettings;
+    brand.marquee = { ...brand.marquee, messages: marqueeItems(brand.marquee?.messages) };
+  }
   cache.set(key, merged);
   return merged;
 }
@@ -362,6 +368,18 @@ function hostOf(url: string): string {
   }
 }
 
+/**
+ * The announcement bar's lines: up to 3, each up to 60 characters, emoji removed. Longer or more
+ * are refused with a reason (the settings card shows the same limits as the owner types).
+ */
+function announcementLines(messages: unknown[], typed: boolean): string[] {
+  const lines = messages.map((m, i) => stripEmoji(text(m, `Announcement ${i + 1}`, 500)));
+  if (!typed) return marqueeItems(lines);
+  const problem = marqueeProblem(lines);
+  if (problem) throw new HttpError(400, problem);
+  return lines.filter(Boolean);
+}
+
 const EMIRATES = ['Dubai', 'Abu Dhabi', 'Sharjah', 'Ajman', 'Ras Al Khaimah', 'Fujairah', 'Umm Al Quwain'];
 
 const VALIDATORS: { [K in SettingsKey]: (input: Obj, current: SettingsMap[K]) => Promise<SettingsMap[K]> } = {
@@ -382,7 +400,7 @@ const VALIDATORS: { [K in SettingsKey]: (input: Obj, current: SettingsMap[K]) =>
       marquee: {
         enabled: bool(marquee.enabled, current.marquee.enabled),
         speedSeconds: Number.isFinite(speed) ? Math.min(120, Math.max(5, Math.round(speed))) : current.marquee.speedSeconds,
-        messages: messages.slice(0, 10).map((m, i) => text(m, `Marquee message ${i + 1}`, 160)).filter(Boolean),
+        messages: announcementLines(messages, Array.isArray(marquee.messages)),
       },
     };
   },

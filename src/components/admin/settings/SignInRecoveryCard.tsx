@@ -12,10 +12,10 @@ import { passkeyErrorMessage, passkeysSupported, webauthnBrowser } from '@/lib/c
  * shown once to copy, download or print.
  */
 
-const field = 'w-full px-3 py-2 rounded-xl border border-stone-300 bg-white text-stone-900 text-sm placeholder:text-stone-500 focus:outline-none focus:ring-2 focus:ring-[#c5a059]';
-const label = 'block text-xs font-semibold text-stone-700 mb-1';
-const darkButton = 'px-4 py-2 rounded-xl bg-[#0f1c2e] text-white text-xs font-bold flex items-center gap-1.5 disabled:opacity-60';
-const lightButton = 'px-3 py-2 rounded-xl border border-stone-300 bg-white text-stone-800 text-xs font-bold flex items-center gap-1.5 hover:bg-stone-50 disabled:opacity-60';
+const field = 'w-full px-3 py-2 rounded-xl border border-line-strong bg-surface text-ink text-sm placeholder:text-ink-muted focus:outline-none focus:ring-2 focus:ring-gold';
+const label = 'block text-xs font-semibold text-ink-soft mb-1';
+const darkButton = 'px-4 py-2 rounded-xl bg-ink text-white text-xs font-bold flex items-center gap-1.5 disabled:opacity-60';
+const lightButton = 'px-3 py-2 rounded-xl border border-line-strong bg-surface text-ink text-xs font-bold flex items-center gap-1.5 hover:bg-ivory disabled:opacity-60';
 
 interface Passkey {
   id: string;
@@ -46,7 +46,7 @@ function when(iso: string | null): string {
 export function SignInRecoveryCard() {
   return (
     <div className="space-y-6 text-sm">
-      <p className="text-xs text-stone-600 leading-relaxed">
+      <p className="text-xs text-ink-soft leading-relaxed">
         If you forget your password, these get you back into the Admin Hub. Set up at least one: a passkey on your phone, and recovery codes kept somewhere safe (printed, or in a password manager).
       </p>
       <PasskeysSection />
@@ -134,53 +134,53 @@ function PasskeysSection() {
 
   return (
     <section className="space-y-3" aria-labelledby="passkeys-title">
-      <h3 id="passkeys-title" className="font-bold text-[#0f1c2e] flex items-center gap-2"><KeyRound className="w-4 h-4 text-[#9a7a35]" /> Passkeys</h3>
-      <p className="text-xs text-stone-600 leading-relaxed">
+      <h3 id="passkeys-title" className="font-bold text-ink flex items-center gap-2"><KeyRound className="w-4 h-4 text-gold-deep" /> Passkeys</h3>
+      <p className="text-xs text-ink-soft leading-relaxed">
         A passkey lets you sign in with your phone&apos;s or computer&apos;s fingerprint, face or screen lock, with no password to remember.
         Add one on each phone or computer you use (passkeys saved in iCloud Keychain or Google Password Manager follow you to your other devices).
       </p>
 
       {list === null ? (
-        <p className="text-xs text-stone-600 flex items-center gap-1.5"><Loader2 className="w-3.5 h-3.5 animate-spin" /> Loading…</p>
+        <p className="text-xs text-ink-soft flex items-center gap-1.5"><Loader2 className="w-3.5 h-3.5 animate-spin" /> Loading…</p>
       ) : list.length === 0 ? (
-        <p className="text-xs text-stone-700 bg-stone-50 border border-stone-200 rounded-xl p-3">No passkeys yet.</p>
+        <p className="text-xs text-ink-soft bg-ivory border border-line rounded-xl p-3">No passkeys yet.</p>
       ) : (
-        <ul className="divide-y divide-stone-200 border border-stone-200 rounded-xl" aria-label="Your passkeys">
+        <ul className="divide-y divide-line border border-line rounded-xl" aria-label="Your passkeys">
           {list.map((p) => (
             <li key={p.id} className="p-3 flex flex-wrap items-center gap-x-3 gap-y-2">
               <div className="min-w-0 flex-1">
-                <p className="font-semibold text-stone-900 break-words">{p.name}</p>
-                <p className="text-xs text-stone-600">
+                <p className="font-semibold text-ink break-words">{p.name}</p>
+                <p className="text-xs text-ink-soft">
                   Added {when(p.createdAt)} · Last used {when(p.lastUsedAt)}
                   {p.synced ? ' · Synced to your other devices' : ''}
                 </p>
-                {p.otherAddress && <p className="text-xs text-amber-800">Made for another address of the shop: it won&apos;t work here.</p>}
+                {p.otherAddress && <p className="text-xs text-warning">Made for another address of the shop: it won&apos;t work here.</p>}
                 {p.suspended && (
-                  <p className="text-xs text-amber-900 font-semibold">Switched off after a restore. Keep it only if you still have this phone or computer.</p>
+                  <p className="text-xs text-warning font-semibold">Switched off after a restore. Keep it only if you still have this phone or computer.</p>
                 )}
               </div>
               {confirming?.id === p.id ? (
                 <form onSubmit={(e) => void act(e, p, confirming.action)} className="w-full flex flex-wrap items-end gap-2">
-                  <p className="w-full text-xs text-stone-800">{confirming.action === 'remove' ? `Remove “${p.name}”?` : `Keep “${p.name}” and switch it back on?`}</p>
+                  <p className="w-full text-xs text-ink">{confirming.action === 'remove' ? `Remove “${p.name}”?` : `Keep “${p.name}” and switch it back on?`}</p>
                   {!fresh && (
                     <div className="min-w-0 flex-1 basis-48">
                       <label className={label} htmlFor={`passkey-confirm-${p.id}`}>Current password</label>
                       <input id={`passkey-confirm-${p.id}`} className={field} type="password" required autoComplete="current-password" maxLength={256} value={confirmPassword} onChange={(e) => setConfirmPassword(e.target.value)} />
                     </div>
                   )}
-                  <button type="submit" disabled={busy} className={`px-3 py-2 rounded-lg text-white text-xs font-bold disabled:opacity-60 ${confirming.action === 'remove' ? 'bg-red-700' : 'bg-[#0f1c2e]'}`}>
+                  <button type="submit" disabled={busy} className={`px-3 py-2 rounded-lg text-white text-xs font-bold disabled:opacity-60 ${confirming.action === 'remove' ? 'bg-danger' : 'bg-ink'}`}>
                     {confirming.action === 'remove' ? 'Yes, remove' : 'Yes, keep it'}
                   </button>
-                  <button type="button" onClick={() => { setConfirming(null); setConfirmPassword(''); }} className="px-3 py-2 rounded-lg border border-stone-300 text-stone-800 text-xs font-bold">Cancel</button>
+                  <button type="button" onClick={() => { setConfirming(null); setConfirmPassword(''); }} className="px-3 py-2 rounded-lg border border-line-strong text-ink text-xs font-bold">Cancel</button>
                 </form>
               ) : (
                 <div className="flex flex-wrap gap-2">
                   {p.suspended && (
-                    <button type="button" onClick={() => setConfirming({ id: p.id, action: 'keep' })} aria-label={`Keep passkey ${p.name}`} className="px-3 py-1.5 rounded-lg border border-stone-300 text-stone-800 text-xs font-bold hover:bg-stone-50">
+                    <button type="button" onClick={() => setConfirming({ id: p.id, action: 'keep' })} aria-label={`Keep passkey ${p.name}`} className="px-3 py-1.5 rounded-lg border border-line-strong text-ink text-xs font-bold hover:bg-ivory">
                       Keep
                     </button>
                   )}
-                  <button type="button" onClick={() => setConfirming({ id: p.id, action: 'remove' })} aria-label={`Remove passkey ${p.name}`} className="px-3 py-1.5 rounded-lg border border-stone-300 text-stone-800 text-xs font-bold flex items-center gap-1 hover:bg-stone-50">
+                  <button type="button" onClick={() => setConfirming({ id: p.id, action: 'remove' })} aria-label={`Remove passkey ${p.name}`} className="px-3 py-1.5 rounded-lg border border-line-strong text-ink text-xs font-bold flex items-center gap-1 hover:bg-ivory">
                     <Trash2 className="w-3.5 h-3.5" /> Remove
                   </button>
                 </div>
@@ -191,9 +191,9 @@ function PasskeysSection() {
       )}
 
       {problem ? (
-        <p className="text-xs bg-amber-50 border border-amber-300 text-amber-900 rounded-xl p-3">{problem}</p>
+        <p className="text-xs bg-warning-soft border border-warning-line text-warning rounded-xl p-3">{problem}</p>
       ) : !supported ? (
-        <p className="text-xs bg-amber-50 border border-amber-300 text-amber-900 rounded-xl p-3">This browser can&apos;t make passkeys. Open the Admin Hub in an up-to-date Chrome, Safari, Edge or Firefox to add one.</p>
+        <p className="text-xs bg-warning-soft border border-warning-line text-warning rounded-xl p-3">This browser can&apos;t make passkeys. Open the Admin Hub in an up-to-date Chrome, Safari, Edge or Firefox to add one.</p>
       ) : (
         <form onSubmit={(e) => void add(e)} className="grid grid-cols-1 sm:grid-cols-2 gap-3">
           <div>
@@ -211,7 +211,7 @@ function PasskeysSection() {
           </div>
         </form>
       )}
-      {status && <p role="status" className={`text-xs font-semibold ${status.ok ? 'text-emerald-800' : 'text-red-700'}`}>{status.text}</p>}
+      {status && <p role="status" className={`text-xs font-semibold ${status.ok ? 'text-success' : 'text-danger'}`}>{status.text}</p>}
     </section>
   );
 }
@@ -301,32 +301,32 @@ function RecoveryCodesSection() {
   const low = hasSet && remaining <= 2;
 
   return (
-    <section className="space-y-3 border-t border-stone-200 pt-5" aria-labelledby="recovery-title">
-      <h3 id="recovery-title" className="font-bold text-[#0f1c2e] flex items-center gap-2"><LifeBuoy className="w-4 h-4 text-[#9a7a35]" /> Recovery codes</h3>
-      <p className="text-xs text-stone-600 leading-relaxed">
+    <section className="space-y-3 border-t border-line pt-5" aria-labelledby="recovery-title">
+      <h3 id="recovery-title" className="font-bold text-ink flex items-center gap-2"><LifeBuoy className="w-4 h-4 text-gold-deep" /> Recovery codes</h3>
+      <p className="text-xs text-ink-soft leading-relaxed">
         Ten one-time codes. If you forget your password, choose &ldquo;Use a recovery code&rdquo; on the sign-in screen, type your admin email and one code, then choose a new password.
         Each code works once. Creating a new set makes the old codes stop working.
       </p>
 
       {info && (
-        <p className={`text-xs rounded-xl border p-3 ${low ? 'bg-amber-50 border-amber-300 text-amber-900' : 'bg-stone-50 border-stone-200 text-stone-800'}`} role={low ? 'alert' : undefined}>
+        <p className={`text-xs rounded-xl border p-3 ${low ? 'bg-warning-soft border-warning-line text-warning' : 'bg-ivory border-line text-ink'}`} role={low ? 'alert' : undefined}>
           {!hasSet
             ? 'You have no recovery codes yet.'
             : `${remaining} of ${info.total} codes left (created ${when(info.createdAt)}).${remaining === 0 ? ' None left: create a new set now.' : low ? ' Running low: create a new set soon.' : ''}`}
         </p>
       )}
       {info?.managedByEnv && (
-        <p className="text-xs text-stone-700">
+        <p className="text-xs text-ink-soft">
           Your password is set on the server (ADMIN_PASSWORD_HASH), so a recovery code signs you in but can&apos;t change the password: that is still done in .env.production.
         </p>
       )}
 
       {codes && (
-        <div className="rounded-xl border-2 border-[#c5a059] bg-amber-50/60 p-3 space-y-3">
-          <p className="text-xs font-bold text-stone-900">Save these codes now: this is the only time they are shown.</p>
-          <ol className="grid grid-cols-1 min-[420px]:grid-cols-2 gap-x-6 gap-y-1 font-mono text-sm text-stone-900" aria-label="Your new recovery codes">
+        <div className="rounded-xl border-2 border-gold bg-warning-soft/60 p-3 space-y-3">
+          <p className="text-xs font-bold text-ink">Save these codes now: this is the only time they are shown.</p>
+          <ol className="grid grid-cols-1 min-[420px]:grid-cols-2 gap-x-6 gap-y-1 font-mono text-sm text-ink" aria-label="Your new recovery codes">
             {codes.map((c, i) => (
-              <li key={c} className="flex gap-2"><span className="text-stone-600 w-7 shrink-0 text-right">{i + 1}.</span><span className="tracking-wider">{c}</span></li>
+              <li key={c} className="flex gap-2"><span className="text-ink-soft w-7 shrink-0 text-right">{i + 1}.</span><span className="tracking-wider">{c}</span></li>
             ))}
           </ol>
           <div className="flex flex-wrap gap-2">
@@ -341,7 +341,7 @@ function RecoveryCodesSection() {
       {!codes && info && (
         <form onSubmit={(e) => void create(e)} className="grid grid-cols-1 sm:grid-cols-2 gap-3">
           {info.freshPasskey ? (
-            <p className="sm:col-span-2 text-xs text-stone-700">You signed in with a passkey a moment ago, so your password isn&apos;t needed.</p>
+            <p className="sm:col-span-2 text-xs text-ink-soft">You signed in with a passkey a moment ago, so your password isn&apos;t needed.</p>
           ) : (
             <div>
               <label className={label} htmlFor="recovery-password">Current password</label>
@@ -356,7 +356,7 @@ function RecoveryCodesSection() {
           </div>
         </form>
       )}
-      {status && <p role="status" className={`text-xs font-semibold ${status.ok ? 'text-emerald-800' : 'text-red-700'}`}>{status.text}</p>}
+      {status && <p role="status" className={`text-xs font-semibold ${status.ok ? 'text-success' : 'text-danger'}`}>{status.text}</p>}
       {/* Always present, so screen readers announce this short line, not the ten codes. */}
       <p role="status" className="sr-only" id="codes-announcement">
         {codes ? `${codes.length} new recovery codes are shown below. Save them now: this is the only time they are shown.` : ''}
@@ -389,9 +389,9 @@ function NewPasswordAfterPasskey() {
   };
 
   return (
-    <form onSubmit={(e) => void save(e)} className="grid grid-cols-1 sm:grid-cols-2 gap-3 border-t border-stone-200 pt-5" aria-labelledby="new-password-title">
-      <h3 id="new-password-title" className="sm:col-span-2 font-bold text-[#0f1c2e]">Forgot your password?</h3>
-      <p className="sm:col-span-2 text-xs text-stone-700">You signed in with a passkey a moment ago, so you can choose a new password without the old one (for 10 minutes after signing in).</p>
+    <form onSubmit={(e) => void save(e)} className="grid grid-cols-1 sm:grid-cols-2 gap-3 border-t border-line pt-5" aria-labelledby="new-password-title">
+      <h3 id="new-password-title" className="sm:col-span-2 font-bold text-ink">Forgot your password?</h3>
+      <p className="sm:col-span-2 text-xs text-ink-soft">You signed in with a passkey a moment ago, so you can choose a new password without the old one (for 10 minutes after signing in).</p>
       <div>
         <label className={label} htmlFor="passkey-new-password">New password</label>
         <input id="passkey-new-password" className={field} type="password" required minLength={12} maxLength={256} autoComplete="new-password" value={next} onChange={(e) => setNext(e.target.value)} />
@@ -405,7 +405,7 @@ function NewPasswordAfterPasskey() {
           {busy && <Loader2 className="w-3.5 h-3.5 animate-spin" />} Set new password
         </button>
       </div>
-      {status && <p role="status" className={`sm:col-span-2 text-xs font-semibold ${status.ok ? 'text-emerald-800' : 'text-red-700'}`}>{status.text}</p>}
+      {status && <p role="status" className={`sm:col-span-2 text-xs font-semibold ${status.ok ? 'text-success' : 'text-danger'}`}>{status.text}</p>}
     </form>
   );
 }
