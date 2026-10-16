@@ -54,7 +54,7 @@ What protects the shop, how it works, and what the owner must do. Each item has 
 
 ## Delivery charges
 
-- Whether we deliver, and any same-day charge, are decided on the server from the address and Settings → Delivery, in fils; a GPS reading never decides it (devices often report a network location). The browser's total must match the server's or the order is refused before anything is charged; a same-day order after the cut-off is refused (409) and checkout moves back to standard.
+- Whether we deliver, and any same-day charge, are decided on the server from the address and Settings → Delivery, in fils; a GPS reading never decides it (devices often report a network location). The area is free text (up to 120 characters); the suggestion list and a GPS-suggested area are conveniences in the browser, never trusted by the server. GPS suggests an area only from a reading within 300 m accuracy and 1.5 km of a known community, and no map tiles or other third parties are loaded. The browser's total must match the server's or the order is refused before anything is charged; a same-day order after the cut-off is refused (409) and checkout moves back to standard.
 
 ## Chat
 

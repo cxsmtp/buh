@@ -162,6 +162,14 @@ for (const colorScheme of ['dark', 'light'] as const) {
       await page.getByRole('button', { name: /Proceed to Checkout/ }).click();
       await page.locator('#checkout-phone').waitFor();
       problems.push(...(await lowContrast(page, 'checkout')));
+      // The area suggestions, with one highlighted and another emirate's areas shown.
+      await page.locator('#checkout-area').click();
+      await page.keyboard.type('al n');
+      await page.getByRole('listbox', { name: 'Area suggestions' }).waitFor();
+      await page.keyboard.press('ArrowDown');
+      problems.push(...(await lowContrast(page, 'checkout area list')));
+      await page.keyboard.press('Escape'); // closes the list
+      await page.getByRole('listbox', { name: 'Area suggestions' }).waitFor({ state: 'hidden' });
       await page.keyboard.press('Escape');
       await page.getByRole('button', { name: 'Help and chat' }).click();
       await page.getByRole('dialog', { name: 'Chat with the shop' }).waitFor();

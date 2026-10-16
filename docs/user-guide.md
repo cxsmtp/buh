@@ -30,7 +30,7 @@ The shop looks and works like a boutique's Instagram page, on a phone first.
 - Stock and prices update on the open page within seconds. Prices and stock are always checked by the shop when the order is placed.
 - **Share** on a product sends its link (with its photo in the preview) through WhatsApp or the phone's share sheet.
 
-- **Delivery** is free, in 1–2 days, to all seven emirates; a green tick confirms the address. Where the shop offers it, **Same day** can be chosen for an extra charge before the cut-off time. **Use My GPS** saves the location for the driver and suggests the area; if the phone or laptop reports a location outside the UAE (common with network or VPN locations), it says so and you choose the emirate and area yourself.
+- **Delivery** is free, in 1–2 days, to all seven emirates; a green tick confirms the address. Where the shop offers it, **Same day** can be chosen for an extra charge before the cut-off time. **Use My GPS** always saves the location for the driver, but only fills in the area when the reading is precise (within 300 m) and next to a community it knows; a laptop or phone indoors often gives an approximate Wi-Fi location (± 1–5 km), and then it says so and you choose the area. A location outside the UAE (common with VPNs) is not used. **Area** suggests communities from every emirate as you type any part of the name or a short form ("JVC", "JLT", "DIP"); choosing one in another emirate switches the emirate, and you can still type any area. **Drop Pin on Map** is a searchable list of communities whose location is known.
 
 ## For the owner: the Admin Hub
 
@@ -107,7 +107,7 @@ On each product, customers see **Ask in chat**, **Ask on WhatsApp** and **Ask on
 
 - **Store & contact:** your WhatsApp number (change it any time; empty hides the WhatsApp buttons), the message a chat opens with, the floating WhatsApp button, the support email, Instagram, TikTok and Facebook, which of **Ask on WhatsApp / Instagram** show, the address, and whether visitors abroad see their own currency.
 - **Chat assistant:** see Chats above.
-- **Delivery:** the emirates you deliver to, areas you don't serve, the delivery time customers see (1–2 days), and same-day delivery: switch it on, set the extra charge, the cut-off time (UAE) and where it's offered. Customers see a green tick for their area and choose standard or same day; the courier is never named to them.
+- **Delivery:** the emirates you deliver to, areas you don't serve (a short form counts: "JVC" also covers "Jumeirah Village Circle (JVC)"), the delivery time customers see (1–2 days), and same-day delivery: switch it on, set the extra charge, the cut-off time (UAE) and where it's offered. Customers see a green tick for their area and choose standard or same day; the courier is never named to them.
 - **Email & admin account:** the mail server, where backups and alerts go, the mailbox for chat replies, and your sign-in email.
 - **Passkeys & recovery codes:** your ways back in if you forget the password (see above).
 - **Catalogue:** the size presets offered when adding a product (name, measurements, price difference, pieces in the set), the categories shown in the shop (each category with pieces in it is a round story chip at the top of the shop, in this order, with its first piece's photo; **New in** and **On sale** chips come from each product's **New arrival** tick and its **Was (AED)** price), and the **Only N left** level.
