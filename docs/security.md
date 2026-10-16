@@ -118,13 +118,40 @@ Carrier endpoints are fixed in code.
 
 Every page sends:
 
-- **Content Security Policy:** scripts and connections only to this site, no plugins, no `<base>`, no framing.
+- **Content Security Policy:** scripts and connections only to this site, no plugins, no `<base>`, no framing. Workers only from this site (`worker-src 'self' blob:`: the service worker, and the order confirmation's confetti, drawn in a worker from a `blob:` URL) and the app manifest only from this site (`manifest-src 'self'`).
   - Exception, for Firebase phone sign-in: reCAPTCHA scripts and frames (`www.google.com/recaptcha/`, `www.gstatic.com/recaptcha/`, `recaptcha.google.com/recaptcha/`), `apis.google.com`, frames from `*.firebaseapp.com`, and connections to `identitytoolkit.googleapis.com` and `securetoken.googleapis.com`.
   - **Trade-off:** the policy is fixed at build time (a per-request one costs too much, below), so these Google hosts are allowed even while Firebase is off. They are Google-run, path-limited where CSP allows, and nothing on the page loads from them unless Firebase is switched on. A custom auth domain (not `<project>.firebaseapp.com`) is not covered; keep the default.
 - `X-Frame-Options: DENY`, `nosniff`, `Cross-Origin-Opener-Policy: same-origin`, HSTS, and a `Permissions-Policy` that allows only geolocation (for the address pin).
 - API responses add `Cache-Control: no-store`.
 
 **Why there is no nonce CSP.** A per-request nonce would also block injected inline scripts, but it renders every page per request. On this shop the storefront fell from ~790 to ~145 requests/s, and even an idle proxy cost ~35%. React escapes all rendered text and there are no raw-HTML sinks, so the static policy is the better trade.
+
+## The installed app (service worker)
+
+The shop installs as an app (manifest at `/manifest.webmanifest`, icons at `/icons/…`). A small hand-written service worker, `/sw.js` (source: `src/lib/serviceWorker.ts`, no library), controls the whole site (scope `/`).
+
+**What it keeps on the phone** (the browser's Cache Storage for this site):
+
+| Cache | What | Why it is safe |
+| --- | --- | --- |
+| `buh-shell-<version>` | the offline page (`/offline`), the manifest and the app icons | public, the same for everyone |
+| `buh-static-<version>` | the shop's own scripts, styles and fonts (`/_next/static/…`), at most 300 | public, named by their content: a file never changes under the same name |
+| `buh-images` | uploaded product photos and the logo (`/api/images/…`), the latest 120 | public, named by their content (SHA-256) |
+
+**What it never touches** (the request goes to the server as if there were no worker, and nothing is stored):
+
+- anything that is not a `GET`: orders, checkout, phone codes, sign-in, every admin change;
+- every other `/api/` address: products, prices and stock, orders and order tracking, the chat, settings, live updates (`/api/events`), and all of `/api/admin/`;
+- other sites (Unsplash photos, Google reCAPTCHA);
+- pages (`/`, `/p/…`): always fetched from the server while online and never stored, so a new version shows at once and the zero-downtime version switch works exactly as before. Only when the phone is offline does a page request get the stored offline page.
+
+The worker never stores a response marked `no-store` or `private`, nor one from another site. All API answers carry `Cache-Control: no-store` anyway.
+
+**Updates:** `/sw.js` is sent with `Cache-Control: no-cache` and contains the release's version, so every release is a new worker. It installs in the background and **waits**; the page shows **New version ready — Refresh**, which tells it to take over (`SKIP_WAITING`) and reloads; otherwise it takes over when the app is next opened. On taking over it deletes the previous version's caches. A shopper's page that is in the background switches by itself, never with a product, the bag or checkout open (as before).
+
+**Removing it:** the browser's site settings → Clear data removes the worker and its caches; nothing in it is needed to place or find an order.
+
+Tested by `test/sw-source.test.mts` (every rule above) and `test/browser-app.test.mts` (in Chromium: registers for `/`, API and admin responses never come from the worker, nothing under `/api/` but photos is stored, the offline page with the network off).
 
 ## Deployment
 

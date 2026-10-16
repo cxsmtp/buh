@@ -162,6 +162,8 @@ test('tablet sideways (1024×768): the product shows photos and details side by 
   await page.locator('main article a').first().click();
   const sheet = page.getByRole('dialog', { name: /Mughal Botanical/ });
   await sheet.waitFor();
+  await page.waitForTimeout(400); // faded in
+  await page.waitForFunction(() => matchMedia('(min-width: 768px) and (orientation: landscape)').matches);
   const photo = (await sheet.getByTestId('photo-track').boundingBox())!;
   const title = (await sheet.getByRole('heading', { name: /Mughal Botanical/ }).boundingBox())!;
   assert.ok(title.x > photo.x + photo.width - 1, 'details to the right of the photos');

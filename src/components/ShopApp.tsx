@@ -1110,7 +1110,6 @@ export function ShopApp({ initialProductId }: { initialProductId?: string } = {}
       {!isAdminMode && (
         <InstallPrompt
           blocked={isCheckoutOpen || isCartOpen || isTrackerOpen || selectedProduct !== null || searchOpen || filterOpen || isAdminLoginOpen}
-          name={brandSettings.storeName || 'Beautiful UAE Home'}
           logo={<BrandLogo brand={brandSettings} className="w-11 h-11 text-base" />}
         />
       )}

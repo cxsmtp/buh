@@ -6,13 +6,33 @@ The shop looks and works like a boutique's Instagram page, on a phone first.
 
 - **At the top:** the shop's logo, name, tagline and address (Settings → Branding & bank, Store & contact), how delivery and payment work, and the festival greeting when one is on.
 - **Round story chips:** **All**, **New in** and **On sale** (each only when it shows fewer pieces than All), then one per category, in the order of Settings → Catalogue, each with a photo from inside it. A category with no pieces in the shop has no chip. One tap shows just that.
-- **The feed:** big photos, two across on a phone (three or four on a computer), with the name, the price (and the price before, crossed out, when it is reduced) and **Only 1 left** or **Sold out** from the real stock.
-- **Tap a photo** and the product opens full screen: swipe the photos (or use the arrows, the dots or the arrow keys), choose the size and colour, **Add to Bag**, or **Ask in chat / on WhatsApp / on Instagram**. **Share** sends its link. The phone's Back button closes it.
+- **The feed:** on a phone, one big photo per row, edge to edge, like Instagram; the two buttons next to **Filter** switch to two across and back, and the phone remembers the choice. Tablets show two (upright) or three (sideways) across, a computer four. Each piece has the name, the price (and the price before, crossed out, when it is reduced) and **Only 1 left** or **Sold out** from the real stock.
+- **Tap a photo** and the product opens full screen: swipe the photos (or use the arrows, the dots or the arrow keys); tap a photo again (or the expand button) to see it full screen and pinch, double-tap or use **+** / **−** to look at the print up close (Back or ✕ closes it). Choose the size and colour, **Add to Bag**, or **Ask in chat / on WhatsApp / on Instagram**. **Share** sends its link. The phone's Back button closes it.
 - **Filter** (next to the number of pieces) opens a sheet with only the choices that make a difference for the pieces in the shop: category, size, colour (worked out from each colour's swatch: blue, cream, red…), price range, **In stock only**, **On sale**, **New in**, and the sort (newest, price). Each choice shows how many pieces it leaves; **Show N pieces** applies them. Every filter on shows as a chip under the button: tap it to remove it, or **Clear all**.
 - **Search** (the tab bar on a phone, the magnifier on a computer) finds pieces by name, colour, category or fabric as you type; tap one to open it, or **See all** to show them in the shop.
 - **Links keep the view:** the address holds the search, filters and the open product, so a filtered view can be sent on WhatsApp and Back steps through what you looked at.
 - **On a phone** the tab bar at the bottom has **Home** (back to the top), **Search**, **Bag** and **Orders** (Track Order), with the **Help** button (chat, or WhatsApp) in its right-hand slot, so nothing floats over the products; the version number is at the very bottom of the page.
 - Everything works with the keyboard (Tab, Enter, Escape closes a sheet), and the shop moves less for people whose phone is set to reduce motion.
+
+## Install the shop as an app
+
+The shop can sit on the home screen of a phone or tablet and open full screen, without the browser's address bar, like an app from a store (it takes almost no space, and there is nothing to update: it is always the latest shop).
+
+**For customers**
+
+- **Android (Chrome, Samsung Internet, Edge):** after a few seconds in the shop a small card offers **Install the app**; tap **Install**. Or open the browser's menu (⋮) → **Install app** / **Add to Home screen**.
+- **iPhone and iPad (Safari):** the card says how: tap **Share** (the square with the arrow), then **Add to Home Screen**. In Chrome or another app's browser on an iPhone, open the shop in Safari first.
+- The card shows once per phone and never while something is open (a product, the bag, checkout). **Not now** or ✕ closes it for good.
+- Long-press the icon for shortcuts straight to the **Bag** and **Track Order**.
+- **No connection?** The app shows a calm "You are offline" page instead of an error; the bag is kept on the phone, and the shop opens again by itself when the connection is back. Prices, stock and orders always come from the shop live, never from an old copy.
+- **A new version:** a line at the top says **New version ready — Refresh**. Tap it (the bag is kept), or it switches the next time the app is opened. It never switches in the middle of a checkout.
+
+**For the owner**
+
+- The app's name and icon come from **Settings → Branding & bank**: the store name (a name in capitals shows as "Beautiful UAE Home"; the label under the icon is shortened to fit, e.g. "UAE Home") and the logo (a PNG or JPEG logo on white, or the logo's letters on the brand colour). A new logo reaches installed phones when they next check, usually within a day.
+- During a festival the phone's status bar takes the festival's colour.
+- Installing needs the shop on **https://** (the deployment's Caddy gives it). Install it on your own phone the same way; the Admin Hub works in the app too.
+- What the app keeps on the phone, and what it never keeps: docs/security.md, "The installed app".
 
 ## For customers: placing an order
 

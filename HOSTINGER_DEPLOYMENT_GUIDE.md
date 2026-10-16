@@ -78,6 +78,7 @@ Everything the shop stores lives in one Docker volume and is backed up every 12 
   - The status line should be green.
 - [ ] **Restore drill:** restore that backup on your computer (section 4), so you know it works before you need it.
 - [ ] **A real test order:** place it from your phone, then confirm, book and cancel it in the Admin Hub.
+- [ ] **Install it as an app on your phone** (needs the `https://` address): Android, browser menu → **Install app**; iPhone, Safari → Share → **Add to Home Screen**. The name and icon come from Settings → Branding ([user guide](docs/user-guide.md#install-the-shop-as-an-app)). If a proxy or CDN sits in front, it must not cache `/sw.js` (the shop sends `Cache-Control: no-cache`).
 - [ ] **Uptime monitor:** use a free service (e.g. UptimeRobot) on `https://yourdomain.ae/api/health`.
 - [ ] **Automatic updates** (recommended): turn on the updater (section 5).
 

@@ -4,7 +4,8 @@
 
 | You get | How |
 | --- | --- |
-| **Browses like Instagram on a phone** | A slim header and a tab bar (Home, Search, Bag, Orders), round story chips for your categories, big photos with price and "only 1 left", products that open full screen with swipeable photos, and filters (size, colour, price, in stock, on sale) only when wanted, kept in a shareable link. |
+| **Browses like Instagram on a phone** | A slim header and a tab bar (Home, Search, Bag, Orders), round story chips for your categories, one big photo per row (or two across) with price and "only 1 left", products that open full screen with swipeable, zoomable photos, and filters (size, colour, price, in stock, on sale) only when wanted, kept in a shareable link. |
+| **Installs like an app** | Customers add the shop to their home screen (Android's install offer, iPhone's Share → Add to Home Screen): full screen, your logo as the icon, a calm offline page, and "New version ready" when you update ([user guide](docs/user-guide.md#install-the-shop-as-an-app)). |
 | **Orders reach you** | Every order is stored on the server with prices and stock checked there, and appears in the Admin Hub: book the courier, follow it to delivery, confirm bank transfers, cancel (stock returns). |
 | **Backed up every 12 hours** | The shop emails itself to you: the full database, Excel-ready CSVs of orders and customers, and receipts, optionally encrypted. Status and **Back up now** in the Admin Hub; tested restore. |
 | **Verified orders only** | Customers confirm their UAE mobile with a 6-digit SMS code (through the shop's SMS gateway or Firebase Phone Auth) before they can order. Other countries are invited to email the shop instead. |

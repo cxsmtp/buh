@@ -28,7 +28,6 @@ interface InstallPromptProps {
   blocked: boolean;
   /** The logo, shown on the card. */
   logo?: React.ReactNode;
-  name: string;
 }
 
 /**
@@ -39,7 +38,7 @@ interface InstallPromptProps {
  * Shown once per device (Install, Not now or ✕ all count), only after a few seconds of looking,
  * never while something is open (and so never during checkout), never inside the installed app.
  */
-export function InstallPrompt({ blocked, logo, name }: InstallPromptProps) {
+export function InstallPrompt({ blocked, logo }: InstallPromptProps) {
   const [offer, setOffer] = useState<InstallPromptEvent | null>(null);
   const [ios, setIos] = useState(false);
   const [ready, setReady] = useState(false);
@@ -110,7 +109,7 @@ export function InstallPrompt({ blocked, logo, name }: InstallPromptProps) {
       <div className="flex items-start gap-3">
         <span className="shrink-0">{logo}</span>
         <div className="min-w-0 flex-1 space-y-1">
-          <h2 className="text-sm font-semibold text-stone-900">Install the {name} app</h2>
+          <h2 className="text-sm font-semibold text-stone-900">Install the shop as an app</h2>
           {ios ? (
             <p className="text-xs text-stone-700 leading-relaxed">
               Tap <Share className="inline w-4 h-4 -mt-0.5 text-[#0f1c2e]" aria-label="Share" /> <strong>Share</strong> at the bottom of Safari, then{' '}
