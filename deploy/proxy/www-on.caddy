@@ -1,0 +1,5 @@
+# www.DOMAIN → https://DOMAIN (needs a DNS record for www.DOMAIN too).
+www.{$DOMAIN} {
+	import tls-{$TLS:acme}.caddy
+	redir https://{$DOMAIN}{uri} permanent
+}

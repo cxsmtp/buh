@@ -1,0 +1,35 @@
+# ghcr.io/cxsmtp/buh-proxy: HTTPS in front of one shop container on a Podman server.
+# Free certificates from Let's Encrypt, renewed automatically; HTTP → HTTPS; www → the domain.
+# Settings (environment):
+#   DOMAIN        the shop's domain, required (e.g. shop.example.com, or srvNNNN.hstgr.cloud)
+#   ACME_EMAIL    required: Let's Encrypt's account address (warnings before a certificate
+#                 expires). Caddy cannot leave it out here without a shell entrypoint, and a
+#                 shell would lose the capability to bind 80 and 443 (see below).
+#   UPSTREAM      the shop, default 127.0.0.1:3000 (the proxy runs with --network host)
+#   WWW_REDIRECT  on (default): www.DOMAIN → DOMAIN; off for a name without www
+#   TLS           tests only: "internal" uses Caddy's own local authority, not Let's Encrypt
+# Caddy runs as the container's process itself (no shell): the binary keeps the one
+# capability it is given (binding 80 and 443) only when it is started directly.
+# The protections are the same snippets as the Docker Compose Caddy (../shop-snippets.caddy).
+{
+	# No admin endpoint: on the host network it would be open to every local user.
+	admin off
+	skip_install_trust
+	# Read when the certificate manager starts: Caddy stops with "{env.ACME_EMAIL} is empty"
+	# when it is not set.
+	email {env.ACME_EMAIL}
+}
+
+import shop-snippets.caddy
+
+{$DOMAIN} {
+	import tls-{$TLS:acme}.caddy
+	import shop_site
+	reverse_proxy {$UPSTREAM:127.0.0.1:3000} {
+		import shop_upstream
+		# One shop: back in service at the first healthy answer after a switch.
+		health_passes 1
+	}
+}
+
+import www-{$WWW_REDIRECT:on}.caddy

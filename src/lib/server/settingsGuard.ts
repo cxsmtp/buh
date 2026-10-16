@@ -35,6 +35,31 @@ export function isKnownWorking(key: SettingsKey, value: unknown = getSettings(ke
 export type Verifier = (next: EmailSettings) => Promise<void>;
 
 /** Try the mail server (login), and the mailbox if one is set. Throws a readable reason. */
+/**
+ * What a failed mail-server check means, in plain words. The raw OpenSSL or SMTP text
+ * ("ssl3_get_record:wrong version number") tells the owner nothing.
+ */
+export function explainMailError(err: unknown, s: Pick<EmailSettings, 'smtpPort' | 'smtpSecurity'>): string {
+  const e = err as { message?: string; code?: string; responseCode?: number };
+  const text = String(e?.message ?? err);
+  if (/wrong version number|ssl3_get_record|packet length too long|unknown protocol|EPROTO/i.test(text)) {
+    const want = s.smtpPort === 465 ? 'TLS' : 'STARTTLS';
+    return `the port and the security setting don't match: port ${s.smtpPort} needs Security “${want}” (465 → TLS; 587, 2525 and 25 → STARTTLS)`;
+  }
+  if (/missing credentials/i.test(text)) {
+    return 'no password is saved for this mail server: type the (app) password and press “Save email settings”';
+  }
+  if (e?.code === 'EAUTH' || e?.responseCode === 535 || /\b535\b|authentication failed|username and password not accepted/i.test(text)) {
+    return 'the mail server refused the username or password (Gmail and Outlook need an app password, not your normal password)';
+  }
+  if (/ETIMEDOUT|ECONNREFUSED|ECONNRESET|EHOSTUNREACH|timed? ?out/i.test(text) || e?.code === 'ETIMEDOUT' || e?.code === 'ECONNECTION') {
+    return `could not reach the mail server on port ${s.smtpPort}: check the server name and port`;
+  }
+  if (/ENOTFOUND|EAI_AGAIN|getaddrinfo/i.test(text)) return 'that mail server name was not found: check the spelling';
+  if (/self.signed|certificate|CERT_/i.test(text)) return 'the mail server’s certificate is not valid for that name: use the server name your provider gives';
+  return `the mail server said: ${text.slice(0, 160)}`;
+}
+
 export const verifyEmail: Verifier = async (next) => {
   if (!next.smtpHost) return; // .env.production is used: nothing typed here to try
   const { assertPublicMailHost } = await import('./mail');
@@ -54,7 +79,7 @@ export const verifyEmail: Verifier = async (next) => {
   try {
     await t.verify();
   } catch (err) {
-    throw new Error(`the mail server said: ${(err instanceof Error ? err.message : String(err)).slice(0, 160)}`);
+    throw new Error(explainMailError(err, next));
   } finally {
     t.close();
   }

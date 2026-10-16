@@ -12,6 +12,8 @@ export interface RunningServer {
   base: string;
   log: () => string;
   stop: () => void;
+  /** Its DATA_DIR (database, audit log). */
+  dataDir: string;
 }
 
 export async function startServer(env: Record<string, string> = {}): Promise<RunningServer> {
@@ -35,7 +37,7 @@ export async function startServer(env: Record<string, string> = {}): Promise<Run
   child.on('exit', () => (exited = true));
   for (let i = 0; i < 150 && !exited; i++) {
     if (await fetch(`${base}/api/health`).then((r) => r.ok, () => false)) {
-      return { base, log: () => log, stop: () => child.kill() };
+      return { base, log: () => log, stop: () => child.kill(), dataDir };
     }
     await new Promise((r) => setTimeout(r, 100));
   }

@@ -4,6 +4,7 @@
 
 | You get | How |
 | --- | --- |
+| **Browses like Instagram on a phone** | A slim header and a tab bar (Home, Search, Bag, Orders), round story chips for your categories, big photos with price and "only 1 left", products that open full screen with swipeable photos, and filters (size, colour, price, in stock, on sale) only when wanted, kept in a shareable link. |
 | **Orders reach you** | Every order is stored on the server with prices and stock checked there, and appears in the Admin Hub: book the courier, follow it to delivery, confirm bank transfers, cancel (stock returns). |
 | **Backed up every 12 hours** | The shop emails itself to you: the full database, Excel-ready CSVs of orders and customers, and receipts, optionally encrypted. Status and **Back up now** in the Admin Hub; tested restore. |
 | **Verified orders only** | Customers confirm their UAE mobile with a 6-digit SMS code (through the shop's SMS gateway or Firebase Phone Auth) before they can order. Other countries are invited to email the shop instead. |
@@ -35,17 +36,25 @@ docker compose pull app-blue && docker compose up -d
 
 Updates switch between two copies of the shop with no downtime, roll back on their own if the new version is unhealthy, and restart a shop that stops answering; turn on the optional updater as described in the [guide](HOSTINGER_DEPLOYMENT_GUIDE.md#5-updates-without-downtime-and-rollback). Settings → Versions lists every release and switches to any of them.
 
-The image `ghcr.io/cxsmtp/buh:latest` is built, tested and published from main. With Podman, update a running shop (data stays in the volume):
+The image `ghcr.io/cxsmtp/buh:latest` is built, tested and published from main. It is private: log Podman in once with a GitHub token that can only read packages (`podman login ghcr.io -u YOUR-GITHUB-NAME`; on a Linux server see the guide, "Private images"). With Podman, update a running shop (data stays in the volume):
 
 ```
 podman pull ghcr.io/cxsmtp/buh:latest && podman run --replace -d --name beautifuluaehome -p 443:3000 -v beautifuluaehome-data:/data -e TZ=Asia/Dubai --read-only --tmpfs /tmp --cap-drop ALL --security-opt no-new-privileges:true ghcr.io/cxsmtp/buh:latest
 ```
 
-Automatic updates for that one container (a few seconds' pause at each switch; data volume kept; see the [guide](HOSTINGER_DEPLOYMENT_GUIDE.md#podman-on-windows-one-container)):
+Automatic updates for that one container, from the published updater image (no git, no files; a few seconds' pause at each switch; its data, port and settings are kept). In Windows **Command Prompt (cmd), not PowerShell**:
 
 ```
-scripts\podman-autoupdate.bat beautifuluaehome 443 beautifuluaehome-data
+for /f "delims=" %S in ('podman info --format "{{if index .Host.RemoteSocket.Path 0 | eq 47}}{{.Host.RemoteSocket.Path}}{{else}}{{slice .Host.RemoteSocket.Path 7}}{{end}}"') do podman run --rm --pull=newer --security-opt label=disable -v %S:/var/run/docker.sock -e SOCK=%S -v "%USERPROFILE%\.config\containers:/run/buh/registry-auth:ro" ghcr.io/cxsmtp/buh-updater:latest setup beautifuluaehome
 ```
+
+In PowerShell:
+
+```
+$S = (podman info --format '{{.Host.RemoteSocket.Path}}') -replace '^unix://', ''; podman run --rm --pull=newer --security-opt label=disable -v "${S}:/var/run/docker.sock" -e "SOCK=$S" -v "$env:USERPROFILE\.config\containers:/run/buh/registry-auth:ro" ghcr.io/cxsmtp/buh-updater:latest setup beautifuluaehome
+```
+
+A Linux server with Podman (shop, HTTPS proxy and updater, from images only): [guide](HOSTINGER_DEPLOYMENT_GUIDE.md#hostinger-vps-with-podman-images-only).
 
 To try it on your own computer with Podman on Windows, run `scripts\run-local-podman.bat` (test mode, http://localhost:3000).
 

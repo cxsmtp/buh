@@ -33,7 +33,7 @@ STATUS=$NAME-updater-status
 STATE=$NAME-updater-state
 CODE=$NAME-updater-code
 UPDATER=$NAME-updater
-UPDATER_IMAGE=docker:27.3.1-cli
+UPDATER_IMAGE=docker:28.5.2-cli@sha256:625d9431a9f54c5a2bc90f24f0e1c3d55b1349fd857dd85035f98c2c9acbdd4d
 # The engine's API socket on this machine, mounted into the updater as /var/run/docker.sock.
 ENGINE_SOCKET=${ENGINE_SOCKET:-/var/run/docker.sock}
 LATEST=buh:ci-latest
@@ -53,6 +53,8 @@ image_of() { docker inspect -f '{{.Image}}' "$1"; }
 started_at() { docker inspect -f '{{.State.StartedAt}}' "$1"; }
 
 cleanup() {
+  # Kill first: Podman's rm -f waits out an updater's 600 s stop timeout.
+  docker kill "$UPDATER" > /dev/null 2>&1 || true
   docker rm -f "$UPDATER" "$NAME" "$NAME-candidate" "$NAME-previous" buh-single-second > /dev/null 2>&1 || true
   docker volume rm "$VOLUME" "$CONTROL" "$STATUS" "$STATE" "$CODE" buh-single-other > /dev/null 2>&1 || true
   # The updater's tags (shared with the blue/green test when both run on one machine).
@@ -68,7 +70,7 @@ UPD=(--security-opt label=disable -v "$ENGINE_SOCKET:/var/run/docker.sock" -v "$
   -e "IMAGE=$LATEST" -e UPDATE_CHECK_MINUTES=0 -e HOME=/tmp -e DOCKER_CONFIG=/state/docker-config
   -e PATH=/updater/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
   -e "SHOP_ENV=TZ=Asia/Dubai NEXT_PUBLIC_SUPPORT_EMAIL=help@ci.example" -e HEAL_CHECK_SECONDS=3 -e HEALTH_TIMEOUT=90
-  --read-only --tmpfs /tmp --cap-drop ALL --security-opt no-new-privileges:true --pids-limit 128 --entrypoint /bin/sh)
+  --read-only --tmpfs /tmp --cap-drop ALL --cap-add CHOWN --cap-add FOWNER --security-opt no-new-privileges:true --pids-limit 128 --entrypoint /bin/sh)
 updater_once() { # updater_once COMMAND [more docker run options]: one run, as the .bat's set-up step
   local cmd=$1
   shift
@@ -95,7 +97,7 @@ ask() { # ask LINE: the request, written the way the shop writes it (src/lib/ser
   # a whole temporary file, linked into place, as user 1001 in the sticky folder)
   ASKED_AFTER=$(status_json | jq -r .lastRequest.at)
   sleep 1 # the status gives the time to the second
-  docker exec "$NAME" node -e "const fs=require('fs'),t='/updater-control/.request-ci-'+process.pid;fs.writeFileSync(t,process.argv[1]+'\n',{flag:'wx',mode:0o644});try{fs.linkSync(t,'/updater-control/request')}finally{fs.rmSync(t,{force:true})}" "$1"
+  docker exec "$NAME" node -e "const fs=require('fs'),t='/updater-control/.request-ci-'+process.pid+'-'+require('crypto').randomBytes(6).toString('hex');fs.writeFileSync(t,process.argv[1]+'\n',{flag:'wx',mode:0o644});try{fs.linkSync(t,'/updater-control/request')}finally{fs.rmSync(t,{force:true})}" "$1"
 }
 owners_run() { # the owner's own routine: podman run with its settings (and any extra options)
   docker run -d --name "$NAME" -p "$PORT:3000" -v "$VOLUME:/data" -e TZ=Asia/Dubai -e NEXT_PUBLIC_SUPPORT_EMAIL=help@ci.example \
@@ -161,13 +163,13 @@ docker tag buh:9.0.1 "$LATEST"
 step "1. the owner's container, started by hand (first with an extra folder mounted)"
 mkdir -p "$WORK/receipts"
 owners_run -v "$WORK/receipts:/receipts:ro"
-wait_for 90 "the hand-started shop" curl -sf "$URL/api/health"
+wait_for 90 "the hand-started shop" curl -sf --max-time 10 "$URL/api/health"
 docker exec "$NAME" node -e "require('fs').writeFileSync('/data/ci-marker', 'x')"
 serves
 
 step "2. set-up as the .bat does it: volumes, updater code out of the image, adopt"
 for v in "$CONTROL" "$STATUS" "$STATE" "$CODE"; do docker volume create "$v" > /dev/null; done
-docker run --rm --pids-limit 64 --user 0 -v "$CONTROL:/c" -v "$STATUS:/s" --entrypoint /bin/sh "$UPDATER_IMAGE" -c 'chown 0:0 /c /s && chmod 1733 /c && chmod 755 /s'
+docker run --rm --pids-limit 64 --user 0 -v "$CONTROL:/c" -v "$STATUS:/s" --entrypoint /bin/sh "$UPDATER_IMAGE" -c 'touch /c/.updater-folder /s/.updater-folder && chown 0:0 /c /s /c/.updater-folder /s/.updater-folder && chmod 1733 /c && chmod 755 /s'
 docker run --rm --pids-limit 64 --user 0 -v "$CODE:/out" --entrypoint /bin/sh buh:test -c 'test -f /app/updater/updater.sh && rm -rf /out/* && cp -R /app/updater/. /out/ && chmod -R a+rX /out'
 
 before=$(started_at "$NAME")
@@ -187,7 +189,7 @@ grep -q -- "- the bind .* at /receipts" "$WORK/refused.log" || fail "the refusal
 [ "$(started_at "$NAME")" = "$before" ] || fail "the refused adopt touched the container"
 docker rm -f "$NAME" > /dev/null
 owners_run
-wait_for 90 "the hand-started shop" curl -sf "$URL/api/health"
+wait_for 90 "the hand-started shop" curl -sf --max-time 10 "$URL/api/health"
 
 # A second container on the same data volume (another shop): refused, nothing touched.
 docker run -d --name buh-single-second -v "$VOLUME:/data" --pids-limit 2048 buh:9.0.1 > /dev/null
@@ -202,6 +204,7 @@ docker rm -f buh-single-second > /dev/null
 
 start_load
 updater_once adopt > "$WORK/adopt.log" 2>&1 || { cat "$WORK/adopt.log"; fail "adopt failed"; }
+sleep 2 # a few more answers after the switch, for the count
 stop_load 1000
 cat "$WORK/adopt.log"
 echo "adopt closed the shop for about ${LAST_GAP}s"
@@ -279,9 +282,9 @@ data_kept
 
 step "8. self-healing: a stopped shop is started again; a removed one is re-created on the same data"
 docker stop -t 25 "$NAME" > /dev/null
-wait_for 120 "the restart" curl -sf "$URL/api/health"
+wait_for 120 "the restart" curl -sf --max-time 10 "$URL/api/health"
 docker rm -f "$NAME" > /dev/null
-wait_for 120 "the re-created shop" curl -sf "$URL/api/health"
+wait_for 120 "the re-created shop" curl -sf --max-time 10 "$URL/api/health"
 serves
 data_kept
 secret_kept
@@ -293,7 +296,7 @@ docker rm -f "$NAME" > /dev/null
 owners_run
 docker unpause "$UPDATER" > /dev/null
 wait_for 180 "the hand-started container set up again" sh -c "docker inspect -f '{{range .Mounts}}{{.Destination}} {{end}}' $NAME | grep -q /updater-control"
-wait_for 90 "the shop" curl -sf "$URL/api/health"
+wait_for 90 "the shop" curl -sf --max-time 10 "$URL/api/health"
 serves
 data_kept
 secret_kept

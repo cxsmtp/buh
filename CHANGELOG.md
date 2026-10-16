@@ -1,5 +1,20 @@
 # Changelog
 
+## BUH-02.05.00 — 2026-10-16 14:30 UTC · [#11](https://github.com/cxsmtp/buh/pull/11)
+
+- **Browse like Instagram on a phone.** Round collection "stories", a feed of big photos with prices and "Only 2 left", products that open full screen with swipeable photos, a Filter sheet (category, size, colour, price, in stock, on sale) whose choices can be shared as a link, search, and a bottom bar with Home, Search, Bag, Orders and Help.
+- **Turn on HTTPS and automatic updates with one line, from the published images only.** The new `buh-updater` sets everything up and keeps the shop, the new `buh-proxy` HTTPS front door and itself up to date; each new version is tried beside the running shop first, and a switch pauses the shop for a few seconds. It works with private images through your saved registry login.
+- **Automatic updates can be switched off** in Settings → Versions; updating by hand and restarting a stopped shop still work.
+- **Every version is checked.** A version number is published once with fixed fingerprints; your server remembers each version's fingerprint, refuses one that changed, rolls back to the exact one that ran before, and Settings → Versions shows what was installed when, marked verified.
+- **Checkout knows every area.** All UAE communities (163 in Dubai) with short names like JVC and JLT, searchable as you type; a rough location from a laptop or phone is saved for the driver but no longer guesses a wrong area.
+- **Email settings explain themselves.** A port and security mismatch, a password that isn't saved yet, or a refused login are said in plain words, and failed test emails no longer use up the hourly limit.
+- **Fixed:** the product photo counter jumped back when tapping "next" quickly.
+- **Status.**
+  - **Benchmark:** same host, main (BUH-02.04.00) vs this branch, 3 alternating rounds, 0 failed requests. Storefront main 755 / 830 / 804 req/s, branch 788 / 826 / 786; courier check main 663 / 565 / 628, branch 713 / 756 / 626; catalogue main 727 / 794 / 748, branch 818 / 849 / 810. Level. (A first run showed the courier check behind; the area lookup it uses was then made twice as fast.)
+  - **Tests:** 371 passed, including real-container tests of setup, switching, the HTTPS proxy and a private registry on Docker, Podman 4.9 and Podman 5.7 (Ubuntu 26.04); the Windows setup line has not run on a real Windows machine.
+  - **Dependency audit:** production 0 vulnerabilities; no new packages; base images and CI actions pinned by digest.
+  - **Security scan:** two independent reviews of the updater and proxy (7 and 9 findings) and fixes, all with tests; no automated scanner here.
+
 ## BUH-02.04.00 — 2026-10-15 23:17 UTC · [#10](https://github.com/cxsmtp/buh/pull/10)
 
 - **Sign in with a passkey.** In Settings → Passkeys & recovery codes you can add your fingerprint, face or PIN (Windows Hello, iPhone, Android) and sign in to the Admin Hub without a password; passkeys need the shop on https:// or http://localhost.

@@ -4,9 +4,12 @@ import React, { useState } from 'react';
 import { Product, BedProfileMeasurement } from '@/types';
 import { formatAed, toFils } from '@/lib/money';
 import { askWhatsAppLink, instagramLink, openChat, piecesLeft, useShop } from '@/lib/client/shop';
+import { isOnSale, shortSize } from '@/lib/catalogFilter';
 import { InstagramIcon } from '@/components/common/InstagramIcon';
+import { Sheet } from '@/components/common/Sheet';
 import { LocalPrice } from '@/lib/client/currency';
-import { X, Sparkles, Check, Truck, ShieldCheck, Ruler, Layers, ChevronRight, MessageCircle, MessagesSquare, Share2 } from 'lucide-react';
+import { PhotoCarousel } from './PhotoCarousel';
+import { X, Check, Truck, ShieldCheck, Ruler, MessageCircle, MessagesSquare, Share2, Minus, Plus } from 'lucide-react';
 
 interface ProductDetailModalProps {
   product: Product | null;
@@ -14,6 +17,11 @@ interface ProductDetailModalProps {
   onAddToCart: (product: Product, profile: BedProfileMeasurement, color: string, quantity: number) => void;
 }
 
+/**
+ * A product, full screen on phones (like opening a post): swipeable photos, the name and price,
+ * sizes with what is left of each, colours, Add to Bag, and Ask in chat / on WhatsApp / on
+ * Instagram. On a computer, a dialog with the photos beside the details.
+ */
 export const ProductDetailModal: React.FC<ProductDetailModalProps> = (props) => {
   // Keyed by product so choices reset when another product opens, and so the
   // hooks below always run in the same order.
@@ -21,13 +29,8 @@ export const ProductDetailModal: React.FC<ProductDetailModalProps> = (props) => 
   return <ProductDetailContent key={props.product.id} {...props} product={props.product} />;
 };
 
-const ProductDetailContent: React.FC<ProductDetailModalProps & { product: Product }> = ({
-  product,
-  onClose,
-  onAddToCart,
-}) => {
-
-  const { store, lowStockThreshold, supportEmail, chat } = useShop();
+const ProductDetailContent: React.FC<ProductDetailModalProps & { product: Product }> = ({ product, onClose, onAddToCart }) => {
+  const { store, lowStockThreshold, supportEmail, chat, delivery } = useShop();
   // Start on the default size if it is in stock, else the first size that is.
   const inStock = (id: string) => piecesLeft(product, id) > 0;
   const initialProfile =
@@ -38,23 +41,19 @@ const ProductDetailContent: React.FC<ProductDetailModalProps & { product: Produc
   const [selectedProfile, setSelectedProfile] = useState<BedProfileMeasurement>(initialProfile);
   const [selectedColor, setSelectedColor] = useState<string>(product.colors[0]?.name || 'Standard');
   const [quantity, setQuantity] = useState<number>(1);
-  const [activeImageIndex, setActiveImageIndex] = useState<number>(0);
 
-  // Gallery images list (showcase images)
-  const allImages = [
-    product.aiTransformedImage || product.featuredImage,
-    ...(product.galleryImages || []),
-  ].filter(Boolean);
+  const images = [product.aiTransformedImage || product.featuredImage, ...(product.galleryImages || [])].filter((x, i, all): x is string => Boolean(x) && all.indexOf(x) === i);
 
-  const currentMainImage = allImages[activeImageIndex] || product.featuredImage;
-
-  // Calculate final unit price based on selected size profile
+  // The price for the chosen size (sizes can cost more), in fils like the server.
   const unitFils = toFils(product.price) + toFils(selectedProfile.priceDelta || 0);
   const unitPrice = formatAed(unitFils);
   const left = piecesLeft(product, selectedProfile.id);
   const soldOut = left === 0;
   const qty = Math.min(quantity, Math.max(1, left));
   const totalPrice = formatAed(unitFils * qty);
+  const sale = isOnSale(product);
+  const wasFils = sale ? toFils(product.compareAtPrice!) + toFils(selectedProfile.priceDelta || 0) : 0;
+  const sizeShort = shortSize(selectedProfile.name);
 
   const handleAddToCart = () => {
     if (soldOut) return;
@@ -93,400 +92,216 @@ const ProductDetailContent: React.FC<ProductDetailModalProps & { product: Produc
     window.open(`https://wa.me/?text=${encodeURIComponent(`${product.title} · AED ${unitPrice}\n${url}`)}`, '_blank', 'noopener');
   };
   const emailInquiry = `mailto:${supportEmail}?subject=${encodeURIComponent(`${product.title} (${selectedProfile.name})`)}`;
+  const titleId = `product-title-${product.id}`;
+  const askClass = 'inline-flex items-center gap-1.5 text-xs font-medium px-3.5 py-2.5 rounded-full border transition-colors';
 
   return (
-    <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center bg-black/60 backdrop-blur-sm p-0 sm:p-4 md:p-6 overflow-y-auto">
-      <div className="bg-white w-full max-w-2xl md:max-w-5xl sm:rounded-3xl max-h-[94vh] flex flex-col overflow-hidden shadow-2xl animate-in slide-in-from-bottom duration-200">
-        {/* Modal Header */}
-        <div className="px-4 sm:px-6 py-3.5 border-b border-stone-200 flex items-center justify-between bg-stone-50">
-          <div className="flex items-center gap-2">
-            <span className="font-serif font-bold text-sm sm:text-base text-[#0f1c2e]">
-              Beautiful UAE Home • Artisan Sizing & Specifications
-            </span>
-            <span className="text-[10px] bg-amber-100 text-amber-900 border border-amber-300 font-semibold px-2 py-0.5 rounded-full hidden xs:inline-block">
-              UAE Standard Sizes
-            </span>
+    <Sheet labelledBy={titleId} onClose={onClose} variant="full" wide>
+      {/* Top bar: close, name (once scrolled), share */}
+      <div className="flex items-center gap-2 px-2 sm:px-3 h-12 border-b border-stone-200 shrink-0 bg-white">
+        <button type="button" onClick={onClose} aria-label="Close" data-autofocus className="w-10 h-10 rounded-full flex items-center justify-center text-stone-800 hover:bg-stone-100">
+          <X className="w-5 h-5" aria-hidden="true" />
+        </button>
+        <span className="flex-1 min-w-0 truncate text-sm font-semibold text-stone-900 md:invisible" aria-hidden="true">
+          {product.title}
+        </span>
+        <button type="button" onClick={() => void share()} aria-label="Share" className="w-10 h-10 rounded-full flex items-center justify-center text-stone-800 hover:bg-stone-100">
+          <Share2 className="w-5 h-5" aria-hidden="true" />
+        </button>
+      </div>
+
+      <div className="flex-1 min-h-0 overflow-y-auto overscroll-contain md:grid md:grid-cols-2 md:grid-rows-[minmax(0,1fr)] md:overflow-hidden">
+        <div className="md:overflow-y-auto md:p-5">
+          <div className="md:rounded-2xl md:overflow-hidden">
+            <PhotoCarousel images={images} title={product.title}>
+              {sale && (
+                <span className="absolute top-3 left-3 rounded-full bg-white/95 text-[#7a2e1d] text-[11px] font-bold uppercase tracking-wider px-2.5 py-1 shadow-sm">Sale</span>
+              )}
+            </PhotoCarousel>
           </div>
-          <button
-            onClick={onClose}
-            className="p-1.5 text-stone-500 hover:text-stone-800 rounded-full hover:bg-stone-200 transition-colors"
-          >
-            <X className="w-5 h-5" />
-          </button>
         </div>
 
-        {/* Modal Scrollable Body: 2 Columns on Laptop / Tablet, 1 Column on Mobile */}
-        <div className="p-4 sm:p-6 overflow-y-auto flex-1 md:grid md:grid-cols-12 md:gap-8 space-y-6 md:space-y-0">
-          
-          {/* LEFT COLUMN: Visual Media Showcase in One Go */}
-          <div className="md:col-span-6 space-y-3">
-            <div className="relative aspect-[4/3] sm:aspect-[16/11] bg-stone-100 rounded-2xl overflow-hidden shadow-sm border border-stone-200 group">
-              {/* Main High-Res Image */}
-              {/* eslint-disable-next-line @next/next/no-img-element */}
-              <img
-                src={currentMainImage}
-                alt={product.title}
-                className="w-full h-full object-cover transition-transform duration-500 group-hover:scale-102"
-              />
+        <div className="md:overflow-y-auto px-4 sm:px-5 pt-4 pb-6 space-y-5">
+          <div className="space-y-1.5">
+            <h2 id={titleId} className="font-serif text-xl sm:text-2xl leading-snug text-stone-900">
+              {product.title}
+            </h2>
+            <p className="flex items-baseline flex-wrap gap-x-2">
+              <span className="text-xl font-semibold text-[#0f1c2e]">{`AED ${unitPrice}`}</span>
+              {sale && (
+                <span className="text-sm text-stone-600 line-through">
+                  <span className="sr-only">was </span>
+                  {`AED ${formatAed(wasFils)}`}
+                </span>
+              )}
+              <LocalPrice aed={Number(unitPrice)} className="text-xs" />
+            </p>
+            <p className="text-xs text-stone-600">
+              {product.material} · {product.threadCount} TC · {product.weave}
+            </p>
+          </div>
 
-              {/* Luxury Badge */}
-              <div className="absolute top-3 left-3 bg-[#0f1c2e]/85 backdrop-blur-md text-amber-200 text-[10px] font-semibold px-3 py-1 rounded-full shadow border border-amber-300/30 flex items-center gap-1.5">
-                <Sparkles className="w-3 h-3 text-[#c5a059]" />
-                <span>Handprinted Block Linen</span>
-              </div>
-
-              {/* Bottom Spec Badge */}
-              <div className="absolute bottom-3 left-3 right-3 flex items-center justify-between text-[10px] bg-black/65 backdrop-blur-md text-white px-3 py-1.5 rounded-xl">
-                <span>{product.material}</span>
-                <span className="font-bold text-amber-300">40cm Deep Mattress Pocket</span>
-              </div>
-            </div>
-
-            {/* Thumbnail Gallery Strip */}
-            {allImages.length > 1 && (
-              <div className="flex items-center gap-2 overflow-x-auto no-scrollbar py-1">
-                {allImages.map((img, idx) => (
+          {/* Size */}
+          <fieldset className="space-y-2">
+            <legend className="text-xs font-bold text-stone-900 uppercase tracking-wider flex items-center gap-1.5 mb-2">
+              <Ruler className="w-4 h-4 text-[#9f7e38]" aria-hidden="true" />
+              Size: <span className="font-medium normal-case tracking-normal text-stone-700">{selectedProfile.name}</span>
+            </legend>
+            <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
+              {product.profiles.map((profile) => {
+                const isSelected = selectedProfile.id === profile.id;
+                const pieces = piecesLeft(product, profile.id);
+                return (
                   <button
-                    key={idx}
+                    key={profile.id}
                     type="button"
-                    onClick={() => setActiveImageIndex(idx)}
-                    className={`relative w-16 h-16 rounded-xl overflow-hidden shrink-0 border-2 transition-all ${
-                      activeImageIndex === idx
-                        ? 'border-[#c5a059] ring-2 ring-amber-300/50 scale-102'
-                        : 'border-stone-200 hover:border-stone-300 opacity-75 hover:opacity-100'
+                    aria-pressed={isSelected}
+                    aria-label={`${profile.name}${pieces === 0 ? ', sold out' : pieces <= lowStockThreshold ? `, only ${pieces} left` : ''}`}
+                    onClick={() => {
+                      setSelectedProfile(profile);
+                      setQuantity(1);
+                    }}
+                    className={`px-3 py-2 rounded-xl text-left border transition-colors ${
+                      isSelected ? 'border-[#0f1c2e] bg-[#0f1c2e] text-white' : pieces === 0 ? 'border-stone-200 bg-stone-50 text-stone-600' : 'border-stone-300 bg-white text-stone-900 hover:border-stone-500'
                     }`}
                   >
-                    {/* eslint-disable-next-line @next/next/no-img-element */}
-                    <img
-                      src={img}
-                      alt={`Thumbnail ${idx + 1}`}
-                      className="w-full h-full object-cover"
-                    />
+                    <span className="flex items-center justify-between gap-1">
+                      <span className={`text-sm font-semibold ${pieces === 0 && !isSelected ? 'line-through' : ''}`}>{shortSize(profile.name)}</span>
+                      {isSelected && <Check className="w-4 h-4 text-amber-200" aria-hidden="true" />}
+                    </span>
+                    <span className={`block text-[11px] leading-tight truncate ${isSelected ? 'text-amber-100' : 'text-stone-600'}`}>
+                      {pieces === 0 ? 'Sold out' : pieces <= lowStockThreshold ? `Only ${pieces} left` : profile.mattressSize.split('(')[0].trim()}
+                      {profile.priceDelta > 0 && pieces > 0 ? ` · +AED ${profile.priceDelta}` : ''}
+                    </span>
                   </button>
-                ))}
-              </div>
-            )}
-
-            {/* Quality & Craftsmanship Summary */}
-            <div className="text-[11px] text-stone-500 font-medium pt-1 flex items-center justify-between">
-              <span>{product.threadCount} TC • {product.weave} Weave</span>
-              <span className="text-emerald-700 font-semibold">✓ 100% Fit Guarantee</span>
+                );
+              })}
             </div>
+            <details className="rounded-xl border border-stone-200 bg-[#fbf9f5] text-xs">
+              <summary className="cursor-pointer px-3 py-2.5 font-semibold text-stone-800">Measurements for {sizeShort} ({selectedProfile.piecesIncluded} pieces)</summary>
+              <dl className="grid grid-cols-1 sm:grid-cols-2 gap-x-4 gap-y-2 px-3 pb-3 text-stone-900">
+                <div><dt className="text-[11px] text-stone-600">Mattress</dt><dd className="font-medium">{selectedProfile.mattressSize}</dd></div>
+                <div><dt className="text-[11px] text-stone-600">Fitted sheet</dt><dd className="font-medium">{selectedProfile.fittedSheet}</dd></div>
+                <div><dt className="text-[11px] text-stone-600">Flat sheet</dt><dd className="font-medium">{selectedProfile.flatSheet}</dd></div>
+                <div><dt className="text-[11px] text-stone-600">Pillowcases</dt><dd className="font-medium">{selectedProfile.pillowcases}</dd></div>
+                {selectedProfile.duvetCover && (
+                  <div className="sm:col-span-2"><dt className="text-[11px] text-stone-600">Duvet cover</dt><dd className="font-medium">{selectedProfile.duvetCover}</dd></div>
+                )}
+              </dl>
+            </details>
+          </fieldset>
 
-            {/* Quality & Craftsmanship Summary (Desktop left column addition) */}
-            <div className="hidden md:block bg-stone-50 rounded-2xl p-4 border border-stone-200 text-xs space-y-2">
-              <span className="font-bold text-stone-900 block uppercase tracking-wider text-[11px]">
-                Artisanal Provenance & Fit Guarantee
-              </span>
-              <p className="text-stone-600 leading-relaxed text-[11px]">
-                Handcrafted using ancestral block stamps and skin-safe mineral dyes. Every fitted sheet features deep 40cm elasticated pockets designed specifically to hug thick pillow-top luxury mattresses in UAE residences without corner slip-offs.
-              </p>
-              <div className="flex items-center gap-4 text-stone-700 text-[11px] pt-1 font-medium">
-                <span className="flex items-center gap-1">
-                  <ShieldCheck className="w-3.5 h-3.5 text-emerald-600" />
-                  Pre-Washed & Colorfast
-                </span>
-                <span className="flex items-center gap-1">
-                  <Truck className="w-3.5 h-3.5 text-[#c5a059]" />
-                  Complimentary UAE Delivery
-                </span>
+          {/* Colour */}
+          {product.colors.length > 0 && (
+            <fieldset className="space-y-2">
+              <legend className="text-xs font-bold text-stone-900 uppercase tracking-wider mb-2">
+                Colour: <span className="font-medium normal-case tracking-normal text-stone-700">{selectedColor}</span>
+              </legend>
+              <div className="flex items-center gap-2 flex-wrap">
+                {product.colors.map((c) => {
+                  const isSelected = selectedColor === c.name;
+                  return (
+                    <button
+                      key={c.name}
+                      type="button"
+                      aria-pressed={isSelected}
+                      onClick={() => setSelectedColor(c.name)}
+                      className={`flex items-center gap-2 pl-1.5 pr-3 py-1.5 rounded-full text-xs border transition-colors ${
+                        isSelected ? 'border-[#0f1c2e] ring-1 ring-[#0f1c2e] bg-white text-stone-900 font-semibold' : 'border-stone-300 bg-white text-stone-800 hover:border-stone-500'
+                      }`}
+                    >
+                      <span className="w-5 h-5 rounded-full border border-stone-300" style={{ backgroundColor: c.hex }} aria-hidden="true" />
+                      <span>{c.name}</span>
+                    </button>
+                  );
+                })}
               </div>
+            </fieldset>
+          )}
+
+          {/* Quantity */}
+          <div className="flex items-center gap-3">
+            <span className="text-xs font-bold text-stone-900 uppercase tracking-wider" id={`${titleId}-qty`}>Quantity</span>
+            <div className="flex items-center border border-stone-300 rounded-full overflow-hidden bg-white" role="group" aria-labelledby={`${titleId}-qty`}>
+              <button type="button" onClick={() => setQuantity(Math.max(1, qty - 1))} disabled={qty <= 1} aria-label="One fewer" className="w-9 h-9 flex items-center justify-center text-stone-800 hover:bg-stone-100 disabled:opacity-30">
+                <Minus className="w-4 h-4" aria-hidden="true" />
+              </button>
+              <span className="w-8 text-center text-sm font-semibold text-stone-900" aria-live="polite">{soldOut ? 0 : qty}</span>
+              <button type="button" onClick={() => setQuantity(Math.min(left, qty + 1))} disabled={qty >= left} aria-label="One more" className="w-9 h-9 flex items-center justify-center text-stone-800 hover:bg-stone-100 disabled:opacity-30">
+                <Plus className="w-4 h-4" aria-hidden="true" />
+              </button>
             </div>
           </div>
 
-          {/* RIGHT COLUMN: Details, Sizes, Measurements Table & Actions (col-span-6 on desktop) */}
-          <div className="md:col-span-6 space-y-5 flex flex-col justify-between">
-            <div className="space-y-4">
-              {/* Product Title & Basic Info */}
-              <div>
-                <h2 className="font-serif text-lg sm:text-2xl font-bold text-stone-900 leading-snug">
-                  {product.title}
-                </h2>
-                <p className="text-xs sm:text-sm text-stone-600 mt-1.5 leading-relaxed">
-                  {product.description}
-                </p>
-              </div>
-
-              {/* 1. SELECT BED SIZE PROFILE */}
-              <div className="space-y-2 pt-2 border-t border-stone-200">
-                <div className="flex items-center justify-between">
-                  <label className="text-xs font-bold text-stone-900 uppercase tracking-wider flex items-center gap-1.5">
-                    <Ruler className="w-4 h-4 text-[#c5a059]" />
-                    <span>1. Select Bed Profile & Size:</span>
-                  </label>
-                  <span className="text-[11px] text-[#8a6a2c] font-medium">
-                    {selectedProfile.name}
-                  </span>
-                </div>
-
-                {/* Profile Selection Pills */}
-                <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
-                  {product.profiles.map((profile) => {
-                    const isSelected = selectedProfile.id === profile.id;
-                    const pieces = piecesLeft(product, profile.id);
-                    return (
-                      <button
-                        key={profile.id}
-                        type="button"
-                        aria-pressed={isSelected}
-                        aria-label={`${profile.name}${pieces === 0 ? ', sold out' : pieces <= lowStockThreshold ? `, only ${pieces} left` : ''}`}
-                        onClick={() => {
-                          setSelectedProfile(profile);
-                          setQuantity(1);
-                        }}
-                        className={`p-2.5 rounded-xl text-left border transition-all relative ${
-                          isSelected
-                            ? 'border-[#0f1c2e] bg-[#0f1c2e] text-white shadow-md ring-2 ring-[#c5a059]/40'
-                            : pieces === 0
-                            ? 'border-stone-200 bg-stone-50 text-stone-500'
-                            : 'border-stone-200 bg-white text-stone-800 hover:border-stone-400'
-                        }`}
-                      >
-                        {pieces === 0 ? (
-                          <span className="absolute -top-2 right-2 text-[9px] font-bold uppercase bg-stone-500 text-white px-1.5 rounded">Sold out</span>
-                        ) : pieces <= lowStockThreshold ? (
-                          <span className="absolute -top-2 right-2 text-[9px] font-bold uppercase bg-amber-500 text-white px-1.5 rounded">Only {pieces} left</span>
-                        ) : null}
-                        <div className="flex items-center justify-between mb-1">
-                          <span className="text-xs font-bold">{profile.name.split(' ')[0]}</span>
-                          {isSelected ? (
-                            <Check className="w-3.5 h-3.5 text-amber-300" />
-                          ) : (
-                            <span className="text-[10px] text-stone-500 font-medium">
-                              {profile.priceDelta > 0 ? `+AED ${profile.priceDelta}` : 'Standard'}
-                            </span>
-                          )}
-                        </div>
-                        <div className={`text-[10px] leading-tight truncate ${isSelected ? 'text-amber-200' : 'text-stone-500'}`}>
-                          {profile.mattressSize.split('(')[0]}
-                        </div>
-                      </button>
-                    );
-                  })}
-                </div>
-              </div>
-
-              {/* 2. EXACT MEASUREMENTS TABLE (Customer Shopping View) */}
-              <div className="bg-gradient-to-br from-amber-50/50 via-stone-50 to-amber-50/30 rounded-2xl p-3.5 sm:p-4 border border-amber-200/60 shadow-sm space-y-2.5">
-                <div className="flex items-center justify-between border-b border-amber-200/50 pb-2">
-                  <div className="flex items-center gap-1.5">
-                    <Layers className="w-4 h-4 text-[#c5a059]" />
-                    <span className="text-xs font-bold text-stone-900">
-                      Exact Measurements for {selectedProfile.name}
-                    </span>
-                  </div>
-                  <span className="text-[11px] font-bold px-2.5 py-0.5 rounded-full bg-amber-200 text-amber-900">
-                    {selectedProfile.piecesIncluded} Pieces Complete Set
-                  </span>
-                </div>
-
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 text-xs">
-                  {/* Mattress Fit */}
-                  <div className="bg-white p-2.5 rounded-xl border border-stone-200/70">
-                    <span className="text-[10px] text-stone-500 block font-medium">Mattress Fit</span>
-                    <span className="font-semibold text-stone-900">{selectedProfile.mattressSize}</span>
-                  </div>
-
-                  {/* Fitted Sheet */}
-                  <div className="bg-white p-2.5 rounded-xl border border-stone-200/70">
-                    <span className="text-[10px] text-stone-500 block font-medium">Fitted Sheet</span>
-                    <span className="font-semibold text-stone-900">{selectedProfile.fittedSheet}</span>
-                  </div>
-
-                  {/* Flat Sheet */}
-                  <div className="bg-white p-2.5 rounded-xl border border-stone-200/70">
-                    <span className="text-[10px] text-stone-500 block font-medium">Flat Top Sheet</span>
-                    <span className="font-semibold text-stone-900">{selectedProfile.flatSheet}</span>
-                  </div>
-
-                  {/* Pillowcases */}
-                  <div className="bg-white p-2.5 rounded-xl border border-stone-200/70">
-                    <span className="text-[10px] text-stone-500 block font-medium">Pillowcases</span>
-                    <span className="font-semibold text-stone-900">{selectedProfile.pillowcases}</span>
-                  </div>
-
-                  {/* Duvet Cover if included */}
-                  {selectedProfile.duvetCover && (
-                    <div className="bg-white p-2.5 rounded-xl border border-stone-200/70 sm:col-span-2">
-                      <span className="text-[10px] text-stone-500 block font-medium">Duvet Cover / Blanket Drape</span>
-                      <span className="font-semibold text-stone-900">{selectedProfile.duvetCover}</span>
-                    </div>
-                  )}
-                </div>
-
-                <p className="text-[10px] text-stone-500 italic">
-                  * Tailored to hug deep-pocket UAE luxury mattresses up to 40cm height seamlessly.
-                </p>
-              </div>
-
-              {/* 3. COLOR SELECTOR */}
-              <div className="space-y-2">
-                <label className="text-xs font-bold text-stone-900 uppercase tracking-wider block">
-                  2. Select Palette: <span className="font-normal text-stone-600">{selectedColor}</span>
-                </label>
-                <div className="flex items-center gap-2 flex-wrap">
-                  {product.colors.map((c) => {
-                    const isSelected = selectedColor === c.name;
-                    return (
-                      <button
-                        key={c.name}
-                        onClick={() => setSelectedColor(c.name)}
-                        className={`flex items-center gap-2 px-3 py-1.5 rounded-xl text-xs border transition-all ${
-                          isSelected
-                            ? 'border-[#0f1c2e] bg-[#0f1c2e] text-white shadow-sm ring-1 ring-[#c5a059]'
-                            : 'border-stone-200 bg-white text-stone-700 hover:bg-stone-50'
-                        }`}
-                      >
-                        <span
-                          className="w-3.5 h-3.5 rounded-full border border-stone-300 shadow-inner"
-                          style={{ backgroundColor: c.hex }}
-                        ></span>
-                        <span>{c.name}</span>
-                      </button>
-                    );
-                  })}
-                </div>
-              </div>
-
-              {/* 4. QUANTITY & WHATSAPP */}
-              <div className="flex items-center justify-between gap-3 pt-2">
-                <div className="flex items-center gap-2">
-                  <span className="text-xs text-stone-600 font-medium">Quantity:</span>
-                  <div className="flex items-center border border-stone-300 rounded-lg overflow-hidden bg-white">
-                    <button
-                      type="button"
-                      onClick={() => setQuantity(Math.max(1, qty - 1))}
-                      disabled={qty <= 1}
-                      aria-label="One fewer"
-                      className="px-3 py-1 text-sm font-bold text-stone-600 hover:bg-stone-100 disabled:opacity-30"
-                    >
-                      -
-                    </button>
-                    <span className="px-3.5 py-1 text-xs font-bold text-stone-900" aria-live="polite">{soldOut ? 0 : qty}</span>
-                    <button
-                      type="button"
-                      onClick={() => setQuantity(Math.min(left, qty + 1))}
-                      disabled={qty >= left}
-                      aria-label="One more"
-                      className="px-3 py-1 text-sm font-bold text-stone-600 hover:bg-stone-100 disabled:opacity-30"
-                    >
-                      +
-                    </button>
-                  </div>
-                </div>
-
-                <button
-                  type="button"
-                  onClick={() => void share()}
-                  className="flex items-center gap-1.5 text-xs text-stone-700 bg-white hover:bg-stone-50 border border-stone-300 px-3 py-2 rounded-xl font-medium"
-                >
-                  <Share2 className="w-3.5 h-3.5" />
-                  <span>Share</span>
-                </button>
-
-                {/* Ask: the chat, WhatsApp, Instagram (each only when switched on in Settings); email if none */}
-                {chat && (
-                  <button
-                    type="button"
-                    onClick={() => openChat(`About ${product.title} (${selectedProfile.name}): `)}
-                    className="flex items-center gap-1.5 text-xs text-[#0f1c2e] bg-amber-50 hover:bg-amber-100 border border-amber-300 px-3.5 py-2 rounded-xl transition-colors font-medium"
-                  >
-                    <MessagesSquare className="w-3.5 h-3.5" />
-                    <span>Ask in chat</span>
-                  </button>
-                )}
-                {inquiry && (
-                  <a
-                    href={inquiry}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="flex items-center gap-1.5 text-xs text-emerald-700 bg-emerald-50 hover:bg-emerald-100 border border-emerald-300 px-3.5 py-2 rounded-xl transition-colors font-medium"
-                  >
-                    <MessageCircle className="w-3.5 h-3.5" />
-                    <span>Ask on WhatsApp</span>
-                  </a>
-                )}
-                {instagram && (
-                  <a
-                    href={instagram}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    onClick={() => void copyLinkForInstagram()}
-                    className="flex items-center gap-1.5 text-xs text-pink-800 bg-pink-50 hover:bg-pink-100 border border-pink-300 px-3.5 py-2 rounded-xl transition-colors font-medium"
-                  >
-                    <InstagramIcon className="w-3.5 h-3.5" />
-                    <span>Ask on Instagram</span>
-                  </a>
-                )}
-                {!chat && !inquiry && !instagram && (
-                  <a
-                    href={emailInquiry}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="flex items-center gap-1.5 text-xs text-emerald-700 bg-emerald-50 hover:bg-emerald-100 border border-emerald-300 px-3.5 py-2 rounded-xl transition-colors font-medium"
-                  >
-                    <MessageCircle className="w-3.5 h-3.5" />
-                    <span>Ask by email</span>
-                  </a>
-                )}
-                {igNote && <p role="status" className="basis-full text-[11px] text-pink-800">{igNote}</p>}
-              </div>
-
-              {/* Delivery Note */}
-              <div className="bg-stone-100 rounded-xl p-3 flex items-center justify-between text-[11px] text-stone-600">
-                <div className="flex items-center gap-1.5">
-                  <Truck className="w-4 h-4 text-[#c5a059]" />
-                  <span>UAE Express Delivery: <strong>24-48 Hours across all Emirates</strong></span>
-                </div>
-                <div className="flex items-center gap-1">
-                  <ShieldCheck className="w-4 h-4 text-emerald-600" />
-                  <span>Cash on Delivery & Bank Transfer</span>
-                </div>
-              </div>
-            </div>
-
-            {/* Desktop / Mobile Bottom Action Bar */}
-            <div className="pt-4 border-t border-stone-200 flex items-center justify-between gap-4 mt-auto">
-              <div>
-                <div className="text-[10px] text-stone-500 uppercase font-semibold">Total Price</div>
-                <div className="text-2xl font-bold text-[#0f1c2e]">AED {totalPrice}</div>
-                <LocalPrice aed={Number(totalPrice)} className="text-xs block" />
-                <div className="text-[10px] text-emerald-600 font-semibold">Complimentary UAE Delivery</div>
-              </div>
-
-              {soldOut ? (
-                !inquiry && chat ? (
-                  <button
-                    type="button"
-                    onClick={() => openChat(`${product.title} in ${selectedProfile.name} shows as sold out. Will it come back? `)}
-                    className="flex-1 bg-stone-200 text-stone-700 font-bold text-sm py-3.5 px-6 rounded-xl flex items-center justify-center gap-2"
-                  >
-                    <span>{selectedProfile.name.split(' ')[0]} sold out · Ask us</span>
-                  </button>
-                ) : (
-                  <a
-                    href={inquiry ?? emailInquiry}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="flex-1 bg-stone-200 text-stone-700 font-bold text-sm py-3.5 px-6 rounded-xl flex items-center justify-center gap-2"
-                  >
-                    <span>{selectedProfile.name.split(' ')[0]} sold out · Ask us</span>
-                  </a>
-                )
-              ) : (
-                <button
-                  type="button"
-                  onClick={handleAddToCart}
-                  className="flex-1 bg-gradient-to-r from-[#c5a059] to-[#dfc082] hover:brightness-105 active:scale-95 text-[#0f1c2e] font-bold text-sm py-3.5 px-6 rounded-xl shadow-lg flex items-center justify-center gap-2 transition-all"
-                >
-                  <span>Add to Bag ({selectedProfile.name.split(' ')[0]})</span>
-                  <ChevronRight className="w-4 h-4" />
+          {/* Ask: the chat, WhatsApp, Instagram (each only when switched on in Settings); email if none */}
+          <div className="space-y-2">
+            <p className="text-xs text-stone-700">Questions about this piece? Ask us:</p>
+            <div className="flex flex-wrap gap-2">
+              {chat && (
+                <button type="button" onClick={() => openChat(`About ${product.title} (${selectedProfile.name}): `)} className={`${askClass} text-[#0f1c2e] bg-amber-50 hover:bg-amber-100 border-amber-300`}>
+                  <MessagesSquare className="w-4 h-4" aria-hidden="true" />
+                  <span>Ask in chat</span>
                 </button>
               )}
+              {inquiry && (
+                <a href={inquiry} target="_blank" rel="noopener noreferrer" className={`${askClass} text-emerald-800 bg-emerald-50 hover:bg-emerald-100 border-emerald-300`}>
+                  <MessageCircle className="w-4 h-4" aria-hidden="true" />
+                  <span>Ask on WhatsApp</span>
+                </a>
+              )}
+              {instagram && (
+                <a href={instagram} target="_blank" rel="noopener noreferrer" onClick={() => void copyLinkForInstagram()} className={`${askClass} text-pink-800 bg-pink-50 hover:bg-pink-100 border-pink-300`}>
+                  <InstagramIcon className="w-4 h-4" />
+                  <span>Ask on Instagram</span>
+                </a>
+              )}
+              {!chat && !inquiry && !instagram && (
+                <a href={emailInquiry} target="_blank" rel="noopener noreferrer" className={`${askClass} text-emerald-800 bg-emerald-50 hover:bg-emerald-100 border-emerald-300`}>
+                  <MessageCircle className="w-4 h-4" aria-hidden="true" />
+                  <span>Ask by email</span>
+                </a>
+              )}
             </div>
+            {igNote && <p role="status" className="text-[11px] text-pink-800">{igNote}</p>}
           </div>
+
+          <p className="text-sm text-stone-700 leading-relaxed">{product.description}</p>
+
+          <ul className="text-xs text-stone-700 space-y-1.5">
+            <li className="flex items-center gap-2">
+              <Truck className="w-4 h-4 text-[#9f7e38]" aria-hidden="true" />
+              Free delivery in {delivery.standardDays || '1–2 days'} to all seven emirates
+            </li>
+            <li className="flex items-center gap-2">
+              <ShieldCheck className="w-4 h-4 text-emerald-700" aria-hidden="true" />
+              Cash on delivery or bank transfer
+            </li>
+          </ul>
         </div>
       </div>
-    </div>
+
+      {/* Always in reach: the total and Add to Bag */}
+      <div className="shrink-0 border-t border-stone-200 bg-white px-4 py-3 pb-safe flex items-center gap-3">
+        <div className="min-w-0">
+          <div className="text-[11px] text-stone-600">Total</div>
+          <div className="text-lg font-semibold text-[#0f1c2e] leading-tight">{`AED ${totalPrice}`}</div>
+        </div>
+        {soldOut ? (
+          !inquiry && chat ? (
+            <button type="button" onClick={() => openChat(`${product.title} in ${selectedProfile.name} shows as sold out. Will it come back? `)} className="flex-1 bg-stone-200 text-stone-800 font-semibold text-sm py-3.5 px-4 rounded-full text-center">
+              {sizeShort} sold out · Ask us
+            </button>
+          ) : (
+            <a href={inquiry ?? emailInquiry} target="_blank" rel="noopener noreferrer" className="flex-1 bg-stone-200 text-stone-800 font-semibold text-sm py-3.5 px-4 rounded-full text-center">
+              {sizeShort} sold out · Ask us
+            </a>
+          )
+        ) : (
+          <button type="button" onClick={handleAddToCart} className="flex-1 bg-[#0f1c2e] hover:bg-[#1c2c44] active:scale-[0.98] text-white font-semibold text-sm py-3.5 px-4 rounded-full shadow transition-transform">
+            Add to Bag ({sizeShort})
+          </button>
+        )}
+      </div>
+    </Sheet>
   );
 };

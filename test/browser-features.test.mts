@@ -11,6 +11,7 @@ import path from 'node:path';
 import zlib from 'node:zlib';
 import { after, before, test } from 'node:test';
 import { hasBuild, startServer, type RunningServer } from './server.mjs';
+import { SETUP_CMD, SETUP_POWERSHELL } from '@/lib/podmanSetup';
 
 type PW = typeof import('playwright');
 const pw: PW | null = hasBuild ? await import('playwright').catch(() => null) : null;
@@ -249,18 +250,44 @@ test('settings → Email & admin account: a private mail server is refused; the 
   await page.getByRole('button', { name: 'Save email settings' }).click();
   await page.getByText('The mail server must be a public address.').waitFor();
   assert.equal(await page.getByLabel('Sign-in email').inputValue(), 'admin@beautifuluaehome.com');
+  // Reported: port 587 with Security "TLS" failed with an OpenSSL message. A mismatch is now pointed out, with a one-tap fix.
+  await page.getByLabel('Port', { exact: true }).selectOption('587');
+  await page.getByLabel('Security', { exact: true }).selectOption('tls');
+  await page.getByText('Port 587 usually needs Security “STARTTLS”.').waitFor();
+  await page.getByRole('button', { name: 'Use STARTTLS' }).click();
+  assert.equal(await page.getByLabel('Security', { exact: true }).inputValue(), 'starttls');
+  assert.equal(await page.getByText(/usually needs Security/).count(), 0);
+  // Reported: "Saved automatically" showed while the typed password was not saved, then the test email failed.
+  await page.getByLabel('Password', { exact: true }).first().fill('abcd efgh ijkl mnop');
+  await page.getByText(/The password you typed is not saved yet/).waitFor();
   assert.deepEqual(await overflow(page), []);
   assert.deepEqual(errors, []);
   await ctx.close();
 });
 
-test('version badge: bottom left for everyone; for the owner it opens Settings → Versions with every release', { skip }, async () => {
+test('version badge: visible to everyone, bottom left, never over the products on a phone; for the owner it opens Settings → Versions with every release', { skip }, async () => {
+  // On a computer: floating bottom left.
+  const desk = await browser.newPage({ viewport: { width: 1280, height: 900 } });
+  await desk.goto(server.base, { waitUntil: 'domcontentloaded' });
+  const deskBadge = desk.getByLabel(/^Version BUH-\d{2}\.\d{2}\.\d{2}$/);
+  await deskBadge.waitFor();
+  const d = (await deskBadge.boundingBox())!;
+  assert.ok(d.x < 20 && d.y > 850, `bottom left (${d.x}, ${d.y})`);
+  await desk.close();
+  // On a phone (regression: it sat on the first product card): in the page's footer, bottom left, under every product.
   const shopper = await browser.newPage({ viewport: { width: 375, height: 800 } });
   await shopper.goto(server.base, { waitUntil: 'domcontentloaded' });
+  await shopper.locator('main article').first().waitFor();
   const badge = shopper.getByLabel(/^Version BUH-\d{2}\.\d{2}\.\d{2}$/);
   await badge.waitFor();
-  const box = (await badge.boundingBox())!;
-  assert.ok(box.x < 20 && box.y > 600, `bottom left (${box.x}, ${box.y})`);
+  assert.equal(await badge.evaluate((e) => getComputedStyle(e).position), 'static', 'not floating over the feed');
+  const box = await badge.evaluate((e) => { const r = e.getBoundingClientRect(); return { x: r.x, top: r.top + scrollY }; });
+  const lastCard = await shopper.locator('main article').last().evaluate((e) => e.getBoundingClientRect().bottom + scrollY);
+  assert.ok(box.x < 20 && box.top > lastCard, `bottom left, below the last product (${box.x}, ${box.top} > ${lastCard})`);
+  await badge.scrollIntoViewIfNeeded();
+  const nav = (await shopper.getByRole('navigation', { name: 'Shop' }).boundingBox())!;
+  const shown = (await badge.boundingBox())!;
+  assert.ok(shown.y + shown.height <= nav.y, 'above the tab bar when scrolled to');
   assert.deepEqual(await overflow(shopper), []);
   await shopper.close();
 
@@ -274,7 +301,10 @@ test('version badge: bottom left for everyone; for the owner it opens Settings �
     assert.equal(await page.getByText(/^podman run --replace .* ghcr\.io\/cxsmtp\/buh:latest$/).count(), 1);
     assert.equal(await page.getByText(/docker compose run/).isVisible(), false, 'the Docker Compose command is folded away');
     // And the one line that turns on automatic updates for a single Podman container.
-    await page.getByText('scripts\\podman-autoupdate.bat beautifuluaehome 443 beautifuluaehome-data', { exact: true }).waitFor();
+    // (cmd and PowerShell; the very text of the guide and README: test/podman-setup-lines.test.mts).
+    await page.getByText(SETUP_CMD, { exact: true }).waitFor();
+    await page.getByText(SETUP_POWERSHELL, { exact: true }).waitFor();
+    await page.getByText(/Command Prompt \(cmd\), not PowerShell/).waitFor();
     assert.equal(await page.getByText('Running', { exact: true }).count(), 1);
     assert.deepEqual(await overflow(page), [], `no sideways scroll at ${width}px`);
     assert.deepEqual(errors, []);
@@ -298,12 +328,136 @@ test('Settings → Versions with the single-container (Podman) updater: says so,
       // The old hand routine would fight the updater: the page says so.
       await page.getByText(/not with podman pull\/stop\/rm\/run; to do it by hand, stop the updater first/).waitFor();
       assert.equal(await page.getByText(/Automatic updates are not running/).count(), 0);
+      assert.equal(await page.getByRole('alert').filter({ hasText: /registry login/ }).count(), 0, 'no login note while downloads work');
+      assert.deepEqual(await overflow(page), [], `no sideways scroll at ${width}px`);
+      assert.deepEqual(errors, []);
+      await ctx.close();
+    }
+    // The registry refuses downloads (the login expired): the owner is told what to do.
+    const status = JSON.parse(fs.readFileSync(path.join(updaterDir, 'status', 'status.json'), 'utf8'));
+    status.registryProblem =
+      'the registry login has expired or is missing: ghcr.io refused to send ghcr.io/cxsmtp/buh:latest. On the server, log in again (podman login ghcr.io, with a GitHub token that can read packages; deployment guide, "Private images"); updates resume by themselves (since 2026-10-16T10:00:00Z)';
+    fs.writeFileSync(path.join(updaterDir, 'status', 'status.json'), JSON.stringify({ ...status, updatedAt: new Date().toISOString() }));
+    for (const width of [375, 1280]) {
+      const { ctx, page, errors } = await adminPage(width);
+      await page.getByRole('button', { name: /^BUH-\d{2}\.\d{2}\.\d{2}$/ }).click();
+      await page.getByRole('alert').filter({ hasText: /^The registry login has expired or is missing: ghcr\.io refused/ }).waitFor();
       assert.deepEqual(await overflow(page), [], `no sideways scroll at ${width}px`);
       assert.deepEqual(errors, []);
       await ctx.close();
     }
   } finally {
     fs.rmSync(path.join(updaterDir, 'status', 'status.json'), { force: true });
+  }
+});
+
+test('"Install new versions automatically": admin only, strict, audit-logged; the page shows what the updater confirms, by keyboard, at 375 and 1280 px', { skip }, async () => {
+  const statusFile = path.join(updaterDir, 'status', 'status.json');
+  const requestFile = path.join(updaterDir, 'control', 'request');
+  fs.mkdirSync(path.dirname(statusFile), { recursive: true });
+  fs.mkdirSync(path.dirname(requestFile), { recursive: true });
+  const writeStatus = (auto: boolean) =>
+    fs.writeFileSync(
+      statusFile,
+      JSON.stringify({
+        updatedAt: new Date().toISOString(), mode: 'single', running: '2.0.0', lastGood: '2.0.0', previous: '', onServer: ['2.0.0'], autoUpdateMinutes: 15,
+        lastRequest: { request: '', result: '', message: '', at: '' }, registryProblem: '', auto, lastCheck: { at: '2026-10-16T09:30:00Z', result: 'up to date (2.0.0)' },
+      })
+    );
+  writeStatus(true);
+  try {
+    // The route: admins only, one known field, a real boolean.
+    const anon = await fetch(`${server.base}/api/admin/versions`, { method: 'POST', headers: { 'content-type': 'application/json', origin: server.base }, body: JSON.stringify({ auto: false }) });
+    assert.ok([401, 403].includes(anon.status), `anonymous: ${anon.status}`);
+    assert.equal((await api('POST', '/api/admin/versions', { auto: 'off' })).status, 400);
+    assert.equal((await api('POST', '/api/admin/versions', { auto: false, target: 'latest' })).status, 400);
+    assert.equal((await api('POST', '/api/admin/versions', { enabled: false })).status, 400);
+    assert.ok(!fs.existsSync(requestFile), 'nothing handed over for a refused request');
+
+    for (const [width, from] of [[375, true], [1280, false]] as const) {
+      writeStatus(from);
+      const { ctx, page, errors } = await adminPage(width);
+      await page.getByRole('button', { name: /^BUH-\d{2}\.\d{2}\.\d{2}$/ }).click();
+      const box = page.getByRole('checkbox', { name: 'Install new versions automatically' });
+      await box.waitFor();
+      assert.equal(await box.isChecked(), from);
+      await page.getByText(/Last check: .*, up to date \(2\.0\.0\)\./).waitFor();
+      // Keyboard: Space on the focused box asks the updater, and the page waits for its answer.
+      await box.focus();
+      await page.keyboard.press('Space');
+      await page.getByRole('status').filter({ hasText: 'Waiting for the updater…' }).waitFor();
+      assert.equal(await box.isChecked(), !from, 'shows what was asked while waiting');
+      assert.equal(await box.isDisabled(), true);
+      // The page shows the choice at once; the request reaches the folder when the server has answered.
+      for (let i = 0; i < 50 && !fs.existsSync(requestFile); i++) await new Promise((r) => setTimeout(r, 100));
+      assert.equal(fs.readFileSync(requestFile, 'utf8'), from ? 'auto off\n' : 'auto on\n');
+      assert.deepEqual(await overflow(page), [], `no sideways scroll at ${width}px`);
+      // The updater takes the request and reports the new state: the page follows it.
+      fs.rmSync(requestFile);
+      writeStatus(!from);
+      await page.getByRole('status').filter({ hasText: 'Waiting for the updater…' }).waitFor({ state: 'detached', timeout: 10_000 });
+      assert.equal(await box.isChecked(), !from);
+      assert.equal(await box.isDisabled(), false);
+      await page.getByText(from ? /^Off: nothing is checked or installed by itself/ : /^On: new versions of the shop/).waitFor();
+      assert.deepEqual(await overflow(page), [], `no sideways scroll at ${width}px`);
+      assert.deepEqual(errors, []);
+      await ctx.close();
+    }
+    // Who asked, and when, is in the audit log.
+    const auditFiles = fs.readdirSync(server.dataDir, { recursive: true }).map(String).filter((f) => /audit-\d{4}-\d{2}\.jsonl$/.test(f));
+    const entries = auditFiles.flatMap((f) => fs.readFileSync(path.join(server.dataDir, f), 'utf8').trim().split('\n')).map((l) => JSON.parse(l));
+    const changes = entries.filter((x) => x.action === 'system.auto_update_changed');
+    assert.deepEqual(changes.map((x) => x.details.request), ['auto off', 'auto on']);
+    for (const x of changes) {
+      assert.ok(x.details.by, 'who');
+      assert.ok(Date.parse(x.at) > 0, 'when');
+    }
+  } finally {
+    fs.rmSync(statusFile, { force: true });
+    fs.rmSync(requestFile, { force: true });
+  }
+});
+
+test('Settings → Versions: "Installed on this server" (version, digest, when, why), a verified mark on the release, and a plain warning when a version came back changed, at 375 and 1280 px', { skip }, async () => {
+  const statusFile = path.join(updaterDir, 'status', 'status.json');
+  fs.mkdirSync(path.dirname(statusFile), { recursive: true });
+  const pkg = JSON.parse(fs.readFileSync('package.json', 'utf8'));
+  const D = 'sha256:2c1f' + '0'.repeat(60);
+  fs.writeFileSync(
+    statusFile,
+    JSON.stringify({
+      updatedAt: new Date().toISOString(), mode: 'single', running: pkg.version, lastGood: pkg.version, previous: '', onServer: [pkg.version], autoUpdateMinutes: 15,
+      lastRequest: { request: '', result: '', message: '', at: '' }, registryProblem: '', auto: true, lastCheck: { at: '', result: '' },
+      history: [
+        { at: '2026-10-16T10:00:00Z', version: pkg.version, digest: D, why: 'scheduled' },
+        { at: '2026-10-15T08:00:00Z', version: '?', digest: 'id:0123456789ab', why: 'set-up' },
+      ],
+      digests: [{ version: pkg.version, digest: D, verified: true }],
+      integrityProblem: 'Version 9.9.9 was refused: it is published under another digest (333333333333) than the one it first came with here (222222222222), on 2026-10-16T11:00:00Z. A published version must never change; check the package on GitHub.',
+    })
+  );
+  const label = `BUH-${pkg.version.split('.').map((n: string) => n.padStart(2, '0')).join('.')}`;
+  try {
+    for (const width of [375, 1280]) {
+      const { ctx, page, errors } = await adminPage(width);
+      await page.getByRole('button', { name: /^BUH-\d{2}\.\d{2}\.\d{2}$/ }).click();
+      const installed = page.getByRole('region', { name: 'Installed on this server' });
+      await installed.waitFor();
+      const items = installed.getByRole('listitem');
+      assert.equal(await items.count(), 2);
+      assert.match((await items.nth(0).innerText()).replace(/\s+/g, ' '), new RegExp(`^${label} sha256:2c1f00000000 .+ automatic$`));
+      assert.match((await items.nth(1).innerText()).replace(/\s+/g, ' '), /^unknown version id:0123456789ab .+ set-up$/);
+      // The release that runs: its short digest, verified.
+      const release = page.locator('li').filter({ has: page.locator('summary strong', { hasText: label }) });
+      await release.getByText('sha256:2c1f00000000').waitFor();
+      await release.getByText('verified', { exact: true }).waitFor();
+      await page.getByRole('alert').filter({ hasText: /^Version 9\.9\.9 was refused: it is published under another digest/ }).waitFor();
+      assert.deepEqual(await overflow(page), [], `no sideways scroll at ${width}px`);
+      assert.deepEqual(errors, []);
+      await ctx.close();
+    }
+  } finally {
+    fs.rmSync(statusFile, { force: true });
   }
 });
 

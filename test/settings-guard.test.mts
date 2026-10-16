@@ -118,3 +118,32 @@ test('regression: an autosave right after a Save starts a new session, so Undo g
   await settings.restoreSettingsVersion(settings.undoVersionId('catalog')!);
   assert.equal(settings.getSettings('catalog').lowStockThreshold, 3, 'back to the Save, not further');
 });
+
+test('reported: TLS on a STARTTLS port gave "ssl3_get_record:wrong version number"; the owner now reads which security setting to pick', async () => {
+  const net = await import('node:net');
+  const tls = await import('node:tls');
+  // A plain-text "mail server" (like port 587 before STARTTLS) answered with TLS gives the real OpenSSL error.
+  const server = net.createServer((sock) => sock.end('220 mail.example ESMTP ready\r\n'));
+  await new Promise<void>((r) => server.listen(0, '127.0.0.1', () => r()));
+  const port = (server.address() as import('node:net').AddressInfo).port;
+  const real = await new Promise<Error>((resolve) => {
+    const c = tls.connect({ host: '127.0.0.1', port, rejectUnauthorized: false });
+    c.on('error', resolve);
+    c.on('secureConnect', () => resolve(new Error('unexpected handshake')));
+  });
+  server.close();
+  assert.match(real.message, /wrong version number|packet length|EPROTO/i);
+  const text = guard.explainMailError(real, { smtpPort: 587, smtpSecurity: 'tls' });
+  assert.match(text, /port 587 needs Security “STARTTLS”/);
+  assert.doesNotMatch(text, /ssl3|openssl/i);
+  assert.match(guard.explainMailError(real, { smtpPort: 465, smtpSecurity: 'starttls' }), /port 465 needs Security “TLS”/);
+});
+
+test('mail errors in plain words: refused password, unreachable server, unknown name; anything else keeps the server’s own words', () => {
+  assert.match(guard.explainMailError(Object.assign(new Error('Invalid login: 535-5.7.8 Username and Password not accepted'), { code: 'EAUTH', responseCode: 535 }), { smtpPort: 587, smtpSecurity: 'starttls' }), /app password/);
+  assert.match(guard.explainMailError(Object.assign(new Error('connect ETIMEDOUT 1.2.3.4:587'), { code: 'ETIMEDOUT' }), { smtpPort: 587, smtpSecurity: 'starttls' }), /could not reach the mail server on port 587/);
+  assert.match(guard.explainMailError(new Error('getaddrinfo ENOTFOUND smtp.gmial.com'), { smtpPort: 587, smtpSecurity: 'starttls' }), /not found/);
+  // Reported: "Missing credentials for "PLAIN"" when the typed password had not been saved yet.
+  assert.match(guard.explainMailError(Object.assign(new Error('Missing credentials for "PLAIN"'), { code: 'EAUTH' }), { smtpPort: 587, smtpSecurity: 'starttls' }), /no password is saved/);
+  assert.equal(guard.explainMailError(new Error('450 mailbox busy'), { smtpPort: 587, smtpSecurity: 'starttls' }), 'the mail server said: 450 mailbox busy');
+});

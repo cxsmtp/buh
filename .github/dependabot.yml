@@ -1,0 +1,20 @@
+# Keeps the pins fresh: actions are pinned by commit and base images by digest (container.yml,
+# zero-downtime.yml, the Dockerfiles, docker-compose.yml); Dependabot opens a pull request when a
+# newer one is out (security fixes in node:20-alpine, for instance), and CI tests it like any other.
+version: 2
+updates:
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+  - package-ecosystem: docker
+    directories:
+      - /
+      - /deploy/updater
+      - /deploy/proxy
+    schedule:
+      interval: weekly
+  - package-ecosystem: docker-compose
+    directory: /
+    schedule:
+      interval: weekly

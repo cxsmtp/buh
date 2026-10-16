@@ -45,9 +45,14 @@ export function EmailSettingsCard({
     setSaving(false);
     if (!problem) setD((x) => ({ ...x, smtpPass: '', imapPass: '' }));
     setStatus(problem ? { ok: false, text: problem } : { ok: true, text: 'Saved. Use "Send a test email" to check it works.' });
+    return problem;
   };
+  // A typed password is only sent by Save; until then autosave keeps the old one (or none).
+  const unsavedPassword = Boolean(d.smtpPass || d.imapPass);
 
   const test = async () => {
+    // Testing with a password still in the box means "test what I typed": save it first.
+    if (unsavedPassword && (await save())) return;
     setTesting(true);
     setStatus(null);
     const { ok, data } = await postJson<{ message?: string }>('/api/admin/email-test', {});
@@ -60,7 +65,7 @@ export function EmailSettingsCard({
       <section className="space-y-3">
         <h3 className="font-bold text-[#0f1c2e] flex items-center gap-2"><Mail className="w-4 h-4 text-[#c5a059]" /> Mail server (SMTP)</h3>
         <p className="text-xs text-stone-500">
-          Your email provider&apos;s SMTP details (Hostinger: smtp.hostinger.com, port 465, TLS; Gmail: smtp.gmail.com, 587 with an app password).
+          Your email provider&apos;s SMTP details (Hostinger: smtp.hostinger.com, port 465, TLS; Gmail: smtp.gmail.com, port 587, STARTTLS, with an app password).
           Leave the server empty to use SMTP_* from .env.production.
         </p>
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
@@ -90,6 +95,14 @@ export function EmailSettingsCard({
                 <option value="starttls">STARTTLS</option>
               </select>
             </div>
+            {(d.smtpPort === 465) !== (d.smtpSecurity === 'tls') && (
+              <p role="status" className="col-span-2 text-xs font-semibold text-amber-900">
+                Port {d.smtpPort} usually needs Security “{d.smtpPort === 465 ? 'TLS' : 'STARTTLS'}”.{' '}
+                <button type="button" className="underline" onClick={() => set('smtpSecurity', d.smtpPort === 465 ? 'tls' : 'starttls')}>
+                  Use {d.smtpPort === 465 ? 'TLS' : 'STARTTLS'}
+                </button>
+              </p>
+            )}
           </div>
           <div>
             <label className={label} htmlFor="em-user">Username</label>
@@ -144,6 +157,11 @@ export function EmailSettingsCard({
             {saving && <Loader2 className="w-3.5 h-3.5 animate-spin" />} Save email settings
           </button>
         {auto && autosave.bar}
+        {unsavedPassword && (
+          <p role="status" className="text-xs font-semibold text-amber-900">
+            The password you typed is not saved yet: press “Save email settings” (or “Send a test email”, which saves it first).
+          </p>
+        )}
           <button type="button" onClick={() => void test()} disabled={testing} className="px-4 py-2 rounded-xl border border-stone-300 text-xs font-bold flex items-center gap-1.5 disabled:opacity-60">
             {testing ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Send className="w-3.5 h-3.5" />} Send a test email
           </button>
