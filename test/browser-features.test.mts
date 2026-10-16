@@ -290,7 +290,7 @@ test('version badge: visible to everyone, bottom left, never over the products o
     assert.equal(await page.getByText(/^podman run --replace .* ghcr\.io\/cxsmtp\/buh:latest$/).count(), 1);
     assert.equal(await page.getByText(/docker compose run/).isVisible(), false, 'the Docker Compose command is folded away');
     // And the one line that turns on automatic updates for a single Podman container.
-    await page.getByText('scripts\\podman-autoupdate.bat beautifuluaehome 443 beautifuluaehome-data', { exact: true }).waitFor();
+    await page.getByText(/^for \/f "delims=" %S in \('podman info --format "\{\{\.Host\.RemoteSocket\.Path\}\}"'\) do podman run --rm --security-opt label=disable -v %S:\/var\/run\/docker\.sock -e SOCK=%S ghcr\.io\/cxsmtp\/buh-updater:latest setup beautifuluaehome$/).waitFor();
     assert.equal(await page.getByText('Running', { exact: true }).count(), 1);
     assert.deepEqual(await overflow(page), [], `no sideways scroll at ${width}px`);
     assert.deepEqual(errors, []);

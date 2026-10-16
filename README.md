@@ -42,11 +42,13 @@ The image `ghcr.io/cxsmtp/buh:latest` is built, tested and published from main. 
 podman pull ghcr.io/cxsmtp/buh:latest && podman run --replace -d --name beautifuluaehome -p 443:3000 -v beautifuluaehome-data:/data -e TZ=Asia/Dubai --read-only --tmpfs /tmp --cap-drop ALL --security-opt no-new-privileges:true ghcr.io/cxsmtp/buh:latest
 ```
 
-Automatic updates for that one container (a few seconds' pause at each switch; data volume kept; see the [guide](HOSTINGER_DEPLOYMENT_GUIDE.md#podman-on-windows-one-container)):
+Automatic updates for that one container, from the published updater image (no git, no files; a few seconds' pause at each switch; its data, port and settings are kept), in the Windows command prompt:
 
 ```
-scripts\podman-autoupdate.bat beautifuluaehome 443 beautifuluaehome-data
+for /f "delims=" %S in ('podman info --format "{{.Host.RemoteSocket.Path}}"') do podman run --rm --security-opt label=disable -v %S:/var/run/docker.sock -e SOCK=%S ghcr.io/cxsmtp/buh-updater:latest setup beautifuluaehome
 ```
+
+A Linux server with Podman (shop, HTTPS proxy and updater, from images only): [guide](HOSTINGER_DEPLOYMENT_GUIDE.md#hostinger-vps-with-podman-images-only).
 
 To try it on your own computer with Podman on Windows, run `scripts\run-local-podman.bat` (test mode, http://localhost:3000).
 

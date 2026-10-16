@@ -43,7 +43,8 @@ const older = (a: string, b: string) => {
 };
 const IMAGE = 'ghcr.io/cxsmtp/buh';
 const PODMAN_RUN = `podman run --replace -d --name beautifuluaehome -p 443:3000 -v beautifuluaehome-data:/data -e TZ=Asia/Dubai --read-only --tmpfs /tmp --cap-drop ALL --security-opt no-new-privileges:true ${IMAGE}:latest`;
-const AUTOUPDATE_BAT = 'scripts\\podman-autoupdate.bat beautifuluaehome 443 beautifuluaehome-data';
+// Turns on automatic updates from the published updater image: one line in Windows cmd, no git, no files.
+const SETUP_WINDOWS = `for /f "delims=" %S in ('podman info --format "{{.Host.RemoteSocket.Path}}"') do podman run --rm --security-opt label=disable -v %S:/var/run/docker.sock -e SOCK=%S ghcr.io/cxsmtp/buh-updater:latest setup beautifuluaehome`;
 const label = (v: string) => `BUH-${v.split('.').map((n) => n.padStart(2, '0')).join('.')}`;
 
 export function VersionsCard() {
@@ -132,9 +133,9 @@ export function VersionsCard() {
             <p>
               Then reload this page. If it still says <strong className="font-mono">{label(info.current)}</strong>, another, older container is still answering: <code>podman ps</code> shows which one holds the port; stop it.
             </p>
-            <p>To have the shop update itself (and this page switch versions), run once, in the shop folder on that computer (Windows):</p>
-            <code className="block bg-stone-100 rounded-lg p-2 break-all">{AUTOUPDATE_BAT}</code>
-            <p>It keeps your data volume and checks every 15 minutes; a switch closes the shop for a few seconds.</p>
+            <p>To have the shop update itself (and this page switch versions), paste this one line once into the Windows command prompt on that computer. Nothing to download first; use your container&apos;s name if it is not beautifuluaehome:</p>
+            <code className="block bg-stone-100 rounded-lg p-2 break-all">{SETUP_WINDOWS}</code>
+            <p>It keeps your container&apos;s data, port and settings, checks for new versions every 15 minutes, and keeps itself up to date; a switch closes the shop for a few seconds. On a Linux server, see the deployment guide.</p>
             <details>
               <summary className="cursor-pointer">Docker Compose server (Hostinger guide)</summary>
               <code className="block bg-stone-100 rounded-lg p-2 mt-1 break-all">docker compose run --rm updater rollback {IMAGE}:2.0.0</code>
