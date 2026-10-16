@@ -1,7 +1,8 @@
 'use client';
 
 import React, { useCallback, useEffect, useRef, useState } from 'react';
-import { ChevronLeft, ChevronRight } from 'lucide-react';
+import { ChevronLeft, ChevronRight, Expand } from 'lucide-react';
+import { PhotoZoom } from './PhotoZoom';
 import { SHEET_SIZES, photoSources } from '@/lib/client/photos';
 
 interface PhotoCarouselProps {
@@ -16,12 +17,17 @@ const reducedMotion = () => typeof window !== 'undefined' && window.matchMedia?.
 /**
  * A product's photos, one at a time, swiped sideways with a finger (native scrolling with snap
  * points, so it is smooth on every phone) or dragged with a mouse. Previous / next buttons, the
- * dots, and the arrow keys (when the photos have focus) do the same.
+ * dots, and the arrow keys (when the photos have focus) do the same. A tap on a photo (or the
+ * expand button) shows it full screen, to pinch and zoom into.
  */
 export function PhotoCarousel({ images, title, children }: PhotoCarouselProps) {
   const track = useRef<HTMLDivElement>(null);
   const [index, setIndex] = useState(0);
   const drag = useRef<{ x: number; left: number; from: number } | null>(null);
+  // The photo shown full screen to zoom into (tap a photo, or the expand button).
+  const [zoom, setZoom] = useState<number | null>(null);
+  // A mouse drag that moved the photos is not a tap.
+  const dragged = useRef(false);
   const count = images.length;
 
   // The photo a button, dot, key or drag is sliding to. While the slide is under way the scroll
@@ -31,14 +37,14 @@ export function PhotoCarousel({ images, title, children }: PhotoCarouselProps) {
   const target = useRef<number | null>(null);
 
   const go = useCallback(
-    (i: number) => {
+    (i: number, instant = false) => {
       const el = track.current;
       if (!el || !count) return;
       const next = Math.max(0, Math.min(count - 1, i));
       const left = next * el.clientWidth;
       // Already there: no scroll will happen (and nothing would clear the target).
       target.current = Math.abs(el.scrollLeft - left) < 2 ? null : next;
-      el.scrollTo({ left, behavior: reducedMotion() ? 'auto' : 'smooth' });
+      el.scrollTo({ left, behavior: instant || reducedMotion() ? 'auto' : 'smooth' });
       setIndex(next);
     },
     [count]
@@ -101,12 +107,14 @@ export function PhotoCarousel({ images, title, children }: PhotoCarouselProps) {
     if (e.pointerType !== 'mouse' || e.button !== 0 || count < 2 || !track.current) return;
     target.current = null;
     drag.current = { x: e.clientX, left: track.current.scrollLeft, from: index };
+    dragged.current = false;
     track.current.setPointerCapture(e.pointerId);
     track.current.style.scrollSnapType = 'none';
   };
   const onPointerMove = (e: React.PointerEvent) => {
     const d = drag.current;
     if (!d || !track.current) return;
+    if (Math.abs(e.clientX - d.x) > 6) dragged.current = true;
     track.current.scrollLeft = d.left - (e.clientX - d.x);
   };
   const endDrag = (e: React.PointerEvent) => {
@@ -143,7 +151,20 @@ export function PhotoCarousel({ images, title, children }: PhotoCarouselProps) {
         {images.map((img, i) => {
           const s = photoSources(img);
           return (
-            <div key={`${img}-${i}`} role="group" aria-roledescription="slide" aria-label={`${i + 1} of ${count}`} className="relative w-full h-full shrink-0 snap-center snap-always">
+            <div
+              key={`${img}-${i}`}
+              role="group"
+              aria-roledescription="slide"
+              aria-label={`${i + 1} of ${count}`}
+              className="relative w-full h-full shrink-0 snap-center snap-always cursor-zoom-in"
+              onClick={() => {
+                if (dragged.current) {
+                  dragged.current = false;
+                  return;
+                }
+                setZoom(i);
+              }}
+            >
               {/* eslint-disable-next-line @next/next/no-img-element */}
               <img
                 src={s.src}
@@ -162,6 +183,26 @@ export function PhotoCarousel({ images, title, children }: PhotoCarouselProps) {
         })}
       </div>
       {children}
+      <button
+        type="button"
+        onClick={() => setZoom(index)}
+        aria-label="Zoom photo"
+        className="absolute right-3 top-3 w-10 h-10 rounded-full bg-white/90 text-stone-900 shadow flex items-center justify-center"
+      >
+        <Expand className="w-4 h-4" aria-hidden="true" />
+      </button>
+      {zoom !== null && (
+        <PhotoZoom
+          images={images}
+          start={zoom}
+          title={title}
+          onClose={(i) => {
+            setZoom(null);
+            // Back on the photo last seen full screen (no slide: it was out of sight).
+            go(i, true);
+          }}
+        />
+      )}
       {count > 1 && (
         <>
           <button

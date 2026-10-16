@@ -15,11 +15,14 @@ let locks = 0;
 function lockScroll() {
   if (locks++ === 0) {
     document.documentElement.style.overflow = 'hidden';
+    // No rubber-band or pull-to-reload on the page behind (globals.css).
+    document.documentElement.classList.add('sheet-open');
   }
 }
 function unlockScroll() {
   if (--locks === 0) {
     document.documentElement.style.overflow = '';
+    document.documentElement.classList.remove('sheet-open');
   }
 }
 
@@ -28,7 +31,7 @@ export interface SheetProps {
   labelledBy: string;
   onClose: () => void;
   children: React.ReactNode;
-  /** full: the whole screen on phones (product); bottom: up to 90% high (filters); top: search. */
+  /** full: the whole screen on phones and upright tablets (product); bottom: up to 90% high (filters); top: search. */
   variant?: 'full' | 'bottom' | 'top';
   /** Width on bigger screens. */
   wide?: boolean;
@@ -65,6 +68,8 @@ export function Sheet({ labelledBy, onClose, children, variant = 'bottom', wide 
       return;
     }
     if (e.key !== 'Tab' || !panel.current) return;
+    // A sheet inside a sheet (the photo zoom) keeps Tab to itself.
+    e.stopPropagation();
     const items = [...panel.current.querySelectorAll<HTMLElement>(FOCUSABLE)].filter((el) => el.offsetParent !== null || el === document.activeElement);
     if (!items.length) {
       e.preventDefault();
@@ -85,14 +90,15 @@ export function Sheet({ labelledBy, onClose, children, variant = 'bottom', wide 
     variant === 'top'
       ? 'items-start justify-center sm:pt-16'
       : variant === 'full'
-        ? 'items-stretch sm:items-center justify-center sm:p-4 md:p-6'
+        ? 'items-stretch twopane:items-center justify-center twopane:p-6'
         : 'items-end sm:items-center justify-center sm:p-4';
   const shape =
     variant === 'top'
-      ? 'w-full sm:max-w-xl max-h-[100dvh] sm:max-h-[80vh] sm:rounded-3xl sheet-down'
+      ? 'w-full sm:max-w-xl max-h-[100dvh] sm:max-h-[80vh] sm:rounded-3xl sheet-down pt-safe sm:pt-0'
       : variant === 'full'
-        ? `w-full ${wide ? 'sm:max-w-5xl' : 'sm:max-w-xl'} h-[100dvh] sm:h-auto sm:max-h-[92vh] sm:rounded-3xl sheet-up sm:[animation-name:sheet-fade]`
-        : `w-full ${wide ? 'sm:max-w-2xl' : 'sm:max-w-lg'} max-h-[90dvh] sm:max-h-[85vh] rounded-t-3xl sm:rounded-3xl sheet-up sm:[animation-name:sheet-fade]`;
+        ? // Full screen on phones and upright tablets (like opening a post), a dialog when side by side.
+          `w-full ${wide ? 'twopane:max-w-5xl' : 'twopane:max-w-xl'} h-[100dvh] twopane:h-auto twopane:max-h-[92vh] twopane:rounded-3xl sheet-up twopane:[animation-name:sheet-fade] pt-safe px-safe twopane:pt-0 twopane:px-0`
+        : `w-full ${wide ? 'sm:max-w-2xl' : 'sm:max-w-lg'} max-h-[90dvh] sm:max-h-[85vh] rounded-t-3xl sm:rounded-3xl sheet-up sm:[animation-name:sheet-fade] px-safe sm:px-0`;
 
   return (
     <div className={`fixed inset-0 z-50 flex ${layout}`} onKeyDown={onKeyDown}>

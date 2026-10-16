@@ -35,6 +35,16 @@ const nextConfig: NextConfig = {
         ],
       },
       {
+        // The service worker: always checked with the server (so a new release is found), allowed
+        // to control the whole site, and itself limited to this site.
+        source: "/sw.js",
+        headers: [
+          { key: "Cache-Control", value: "no-cache, max-age=0, must-revalidate" },
+          { key: "Service-Worker-Allowed", value: "/" },
+          { key: "Content-Security-Policy", value: "default-src 'self'; script-src 'self'; frame-ancestors 'none'" },
+        ],
+      },
+      {
         // API answers are per-request and may carry personal data: never cache them.
         // (Uploaded images, content-addressed and public, set their own long cache.)
         source: "/api/((?!images/).*)",

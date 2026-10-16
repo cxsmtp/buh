@@ -19,7 +19,7 @@ function withWidth(url: string, width: number): string {
 }
 
 /** src and srcSet for an <img>: srcSet only where the host can resize. */
-export function photoSources(url: string, widths: number[] = [360, 540, 720, 1080]): { src: string; srcSet?: string } {
+export function photoSources(url: string, widths: number[] = PHOTO_WIDTHS): { src: string; srcSet?: string } {
   if (!url || !RESIZABLE.test(url)) return { src: url };
   return {
     src: withWidth(url, widths[Math.min(1, widths.length - 1)]),
@@ -27,7 +27,22 @@ export function photoSources(url: string, widths: number[] = [360, 540, 720, 108
   };
 }
 
-/** The card photo in the shop's grid: half the screen on phones, a third or a quarter on wider ones. */
-export const CARD_SIZES = '(min-width: 1280px) 300px, (min-width: 1024px) 25vw, (min-width: 768px) 33vw, 50vw';
-/** A photo in the product sheet: the whole screen on phones, half the dialog on wider screens. */
-export const SHEET_SIZES = '(min-width: 1024px) 520px, (min-width: 640px) 50vw, 100vw';
+/**
+ * The widths offered to the browser, which picks the smallest that is sharp on the screen: 412 px
+ * phones at 2.6x (most Androids) take the 1080, a 375 px iPhone at 3x too, a 2-across card 540.
+ */
+export const PHOTO_WIDTHS = [360, 540, 720, 828, 1080, 1440];
+
+/**
+ * How wide a feed photo is on screen. Phones: the whole screen (one photo per row, the default) or
+ * half of it (the grid); tablets two across, then three; computers four in a 1280 px column. Phones held sideways: two across.
+ */
+export function feedSizes(layout: 'one' | 'grid'): string {
+  return `(min-width: 1280px) 300px, (min-width: 1024px) 33vw, (min-width: 640px) 50vw, ${layout === 'one' ? '100vw' : '50vw'}`;
+}
+/** The card photo in the shop's grid (two across on phones). */
+export const CARD_SIZES = feedSizes('grid');
+/** A photo in the product sheet: the whole screen on phones and portrait tablets, half the dialog side by side. */
+export const SHEET_SIZES = '(min-width: 1024px) 520px, (min-width: 768px) and (orientation: landscape) 50vw, (min-width: 640px) 576px, 100vw';
+/** Full screen (the zoom view): sharp at twice the size when zoomed in. */
+export const ZOOM_SIZES = '200vw';

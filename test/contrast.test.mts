@@ -1,8 +1,9 @@
 /**
  * Every screen readable, on any device: text contrast measured in a real browser, in light and
  * dark mode (a phone or laptop set to dark mode once made labels invisible on white cards),
- * at phone and desktop width. Covers the shop (its filter sheet, filtered view and search), a product,
- * the bag, checkout, the chat, the admin sign-in and every Admin Hub tab and settings section.
+ * at phone and desktop width. Covers the shop (its filter sheet, filtered view and search), the
+ * "Install the app" offer, a product and its full-screen photo, the bag, checkout, the chat, the
+ * admin sign-in, the offline page and every Admin Hub tab and settings section.
  */
 import assert from 'node:assert/strict';
 import { after, before, test } from 'node:test';
@@ -144,6 +145,18 @@ for (const colorScheme of ['dark', 'light'] as const) {
       await ready;
       await page.waitForTimeout(500);
       problems.push(...(await lowContrast(page, 'shop')));
+      // The "Install the app" offer (the phone's install event, stood in for here).
+      await page.evaluate(() => {
+        const e = new Event('beforeinstallprompt') as Event & { prompt?: () => Promise<void>; userChoice?: Promise<unknown> };
+        e.prompt = async () => {};
+        e.userChoice = Promise.resolve({ outcome: 'dismissed' });
+        window.dispatchEvent(e);
+      });
+      const install = page.getByRole('region', { name: 'Install the app' });
+      await install.waitFor({ timeout: 9000 });
+      await page.waitForTimeout(400); // risen into place
+      problems.push(...(await lowContrast(page, 'install offer')));
+      await install.getByRole('button', { name: 'Not now' }).click();
       // The Filter sheet, a story chosen with chips showing, and search with its matches.
       await page.getByRole('button', { name: /^Filter and sort/ }).click();
       const filters = page.getByRole('dialog', { name: 'Filter & sort' });
@@ -168,6 +181,11 @@ for (const colorScheme of ['dark', 'light'] as const) {
       await page.locator('h3, h4').filter({ hasText: p.title }).first().click();
       await page.getByRole('button', { name: /Add to Bag/ }).waitFor();
       problems.push(...(await lowContrast(page, 'product')));
+      await page.getByRole('button', { name: 'Zoom photo' }).click();
+      await page.getByTestId('photo-zoom').waitFor();
+      problems.push(...(await lowContrast(page, 'photo zoom')));
+      await page.keyboard.press('Escape');
+      await page.getByTestId('photo-zoom').waitFor({ state: 'detached' });
       await page.getByRole('button', { name: /Add to Bag/ }).click();
       await page.getByRole('button', { name: /Proceed to Checkout/ }).waitFor();
       problems.push(...(await lowContrast(page, 'bag')));
@@ -190,6 +208,10 @@ for (const colorScheme of ['dark', 'light'] as const) {
       await page.locator('header button:has-text("Admin Hub")').click();
       await page.getByText('Admin Hub Security Access').waitFor();
       problems.push(...(await lowContrast(page, 'sign-in')));
+      // What the installed app shows without a connection.
+      await page.goto(`${server.base}/offline`, { waitUntil: 'domcontentloaded' });
+      await page.getByRole('heading', { name: 'You are offline' }).waitFor();
+      problems.push(...(await lowContrast(page, 'offline page')));
       await ctx.close();
 
       // The Admin Hub: every tab and every settings section.

@@ -10,6 +10,7 @@ import { useLiveUpdates } from '@/lib/client/live';
 import { stockAlerts } from '@/lib/client/stock';
 import { INITIAL_BANK_DETAILS, INITIAL_BRAND_SETTINGS, INITIAL_COURIER_SETTINGS, INITIAL_SMS_SETTINGS } from '@/data/initialData';
 import { ADMIN_SIGNED_OUT_EVENT, getJson, postJson, sendJson } from '@/lib/apiClient';
+import { applyUpdate, checkForUpdate, registerServiceWorker, setFeedLayout, useFeedLayout, useUpdateWaiting } from '@/lib/client/pwa';
 
 /** Settings as the admin hub receives them: secrets blank, with which are saved. */
 interface AdminSetting<T> {
@@ -120,9 +121,11 @@ const AdminChatsTab = dynamic(() => import('@/components/admin/AdminChatsTab').t
 const SystemHealthCard = dynamic(() => import('@/components/admin/settings/SystemHealthCard').then((m) => m.SystemHealthCard), { ssr: false });
 
 import { HelpLauncher } from '@/components/store/HelpLauncher';
+import { InstallPrompt } from '@/components/store/InstallPrompt';
+import { BRAND_NAVY } from '@/lib/festivals/catalog';
 import { VersionBadge } from '@/components/common/VersionBadge';
 
-import { SlidersHorizontal, X } from 'lucide-react';
+import { LayoutGrid, SlidersHorizontal, Square, X } from 'lucide-react';
 import { EMPTY_FILTERS, SORTS, activeChips, activeCount, applyFilters, buildStories, filtersToSearch, parseFilters, type Filters } from '@/lib/catalogFilter';
 
 const prefersReducedMotion = () => typeof window !== 'undefined' && window.matchMedia?.('(prefers-reduced-motion: reduce)').matches;
@@ -283,8 +286,13 @@ export function ShopApp({ initialProductId }: { initialProductId?: string } = {}
       const wanted = params.get('p') || initialProductId;
       const product = wanted ? list.find((p) => p.id === wanted) : undefined;
       if (product) setSelectedProduct(product);
-      if (params.has('bag')) {
+      // The installed app's shortcuts (long-press the icon): Bag and Track Order.
+      const shortcut = params.get('open');
+      if (shortcut === 'bag') setIsCartOpen(true);
+      else if (shortcut === 'track') setIsTrackerOpen(true);
+      if (params.has('bag') || shortcut) {
         params.delete('bag');
+        params.delete('open');
         const rest = params.toString();
         window.history.replaceState(null, '', `${window.location.pathname}${rest ? `?${rest}` : ''}`);
       }
@@ -297,6 +305,9 @@ export function ShopApp({ initialProductId }: { initialProductId?: string } = {}
     } catch {
       // storage unavailable (private mode): nothing to clean up
     }
+
+    // The service worker: fast repeat opens, an offline page, installable as an app (src/lib/serviceWorker.ts).
+    registerServiceWorker();
 
     // Admin sign-in lives in an HttpOnly cookie the server checks; ask it.
     let cancelled = false;
@@ -352,7 +363,10 @@ export function ShopApp({ initialProductId }: { initialProductId?: string } = {}
   useLiveUpdates(isAdminMode && isAdminAuthenticated ? null : '/api/events', {
     onCatalog: () => debounced('catalog', () => void loadCatalog()),
     onSettings: () => debounced('catalog', () => void loadCatalog()),
-    onNewVersion: () => setUpdateReady(true),
+    onNewVersion: () => {
+      setUpdateReady(true);
+      checkForUpdate();
+    },
   });
   useLiveUpdates(isAdminMode && isAdminAuthenticated ? '/api/admin/events' : null, {
     onCatalog: () => debounced('admin', () => void Promise.all([loadAdminData(), loadCatalog()])),
@@ -369,21 +383,43 @@ export function ShopApp({ initialProductId }: { initialProductId?: string } = {}
         })
       );
     },
-    onNewVersion: () => setUpdateReady(true),
+    onNewVersion: () => {
+      setUpdateReady(true);
+      checkForUpdate();
+    },
   });
+  // The service worker of a new version has arrived and waits for the go-ahead.
+  const workerWaiting = useUpdateWaiting();
+  const newVersion = updateReady || workerWaiting;
   // A new version of the shop was installed: switch over unnoticed when the page is in the
   // background (the bag is saved), never in the middle of a checkout.
   useEffect(() => {
-    if (!updateReady) return;
+    if (!newVersion) return;
     // Only a shopper's page with nothing open: never the admin hub (unsaved edits) or an open product or bag.
     const busy = isAdminMode || isCheckoutOpen || isCartOpen || isTrackerOpen || selectedProduct !== null;
     if (busy) return;
     const onHide = () => {
-      if (document.visibilityState === 'hidden') window.location.reload();
+      if (document.visibilityState === 'hidden') applyUpdate();
     };
     document.addEventListener('visibilitychange', onHide);
     return () => document.removeEventListener('visibilitychange', onHide);
-  }, [updateReady, isAdminMode, isCheckoutOpen, isCartOpen, isTrackerOpen, selectedProduct]);
+  }, [newVersion, isAdminMode, isCheckoutOpen, isCartOpen, isTrackerOpen, selectedProduct]);
+
+  // The phone's status bar (and the installed app's title bar) takes the festival's colour while
+  // a festival's look is on, else the brand navy.
+  useEffect(() => {
+    const color = festival?.festivalId ? festival.theme.gradient[0] : BRAND_NAVY;
+    let metas = document.querySelectorAll<HTMLMetaElement>('meta[name="theme-color"]');
+    if (!metas.length) {
+      const m = document.createElement('meta');
+      m.name = 'theme-color';
+      document.head.appendChild(m);
+      metas = document.querySelectorAll<HTMLMetaElement>('meta[name="theme-color"]');
+    }
+    metas.forEach((m) => {
+      m.content = color;
+    });
+  }, [festival]);
 
   useEffect(() => {
     if (!isAdminAuthenticated) return;
@@ -500,6 +536,13 @@ export function ShopApp({ initialProductId }: { initialProductId?: string } = {}
   const activeStory = stories.find((s) => s.isActive(filters))?.id ?? null;
   const chips = useMemo(() => activeChips(filters, products, categories), [filters, products, categories]);
   const filterCount = activeCount(filters);
+  // Phones: one big photo per row (the default) or two across, remembered on this device.
+  const feedLayout = useFeedLayout();
+  const feedGrid =
+    feedLayout === 'one'
+      ? 'grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-y-8 sm:gap-y-6 sm:gap-x-5'
+      : 'grid grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-x-3 gap-y-6 sm:gap-x-5';
+  const feedKey = filtersToSearch(filters, '');
 
   /** Show other products: a new step in the browser's history (Back returns to this view). */
   const showFilters = useCallback((next: Filters, mode: 'push' | 'replace' = 'push') => {
@@ -563,11 +606,11 @@ export function ShopApp({ initialProductId }: { initialProductId?: string } = {}
 
   return (
     <ShopProvider value={shopInfo}>
-    <div className="min-h-screen flex flex-col font-sans">
-      {updateReady && (
+    <div className="min-h-screen flex flex-col font-sans px-safe">
+      {newVersion && (
         <div role="status" className="bg-[#0f1c2e] text-white text-xs px-3 py-1.5 flex items-center justify-center gap-3">
-          <span>The shop has been updated.</span>
-          <button type="button" className="font-bold underline" onClick={() => window.location.reload()}>Refresh</button>
+          <span>New version ready</span>
+          <button type="button" className="font-bold underline min-h-8" onClick={() => applyUpdate()}>Refresh</button>
           <span className="opacity-60 hidden sm:inline">(your bag is kept)</span>
         </div>
       )}
@@ -599,7 +642,7 @@ export function ShopApp({ initialProductId }: { initialProductId?: string } = {}
       )}
 
       {/* Main Content Area (on phones, room at the bottom for the tab bar and the Help button) */}
-      <main className={`flex-1 max-w-7xl mx-auto w-full ${isAdminMode ? 'pb-20 px-3 sm:px-6' : 'pb-20 md:pb-16 px-4 sm:px-6'}`}>
+      <main className={`flex-1 max-w-7xl mx-auto w-full ${isAdminMode ? 'pb-[calc(5rem+env(safe-area-inset-bottom,0px))] px-3 sm:px-6' : 'pb-[calc(5rem+env(safe-area-inset-bottom,0px))] md:pb-16 px-4 sm:px-6'}`}>
         {isAdminMode ? (
           /* ================= ADMIN MOBILE HUB ================= */
           <div className="py-4 space-y-4">
@@ -846,6 +889,28 @@ export function ShopApp({ initialProductId }: { initialProductId?: string } = {}
                 <p className="text-sm text-stone-700" aria-live="polite">
                   {catalogLoaded ? `${filteredProducts.length} ${filteredProducts.length === 1 ? 'piece' : 'pieces'}` : ''}
                 </p>
+                <div className="flex items-center gap-2">
+                {/* Phones: one big photo per row, or two across (wider screens always show a grid). */}
+                <div role="group" aria-label="Photo size" className="sm:hidden flex items-center rounded-full border border-stone-300 bg-white p-0.5">
+                  <button
+                    type="button"
+                    aria-pressed={feedLayout === 'one'}
+                    aria-label="Show one big photo per row"
+                    onClick={() => setFeedLayout('one')}
+                    className={`w-9 h-9 rounded-full flex items-center justify-center ${feedLayout === 'one' ? 'bg-[#0f1c2e] text-white' : 'text-stone-700'}`}
+                  >
+                    <Square className="w-4 h-4" aria-hidden="true" />
+                  </button>
+                  <button
+                    type="button"
+                    aria-pressed={feedLayout === 'grid'}
+                    aria-label="Show two photos per row"
+                    onClick={() => setFeedLayout('grid')}
+                    className={`w-9 h-9 rounded-full flex items-center justify-center ${feedLayout === 'grid' ? 'bg-[#0f1c2e] text-white' : 'text-stone-700'}`}
+                  >
+                    <LayoutGrid className="w-4 h-4" aria-hidden="true" />
+                  </button>
+                </div>
                 <button
                   type="button"
                   onClick={() => setFilterOpen(true)}
@@ -861,6 +926,7 @@ export function ShopApp({ initialProductId }: { initialProductId?: string } = {}
                     </span>
                   )}
                 </button>
+                </div>
               </div>
 
               {(chips.length > 0 || filters.sort !== 'featured') && (
@@ -900,21 +966,23 @@ export function ShopApp({ initialProductId }: { initialProductId?: string } = {}
                 <p role="alert" className="text-sm text-red-800 bg-red-50 border border-red-200 rounded-xl px-3 py-2">{catalogError}</p>
               )}
 
-              {/* The feed: big photos, two across on phones */}
+              {/* The feed: big photos (on phones one per row, edge to edge, or two across) */}
               {!catalogLoaded && !catalogError ? (
-                <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-x-3 gap-y-6 sm:gap-x-5" aria-hidden="true">
+                <div className={feedGrid} aria-hidden="true" data-testid="feed-skeleton">
                   {[0, 1, 2, 3].map((i) => (
-                    <div key={i} className="space-y-2">
-                      <div className="aspect-[4/5] rounded-2xl bg-[#efe8dc] motion-safe:animate-pulse" />
-                      <div className="h-3 rounded bg-[#efe8dc] w-4/5" />
-                      <div className="h-3 rounded bg-[#efe8dc] w-1/3" />
+                    <div key={i} className={`space-y-2 ${feedLayout === 'one' ? '-mx-4 sm:mx-0' : ''}`}>
+                      <div className={`aspect-[4/5] bg-[#efe8dc] motion-safe:animate-pulse ${feedLayout === 'one' ? 'sm:rounded-2xl' : 'rounded-2xl'}`} />
+                      <div className={`space-y-2 ${feedLayout === 'one' ? 'px-4 sm:px-0' : ''}`}>
+                        <div className="h-3 rounded bg-[#efe8dc] w-4/5 motion-safe:animate-pulse" />
+                        <div className="h-3 rounded bg-[#efe8dc] w-1/3 motion-safe:animate-pulse" />
+                      </div>
                     </div>
                   ))}
                 </div>
               ) : filteredProducts.length > 0 ? (
-                <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-x-3 gap-y-6 sm:gap-x-5">
+                <div key={feedKey} className={`${feedGrid} feed-in`} data-testid="feed">
                   {filteredProducts.map((prod, i) => (
-                    <ProductCard key={prod.id} product={prod} onSelect={openProduct} eager={i < 4} />
+                    <ProductCard key={prod.id} product={prod} onSelect={openProduct} eager={i < (feedLayout === 'one' ? 2 : 4)} layout={feedLayout} />
                   ))}
                 </div>
               ) : catalogLoaded ? (
@@ -1039,6 +1107,13 @@ export function ShopApp({ initialProductId }: { initialProductId?: string } = {}
       />
       )}
       {!isAdminMode && <HelpLauncher />}
+      {!isAdminMode && (
+        <InstallPrompt
+          blocked={isCheckoutOpen || isCartOpen || isTrackerOpen || selectedProduct !== null || searchOpen || filterOpen || isAdminLoginOpen}
+          name={brandSettings.storeName || 'Beautiful UAE Home'}
+          logo={<BrandLogo brand={brandSettings} className="w-11 h-11 text-base" />}
+        />
+      )}
       {isAdminMode && (
         <VersionBadge
           raised

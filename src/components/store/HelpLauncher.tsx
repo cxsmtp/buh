@@ -1,7 +1,7 @@
 'use client';
 
 import React, { useCallback, useEffect, useRef, useState } from 'react';
-import { Bot, Loader2, MessageCircle, MessagesSquare, RotateCcw, Send, UserRound, X } from 'lucide-react';
+import { Bot, MessageCircle, MessagesSquare, RotateCcw, Send, UserRound, X } from 'lucide-react';
 import type { ChatMessage } from '@/types';
 import { getJson, postJson } from '@/lib/apiClient';
 import { OPEN_CHAT_EVENT, askWhatsAppLink, instagramLink, useShop } from '@/lib/client/shop';
@@ -220,7 +220,7 @@ export function HelpLauncher() {
         <section
           role="dialog"
           aria-label="Chat with the shop"
-          className="fixed z-50 inset-x-2 bottom-2 top-16 sm:inset-auto sm:right-6 sm:bottom-6 sm:w-[380px] sm:h-[600px] sm:max-h-[calc(100vh-3rem)] bg-white rounded-3xl shadow-2xl border border-stone-200 flex flex-col overflow-hidden"
+          className="fixed z-50 inset-x-2 bottom-[calc(0.5rem+env(safe-area-inset-bottom,0px))] top-[calc(4rem+env(safe-area-inset-top,0px))] overscroll-contain sm:inset-auto sm:right-6 sm:bottom-6 sm:w-[380px] sm:h-[600px] sm:max-h-[calc(100vh-3rem)] bg-white rounded-3xl shadow-2xl border border-stone-200 flex flex-col overflow-hidden"
         >
           <header className="flex items-center gap-2 px-4 py-3 bg-[#0f1c2e] text-white">
             <Bot className="w-5 h-5 text-amber-300" />
@@ -267,7 +267,12 @@ export function HelpLauncher() {
             )}
             {busy && (
               <div className="flex items-center gap-1.5 text-xs text-stone-500">
-                <Loader2 className="w-3.5 h-3.5 animate-spin" /> …
+                <span className="sr-only">Writing…</span>
+                <span aria-hidden="true" className="inline-flex items-center gap-1 rounded-2xl bg-stone-100 px-3 py-2">
+                  <span className="typing-dot w-1.5 h-1.5 rounded-full bg-stone-500" />
+                  <span className="typing-dot w-1.5 h-1.5 rounded-full bg-stone-500" />
+                  <span className="typing-dot w-1.5 h-1.5 rounded-full bg-stone-500" />
+                </span>
               </div>
             )}
             <div ref={end} />

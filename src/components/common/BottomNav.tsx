@@ -51,9 +51,9 @@ export const BottomNav: React.FC<BottomNavProps> = ({
   // The shop on a phone: Home, Search, Bag and Orders, like an app's tab bar (hidden on wider screens,
   // where the header has them). The Help button takes the slot at its right end, so it never floats over the feed.
   const tab = (active: boolean) =>
-    `flex-1 flex flex-col items-center justify-center gap-0.5 h-14 text-[11px] ${active ? 'text-[#0f1c2e] font-semibold' : 'text-stone-600'}`;
+    `flex-1 flex flex-col items-center justify-center gap-0.5 h-14 text-[11px] transition-transform active:scale-95 ${active ? 'text-[#0f1c2e] font-semibold' : 'text-stone-600'}`;
   return (
-    <nav aria-label="Shop" className="fixed bottom-0 inset-x-0 z-40 bg-[#fbf9f5]/95 backdrop-blur-md border-t border-[#e8e1d5] pb-safe md:hidden">
+    <nav aria-label="Shop" className="fixed bottom-0 inset-x-0 z-40 bg-[#fbf9f5]/95 backdrop-blur-md border-t border-[#e8e1d5] pb-safe px-safe md:hidden">
       <div className="flex items-stretch">
         <button type="button" onClick={onHome} aria-current={storeTab === 'home' ? 'page' : undefined} className={tab(storeTab === 'home')}>
           <Home className="w-6 h-6" aria-hidden="true" strokeWidth={storeTab === 'home' ? 2.25 : 1.75} />
