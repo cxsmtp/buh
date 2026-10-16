@@ -128,7 +128,7 @@ export function PhotoCarousel({ images, title, children }: PhotoCarouselProps) {
     go(dx < -40 ? d.from + 1 : dx > 40 ? d.from - 1 : d.from);
   };
 
-  if (!count) return <div className="aspect-[4/5] bg-[#efe8dc]" />;
+  if (!count) return <div className="aspect-[4/5] bg-sand-deep" />;
 
   return (
     <div className="relative select-none" role="group" aria-roledescription="carousel" aria-label={`Photos of ${title}`}>
@@ -145,7 +145,7 @@ export function PhotoCarousel({ images, title, children }: PhotoCarouselProps) {
         onPointerMove={onPointerMove}
         onPointerUp={endDrag}
         onPointerCancel={endDrag}
-        className={`flex overflow-x-auto no-scrollbar snap-x snap-mandatory overscroll-x-contain aspect-[4/5] bg-[#efe8dc] ${count > 1 ? 'cursor-grab active:cursor-grabbing' : ''}`}
+        className={`flex overflow-x-auto no-scrollbar snap-x snap-mandatory overscroll-x-contain aspect-[4/5] bg-sand-deep ${count > 1 ? 'cursor-grab active:cursor-grabbing' : ''}`}
         data-testid="photo-track"
       >
         {images.map((img, i) => {
@@ -187,7 +187,7 @@ export function PhotoCarousel({ images, title, children }: PhotoCarouselProps) {
         type="button"
         onClick={() => setZoom(index)}
         aria-label="Zoom photo"
-        className="absolute right-3 top-3 w-10 h-10 rounded-full bg-white/90 text-stone-900 shadow flex items-center justify-center"
+        className="absolute right-3 top-3 w-10 h-10 rounded-full bg-surface/90 text-ink flex items-center justify-center"
       >
         <Expand className="w-4 h-4" aria-hidden="true" />
       </button>
@@ -210,7 +210,7 @@ export function PhotoCarousel({ images, title, children }: PhotoCarouselProps) {
             onClick={() => go(index - 1)}
             disabled={index === 0}
             aria-label="Previous photo"
-            className="absolute left-2 top-1/2 -translate-y-1/2 w-9 h-9 rounded-full bg-white/90 text-stone-900 shadow flex items-center justify-center disabled:opacity-0 transition-opacity"
+            className="absolute left-2 top-1/2 -translate-y-1/2 w-9 h-9 rounded-full bg-surface/90 text-ink flex items-center justify-center disabled:opacity-0 transition-opacity"
           >
             <ChevronLeft className="w-5 h-5" aria-hidden="true" />
           </button>
@@ -219,7 +219,7 @@ export function PhotoCarousel({ images, title, children }: PhotoCarouselProps) {
             onClick={() => go(index + 1)}
             disabled={index === count - 1}
             aria-label="Next photo"
-            className="absolute right-2 top-1/2 -translate-y-1/2 w-9 h-9 rounded-full bg-white/90 text-stone-900 shadow flex items-center justify-center disabled:opacity-0 transition-opacity"
+            className="absolute right-2 top-1/2 -translate-y-1/2 w-9 h-9 rounded-full bg-surface/90 text-ink flex items-center justify-center disabled:opacity-0 transition-opacity"
           >
             <ChevronRight className="w-5 h-5" aria-hidden="true" />
           </button>
@@ -233,7 +233,7 @@ export function PhotoCarousel({ images, title, children }: PhotoCarouselProps) {
                 aria-current={i === index ? 'true' : undefined}
                 className="p-1.5 -m-0.5"
               >
-                <span className={`block h-1.5 rounded-full shadow transition-all ${i === index ? 'w-4 bg-white' : 'w-1.5 bg-white/60'}`} />
+                <span className={`block h-1.5 rounded-full  transition-all ${i === index ? 'w-4 bg-surface' : 'w-1.5 bg-surface/60'}`} />
               </button>
             ))}
           </div>

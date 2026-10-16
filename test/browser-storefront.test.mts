@@ -308,7 +308,7 @@ for (const width of [375, 1280]) {
     assert.equal(await sheet.getByRole('button', { name: 'One more' }).isDisabled(), true, 'only one to add');
     await sheet.getByRole('button', { name: 'Add to Bag (King)' }).click();
     await sheet.waitFor({ state: 'detached' });
-    await page.getByText('Your Shopping Bag').waitFor();
+    await page.getByText('Your bag').waitFor();
     await page.getByRole('button', { name: /Proceed to Checkout/ }).waitFor();
     assert.equal(await page.getByRole('button', { name: 'View shopping bag, 1 piece' }).count(), 1);
     if (width < 768) assert.equal(await page.getByRole('navigation', { name: 'Shop' }).getByRole('button', { name: 'Bag, 1 piece' }).count(), 1);
@@ -373,7 +373,7 @@ for (const width of [375, 1280]) {
       await nav.getByRole('button', { name: 'Home' }).click();
       await page.waitForFunction(() => window.scrollY === 0);
       await nav.getByRole('button', { name: 'Orders' }).click();
-      await page.getByText('Track Your UAE Bedding Order').waitFor();
+      await page.getByText('Track your order').waitFor();
     }
     assert.deepEqual(await overflow(page), []);
     assert.deepEqual(errors, []);

@@ -59,14 +59,14 @@ Everything the shop stores lives in one Docker volume and is backed up every 12 
 
 ## 2. Go-live checklist (in the Admin Hub)
 
-- [ ] **⚙️ Settings → Passkeys & recovery codes:** add a passkey on your phone, and create recovery codes (Download or Print them, keep them safe). They get you back in if you forget the password, even without email.
-- [ ] **⚙️ Settings → Phone verification:** enter your Twilio or Infobip keys, **Send test** to your own mobile, then **Save**.
+- [ ] **Settings → Passkeys & recovery codes:** add a passkey on your phone, and create recovery codes (Download or Print them, keep them safe). They get you back in if you forget the password, even without email.
+- [ ] **Settings → Phone verification:** enter your Twilio or Infobip keys, **Send test** to your own mobile, then **Save**.
   - Or choose **Firebase Phone Auth** (Blaze plan, billed per SMS; see docs/user-guide.md) and test with a checkout on your phone.
   - Checkout needs a working SMS gateway: customers cannot order without verifying their number.
   - At start-up, the log warns if none is configured.
-- [ ] **⚙️ Settings → Store & contact:** your WhatsApp number, support email and Instagram account.
-- [ ] **⚙️ Settings → Branding & bank → Bank transfer details:** enter the bank name, account name and real IBAN, and check every digit. Bank transfer is hidden at checkout until they are saved.
-- [ ] **⚙️ Settings → Couriers:**
+- [ ] **Settings → Store & contact:** your WhatsApp number, support email and Instagram account.
+- [ ] **Settings → Branding & bank → Bank transfer details:** enter the bank name, account name and real IBAN, and check every digit. Bank transfer is hidden at checkout until they are saved.
+- [ ] **Settings → Couriers:**
   - enter the keys;
   - press **Test connection**;
   - switch to **live mode** only when you are ready to book real pickups.

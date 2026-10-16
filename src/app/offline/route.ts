@@ -4,6 +4,8 @@
  * works on its own: it says what happened, that the bag is safe, and tries again by itself when
  * the phone is back online.
  */
+import { PALETTE } from '@/lib/design/tokens';
+
 export const dynamic = 'force-static';
 
 const HTML = `<!doctype html>
@@ -11,26 +13,26 @@ const HTML = `<!doctype html>
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-<meta name="theme-color" content="#0f1c2e">
+<meta name="theme-color" content="${PALETTE.ink}">
 <meta name="robots" content="noindex">
 <title>You are offline</title>
 <style>
   :root { color-scheme: light; }
   html, body { margin: 0; height: 100%; }
   body {
-    background: #fbf9f5; color: #1c1815;
+    background: ${PALETTE.ivory}; color: ${PALETTE.ink};
     font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
     display: flex; align-items: center; justify-content: center;
     padding: max(24px, env(safe-area-inset-top)) max(20px, env(safe-area-inset-right)) max(24px, env(safe-area-inset-bottom)) max(20px, env(safe-area-inset-left));
     box-sizing: border-box; -webkit-tap-highlight-color: transparent; overscroll-behavior: none;
   }
   main { max-width: 22rem; text-align: center; }
-  .mark { width: 72px; height: 72px; border-radius: 50%; margin: 0 auto 20px; display: flex; align-items: center; justify-content: center; background: #f4eee3; color: #8c6a2a; }
-  h1 { font-family: Georgia, "Times New Roman", serif; font-size: 1.5rem; line-height: 1.25; margin: 0 0 10px; color: #0f1c2e; }
-  p { font-size: 0.95rem; line-height: 1.55; margin: 0 0 12px; color: #57504a; }
-  button { margin-top: 12px; font: inherit; font-weight: 600; font-size: 0.95rem; color: #fff; background: #0f1c2e; border: 0; border-radius: 999px; padding: 14px 28px; min-height: 48px; cursor: pointer; touch-action: manipulation; }
-  button:focus-visible { outline: 2px solid #9f7e38; outline-offset: 3px; }
-  .small { font-size: 0.8rem; color: #6b635b; margin-top: 16px; }
+  .mark { width: 72px; height: 72px; border-radius: 50%; margin: 0 auto 20px; display: flex; align-items: center; justify-content: center; background: ${PALETTE.sand}; color: ${PALETTE['gold-deep']}; }
+  h1 { font-family: Georgia, "Times New Roman", serif; font-weight: 500; font-size: 1.5rem; line-height: 1.25; margin: 0 0 10px; color: ${PALETTE.ink}; }
+  p { font-size: 0.95rem; line-height: 1.55; margin: 0 0 12px; color: ${PALETTE['ink-soft']}; }
+  button { margin-top: 12px; font: inherit; font-weight: 600; font-size: 0.95rem; color: #fff; background: ${PALETTE.ink}; border: 0; border-radius: 999px; padding: 14px 28px; min-height: 48px; cursor: pointer; touch-action: manipulation; }
+  button:focus-visible { outline: 2px solid ${PALETTE['gold-deep']}; outline-offset: 3px; }
+  .small { font-size: 0.8rem; color: ${PALETTE['ink-muted']}; margin-top: 16px; }
 </style>
 </head>
 <body>

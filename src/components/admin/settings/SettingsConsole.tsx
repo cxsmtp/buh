@@ -12,7 +12,8 @@ import React, { useState } from 'react';
 export interface SettingsSection {
   id: string;
   label: string;
-  icon: string;
+  /** A line icon (lucide). */
+  icon: React.ReactNode;
   /** One line under the title. */
   hint: string;
   content: React.ReactNode;
@@ -43,26 +44,26 @@ export function SettingsConsole({ sections, openId }: { sections: SettingsSectio
 
   return (
     <div className="grid grid-cols-1 md:grid-cols-[210px_1fr] gap-3">
-      <nav aria-label="Settings sections" className="flex md:flex-col gap-1.5 overflow-x-auto no-scrollbar md:overflow-visible -mx-1 px-1 md:mx-0 md:px-0">
+      <nav aria-label="Settings sections" className="min-w-0 flex md:flex-col gap-1.5 overflow-x-auto no-scrollbar md:overflow-visible -mx-1 px-1 md:mx-0 md:px-0">
         {sections.map((s) => (
           <button
             key={s.id}
             type="button"
             onClick={() => open(s.id)}
             aria-current={s.id === current?.id ? 'page' : undefined}
-            className={`shrink-0 text-left px-3 py-2 rounded-xl text-xs font-bold flex items-center gap-2 transition-colors ${
-              s.id === current?.id ? 'bg-[#0f1c2e] text-white' : 'bg-white text-stone-700 border border-stone-200 hover:bg-stone-50'
+            className={`shrink-0 text-left px-3 py-2 rounded-xl text-xs font-medium flex items-center gap-2 transition-colors ${
+              s.id === current?.id ? 'bg-ink text-white' : 'bg-surface text-ink-soft border border-line hover:bg-ivory'
             }`}
           >
-            <span aria-hidden="true">{s.icon}</span>
+            <span aria-hidden="true" className="shrink-0 [&>svg]:w-4 [&>svg]:h-4 [&>svg]:stroke-[1.5]">{s.icon}</span>
             <span className="whitespace-nowrap">{s.label}</span>
           </button>
         ))}
       </nav>
       {current && (
-        <section className="bg-white rounded-2xl border border-stone-200 p-4 min-w-0" aria-labelledby="settings-title">
-          <h2 id="settings-title" className="font-serif font-bold text-lg text-[#0f1c2e]">{current.label}</h2>
-          <p className="text-xs text-stone-500 mb-4">{current.hint}</p>
+        <section className="bg-surface rounded-2xl border border-line p-4 min-w-0" aria-labelledby="settings-title">
+          <h2 id="settings-title" className="font-serif font-bold text-lg text-ink">{current.label}</h2>
+          <p className="text-xs text-ink-muted mb-4">{current.hint}</p>
           {current.content}
         </section>
       )}

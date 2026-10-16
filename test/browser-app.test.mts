@@ -74,7 +74,7 @@ const photoBox = (page: import('playwright').Page) => page.locator('[data-testid
 
 for (const width of [375, 412, 768, 1280]) {
   const phone = width < 640;
-  test(`feed at ${width}px: ${phone ? 'one big photo per row, edge to edge; the grid toggle works and is remembered' : 'a grid of large photos'}`, { skip }, async () => {
+  test(`feed at ${width}px: ${phone ? 'one big photo per row, edge to edge, no cramped two-across grid' : 'a grid of large photos'}`, { skip }, async () => {
     const dpr = width === 412 ? 2.625 : width === 375 ? 3 : 1;
     const { ctx, page, errors, photoWidths } = await open(width, { dpr });
     const box = (await photoBox(page))!;
@@ -87,21 +87,13 @@ for (const width of [375, 412, 768, 1280]) {
       assert.ok(first >= width * dpr && first <= 1440, `asked for ${first}px for ${width * dpr} device pixels`);
       assert.ok(first < width * dpr * 1.4, `not oversized: ${first}px for ${width * dpr}`);
 
-      const toggle = page.getByRole('group', { name: 'Photo size' });
-      assert.equal(await toggle.getByRole('button', { name: 'Show one big photo per row' }).getAttribute('aria-pressed'), 'true');
-      await toggle.getByRole('button', { name: 'Show two photos per row' }).click();
-      await page.waitForFunction(() => document.querySelector('main article')?.getAttribute('data-layout') === 'grid');
-      const half = (await photoBox(page))!;
-      assert.ok(half.width < 0.55 * width && half.width > 0.4 * width, `two across: ${half.width}`);
-      // Remembered on this device.
-      await page.reload({ waitUntil: 'domcontentloaded' });
-      await page.locator('main h3').first().waitFor();
-      await page.waitForFunction(() => document.querySelector('main article')?.getAttribute('data-layout') === 'grid');
-      assert.equal(await toggle.getByRole('button', { name: 'Show two photos per row' }).getAttribute('aria-pressed'), 'true');
-      await toggle.getByRole('button', { name: 'Show one big photo per row' }).click();
-      await page.waitForFunction(() => document.querySelector('main article')?.getAttribute('data-layout') === 'one');
-      assert.ok((await photoBox(page))!.width >= 0.9 * width);
-      assert.equal(await page.evaluate(() => localStorage.getItem('buh_feed_layout')), 'one');
+      // Always one large photo per row on a phone (the two-across grid read as cheap), so there is
+      // no layout toggle; every card in the feed is a full-width post.
+      assert.equal(await page.getByRole('group', { name: 'Photo size' }).count(), 0, 'no grid toggle');
+      const layouts = await page.locator('main article').evaluateAll((els) => els.map((e) => e.getAttribute('data-layout')));
+      assert.ok(layouts.length > 0 && layouts.every((l) => l === 'one'), layouts.join());
+      const lefts = await page.locator('[data-testid=feed-photo]').evaluateAll((els) => els.map((e) => Math.round(e.getBoundingClientRect().left)));
+      assert.ok(lefts.every((l) => l === 0), `each photo starts at the screen's edge: ${lefts}`);
     } else {
       assert.equal(await page.getByRole('group', { name: 'Photo size' }).isVisible(), false, 'no toggle where the grid is roomy');
       const across = width < 1024 ? 2 : width < 1280 ? 3 : 4;
@@ -198,10 +190,10 @@ test('the manifest is valid for Chrome, and every icon loads at its size', { ski
   assert.equal((await fetch(`${server.base}/icons/evil.svg`)).status, 404);
   // The shortcuts open the bag and Track Order.
   await page.goto(`${server.base}/?open=track`, { waitUntil: 'domcontentloaded' });
-  await page.getByText('Track Your UAE Bedding Order').waitFor();
+  await page.getByText('Track your order').waitFor();
   assert.equal(new URL(page.url()).search, '', 'the shortcut leaves a clean address');
   await page.goto(`${server.base}/?open=bag`, { waitUntil: 'domcontentloaded' });
-  await page.getByRole('heading', { name: 'Your Shopping Bag' }).waitFor();
+  await page.getByRole('heading', { name: 'Your bag' }).waitFor();
   assert.deepEqual(errors, []);
   await ctx.close();
 });
@@ -355,9 +347,9 @@ test('safe areas: the header, tab bar, sheets and footer buttons keep clear of a
   await page.keyboard.press('Escape');
   // The bag drawer too.
   await page.getByRole('navigation', { name: 'Shop' }).getByRole('button', { name: /^Bag/ }).click();
-  await page.getByRole('heading', { name: 'Your Shopping Bag' }).waitFor();
+  await page.getByRole('heading', { name: 'Your bag' }).waitFor();
   await page.waitForTimeout(400);
-  const head = (await page.getByRole('heading', { name: 'Your Shopping Bag' }).boundingBox())!;
+  const head = (await page.getByRole('heading', { name: 'Your bag' }).boundingBox())!;
   assert.ok(head.y >= 44, 'bag title below the status bar');
   assert.deepEqual(errors, []);
   await ctx.close();
@@ -378,14 +370,14 @@ test('app feel: no tap flash, taps without delay, sheets hold their scroll, the 
   const nav = page.getByRole('navigation', { name: 'Shop' });
   // Orders, Bag, Search: each opens over the feed and closes back to the same place.
   await nav.getByRole('button', { name: 'Orders' }).click();
-  await page.getByText('Track Your UAE Bedding Order').waitFor();
+  await page.getByText('Track your order').waitFor();
   await page.getByRole('button', { name: 'Close Track Order' }).click();
-  await page.getByText('Track Your UAE Bedding Order').waitFor({ state: 'detached' });
+  await page.getByText('Track your order').waitFor({ state: 'detached' });
   assert.ok(Math.abs((await page.evaluate(() => window.scrollY)) - 900) < 2, 'feed kept its place after Orders');
   await nav.getByRole('button', { name: /^Bag/ }).click();
-  await page.getByRole('heading', { name: 'Your Shopping Bag' }).waitFor();
+  await page.getByRole('heading', { name: 'Your bag' }).waitFor();
   await page.getByRole('button', { name: 'Close bag' }).click();
-  await page.getByRole('heading', { name: 'Your Shopping Bag' }).waitFor({ state: 'detached' });
+  await page.getByRole('heading', { name: 'Your bag' }).waitFor({ state: 'detached' });
   assert.ok(Math.abs((await page.evaluate(() => window.scrollY)) - 900) < 2, 'feed kept its place after the bag');
   await nav.getByRole('button', { name: 'Search' }).click();
   const search = page.getByRole('dialog', { name: 'Search the shop' });
@@ -422,7 +414,8 @@ test('skeletons while the shop loads (no spinner), in the chosen layout', { skip
 test('festival colour: the status bar (theme-color) follows the festival look', { skip }, async () => {
   const { ctx, page } = await open(412);
   const pub = await (await fetch(`${server.base}/api/settings/public`)).json();
-  const want = pub.festival?.festivalId ? pub.festival.theme.gradient[0] : '#0f1c2e';
+  // The deep shade of the festival's accent, or the shop's ink.
+  const want = pub.festival?.festivalId ? pub.festival.theme.bar : '#2b2127';
   await page.waitForFunction((c) => document.querySelector('meta[name=theme-color]')?.getAttribute('content') === c, want);
   await ctx.close();
 });

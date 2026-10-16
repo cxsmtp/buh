@@ -13,8 +13,8 @@ import { EMIRATES_LIST } from '@/lib/delivery';
  * and never shown to them.
  */
 
-const field = 'w-full px-3 py-2 rounded-xl border border-stone-300 bg-white text-stone-900 text-sm focus:outline-none focus:ring-2 focus:ring-[#c5a059]';
-const label = 'block text-xs font-semibold text-stone-700 mb-1';
+const field = 'w-full px-3 py-2 rounded-xl border border-line-strong bg-surface text-ink text-sm focus:outline-none focus:ring-2 focus:ring-gold';
+const label = 'block text-xs font-semibold text-ink-soft mb-1';
 
 export function DeliverySettingsCard({ value, onSave, auto }: { value: DeliverySettings; onSave: (v: DeliverySettings) => Promise<string | null>; auto?: AutoSaveHooks }) {
   const [d, setD] = useState<DeliverySettings>(value);
@@ -37,12 +37,12 @@ export function DeliverySettingsCard({ value, onSave, auto }: { value: DeliveryS
   return (
     <div className="space-y-5 text-sm">
       <section className="space-y-2">
-        <h3 className="font-bold text-[#0f1c2e] flex items-center gap-2"><Truck className="w-4 h-4 text-[#c5a059]" /> Where and how fast</h3>
+        <h3 className="font-bold text-ink flex items-center gap-2"><Truck className="w-4 h-4 text-gold" /> Where and how fast</h3>
         <fieldset>
           <legend className={label}>Emirates you deliver to</legend>
           <div className="flex flex-wrap gap-2 text-xs">
             {EMIRATES_LIST.map((e) => (
-              <label key={e} className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg border border-stone-200 bg-white">
+              <label key={e} className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg border border-line bg-surface">
                 <input type="checkbox" checked={d.emirates.includes(e)} onChange={() => toggle('emirates', e)} /> {e}
               </label>
             ))}
@@ -60,7 +60,7 @@ export function DeliverySettingsCard({ value, onSave, auto }: { value: DeliveryS
         </div>
       </section>
 
-      <section className="space-y-2 rounded-2xl border border-stone-200 bg-white p-3">
+      <section className="space-y-2 rounded-2xl border border-line bg-surface p-3">
         <label className="flex items-center gap-2 text-xs font-semibold">
           <input type="checkbox" checked={d.sameDayEnabled} onChange={(e) => set('sameDayEnabled', e.target.checked)} />
           Offer same-day delivery for an extra charge
@@ -81,23 +81,23 @@ export function DeliverySettingsCard({ value, onSave, auto }: { value: DeliveryS
               <legend className={label}>Where same-day is offered</legend>
               <div className="flex flex-wrap gap-2 text-xs">
                 {EMIRATES_LIST.map((e) => (
-                  <label key={e} className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg border border-stone-200">
+                  <label key={e} className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg border border-line">
                     <input type="checkbox" checked={d.sameDayEmirates.includes(e)} onChange={() => toggle('sameDayEmirates', e)} /> {e}
                   </label>
                 ))}
               </div>
             </fieldset>
-            <p className="text-[11px] text-stone-500">Customers choose it at checkout; the charge is added to their total (and to the cash collected on delivery). Book these with the courier&apos;s same-day service.</p>
+            <p className="text-[11px] text-ink-muted">Customers choose it at checkout; the charge is added to their total (and to the cash collected on delivery). Book these with the courier&apos;s same-day service.</p>
           </>
         )}
       </section>
 
       <div className="flex flex-wrap items-center gap-3">
-        <button type="button" onClick={() => void save()} disabled={saving} className="px-4 py-2 rounded-xl bg-[#0f1c2e] text-white text-xs font-bold flex items-center gap-1.5 disabled:opacity-60">
+        <button type="button" onClick={() => void save()} disabled={saving} className="px-4 py-2 rounded-xl bg-ink text-white text-xs font-bold flex items-center gap-1.5 disabled:opacity-60">
           {saving && <Loader2 className="w-3.5 h-3.5 animate-spin" />} Save delivery settings
         </button>
         {auto && autosave.bar}
-        {status && <p role="status" className={`text-xs font-semibold ${status.ok ? 'text-emerald-700' : 'text-red-700'}`}>{status.text}</p>}
+        {status && <p role="status" className={`text-xs font-semibold ${status.ok ? 'text-success' : 'text-danger'}`}>{status.text}</p>}
       </div>
     </div>
   );

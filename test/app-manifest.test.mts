@@ -35,8 +35,9 @@ test('the manifest: standalone, the brand colours, 192/512 icons in both kinds, 
   assert.equal(m.start_url, '/');
   assert.equal(m.scope, '/');
   assert.equal(m.name, 'Beautiful UAE Home');
-  assert.equal(m.theme_color, '#0f1c2e');
-  assert.equal(m.background_color, '#fbf9f5');
+  // The palette's ink and ivory (src/lib/design/tokens.ts).
+  assert.equal(m.theme_color, '#2b2127');
+  assert.equal(m.background_color, '#faf6ef');
   const icons = m.icons!.map((i) => `${i.purpose} ${i.sizes}`);
   assert.deepEqual(icons.sort(), ['any 192x192', 'any 512x512', 'maskable 192x192', 'maskable 512x512']);
   assert.deepEqual(m.shortcuts!.map((s) => s.url), ['/?open=bag', '/?open=track']);

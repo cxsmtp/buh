@@ -118,7 +118,7 @@ export function VersionsCard() {
     return () => clearInterval(t);
   }, [waitingForUpdater, load]);
 
-  if (!info) return <p className="text-xs text-stone-500">{error || 'Loading…'}</p>;
+  if (!info) return <p className="text-xs text-ink-muted">{error || 'Loading…'}</p>;
   const running = info.updater?.running || info.current;
   const managed = Boolean(info.updater);
   const autoNow = info.updater?.auto !== false;
@@ -126,22 +126,22 @@ export function VersionsCard() {
   const autoWaiting = managed && autoWanted !== null && autoWanted !== autoNow;
 
   return (
-    <div className="space-y-4 text-xs text-stone-700">
-      <div className="rounded-2xl border border-stone-200 bg-white p-3 space-y-1.5">
+    <div className="space-y-4 text-xs text-ink-soft">
+      <div className="rounded-2xl border border-line bg-surface p-3 space-y-1.5">
         <div className="flex flex-wrap items-center gap-2">
-          <History className="w-4 h-4 text-[#c5a059]" />
+          <History className="w-4 h-4 text-gold" />
           <span>
             This page is <strong className="font-mono">{label(info.current)}</strong>
             {running !== info.current && <> · the server now runs <strong className="font-mono">{label(running)}</strong> (reload to see it)</>}
           </span>
           {managed && (
-            <button type="button" onClick={() => void switchTo('latest')} disabled={Boolean(busy) || Boolean(info.pending) || info.updater?.lastRequest.result === 'working'} className="ml-auto px-3 py-1.5 rounded-lg bg-[#0f1c2e] text-white font-bold flex items-center gap-1 disabled:opacity-50">
+            <button type="button" onClick={() => void switchTo('latest')} disabled={Boolean(busy) || Boolean(info.pending) || info.updater?.lastRequest.result === 'working'} className="ml-auto px-3 py-1.5 rounded-lg bg-ink text-white font-bold flex items-center gap-1 disabled:opacity-50">
               {busy === 'latest' ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Sparkles className="w-3.5 h-3.5" />} Update to the latest
             </button>
           )}
         </div>
         {managed && (
-          <p className="text-stone-500">
+          <p className="text-ink-muted">
             Automatic updates{info.updater!.mode === 'single' ? ': Podman (one container), ' : ': '}
             {info.updater!.autoUpdateMinutes > 0 && info.updater!.auto !== false ? `checked every ${info.updater!.autoUpdateMinutes} minutes` : 'new versions only when you ask'}
             {info.updater!.mode === 'single' ? '; a switch closes the shop for a few seconds (the new version is tried first, the database saved).' : '.'}
@@ -151,9 +151,9 @@ export function VersionsCard() {
                 Update with <strong>Update to the latest</strong>, not with podman pull/stop/rm/run; to do it by hand, stop the updater first (<code>podman stop beautifuluaehome-updater</code>).
               </>
             )}
-            {info.pending && !info.pending.startsWith('auto') && <strong className="text-amber-700"> A switch is waiting to start (within a minute).</strong>}
+            {info.pending && !info.pending.startsWith('auto') && <strong className="text-warning"> A switch is waiting to start (within a minute).</strong>}
             {info.updater!.lastRequest.at && !info.pending && (
-              <span className={info.updater!.lastRequest.result === 'ok' ? 'text-emerald-700' : info.updater!.lastRequest.result === 'working' ? 'text-amber-700 font-semibold' : 'text-red-700'}>
+              <span className={info.updater!.lastRequest.result === 'ok' ? 'text-success' : info.updater!.lastRequest.result === 'working' ? 'text-warning font-semibold' : 'text-danger'}>
                 {' '}
                 {info.updater!.lastRequest.result === 'working' ? info.updater!.lastRequest.message : `Last request: ${info.updater!.lastRequest.message}`}
               </span>
@@ -162,22 +162,22 @@ export function VersionsCard() {
         )}
         {managed && (
           <div className="space-y-1">
-            <label className="flex flex-wrap items-center gap-2 font-semibold text-stone-800 cursor-pointer">
+            <label className="flex flex-wrap items-center gap-2 font-semibold text-ink cursor-pointer">
               <input
                 type="checkbox"
-                className="w-4 h-4 accent-[#0f1c2e]"
+                className="w-4 h-4 accent-ink"
                 checked={autoWaiting ? autoWanted! : autoNow}
                 disabled={autoWaiting}
                 onChange={(e) => void setAuto(e.target.checked)}
               />
               Install new versions automatically
               {autoWaiting && (
-                <span role="status" className="font-normal text-amber-700">
+                <span role="status" className="font-normal text-warning">
                   Waiting for the updater…
                 </span>
               )}
             </label>
-            <p className="text-stone-500">
+            <p className="text-ink-muted">
               {info.updater!.auto === false
                 ? 'Off: nothing is checked or installed by itself (the shop, the HTTPS proxy and the updater). Update to the latest and switching versions still work, and a stopped shop is still started again.'
                 : 'On: new versions of the shop, the HTTPS proxy and the updater are installed by themselves.'}{' '}
@@ -192,24 +192,24 @@ export function VersionsCard() {
           </div>
         )}
         {managed && info.updater!.integrityProblem && (
-          <p role="alert" className="rounded-lg bg-red-50 border border-red-300 text-red-800 p-2 break-words flex gap-1.5">
+          <p role="alert" className="rounded-lg bg-danger-soft border border-danger-line text-danger p-2 break-words flex gap-1.5">
             <ShieldAlert className="w-4 h-4 shrink-0" aria-hidden="true" />
             <span>{info.updater!.integrityProblem}</span>
           </p>
         )}
         {managed && info.updater!.registryProblem && (
-          <p role="alert" className="rounded-lg bg-red-50 border border-red-200 text-red-800 p-2 break-words">
+          <p role="alert" className="rounded-lg bg-danger-soft border border-danger-line text-danger p-2 break-words">
             {info.updater!.registryProblem.charAt(0).toUpperCase() + info.updater!.registryProblem.slice(1)}.
           </p>
         )}
         {!managed && (
-          <div className="text-stone-600 space-y-1.5">
+          <div className="text-ink-soft space-y-1.5">
             <p>Automatic updates are not running on this server, so update with these two commands on the computer that runs the shop (Podman):</p>
             <p>
               The images are private, so Podman must be logged in to <code>ghcr.io</code> once, with a GitHub token that can only read packages: on Windows <code>podman login ghcr.io -u YOUR-GITHUB-NAME</code>; on a Linux server as in the deployment guide (&quot;Private images&quot;), so that the login lasts.
             </p>
-            <code className="block bg-stone-100 rounded-lg p-2 break-all">podman pull {IMAGE}:latest</code>
-            <code className="block bg-stone-100 rounded-lg p-2 break-all">{PODMAN_RUN}</code>
+            <code className="block bg-sand rounded-lg p-2 break-all">podman pull {IMAGE}:latest</code>
+            <code className="block bg-sand rounded-lg p-2 break-all">{PODMAN_RUN}</code>
             <p>
               Use your own container and data-volume names if they differ (<code>podman ps</code> lists them); the data volume must be the one the shop already uses. For an older version, change <code>latest</code> to its number, e.g. <code>2.0.0</code>.
             </p>
@@ -217,34 +217,34 @@ export function VersionsCard() {
               Then reload this page. If it still says <strong className="font-mono">{label(info.current)}</strong>, another, older container is still answering: <code>podman ps</code> shows which one holds the port; stop it.
             </p>
             <p>To have the shop update itself (and this page switch versions), paste one line once on that computer, with Podman running. Nothing to download first; use your container&apos;s name if it is not beautifuluaehome. In <strong>Command Prompt (cmd), not PowerShell</strong>:</p>
-            <code className="block bg-stone-100 rounded-lg p-2 break-all">{SETUP_CMD}</code>
+            <code className="block bg-sand rounded-lg p-2 break-all">{SETUP_CMD}</code>
             <p>Or in PowerShell:</p>
-            <code className="block bg-stone-100 rounded-lg p-2 break-all">{SETUP_POWERSHELL}</code>
+            <code className="block bg-sand rounded-lg p-2 break-all">{SETUP_POWERSHELL}</code>
             <p>It keeps your container&apos;s data, port and settings, checks for new versions every 15 minutes, and keeps itself up to date; a switch closes the shop for a few seconds. On a Linux server, see the deployment guide.</p>
             <details>
               <summary className="cursor-pointer">Docker Compose server (Hostinger guide)</summary>
-              <code className="block bg-stone-100 rounded-lg p-2 mt-1 break-all">docker compose run --rm updater rollback {IMAGE}:2.0.0</code>
+              <code className="block bg-sand rounded-lg p-2 mt-1 break-all">docker compose run --rm updater rollback {IMAGE}:2.0.0</code>
               <p className="mt-1">To let this page switch versions, turn on automatic updates (deployment guide, section 5).</p>
             </details>
           </div>
         )}
-        {status && <p role="status" className={`font-semibold ${status.ok ? 'text-emerald-700' : 'text-red-700'}`}>{status.text}</p>}
+        {status && <p role="status" className={`font-semibold ${status.ok ? 'text-success' : 'text-danger'}`}>{status.text}</p>}
       </div>
 
       {managed && (info.updater!.history?.length ?? 0) > 0 && (
-        <section aria-labelledby="installed-here" className="rounded-2xl border border-stone-200 bg-white p-3 space-y-1.5">
-          <h4 id="installed-here" className="font-bold text-[#0f1c2e]">
+        <section aria-labelledby="installed-here" className="rounded-2xl border border-line bg-surface p-3 space-y-1.5">
+          <h4 id="installed-here" className="font-bold text-ink">
             Installed on this server
           </h4>
           <ul className="space-y-1">
             {info.updater!.history!.map((h) => (
               <li key={`${h.at}-${h.digest}`} className="flex flex-wrap items-baseline gap-x-2 gap-y-0.5">
                 <strong className="font-mono">{/^\d/.test(h.version) ? label(h.version) : 'unknown version'}</strong>
-                <code className="text-stone-500 break-all">{shortDigest(h.digest)}</code>
-                <time dateTime={h.at} className="text-stone-500">
+                <code className="text-ink-muted break-all">{shortDigest(h.digest)}</code>
+                <time dateTime={h.at} className="text-ink-muted">
                   {new Date(h.at).toLocaleString()}
                 </time>
-                <span className="text-stone-600">{WHY[h.why] ?? h.why}</span>
+                <span className="text-ink-soft">{WHY[h.why] ?? h.why}</span>
               </li>
             ))}
           </ul>
@@ -257,22 +257,22 @@ export function VersionsCard() {
           const tooOld = older(e.version, info.oldestRollback);
           const recorded = info.updater?.digests?.find((d) => d.version === e.version);
           return (
-            <li key={e.version} className={`rounded-2xl border p-3 bg-white ${isRunning ? 'border-[#c5a059]' : 'border-stone-200'}`}>
+            <li key={e.version} className={`rounded-2xl border p-3 bg-surface ${isRunning ? 'border-gold' : 'border-line'}`}>
               <details open={e.version === info.changelog[0]?.version}>
                 <summary className="cursor-pointer flex flex-wrap items-center gap-x-2 gap-y-1">
-                  <strong className="font-mono text-[#0f1c2e]">{e.label}</strong>
-                  <span className="text-stone-500">{e.date}</span>
+                  <strong className="font-mono text-ink">{e.label}</strong>
+                  <span className="text-ink-muted">{e.date}</span>
                   {e.pr && (
-                    <a href={`https://github.com/cxsmtp/buh/pull/${e.pr}`} target="_blank" rel="noopener noreferrer" className="text-stone-500 underline inline-flex items-center gap-0.5" onClick={(ev) => ev.stopPropagation()}>
+                    <a href={`https://github.com/cxsmtp/buh/pull/${e.pr}`} target="_blank" rel="noopener noreferrer" className="text-ink-muted underline inline-flex items-center gap-0.5" onClick={(ev) => ev.stopPropagation()}>
                       #{e.pr} <ExternalLink className="w-3 h-3" />
                     </a>
                   )}
-                  {isRunning && <span className="px-2 py-0.5 rounded-full bg-amber-100 text-amber-800 font-bold">Running</span>}
+                  {isRunning && <span className="px-2 py-0.5 rounded-full bg-warning-soft text-warning font-bold">Running</span>}
                   {recorded && (
-                    <span className="inline-flex items-center gap-1 text-stone-500">
+                    <span className="inline-flex items-center gap-1 text-ink-muted">
                       <code className="break-all">{shortDigest(recorded.digest)}</code>
                       {recorded.verified && (
-                        <span className="inline-flex items-center gap-0.5 text-emerald-700 font-semibold" title="Installed here under the digest this version first came with">
+                        <span className="inline-flex items-center gap-0.5 text-success font-semibold" title="Installed here under the digest this version first came with">
                           <BadgeCheck className="w-3.5 h-3.5" aria-hidden="true" /> verified
                         </span>
                       )}
@@ -287,13 +287,13 @@ export function VersionsCard() {
                           void switchTo(e.version);
                         }}
                         disabled={Boolean(busy) || Boolean(info.pending) || info.updater?.lastRequest.result === 'working'}
-                        className="px-2.5 py-1 rounded-lg border border-stone-300 font-semibold inline-flex items-center gap-1 disabled:opacity-50"
+                        className="px-2.5 py-1 rounded-lg border border-line-strong font-semibold inline-flex items-center gap-1 disabled:opacity-50"
                         aria-label={`Switch to ${e.label}`}
                       >
                         {busy === e.version ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <RotateCcw className="w-3.5 h-3.5" />} Switch to this version
                       </button>
                     )}
-                    {!isRunning && tooOld && <span className="text-stone-500">Can&apos;t run on today&apos;s database</span>}
+                    {!isRunning && tooOld && <span className="text-ink-muted">Can&apos;t run on today&apos;s database</span>}
                   </span>
                 </summary>
                 <div className="mt-2 leading-relaxed">

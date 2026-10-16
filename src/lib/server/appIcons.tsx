@@ -1,5 +1,6 @@
 import { ImageResponse } from 'next/og';
 import type { BrandSettings } from '@/types';
+import { PALETTE } from '@/lib/design/tokens';
 import { ICON_FILES, iconVersion, safeColor } from './appManifest';
 import { LOGO_MAX_SIDE, readImage } from './images';
 import { imageDimensions } from './imageInput';
@@ -69,7 +70,7 @@ async function draw(brand: BrandSettings, size: number, maskable: boolean): Prom
           display: 'flex',
           alignItems: 'center',
           justifyContent: 'center',
-          background: `linear-gradient(135deg, ${accent}, #9f7e38)`,
+          background: `linear-gradient(135deg, ${accent}, ${PALETTE['gold-deep']})`,
           borderRadius: maskable ? 0 : size * 0.22,
           color: '#ffffff',
           fontSize: Math.round(inner * (letters.length > 2 ? 0.36 : 0.46)),

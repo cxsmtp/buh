@@ -1,5 +1,17 @@
 # Changelog
 
+## BUH-02.07.00 — 2026-10-16 19:35 UTC · [#23](https://github.com/cxsmtp/buh/pull/23)
+
+- **Fits every phone.** Reported: on a phone some screens went past the edge and you had to scroll sideways to reach a ✕. Every screen and pop-up (bag, checkout, confirmation, filter, product, chat, sign-in and the whole Admin Hub) now fits phones from 320 px wide, held sideways and with large text; every ✕ and main button stays in view.
+- **A quieter, luxury look.** One palette throughout (warm ivory and linen, deep aubergine-ink text, champagne gold, a dusty-rose accent), an elegant serif for headings with a clean sans for the rest, fine hairlines instead of shadows, and a small "Reduced" mark instead of red SALE badges. Phones always show one large photo per row.
+- **Charming festivals.** Each festival now shifts only the accent within the palette (emerald and gold for Eid, saffron for Diwali, berry for Christmas…) with one fine motif and a short, warm greeting; quiet days stay quiet. Settings → Festival themes can preview any of them.
+- **A calm announcement bar.** It drifts slowly, pauses when touched, and holds three short lines at most (free delivery in 1–2 days, cash on delivery, handmade in small batches), edited in Settings → Store & contact.
+- **Status.**
+  - **Benchmark:** same host, main (BUH-02.06.00) vs this branch, 3 alternating rounds, 0 failed requests. Storefront main 876 / 875 / 903 req/s, branch 880 / 921 / 946 (p95 133–160 vs 104–143 ms); courier check main 812 / 714 / 807, branch 749 / 721 / 770; catalogue main 859 / 951 / 816, branch 859 / 854 / 838. Level, the storefront slightly faster.
+  - **Tests:** 464 passed, including a new check of every screen and pop-up at 320, 360, 375, 390, 412 and 430 px, sideways and at 200% text (10 of 16 cases failed before the fix), the palette (no colour outside it, AA contrast) and every festival look.
+  - **Dependency audit:** production 0 vulnerabilities; no new packages (fonts are self-hosted).
+  - **Security scan:** no new routes or inputs beyond the three announcement lines (validated on the server); no automated scanner here. Not yet seen on a real iPhone or Android.
+
 ## BUH-02.06.00 — 2026-10-16 17:36 UTC · [#21](https://github.com/cxsmtp/buh/pull/21)
 
 - **Manage stock from your phone.** Admin Hub → Inventory: search and filters (low, sold out, hidden), stock per size in colour, big − / + buttons with Undo, a typed number, "Received stock" for several sizes at once, a reason for each change and its history; two phones changing the same item never overwrite each other, and a shaky connection never counts a change twice.

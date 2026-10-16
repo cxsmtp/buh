@@ -138,31 +138,29 @@ export function InstallPrompt({ blocked, logo }: InstallPromptProps) {
     <section
       role="region"
       aria-label="Install the app"
-      className="browser-only fixed z-[42] inset-x-3 bottom-above-tabs md:bottom-6 md:left-6 md:right-auto md:w-[360px] rounded-2xl bg-white text-stone-900 shadow-2xl border border-stone-200 p-4 rise-in"
+      className="browser-only fixed z-[42] inset-x-3 bottom-above-tabs md:bottom-6 md:left-6 md:right-auto md:w-[360px] max-h-[calc(100dvh-6rem-env(safe-area-inset-bottom,0px))] overflow-y-auto overscroll-contain rounded-2xl bg-surface text-ink shadow-[0_18px_50px_-24px_rgb(43_33_39/0.5)] border border-line p-4 rise-in"
     >
-      <div className="flex items-start gap-3">
+      <div className="flex items-center gap-3">
         <span className="shrink-0">{logo}</span>
-        <div className="min-w-0 flex-1 space-y-1">
-          <h2 className="text-sm font-semibold text-stone-900">Install the shop as an app</h2>
-          {ios ? (
-            <p className="text-xs text-stone-700 leading-relaxed">
-              Tap <Share className="inline w-4 h-4 -mt-0.5 text-[#0f1c2e]" aria-label="Share" /> <strong>Share</strong> at the bottom of Safari, then{' '}
-              <SquarePlus className="inline w-4 h-4 -mt-0.5 text-[#0f1c2e]" aria-hidden="true" /> <strong>Add to Home Screen</strong>.
-            </p>
-          ) : (
-            <p className="text-xs text-stone-700 leading-relaxed">Open the shop from your home screen, full screen, like an app. It takes no space and no store.</p>
-          )}
-        </div>
-        <button type="button" onClick={close} aria-label="Close" className="shrink-0 -mt-1 -mr-1 w-9 h-9 rounded-full flex items-center justify-center text-stone-700 hover:bg-stone-100">
+        <h2 className="min-w-0 flex-1 font-serif text-lg leading-tight text-ink">Install the shop as an app</h2>
+        <button type="button" onClick={close} aria-label="Close" className="shrink-0 -mr-1 w-9 h-9 rounded-full flex items-center justify-center text-ink-soft hover:bg-sand">
           <X className="w-4 h-4" aria-hidden="true" />
         </button>
       </div>
-      <div className="mt-3 flex items-center justify-end gap-2">
-        <button type="button" onClick={close} className="h-10 px-4 rounded-full text-sm font-medium text-stone-800 hover:bg-stone-100">
+      {ios ? (
+        <p className="mt-2 text-xs text-ink-soft leading-relaxed">
+          Tap <Share className="inline w-4 h-4 -mt-0.5 text-ink" aria-label="Share" /> <strong>Share</strong> at the bottom of Safari, then{' '}
+          <SquarePlus className="inline w-4 h-4 -mt-0.5 text-ink" aria-hidden="true" /> <strong>Add to Home Screen</strong>.
+        </p>
+      ) : (
+        <p className="mt-2 text-xs text-ink-soft leading-relaxed">Open the shop from your home screen, full screen, like an app. It takes no space and no store.</p>
+      )}
+      <div className="sticky -bottom-4 -mx-4 -mb-4 px-4 pb-4 pt-3 bg-surface flex flex-wrap items-center justify-end gap-2">
+        <button type="button" onClick={close} className="min-h-10 px-4 rounded-full text-sm text-ink hover:bg-sand">
           {ios ? 'Got it' : 'Not now'}
         </button>
         {!ios && (
-          <button type="button" onClick={() => void install()} className="h-10 px-5 rounded-full bg-[#0f1c2e] text-white text-sm font-semibold hover:bg-[#1c2c44]">
+          <button type="button" onClick={() => void install()} className="min-h-10 px-5 rounded-full bg-ink text-ivory text-sm font-medium tracking-[0.03em] hover:bg-ink-2">
             Install
           </button>
         )}

@@ -55,16 +55,16 @@ interface AdminInventoryTabProps {
 }
 
 const CHIP: Record<StockLevel, string> = {
-  out: 'bg-red-50 text-red-800 border-red-300',
-  low: 'bg-amber-50 text-amber-900 border-amber-300',
-  ok: 'bg-emerald-50 text-emerald-900 border-emerald-300',
+  out: 'bg-danger-soft text-danger border-danger-line',
+  low: 'bg-warning-soft text-warning border-warning-line',
+  ok: 'bg-success-soft text-success border-success-line',
 };
 const LEVEL_WORD: Record<StockLevel, string> = { out: 'sold out', low: 'low', ok: 'in stock' };
 
-const actionBtn = 'min-h-11 px-3 rounded-xl border border-stone-300 bg-white text-stone-800 text-xs font-semibold inline-flex items-center justify-center gap-1.5 disabled:opacity-40';
-const actionDanger = 'min-h-11 px-3 rounded-xl border border-red-300 bg-white text-red-800 text-xs font-semibold inline-flex items-center justify-center gap-1.5 disabled:opacity-40';
-const actionIcon = 'min-h-11 w-11 rounded-xl border border-stone-300 bg-white text-stone-800 inline-flex items-center justify-center disabled:opacity-40';
-const actionPrimary = 'min-h-11 px-3 rounded-xl border border-[#0f1c2e] bg-[#0f1c2e] text-white text-xs font-semibold inline-flex items-center justify-center gap-1.5';
+const actionBtn = 'min-h-11 px-3 rounded-xl border border-line-strong bg-surface text-ink text-xs font-semibold inline-flex items-center justify-center gap-1.5 disabled:opacity-40';
+const actionDanger = 'min-h-11 px-3 rounded-xl border border-danger-line bg-surface text-danger text-xs font-semibold inline-flex items-center justify-center gap-1.5 disabled:opacity-40';
+const actionIcon = 'min-h-11 w-11 rounded-xl border border-line-strong bg-surface text-ink inline-flex items-center justify-center disabled:opacity-40';
+const actionPrimary = 'min-h-11 px-3 rounded-xl border border-ink bg-ink text-white text-xs font-semibold inline-flex items-center justify-center gap-1.5';
 
 export const AdminInventoryTab: React.FC<AdminInventoryTabProps> = ({ products, catalog, onChanged, onProductUpdated, startAdding = false }) => {
   const [editing, setEditing] = useState<AdminProduct | 'new' | null>(startAdding ? 'new' : null);
@@ -180,21 +180,21 @@ export const AdminInventoryTab: React.FC<AdminInventoryTabProps> = ({ products, 
   return (
     <div className="space-y-3 pb-24 sm:pb-6">
       <div className="flex items-center gap-2">
-        <h2 className="font-serif font-bold text-lg text-[#0f1c2e] flex items-center gap-2">
-          <Package className="w-5 h-5 text-[#8a6a2c]" aria-hidden="true" /> Inventory
+        <h2 className="font-serif font-bold text-lg text-ink flex items-center gap-2">
+          <Package className="w-5 h-5 text-gold-deep" aria-hidden="true" /> Inventory
         </h2>
-        <button type="button" onClick={() => setEditing('new')} className="ml-auto min-h-11 px-4 rounded-xl bg-[#0f1c2e] text-white text-sm font-bold flex items-center gap-1.5">
+        <button type="button" onClick={() => setEditing('new')} className="ml-auto min-h-11 px-4 rounded-xl bg-ink text-white text-sm font-bold flex items-center gap-1.5">
           <Plus className="w-4 h-4" aria-hidden="true" /> Add product
         </button>
       </div>
 
       {(alerts.soldOut.length > 0 || alerts.low.length > 0) && (
         <div className="grid grid-cols-2 gap-2" aria-label="Stock alerts" role="group">
-          <button type="button" onClick={() => setFilter('sold-out')} className="min-h-14 rounded-2xl border border-red-200 bg-red-50 text-red-900 px-3 py-2 text-left">
+          <button type="button" onClick={() => setFilter('sold-out')} className="min-h-14 rounded-2xl border border-danger-line bg-danger-soft text-danger px-3 py-2 text-left">
             <span className="block text-xl font-bold leading-tight">{alerts.soldOut.length}</span>
             <span className="text-xs font-semibold">sold out</span>
           </button>
-          <button type="button" onClick={() => setFilter('low')} className="min-h-14 rounded-2xl border border-amber-200 bg-amber-50 text-amber-900 px-3 py-2 text-left">
+          <button type="button" onClick={() => setFilter('low')} className="min-h-14 rounded-2xl border border-warning-line bg-warning-soft text-warning px-3 py-2 text-left">
             <span className="block text-xl font-bold leading-tight">{alerts.low.length}</span>
             <span className="text-xs font-semibold">running low (≤ {low} left)</span>
           </button>
@@ -202,16 +202,16 @@ export const AdminInventoryTab: React.FC<AdminInventoryTabProps> = ({ products, 
       )}
 
       {/* Search and filters stay at the top while the list scrolls. */}
-      <div className="sticky top-0 z-20 -mx-3 px-3 sm:mx-0 sm:px-0 py-2 bg-[#fbf9f5] space-y-2">
+      <div className="sticky top-0 z-20 -mx-3 px-3 sm:mx-0 sm:px-0 py-2 bg-ivory space-y-2">
         <label className="relative block">
-          <Search className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-stone-500" aria-hidden="true" />
+          <Search className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-ink-muted" aria-hidden="true" />
           <input
             type="search"
             value={query}
             onChange={(e) => setQuery(e.target.value)}
             placeholder="Search name or SKU"
             aria-label="Search name or SKU"
-            className="w-full min-h-11 pl-9 pr-3 rounded-xl border border-stone-300 bg-white text-sm"
+            className="w-full min-h-11 pl-9 pr-3 rounded-xl border border-line-strong bg-surface text-sm"
           />
         </label>
         <div className="flex gap-1.5 overflow-x-auto no-scrollbar sm:flex-wrap" role="group" aria-label="Show">
@@ -221,16 +221,16 @@ export const AdminInventoryTab: React.FC<AdminInventoryTabProps> = ({ products, 
               type="button"
               onClick={() => setFilter(id)}
               aria-pressed={filter === id}
-              className={`shrink-0 min-h-11 px-3.5 rounded-full border text-xs font-semibold ${filter === id ? 'bg-[#0f1c2e] text-white border-[#0f1c2e]' : 'bg-white border-stone-300 text-stone-800'}`}
+              className={`shrink-0 min-h-11 px-3.5 rounded-full border text-xs font-semibold ${filter === id ? 'bg-ink text-white border-ink' : 'bg-surface border-line-strong text-ink'}`}
             >
-              {name} <span className={filter === id ? 'text-white' : 'text-stone-600'}>{counts[id]}</span>
+              {name} <span className={filter === id ? 'text-white' : 'text-ink-soft'}>{counts[id]}</span>
             </button>
           ))}
         </div>
         <div className="grid grid-cols-2 gap-2 sm:flex">
-          <label className="min-w-0 text-[11px] font-semibold text-stone-700 sm:w-60">
+          <label className="min-w-0 text-[11px] font-semibold text-ink-soft sm:w-60">
             Category
-            <select value={category} onChange={(e) => setCategory(e.target.value)} className="mt-0.5 w-full min-h-11 px-2 rounded-xl border border-stone-300 bg-white text-sm font-normal text-stone-900">
+            <select value={category} onChange={(e) => setCategory(e.target.value)} className="mt-0.5 w-full min-h-11 px-2 rounded-xl border border-line-strong bg-surface text-sm font-normal text-ink">
               <option value="">All categories</option>
               {catalog.categories.map((c) => (
                 <option key={c.id} value={c.id}>
@@ -239,9 +239,9 @@ export const AdminInventoryTab: React.FC<AdminInventoryTabProps> = ({ products, 
               ))}
             </select>
           </label>
-          <label className="min-w-0 text-[11px] font-semibold text-stone-700 sm:w-60" title="Recorded with each − / + change and typed number">
+          <label className="min-w-0 text-[11px] font-semibold text-ink-soft sm:w-60" title="Recorded with each − / + change and typed number">
             Reason for − / +
-            <select value={reason} onChange={(e) => setReason(e.target.value as StockReason)} className="mt-0.5 w-full min-h-11 px-2 rounded-xl border border-stone-300 bg-white text-sm font-normal text-stone-900">
+            <select value={reason} onChange={(e) => setReason(e.target.value as StockReason)} className="mt-0.5 w-full min-h-11 px-2 rounded-xl border border-line-strong bg-surface text-sm font-normal text-ink">
               {REASONS.map((r) => (
                 <option key={r.id} value={r.id}>
                   {r.label}
@@ -252,14 +252,14 @@ export const AdminInventoryTab: React.FC<AdminInventoryTabProps> = ({ products, 
         </div>
       </div>
 
-      {shown.length === 0 && <p className="text-center text-sm text-stone-600 py-10 bg-white rounded-2xl border border-stone-200">Nothing here.</p>}
+      {shown.length === 0 && <p className="text-center text-sm text-ink-soft py-10 bg-surface rounded-2xl border border-line">Nothing here.</p>}
 
       <ul className="grid grid-cols-1 lg:grid-cols-2 gap-2.5 lg:items-start">
         {shown.map((p) => {
           const isOpen = open.has(p.id);
           const panelId = `inv-${p.id}`;
           return (
-            <li key={p.id} className={`bg-white rounded-2xl border ${p.archived ? 'border-stone-200 opacity-80' : 'border-stone-200'} overflow-hidden`}>
+            <li key={p.id} className={`bg-surface rounded-2xl border ${p.archived ? 'border-line opacity-80' : 'border-line'} overflow-hidden`}>
               <button
                 type="button"
                 onClick={() => toggle(p.id)}
@@ -269,17 +269,17 @@ export const AdminInventoryTab: React.FC<AdminInventoryTabProps> = ({ products, 
                 className="w-full flex gap-3 p-2.5 text-left"
               >
                 {/* eslint-disable-next-line @next/next/no-img-element */}
-                <img src={p.featuredImage} alt="" className="w-14 h-14 rounded-xl object-cover bg-stone-100 shrink-0" loading="lazy" />
+                <img src={p.featuredImage} alt="" className="w-14 h-14 rounded-xl object-cover bg-sand shrink-0" loading="lazy" />
                 <span className="min-w-0 flex-1">
                   <span className="flex items-start gap-1">
-                    <span className="font-bold text-sm text-[#0f1c2e] truncate flex-1">{p.title}</span>
-                    <ChevronDown className={`w-4 h-4 shrink-0 text-stone-500 transition-transform ${isOpen ? 'rotate-180' : ''}`} aria-hidden="true" />
+                    <span className="font-bold text-sm text-ink truncate flex-1">{p.title}</span>
+                    <ChevronDown className={`w-4 h-4 shrink-0 text-ink-muted transition-transform ${isOpen ? 'rotate-180' : ''}`} aria-hidden="true" />
                   </span>
-                  <span className="block text-[11px] text-stone-600 truncate">
+                  <span className="block text-[11px] text-ink-soft truncate">
                     AED {p.price} · {categoryLabel(p.category)}
                     {p.sku && <> · {p.sku}</>}
-                    {p.active === false && !p.archived && <strong className="ml-1 text-stone-800">· hidden</strong>}
-                    {!p.archived && isSoldOut(p) && <strong className="ml-1 text-red-800">· sold out</strong>}
+                    {p.active === false && !p.archived && <strong className="ml-1 text-ink">· hidden</strong>}
+                    {!p.archived && isSoldOut(p) && <strong className="ml-1 text-danger">· sold out</strong>}
                   </span>
                   {!p.archived && (
                     <span className="mt-1 flex flex-wrap gap-1">
@@ -292,14 +292,14 @@ export const AdminInventoryTab: React.FC<AdminInventoryTabProps> = ({ products, 
                           </span>
                         );
                       })}
-                      {stock.saving(p.id) && <span className="text-[11px] text-stone-600">saving…</span>}
+                      {stock.saving(p.id) && <span className="text-[11px] text-ink-soft">saving…</span>}
                     </span>
                   )}
                 </span>
               </button>
 
               {isOpen && (
-                <div id={panelId} className="border-t border-stone-100 px-2.5 pb-3 pt-2 space-y-3">
+                <div id={panelId} className="border-t border-line px-2.5 pb-3 pt-2 space-y-3">
                   {!p.archived && (
                     <ul className="space-y-1.5" aria-label={`Stock of ${p.title} per size`}>
                       {p.profiles.map((s) => (
@@ -388,17 +388,17 @@ export const AdminInventoryTab: React.FC<AdminInventoryTabProps> = ({ products, 
           <div
             key={stock.toast.id}
             className={`pointer-events-auto w-full max-w-md rounded-2xl shadow-lg px-3 py-2 flex items-center gap-2 text-sm ${
-              stock.toast.kind === 'saved' ? 'bg-[#0f1c2e] text-white' : stock.toast.kind === 'conflict' ? 'bg-amber-100 text-amber-950 border border-amber-300' : 'bg-red-50 text-red-900 border border-red-300'
+              stock.toast.kind === 'saved' ? 'bg-ink text-white' : stock.toast.kind === 'conflict' ? 'bg-warning-soft text-warning border border-warning-line' : 'bg-danger-soft text-danger border border-danger-line'
             }`}
           >
             <span className="flex-1 min-w-0 line-clamp-2">{stock.toast.text}</span>
             {stock.toast.kind === 'saved' && stock.toast.moveId && (
-              <button type="button" onClick={() => stock.undo(stock.toast!)} className="min-h-11 px-3 rounded-xl bg-white/15 font-bold flex items-center gap-1">
+              <button type="button" onClick={() => stock.undo(stock.toast!)} className="min-h-11 px-3 rounded-xl bg-surface/15 font-bold flex items-center gap-1">
                 <Undo2 className="w-4 h-4" aria-hidden="true" /> Undo
               </button>
             )}
             {stock.toast.kind === 'conflict' && (
-              <button type="button" onClick={() => void stock.refresh()} className="min-h-11 px-3 rounded-xl bg-white font-bold flex items-center gap-1 border border-amber-300">
+              <button type="button" onClick={() => void stock.refresh()} className="min-h-11 px-3 rounded-xl bg-surface font-bold flex items-center gap-1 border border-warning-line">
                 <RefreshCw className="w-4 h-4" aria-hidden="true" /> Refresh
               </button>
             )}
@@ -408,7 +408,7 @@ export const AdminInventoryTab: React.FC<AdminInventoryTabProps> = ({ products, 
           </div>
         )}
         {notice && (
-          <div className={`pointer-events-auto w-full max-w-md rounded-2xl shadow-lg px-3 py-2 flex items-center gap-2 text-sm ${notice.error ? 'bg-red-50 text-red-900 border border-red-300' : 'bg-white text-stone-900 border border-stone-300'}`}>
+          <div className={`pointer-events-auto w-full max-w-md rounded-2xl shadow-lg px-3 py-2 flex items-center gap-2 text-sm ${notice.error ? 'bg-danger-soft text-danger border border-danger-line' : 'bg-surface text-ink border border-line-strong'}`}>
             <span className="flex-1 min-w-0 break-words">{notice.text}</span>
             <button type="button" onClick={() => setNotice(null)} className="min-h-11 min-w-11 flex items-center justify-center rounded-xl" aria-label="Dismiss message">
               <X className="w-4 h-4" aria-hidden="true" />
@@ -462,10 +462,10 @@ function SizeStepper({ name, short, qty, level, onStep, onSet }: { name: string;
   return (
     <li className="flex items-center gap-2">
       <span className="min-w-0 flex-1">
-        <span className="block text-sm font-semibold text-stone-900 truncate">{short}</span>
-        <span className={`text-[11px] font-semibold ${level === 'out' ? 'text-red-800' : level === 'low' ? 'text-amber-900' : 'text-emerald-800'}`}>{LEVEL_WORD[level]}</span>
+        <span className="block text-sm font-semibold text-ink truncate">{short}</span>
+        <span className={`text-[11px] font-semibold ${level === 'out' ? 'text-danger' : level === 'low' ? 'text-warning' : 'text-success'}`}>{LEVEL_WORD[level]}</span>
       </span>
-      <button type="button" onClick={() => onStep(-1)} disabled={qty <= 0} className="w-12 h-12 rounded-xl border border-stone-300 bg-white flex items-center justify-center disabled:opacity-30 active:bg-stone-100" aria-label={`One fewer ${name}`}>
+      <button type="button" onClick={() => onStep(-1)} disabled={qty <= 0} className="w-12 h-12 rounded-xl border border-line-strong bg-surface flex items-center justify-center disabled:opacity-30 active:bg-sand" aria-label={`One fewer ${name}`}>
         <Minus className="w-5 h-5" aria-hidden="true" />
       </button>
       {typing === null ? (
@@ -498,11 +498,11 @@ function SizeStepper({ name, short, qty, level, onStep, onSet }: { name: string;
               setTyping(null);
             }
           }}
-          className="w-16 h-12 rounded-xl border-2 border-[#0f1c2e] text-lg font-bold text-center tabular-nums bg-white"
+          className="w-16 h-12 rounded-xl border-2 border-ink text-lg font-bold text-center tabular-nums bg-surface"
           aria-label={`Pieces of ${name} in stock`}
         />
       )}
-      <button type="button" onClick={() => onStep(1)} className="w-12 h-12 rounded-xl border border-stone-300 bg-white flex items-center justify-center active:bg-stone-100" aria-label={`One more ${name}`}>
+      <button type="button" onClick={() => onStep(1)} className="w-12 h-12 rounded-xl border border-line-strong bg-surface flex items-center justify-center active:bg-sand" aria-label={`One more ${name}`}>
         <Plus className="w-5 h-5" aria-hidden="true" />
       </button>
     </li>
@@ -518,31 +518,31 @@ function ReceiveSheet({ product, shown, onClose, onReceive }: { product: AdminPr
   const bump = (id: string, d: number) => setAdd((a) => ({ ...a, [id]: Math.max(0, Math.min(1000, (a[id] ?? 0) + d)) }));
   return (
     <Sheet labelledBy={titleId} onClose={onClose} variant="bottom">
-      <div className="px-4 pt-4 pb-2 flex items-start gap-2 border-b border-stone-200">
+      <div className="px-4 pt-4 pb-2 flex items-start gap-2 border-b border-line">
         <div className="min-w-0 flex-1">
-          <h3 id={titleId} className="font-serif font-bold text-base text-[#0f1c2e]">
+          <h3 id={titleId} className="font-serif font-bold text-base text-ink">
             Received stock
           </h3>
-          <p className="text-xs text-stone-600 truncate">{product.title}</p>
+          <p className="text-xs text-ink-soft truncate">{product.title}</p>
         </div>
-        <button type="button" onClick={onClose} className="min-h-11 min-w-11 flex items-center justify-center rounded-full text-stone-600" aria-label="Close">
+        <button type="button" onClick={onClose} className="min-h-11 min-w-11 flex items-center justify-center rounded-full text-ink-soft" aria-label="Close">
           <X className="w-5 h-5" aria-hidden="true" />
         </button>
       </div>
       <div className="overflow-y-auto px-4 py-3 space-y-2">
-        <p className="text-xs text-stone-700">How many pieces arrived of each size? They are added to what is in stock.</p>
+        <p className="text-xs text-ink-soft">How many pieces arrived of each size? They are added to what is in stock.</p>
         <ul className="space-y-1.5">
           {product.profiles.map((s) => {
             const n = add[s.id] ?? 0;
             return (
               <li key={s.id} className="flex items-center gap-2">
                 <span className="min-w-0 flex-1">
-                  <span className="block text-sm font-semibold text-stone-900 truncate">{shortSizeName(s)}</span>
-                  <span className="text-[11px] text-stone-600">
+                  <span className="block text-sm font-semibold text-ink truncate">{shortSizeName(s)}</span>
+                  <span className="text-[11px] text-ink-soft">
                     {shown(s.id)} now{n > 0 && <> → {shown(s.id) + n}</>}
                   </span>
                 </span>
-                <button type="button" onClick={() => bump(s.id, -1)} disabled={n === 0} className="w-12 h-12 rounded-xl border border-stone-300 bg-white flex items-center justify-center disabled:opacity-30" aria-label={`Receive one fewer ${s.name}`}>
+                <button type="button" onClick={() => bump(s.id, -1)} disabled={n === 0} className="w-12 h-12 rounded-xl border border-line-strong bg-surface flex items-center justify-center disabled:opacity-30" aria-label={`Receive one fewer ${s.name}`}>
                   <Minus className="w-5 h-5" aria-hidden="true" />
                 </button>
                 <input
@@ -553,30 +553,30 @@ function ReceiveSheet({ product, shown, onClose, onReceive }: { product: AdminPr
                   value={n}
                   onFocus={(e) => e.target.select()}
                   onChange={(e) => setAdd((a) => ({ ...a, [s.id]: Math.max(0, Math.min(1000, Math.round(Number(e.target.value)) || 0)) }))}
-                  className="w-16 h-12 rounded-xl border-2 border-stone-300 text-lg font-bold text-center bg-white"
+                  className="w-16 h-12 rounded-xl border-2 border-line-strong text-lg font-bold text-center bg-surface"
                   aria-label={`Pieces of ${s.name} received`}
                 />
-                <button type="button" onClick={() => bump(s.id, 1)} className="w-12 h-12 rounded-xl border border-stone-300 bg-white flex items-center justify-center" aria-label={`Receive one more ${s.name}`}>
+                <button type="button" onClick={() => bump(s.id, 1)} className="w-12 h-12 rounded-xl border border-line-strong bg-surface flex items-center justify-center" aria-label={`Receive one more ${s.name}`}>
                   <Plus className="w-5 h-5" aria-hidden="true" />
                 </button>
               </li>
             );
           })}
         </ul>
-        <label className="block text-xs font-semibold text-stone-700">
+        <label className="block text-xs font-semibold text-ink-soft">
           Note (optional, e.g. supplier or invoice)
-          <input value={note} maxLength={200} onChange={(e) => setNote(e.target.value)} className="mt-1 w-full min-h-11 px-3 rounded-xl border border-stone-300 bg-white text-sm font-normal" />
+          <input value={note} maxLength={200} onChange={(e) => setNote(e.target.value)} className="mt-1 w-full min-h-11 px-3 rounded-xl border border-line-strong bg-surface text-sm font-normal" />
         </label>
       </div>
-      <div className="px-4 py-3 border-t border-stone-200 flex gap-2">
-        <button type="button" onClick={onClose} className="min-h-12 px-4 rounded-xl border border-stone-300 bg-white text-sm font-semibold">
+      <div className="px-4 py-3 border-t border-line flex gap-2">
+        <button type="button" onClick={onClose} className="min-h-12 px-4 rounded-xl border border-line-strong bg-surface text-sm font-semibold">
           Cancel
         </button>
         <button
           type="button"
           disabled={total === 0}
           onClick={() => onReceive(Object.entries(add).map(([sizeId, delta]) => ({ sizeId, delta })), note.trim() || undefined)}
-          className="flex-1 min-h-12 rounded-xl bg-[#0f1c2e] text-white text-sm font-bold disabled:opacity-40"
+          className="flex-1 min-h-12 rounded-xl bg-ink text-white text-sm font-bold disabled:opacity-40"
         >
           Add {total} {total === 1 ? 'piece' : 'pieces'}
         </button>
@@ -619,31 +619,31 @@ function HistorySheet({ product, onClose }: { product: AdminProduct; onClose: ()
   };
   return (
     <Sheet labelledBy={titleId} onClose={onClose} variant="bottom">
-      <div className="px-4 pt-4 pb-2 flex items-start gap-2 border-b border-stone-200">
+      <div className="px-4 pt-4 pb-2 flex items-start gap-2 border-b border-line">
         <div className="min-w-0 flex-1">
-          <h3 id={titleId} className="font-serif font-bold text-base text-[#0f1c2e]">
+          <h3 id={titleId} className="font-serif font-bold text-base text-ink">
             Stock history
           </h3>
-          <p className="text-xs text-stone-600 truncate">{product.title}</p>
+          <p className="text-xs text-ink-soft truncate">{product.title}</p>
         </div>
-        <button type="button" onClick={onClose} className="min-h-11 min-w-11 flex items-center justify-center rounded-full text-stone-600" aria-label="Close">
+        <button type="button" onClick={onClose} className="min-h-11 min-w-11 flex items-center justify-center rounded-full text-ink-soft" aria-label="Close">
           <X className="w-5 h-5" aria-hidden="true" />
         </button>
       </div>
       <div className="overflow-y-auto px-4 py-3">
-        {error && <p role="alert" className="text-sm text-red-800">{error}</p>}
-        {!error && moves === null && <p className="text-sm text-stone-600">Loading…</p>}
-        {moves?.length === 0 && <p className="text-sm text-stone-600">No changes recorded yet. Sales show in Orders.</p>}
+        {error && <p role="alert" className="text-sm text-danger">{error}</p>}
+        {!error && moves === null && <p className="text-sm text-ink-soft">Loading…</p>}
+        {moves?.length === 0 && <p className="text-sm text-ink-soft">No changes recorded yet. Sales show in Orders.</p>}
         <ol className="space-y-2">
           {moves?.map((m) => (
-            <li key={m.id} className="rounded-xl border border-stone-200 px-3 py-2 text-sm">
+            <li key={m.id} className="rounded-xl border border-line px-3 py-2 text-sm">
               <div className="flex flex-wrap items-baseline gap-x-2">
-                <strong className="text-stone-900">{REASON_WORD[m.reason] ?? m.reason}</strong>
-                <span className="text-xs text-stone-600">{new Date(m.at).toLocaleString()}</span>
-                {m.undoneBy && <span className="text-xs font-semibold text-amber-900">undone</span>}
+                <strong className="text-ink">{REASON_WORD[m.reason] ?? m.reason}</strong>
+                <span className="text-xs text-ink-soft">{new Date(m.at).toLocaleString()}</span>
+                {m.undoneBy && <span className="text-xs font-semibold text-warning">undone</span>}
               </div>
-              <div className="text-stone-800">{m.changes.map((c) => `${size(c.sizeId)} ${c.from} → ${c.to}`).join(', ')}</div>
-              <div className="text-xs text-stone-600 break-all">
+              <div className="text-ink">{m.changes.map((c) => `${size(c.sizeId)} ${c.from} → ${c.to}`).join(', ')}</div>
+              <div className="text-xs text-ink-soft break-all">
                 by {m.actor}
                 {m.note && <> · {m.note}</>}
               </div>

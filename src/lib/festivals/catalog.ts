@@ -17,26 +17,67 @@
  * - `parent` marks a day that sits inside a longer festival (Laylat al-Qadr in
  *   Ramadan): it is listed for the admin but never takes over the theme.
  *
- * Colours: `accent` is used for text, buttons and borders, so it must reach a
- * contrast of at least 3:1 on white and on the brand navy (#0f1c2e); a test
- * checks every theme. `accentSoft` is a light tint for backgrounds, and
- * `gradient` is the banner background (white text sits on it).
+ * Colours: a festival never brings its own colours. It picks one of a few
+ * curated accents (FESTIVE_ACCENTS) that sit with the shop's palette
+ * (src/lib/design/tokens.ts): Eid in deep emerald and gold, Diwali in saffron
+ * and gold, Christmas in berry and gold, National Day in emerald with a quiet
+ * nod to the flag, solemn days in stone grey. Each festival also has one
+ * delicate motif (a crescent and stars, a diya, a snowflake…) drawn as a fine
+ * line in the greeting band and the story ring. A test checks every accent's
+ * contrast.
  */
 
-export interface FestivalTheme {
-  /** Accent for text, buttons, borders: >= 3:1 on white and on navy. */
+/** The curated accents a festival may shift to. */
+export interface FestiveAccent {
+  /** Text and fine lines on light backgrounds: at least 4.5:1 on ivory and on `soft`. */
   accent: string;
-  /** A soft tint of the accent for backgrounds and chips. */
-  accentSoft: string;
-  /** Banner background, from -> to. */
-  gradient: [string, string];
-  /** 1–3 emoji or a short symbol string. */
-  ornament: string;
+  /** The greeting band's background: a soft tint. */
+  soft: string;
+  /** The motif and the story ring (decorative, beside gold). */
+  glow: string;
+  /** The phone's status bar while the festival's look is on. */
+  bar: string;
+}
+
+export const FESTIVE_ACCENTS = {
+  gold: { accent: '#82612c', soft: '#f2ebdf', glow: '#c2a36b', bar: '#2b2127' },
+  emerald: { accent: '#2f6450', soft: '#e8efe9', glow: '#b99d5f', bar: '#1f3a31' },
+  saffron: { accent: '#8d4f17', soft: '#f6eadb', glow: '#d0a052', bar: '#4a2a14' },
+  berry: { accent: '#843140', soft: '#f5e6e6', glow: '#c4a065', bar: '#4a1c26' },
+  rose: { accent: '#8a5659', soft: '#f4e8e5', glow: '#c49a98', bar: '#3e2a31' },
+  midnight: { accent: '#3d4a6b', soft: '#e9ebf1', glow: '#bfa26a', bar: '#1e2436' },
+  sage: { accent: '#4b6550', soft: '#e9efe7', glow: '#b3a26c', bar: '#26332a' },
+  stone: { accent: '#5d585a', soft: '#eeebe8', glow: '#a39b95', bar: '#3a3436' },
+} as const satisfies Record<string, FestiveAccent>;
+
+export type FestiveAccentId = keyof typeof FESTIVE_ACCENTS;
+
+/** The fine-line ornaments (drawn by src/components/store/FestiveMotif.tsx). */
+export const MOTIFS = ['sparkle', 'crescent', 'lantern', 'diya', 'lotus', 'rangoli', 'snowflake', 'star', 'blossom', 'dove', 'olive', 'wheat', 'sun', 'flag', 'cloud', 'heart', 'sprout'] as const;
+export type MotifId = (typeof MOTIFS)[number];
+
+/** How a festival looks, as written in the catalogue. */
+interface FestivalLook {
+  palette: FestiveAccentId;
+  motif: MotifId;
+  /** A short, gracious greeting. */
   greeting: string;
-  /** Short storefront banner line. */
+  /** One quiet line under it. */
   headline: string;
-  /** 1–3 short lines for the scrolling bar. */
+  /** 1–3 short lines for the announcement bar (only the first is shown with the shop's own). */
   marquee: string[];
+}
+
+/** A festival's look with its colours worked out (what the storefront receives). */
+export interface FestivalTheme extends FestivalLook {
+  /** Accent for text and fine lines on light backgrounds (>= 4.5:1 on ivory). */
+  accent: string;
+  /** A soft tint of the accent for the greeting band. */
+  accentSoft: string;
+  /** The motif's and the story ring's colour. */
+  glow: string;
+  /** The status-bar colour. */
+  bar: string;
 }
 
 export interface Festival {
@@ -55,40 +96,44 @@ export interface Festival {
   theme: FestivalTheme;
 }
 
-export const BRAND_NAVY = '#0f1c2e';
-export const BRAND_GOLD = '#c5a059';
+function look(l: FestivalLook): FestivalTheme {
+  const a = FESTIVE_ACCENTS[l.palette];
+  return { ...l, accent: a.accent, accentSoft: a.soft, glow: a.glow, bar: a.bar };
+}
 
-/**
- * The everyday look. The brand gold (#c5a059) is only 2.5:1 on white, so it is
- * the soft tint here and a deeper gold carries text and buttons.
- */
-export const DEFAULT_THEME: FestivalTheme = {
-  accent: '#8c6a2a',
-  accentSoft: '#f6efe1',
-  gradient: [BRAND_NAVY, '#1e3350'],
-  ornament: '✦',
+/** The shop's ink and gold (src/lib/design/tokens.ts). */
+export const BRAND_INK = '#2b2127';
+export const BRAND_GOLD = '#c2a36b';
+export const BRAND_IVORY = '#faf6ef';
+
+/** The everyday look: the shop's own gold. */
+export const DEFAULT_THEME: FestivalTheme = look({
+  palette: 'gold',
+  motif: 'sparkle',
   greeting: 'Welcome',
   headline: 'Fine bed linen for every home in the Emirates',
-  marquee: ['Free delivery across the UAE on orders over AED 300', 'Pure cotton, made to last'],
-};
+  marquee: ['Free delivery across the UAE in 1–2 days'],
+});
 
 export const DEFAULT_THEME_ID = 'default';
 
-export const FESTIVALS: Festival[] = [
+type Entry = Omit<Festival, 'theme'> & { theme: FestivalLook };
+
+const ENTRIES: Entry[] = [
   // ---- UAE national days ----------------------------------------------------
   {
     id: 'uae-national-day', name: 'UAE National Day (Eid Al Etihad)', durationDays: 2, priority: 100, tier: 1,
     theme: {
-      accent: '#00843d', accentSoft: '#e6f3ec', gradient: ['#00732f', '#0f1c2e'], ornament: '🇦🇪',
+      palette: 'emerald', motif: 'flag',
       greeting: 'Happy Eid Al Etihad',
-      headline: 'Celebrating the Union with homes dressed in their finest',
-      marquee: ['Happy Eid Al Etihad to everyone who calls the UAE home', 'Gift sets ready for National Day visits'],
+      headline: 'Celebrating the Union, and every home that makes it',
+      marquee: ['Happy Eid Al Etihad to everyone who calls the UAE home'],
     },
   },
   {
     id: 'commemoration-day', name: 'Commemoration Day', durationDays: 1, priority: 100, tier: 1, solemn: true,
     theme: {
-      accent: '#647080', accentSoft: '#eef0f3', gradient: ['#2b333d', '#0f1c2e'], ornament: '🕊️',
+      palette: 'stone', motif: 'olive',
       greeting: 'Commemoration Day',
       headline: 'Today we honour the UAE’s martyrs',
       marquee: ['In remembrance of those who gave their lives for the nation'],
@@ -97,7 +142,7 @@ export const FESTIVALS: Festival[] = [
   {
     id: 'uae-flag-day', name: 'UAE Flag Day', durationDays: 1, priority: 55, tier: 2,
     theme: {
-      accent: '#00843d', accentSoft: '#e6f3ec', gradient: ['#00732f', '#1b1b1b'], ornament: '🇦🇪',
+      palette: 'emerald', motif: 'flag',
       greeting: 'Happy Flag Day',
       headline: 'Raising the flag, at home and across the Emirates',
       marquee: ['Happy UAE Flag Day'],
@@ -106,7 +151,7 @@ export const FESTIVALS: Festival[] = [
   {
     id: 'emirati-womens-day', name: 'Emirati Women’s Day', durationDays: 1, priority: 50, tier: 2,
     theme: {
-      accent: '#a94a75', accentSoft: '#f8eaf0', gradient: ['#7a2f52', '#0f1c2e'], ornament: '🌸',
+      palette: 'rose', motif: 'blossom',
       greeting: 'Happy Emirati Women’s Day',
       headline: 'Celebrating the women who make every house a home',
       marquee: ['Happy Emirati Women’s Day'],
@@ -115,7 +160,7 @@ export const FESTIVALS: Festival[] = [
   {
     id: 'uae-mothers-day', name: 'Mother’s Day', durationDays: 1, priority: 45, tier: 2,
     theme: {
-      accent: '#b0466a', accentSoft: '#fbecf1', gradient: ['#8a3352', '#0f1c2e'], ornament: '💐',
+      palette: 'rose', motif: 'blossom',
       greeting: 'Happy Mother’s Day',
       headline: 'Soft linen for the one who made home feel like home',
       marquee: ['Mother’s Day gift wrapping on every order'],
@@ -126,7 +171,7 @@ export const FESTIVALS: Festival[] = [
   {
     id: 'ramadan', name: 'Ramadan', durationDays: 30, priority: 90, tier: 1,
     theme: {
-      accent: '#1d7a6c', accentSoft: '#e5f3f0', gradient: ['#0f3d3a', '#0f1c2e'], ornament: '🌙✨',
+      palette: 'emerald', motif: 'lantern',
       greeting: 'Ramadan Kareem',
       headline: 'Calm, restful bedding for the holy month',
       marquee: ['Ramadan Kareem from our family to yours', 'Evening delivery slots through Ramadan'],
@@ -135,7 +180,7 @@ export const FESTIVALS: Festival[] = [
   {
     id: 'laylat-al-qadr', name: 'Laylat al-Qadr', durationDays: 1, priority: 90, tier: 2, parent: 'ramadan',
     theme: {
-      accent: '#5068b0', accentSoft: '#ebeff8', gradient: ['#1b2550', '#0f1c2e'], ornament: '🌙',
+      palette: 'midnight', motif: 'crescent',
       greeting: 'Laylat al-Qadr',
       headline: 'A blessed night of peace',
       marquee: ['Wishing you a blessed Laylat al-Qadr'],
@@ -144,25 +189,25 @@ export const FESTIVALS: Festival[] = [
   {
     id: 'eid-al-fitr', name: 'Eid al-Fitr', durationDays: 3, priority: 95, tier: 1,
     theme: {
-      accent: '#2e7d5b', accentSoft: '#e8f4ee', gradient: ['#14513a', '#0f1c2e'], ornament: '🌙🎁',
+      palette: 'emerald', motif: 'crescent',
       greeting: 'Eid Mubarak',
       headline: 'Fresh linen for Eid mornings and the guests who follow',
-      marquee: ['Eid Mubarak', 'Eid gift sets, wrapped and delivered across the UAE'],
+      marquee: ['Eid Mubarak from our home to yours', 'Eid gift sets, wrapped and delivered across the UAE'],
     },
   },
   {
     id: 'eid-al-adha', name: 'Arafat Day & Eid al-Adha', durationDays: 4, priority: 95, tier: 1,
     theme: {
-      accent: '#14766e', accentSoft: '#e4f3f1', gradient: ['#0d4a45', '#0f1c2e'], ornament: '🌙🕋',
-      greeting: 'Eid Mubarak',
-      headline: 'Welcome family home this Eid al-Adha',
+      palette: 'emerald', motif: 'crescent',
+      greeting: 'Eid al-Adha Mubarak',
+      headline: 'Welcome family home this Eid',
       marquee: ['Eid al-Adha Mubarak', 'Guest-room linen, ready for the holidays'],
     },
   },
   {
     id: 'islamic-new-year', name: 'Islamic New Year', durationDays: 1, priority: 40, tier: 2,
     theme: {
-      accent: '#566aa6', accentSoft: '#edf0f8', gradient: ['#25305a', '#0f1c2e'], ornament: '🌙',
+      palette: 'midnight', motif: 'crescent',
       greeting: 'Happy Hijri New Year',
       headline: 'A fresh start for a new Hijri year',
       marquee: ['Happy Hijri New Year'],
@@ -171,7 +216,7 @@ export const FESTIVALS: Festival[] = [
   {
     id: 'isra-miraj', name: 'Isra and Mi’raj', durationDays: 1, priority: 35, tier: 2,
     theme: {
-      accent: '#4a63b0', accentSoft: '#ecf0fa', gradient: ['#1c2756', '#0f1c2e'], ornament: '✨',
+      palette: 'midnight', motif: 'star',
       greeting: 'Blessed Isra and Mi’raj',
       headline: 'Wishing you a peaceful night',
       marquee: ['Blessed Isra and Mi’raj'],
@@ -180,7 +225,7 @@ export const FESTIVALS: Festival[] = [
   {
     id: 'mawlid', name: 'The Prophet’s Birthday (Mawlid)', durationDays: 1, priority: 40, tier: 2,
     theme: {
-      accent: '#3c8a5a', accentSoft: '#eaf5ee', gradient: ['#1d5236', '#0f1c2e'], ornament: '🌙',
+      palette: 'emerald', motif: 'lantern',
       greeting: 'Mawlid Mubarak',
       headline: 'Peace and blessings to your home',
       marquee: ['Mawlid Mubarak'],
@@ -191,25 +236,25 @@ export const FESTIVALS: Festival[] = [
   {
     id: 'diwali', name: 'Diwali', durationDays: 5, priority: 80, tier: 1,
     theme: {
-      accent: '#b85600', accentSoft: '#fdf0e2', gradient: ['#7a2e00', '#2a0f2e'], ornament: '🪔✨',
+      palette: 'saffron', motif: 'diya',
       greeting: 'Happy Diwali',
-      headline: 'Light up the home with linen worth gifting',
+      headline: 'May your home be filled with light',
       marquee: ['Happy Diwali and a bright new year', 'Diwali gift boxes, wrapped by hand'],
     },
   },
   {
     id: 'holi', name: 'Holi', durationDays: 2, priority: 70, tier: 1,
     theme: {
-      accent: '#c0307a', accentSoft: '#fcebf4', gradient: ['#9c1f63', '#4a2a8a'], ornament: '🎨🌸',
+      palette: 'rose', motif: 'rangoli',
       greeting: 'Happy Holi',
       headline: 'Colour for the bedroom, after the colours outside',
-      marquee: ['Happy Holi', 'Bright new prints for spring'],
+      marquee: ['Happy Holi', 'New prints for spring'],
     },
   },
   {
     id: 'onam', name: 'Onam', durationDays: 2, priority: 65, tier: 1,
     theme: {
-      accent: '#2f7d32', accentSoft: '#f7f1df', gradient: ['#1e5a20', '#6b4e0e'], ornament: '🌼🛶',
+      palette: 'saffron', motif: 'blossom',
       greeting: 'Happy Onam',
       headline: 'Kasavu whites and gold for the Onam home',
       marquee: ['Happy Onam', 'Crisp white and gold sets for the season'],
@@ -218,7 +263,7 @@ export const FESTIVALS: Festival[] = [
   {
     id: 'navratri-dussehra', name: 'Navratri & Dussehra', durationDays: 10, priority: 50, tier: 2,
     theme: {
-      accent: '#b8336a', accentSoft: '#fbeaf1', gradient: ['#8a1f4c', '#5a1f7a'], ornament: '🪷',
+      palette: 'rose', motif: 'lotus',
       greeting: 'Happy Navratri',
       headline: 'Nine nights of colour, and a restful tenth',
       marquee: ['Happy Navratri and Dussehra'],
@@ -227,7 +272,7 @@ export const FESTIVALS: Festival[] = [
   {
     id: 'raksha-bandhan', name: 'Raksha Bandhan', durationDays: 1, priority: 45, tier: 2,
     theme: {
-      accent: '#c0407a', accentSoft: '#fcecf3', gradient: ['#922d5b', '#0f1c2e'], ornament: '🪢',
+      palette: 'rose', motif: 'rangoli',
       greeting: 'Happy Raksha Bandhan',
       headline: 'A thoughtful gift for a brother or sister',
       marquee: ['Happy Raksha Bandhan'],
@@ -236,7 +281,7 @@ export const FESTIVALS: Festival[] = [
   {
     id: 'ganesh-chaturthi', name: 'Ganesh Chaturthi', durationDays: 1, priority: 45, tier: 2,
     theme: {
-      accent: '#c25100', accentSoft: '#fdeee0', gradient: ['#8f3a00', '#0f1c2e'], ornament: '🌺',
+      palette: 'saffron', motif: 'lotus',
       greeting: 'Happy Ganesh Chaturthi',
       headline: 'New beginnings for the home',
       marquee: ['Happy Ganesh Chaturthi'],
@@ -245,7 +290,7 @@ export const FESTIVALS: Festival[] = [
   {
     id: 'pongal', name: 'Pongal & Makar Sankranti', durationDays: 3, priority: 45, tier: 2,
     theme: {
-      accent: '#a86200', accentSoft: '#fdf3e0', gradient: ['#7a4600', '#2f5a1e'], ornament: '🌾☀️',
+      palette: 'saffron', motif: 'sun',
       greeting: 'Happy Pongal',
       headline: 'Harvest-season comfort for the home',
       marquee: ['Happy Pongal and Makar Sankranti'],
@@ -254,7 +299,7 @@ export const FESTIVALS: Festival[] = [
   {
     id: 'vishu', name: 'Vishu', durationDays: 1, priority: 40, tier: 2,
     theme: {
-      accent: '#9a7000', accentSoft: '#fdf6dc', gradient: ['#6b4e00', '#1e5a20'], ornament: '🌼',
+      palette: 'saffron', motif: 'blossom',
       greeting: 'Happy Vishu',
       headline: 'A golden start to the Malayalam new year',
       marquee: ['Vishu ashamsakal — Happy Vishu'],
@@ -263,7 +308,7 @@ export const FESTIVALS: Festival[] = [
   {
     id: 'vaisakhi', name: 'Vaisakhi', durationDays: 1, priority: 40, tier: 2,
     theme: {
-      accent: '#c06000', accentSoft: '#fdf0e0', gradient: ['#8a4200', '#0f1c2e'], ornament: '🌾',
+      palette: 'saffron', motif: 'wheat',
       greeting: 'Happy Vaisakhi',
       headline: 'Celebrating the harvest and the new year',
       marquee: ['Happy Vaisakhi'],
@@ -272,7 +317,7 @@ export const FESTIVALS: Festival[] = [
   {
     id: 'gurpurab', name: 'Guru Nanak Gurpurab', durationDays: 1, priority: 45, tier: 2,
     theme: {
-      accent: '#b35c00', accentSoft: '#fdf0e2', gradient: ['#7a3e00', '#0f1c2e'], ornament: '🪔',
+      palette: 'saffron', motif: 'diya',
       greeting: 'Gurpurab di lakh lakh vadhaiyan',
       headline: 'Wishing every home peace and light',
       marquee: ['Happy Guru Nanak Gurpurab'],
@@ -283,16 +328,16 @@ export const FESTIVALS: Festival[] = [
   {
     id: 'lunar-new-year', name: 'Lunar New Year', durationDays: 7, priority: 70, tier: 1,
     theme: {
-      accent: '#cc2a38', accentSoft: '#fdeaea', gradient: ['#9a1020', '#5a0a12'], ornament: '🧧🏮',
-      greeting: 'Gong Xi Fa Cai · Happy Lunar New Year',
+      palette: 'berry', motif: 'cloud',
+      greeting: 'Happy Lunar New Year',
       headline: 'New sheets for a lucky new year',
-      marquee: ['Happy Lunar New Year', 'Red and gold gift sets, wrapped for the season'],
+      marquee: ['Gong Xi Fa Cai · Happy Lunar New Year', 'Gift sets, wrapped for the season'],
     },
   },
   {
     id: 'nowruz', name: 'Nowruz', durationDays: 3, priority: 45, tier: 2,
     theme: {
-      accent: '#3a8a3e', accentSoft: '#ecf6ec', gradient: ['#25602a', '#0f1c2e'], ornament: '🌱🌷',
+      palette: 'sage', motif: 'sprout',
       greeting: 'Nowruz Mubarak',
       headline: 'Fresh linen for a fresh spring',
       marquee: ['Nowruz Mubarak — Happy Persian New Year'],
@@ -303,7 +348,7 @@ export const FESTIVALS: Festival[] = [
   {
     id: 'good-friday', name: 'Good Friday', durationDays: 2, priority: 100, tier: 1, solemn: true,
     theme: {
-      accent: '#5f6b7a', accentSoft: '#eff1f4', gradient: ['#2e3540', '#0f1c2e'], ornament: '✝',
+      palette: 'stone', motif: 'olive',
       greeting: 'Good Friday',
       headline: 'A day of quiet reflection',
       marquee: ['Thinking of everyone observing Good Friday'],
@@ -312,7 +357,7 @@ export const FESTIVALS: Festival[] = [
   {
     id: 'easter', name: 'Easter', durationDays: 4, priority: 75, tier: 1,
     theme: {
-      accent: '#7a5bb5', accentSoft: '#f2eefa', gradient: ['#4f3a80', '#0f1c2e'], ornament: '🌷🐣',
+      palette: 'sage', motif: 'blossom',
       greeting: 'Happy Easter',
       headline: 'Spring-fresh linen for Easter at home',
       marquee: ['Happy Easter', 'Soft pastels for the season'],
@@ -321,16 +366,16 @@ export const FESTIVALS: Festival[] = [
   {
     id: 'orthodox-easter', name: 'Orthodox Easter', durationDays: 2, priority: 50, tier: 2,
     theme: {
-      accent: '#b8463c', accentSoft: '#fbeceb', gradient: ['#7a2620', '#0f1c2e'], ornament: '🥚🌿',
-      greeting: 'Christ is Risen · Happy Easter',
+      palette: 'sage', motif: 'olive',
+      greeting: 'Happy Easter',
       headline: 'Wishing a joyful Pascha to every home',
-      marquee: ['Happy Orthodox Easter'],
+      marquee: ['Christ is Risen · Happy Orthodox Easter'],
     },
   },
   {
     id: 'christmas', name: 'Christmas', durationDays: 2, priority: 80, tier: 1,
     theme: {
-      accent: '#c23b45', accentSoft: '#fbeaec', gradient: ['#7a1a24', '#0f3d2a'], ornament: '🎄✨',
+      palette: 'berry', motif: 'snowflake',
       greeting: 'Merry Christmas',
       headline: 'Wrap them in comfort this Christmas',
       marquee: ['Merry Christmas', 'Christmas gift wrapping on every order'],
@@ -339,7 +384,7 @@ export const FESTIVALS: Festival[] = [
   {
     id: 'orthodox-christmas', name: 'Orthodox Christmas', durationDays: 1, priority: 50, tier: 2,
     theme: {
-      accent: '#ba4249', accentSoft: '#fbeaec', gradient: ['#7a1e26', '#0f1c2e'], ornament: '⭐',
+      palette: 'berry', motif: 'star',
       greeting: 'Merry Christmas',
       headline: 'Warm wishes for Orthodox Christmas',
       marquee: ['Merry Orthodox Christmas'],
@@ -350,7 +395,7 @@ export const FESTIVALS: Festival[] = [
   {
     id: 'new-year', name: 'New Year', durationDays: 1, priority: 60, tier: 1,
     theme: {
-      accent: '#8c6a1f', accentSoft: '#f7f0de', gradient: ['#0f1c2e', '#3a2a5a'], ornament: '🎆',
+      palette: 'midnight', motif: 'sparkle',
       greeting: 'Happy New Year',
       headline: 'New year, fresh sheets',
       marquee: ['Happy New Year from all of us'],
@@ -359,22 +404,24 @@ export const FESTIVALS: Festival[] = [
   {
     id: 'philippine-independence-day', name: 'Philippine Independence Day', durationDays: 1, priority: 40, tier: 2,
     theme: {
-      accent: '#2a6acb', accentSoft: '#e9f0fb', gradient: ['#0038a8', '#7a0f1e'], ornament: '🇵🇭',
+      palette: 'midnight', motif: 'sun',
       greeting: 'Maligayang Araw ng Kalayaan',
       headline: 'Happy Independence Day to our Filipino community',
-      marquee: ['Maligayang Araw ng Kalayaan — Happy Philippine Independence Day'],
+      marquee: ['Happy Philippine Independence Day'],
     },
   },
   {
     id: 'valentines-day', name: 'Valentine’s Day', durationDays: 1, priority: 10, tier: 2,
     theme: {
-      accent: '#b83a5a', accentSoft: '#fbecf0', gradient: ['#8a2a44', '#0f1c2e'], ornament: '🌹',
+      palette: 'berry', motif: 'heart',
       greeting: 'Happy Valentine’s Day',
       headline: 'A softer bedroom, made for two',
       marquee: ['Gift wrapping for Valentine’s Day'],
     },
   },
 ];
+
+export const FESTIVALS: Festival[] = ENTRIES.map((e) => ({ ...e, theme: look(e.theme) }));
 
 const BY_ID = new Map(FESTIVALS.map((f) => [f.id, f]));
 

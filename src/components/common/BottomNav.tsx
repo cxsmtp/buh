@@ -51,9 +51,9 @@ export const BottomNav: React.FC<BottomNavProps> = ({
   // The shop on a phone: Home, Search, Bag and Orders, like an app's tab bar (hidden on wider screens,
   // where the header has them). The Help button takes the slot at its right end, so it never floats over the feed.
   const tab = (active: boolean) =>
-    `flex-1 flex flex-col items-center justify-center gap-0.5 h-14 text-[11px] transition-transform active:scale-95 ${active ? 'text-[#0f1c2e] font-semibold' : 'text-stone-600'}`;
+    `flex-1 flex flex-col items-center justify-center gap-0.5 h-14 text-[11px] transition-transform active:scale-95 ${active ? 'text-ink font-semibold' : 'text-ink-soft'}`;
   return (
-    <nav aria-label="Shop" className="fixed bottom-0 inset-x-0 z-40 bg-[#fbf9f5]/95 backdrop-blur-md border-t border-[#e8e1d5] pb-safe px-safe md:hidden">
+    <nav aria-label="Shop" className="fixed bottom-0 inset-x-0 z-40 bg-ivory/95 backdrop-blur-md border-t border-line pb-safe px-safe md:hidden">
       <div className="flex items-stretch">
         <button type="button" onClick={onHome} aria-current={storeTab === 'home' ? 'page' : undefined} className={tab(storeTab === 'home')}>
           <Home className="w-6 h-6" aria-hidden="true" strokeWidth={storeTab === 'home' ? 2.25 : 1.75} />
@@ -67,7 +67,7 @@ export const BottomNav: React.FC<BottomNavProps> = ({
           <span className="relative">
             <ShoppingBag className="w-6 h-6" aria-hidden="true" strokeWidth={1.75} />
             {cartCount > 0 && (
-              <span className="absolute -top-1.5 -right-2.5 bg-[#c5a059] text-stone-950 text-[10px] font-bold min-w-4 h-4 px-1 rounded-full flex items-center justify-center" aria-hidden="true">
+              <span className="absolute -top-1.5 -right-2.5 bg-gold text-ink text-[10px] font-semibold min-w-4 h-4 px-1 rounded-full flex items-center justify-center" aria-hidden="true">
                 {cartCount}
               </span>
             )}

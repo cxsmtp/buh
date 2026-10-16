@@ -70,39 +70,39 @@ export const AdminCouriersTab: React.FC<AdminCouriersTabProps> = ({
   return (
     <div className="space-y-4">
       {/* Header Info */}
-      <div className="bg-white rounded-2xl p-4 border border-stone-200 shadow-sm space-y-2">
+      <div className="bg-surface rounded-2xl p-4 border border-line shadow-sm space-y-2">
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-2">
-            <Truck className="w-5 h-5 text-[#c5a059]" />
-            <h3 className="font-serif font-bold text-base text-[#0f1c2e]">
+            <Truck className="w-5 h-5 text-gold" />
+            <h3 className="font-serif font-bold text-base text-ink">
               Courier Integration Hub (Jeebly & Eco Express)
             </h3>
           </div>
-          <span className="text-[10px] bg-emerald-100 text-emerald-800 font-bold px-2.5 py-0.5 rounded-full border border-emerald-300">
+          <span className="text-[10px] bg-success-soft text-success font-bold px-2.5 py-0.5 rounded-full border border-success-line">
             Dual Seamless Carrier Active
           </span>
         </div>
-        <p className="text-xs text-stone-600 leading-relaxed">
+        <p className="text-xs text-ink-soft leading-relaxed">
           Both logistics platforms are integrated. Orders are automatically assigned based on payment method, generating compliant Airway Bills (AWB) and printable shipping labels upon confirmation.
         </p>
       </div>
 
       {/* AUTOMATION ROUTING RULES */}
-      <div className="bg-gradient-to-br from-amber-50/60 via-stone-50 to-amber-50/30 rounded-2xl p-4 border border-amber-200/80 space-y-3">
-        <span className="text-xs font-black uppercase tracking-wider text-stone-900 block border-b border-amber-200/60 pb-1.5">
+      <div className="bg-gradient-to-br from-warning-soft/60 via-ivory to-warning-soft/30 rounded-2xl p-4 border border-warning-line/80 space-y-3">
+        <span className="text-xs font-black uppercase tracking-wider text-ink block border-b border-warning-line/60 pb-1.5">
           Automatic Carrier Routing Rules
         </span>
 
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-xs">
           {/* Rule 1: COD Routing */}
-          <div className="bg-white p-3 rounded-xl border border-stone-200 space-y-1.5 shadow-sm">
+          <div className="bg-surface p-3 rounded-xl border border-line space-y-1.5 shadow-sm">
             <div className="flex items-center justify-between">
-              <span className="font-bold text-stone-800">1. Cash On Delivery (COD)</span>
-              <span className="text-[10px] bg-red-100 text-red-800 font-bold px-2 py-0.5 rounded">
+              <span className="font-bold text-ink">1. Cash On Delivery (COD)</span>
+              <span className="text-[10px] bg-danger-soft text-danger font-bold px-2 py-0.5 rounded">
                 COD
               </span>
             </div>
-            <p className="text-[11px] text-stone-500">
+            <p className="text-[11px] text-ink-muted">
               When a customer places a COD order, route by default to:
             </p>
             <select
@@ -116,7 +116,7 @@ export const AdminCouriersTab: React.FC<AdminCouriersTabProps> = ({
                   },
                 })
               }
-              className="w-full px-2.5 py-1.5 rounded-lg border border-stone-300 font-semibold bg-stone-50 text-xs"
+              className="w-full px-2.5 py-1.5 rounded-lg border border-line-strong font-semibold bg-ivory text-xs"
             >
               <option value="jeebly">Jeebly Logistics (Recommended for UAE COD)</option>
               <option value="echo">Eco Express Courier</option>
@@ -124,14 +124,14 @@ export const AdminCouriersTab: React.FC<AdminCouriersTabProps> = ({
           </div>
 
           {/* Rule 2: Prepaid Routing */}
-          <div className="bg-white p-3 rounded-xl border border-stone-200 space-y-1.5 shadow-sm">
+          <div className="bg-surface p-3 rounded-xl border border-line space-y-1.5 shadow-sm">
             <div className="flex items-center justify-between">
-              <span className="font-bold text-stone-800">2. Prepaid / Bank Transfer</span>
-              <span className="text-[10px] bg-emerald-100 text-emerald-800 font-bold px-2 py-0.5 rounded">
+              <span className="font-bold text-ink">2. Prepaid / Bank Transfer</span>
+              <span className="text-[10px] bg-success-soft text-success font-bold px-2 py-0.5 rounded">
                 Prepaid
               </span>
             </div>
-            <p className="text-[11px] text-stone-500">
+            <p className="text-[11px] text-ink-muted">
               When payment is transferred or settled in advance, route to:
             </p>
             <select
@@ -145,7 +145,7 @@ export const AdminCouriersTab: React.FC<AdminCouriersTabProps> = ({
                   },
                 })
               }
-              className="w-full px-2.5 py-1.5 rounded-lg border border-stone-300 font-semibold bg-stone-50 text-xs"
+              className="w-full px-2.5 py-1.5 rounded-lg border border-line-strong font-semibold bg-ivory text-xs"
             >
               <option value="echo">Eco Express Courier (Recommended for Prepaid)</option>
               <option value="jeebly">Jeebly Logistics</option>
@@ -156,7 +156,7 @@ export const AdminCouriersTab: React.FC<AdminCouriersTabProps> = ({
 
       {/* CARRIER TABS: JEEBLY VS ECO EXPRESS */}
       <div className="space-y-3">
-        <div className="grid grid-cols-2 gap-2 border-b border-stone-200 pb-2">
+        <div className="grid grid-cols-2 gap-2 border-b border-line pb-2">
           <button
             onClick={() => {
               setActiveCarrier('jeebly');
@@ -164,12 +164,12 @@ export const AdminCouriersTab: React.FC<AdminCouriersTabProps> = ({
             }}
             className={`flex items-center justify-center gap-2 px-3 py-2 rounded-xl text-xs font-bold transition-all min-w-0 ${
               activeCarrier === 'jeebly'
-                ? 'bg-[#0f1c2e] text-white shadow-sm'
-                : 'bg-white text-stone-700 hover:bg-stone-100 border border-stone-200'
+                ? 'bg-ink text-white shadow-sm'
+                : 'bg-surface text-ink-soft hover:bg-sand border border-line'
             }`}
           >
             <span>Jeebly Logistics (UAE)</span>
-            <span className="hidden md:inline text-[10px] px-1.5 py-0.2 rounded-full bg-amber-400 text-stone-900 font-bold">
+            <span className="hidden md:inline text-[10px] px-1.5 py-0.2 rounded-full bg-gold text-ink font-bold">
               integration.jeebly.com
             </span>
           </button>
@@ -181,12 +181,12 @@ export const AdminCouriersTab: React.FC<AdminCouriersTabProps> = ({
             }}
             className={`flex items-center justify-center gap-2 px-3 py-2 rounded-xl text-xs font-bold transition-all min-w-0 ${
               activeCarrier === 'echo'
-                ? 'bg-[#0f1c2e] text-white shadow-sm'
-                : 'bg-white text-stone-700 hover:bg-stone-100 border border-stone-200'
+                ? 'bg-ink text-white shadow-sm'
+                : 'bg-surface text-ink-soft hover:bg-sand border border-line'
             }`}
           >
             <span>Eco Express Courier</span>
-            <span className="hidden md:inline text-[10px] px-1.5 py-0.2 rounded-full bg-blue-700 text-white font-bold">
+            <span className="hidden md:inline text-[10px] px-1.5 py-0.2 rounded-full bg-ink-soft text-white font-bold">
               Apiary / ecofreight.ae
             </span>
           </button>
@@ -194,28 +194,28 @@ export const AdminCouriersTab: React.FC<AdminCouriersTabProps> = ({
 
         {/* JEEBLY DETAILS & CONFIG */}
         {activeCarrier === 'jeebly' && (
-          <div className="bg-white rounded-2xl p-4 border border-stone-200 space-y-4 text-xs">
-            <div className="flex items-center justify-between pb-2 border-b border-stone-100">
-              <div>
-                <strong className="text-stone-900 text-sm block">Jeebly Logistics Configuration</strong>
-                <span className="text-stone-500 text-[11px]">
-                  Official API Documentation: <a href="https://integration.jeebly.com/v1/api-reference.html" target="_blank" rel="noopener noreferrer" className="text-[#8a6a2c] underline font-medium">integration.jeebly.com/v1</a>
+          <div className="bg-surface rounded-2xl p-4 border border-line space-y-4 text-xs">
+            <div className="flex flex-wrap items-center justify-between gap-2 pb-2 border-b border-line">
+              <div className="min-w-0">
+                <strong className="text-ink text-sm block">Jeebly Logistics Configuration</strong>
+                <span className="text-ink-muted text-[11px]">
+                  Official API Documentation: <a href="https://integration.jeebly.com/v1/api-reference.html" target="_blank" rel="noopener noreferrer" className="text-gold-deep underline font-medium">integration.jeebly.com/v1</a>
                 </span>
               </div>
               <button
                 type="button"
                 onClick={() => handleTestConnection('jeebly')}
                 disabled={testing}
-                className="flex items-center gap-1.5 bg-stone-900 hover:bg-stone-800 text-white px-3 py-1.5 rounded-xl font-semibold transition-all disabled:opacity-50"
+                className="flex items-center gap-1.5 bg-ink hover:bg-ink text-white px-3 py-1.5 rounded-xl font-semibold transition-all disabled:opacity-50"
               >
-                <RefreshCw className={`w-3.5 h-3.5 text-amber-300 ${testing ? 'animate-spin' : ''}`} />
+                <RefreshCw className={`w-3.5 h-3.5 text-gold-light ${testing ? 'animate-spin' : ''}`} />
                 <span>{testing ? 'Testing...' : 'Test Jeebly API'}</span>
               </button>
             </div>
 
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
               <div>
-                <label className="block text-stone-700 font-semibold mb-1">
+                <label className="block text-ink-soft font-semibold mb-1">
                   XApiKey Header:
                 </label>
                 <input
@@ -229,12 +229,12 @@ export const AdminCouriersTab: React.FC<AdminCouriersTabProps> = ({
                       jeebly: { ...formData.jeebly, apiKey: e.target.value },
                     })
                   }
-                  className="w-full px-3 py-2 rounded-xl border border-stone-300 font-mono text-xs"
+                  className="w-full px-3 py-2 rounded-xl border border-line-strong font-mono text-xs"
                 />
               </div>
 
               <div>
-                <label className="block text-stone-700 font-semibold mb-1">
+                <label className="block text-ink-soft font-semibold mb-1">
                   ClientKey Header:
                 </label>
                 <input
@@ -248,12 +248,12 @@ export const AdminCouriersTab: React.FC<AdminCouriersTabProps> = ({
                       jeebly: { ...formData.jeebly, clientKey: e.target.value },
                     })
                   }
-                  className="w-full px-3 py-2 rounded-xl border border-stone-300 font-mono text-xs"
+                  className="w-full px-3 py-2 rounded-xl border border-line-strong font-mono text-xs"
                 />
               </div>
 
               <div>
-                <label className="block text-stone-700 font-semibold mb-1">
+                <label className="block text-ink-soft font-semibold mb-1">
                   Default Service Type:
                 </label>
                 <select
@@ -264,7 +264,7 @@ export const AdminCouriersTab: React.FC<AdminCouriersTabProps> = ({
                       jeebly: { ...formData.jeebly, serviceType: e.target.value as 'Scheduled' | 'Express' },
                     })
                   }
-                  className="w-full px-3 py-2 rounded-xl border border-stone-300 bg-white"
+                  className="w-full px-3 py-2 rounded-xl border border-line-strong bg-surface"
                 >
                   <option value="Scheduled">Scheduled Delivery (Next-Day Forward)</option>
                   <option value="Express">Express Same-Day Intra-Emirate</option>
@@ -272,7 +272,7 @@ export const AdminCouriersTab: React.FC<AdminCouriersTabProps> = ({
               </div>
 
               <div>
-                <label className="block text-stone-700 font-semibold mb-1">
+                <label className="block text-ink-soft font-semibold mb-1">
                   Warehouse Pickup Location:
                 </label>
                 <input
@@ -284,7 +284,7 @@ export const AdminCouriersTab: React.FC<AdminCouriersTabProps> = ({
                       jeebly: { ...formData.jeebly, pickupLocationName: e.target.value },
                     })
                   }
-                  className="w-full px-3 py-2 rounded-xl border border-stone-300"
+                  className="w-full px-3 py-2 rounded-xl border border-line-strong"
                 />
               </div>
             </div>
@@ -293,28 +293,28 @@ export const AdminCouriersTab: React.FC<AdminCouriersTabProps> = ({
 
         {/* ECO EXPRESS DETAILS & CONFIG */}
         {activeCarrier === 'echo' && (
-          <div className="bg-white rounded-2xl p-4 border border-stone-200 space-y-4 text-xs">
-            <div className="flex items-center justify-between pb-2 border-b border-stone-100">
-              <div>
-                <strong className="text-stone-900 text-sm block">Eco Express Courier Configuration</strong>
-                <span className="text-stone-500 text-[11px]">
-                  Official Apiary Spec: <a href="https://ecoexpress.docs.apiary.io/#" target="_blank" rel="noopener noreferrer" className="text-[#8a6a2c] underline font-medium">ecoexpress.docs.apiary.io</a>
+          <div className="bg-surface rounded-2xl p-4 border border-line space-y-4 text-xs">
+            <div className="flex flex-wrap items-center justify-between gap-2 pb-2 border-b border-line">
+              <div className="min-w-0">
+                <strong className="text-ink text-sm block">Eco Express Courier Configuration</strong>
+                <span className="text-ink-muted text-[11px]">
+                  Official Apiary Spec: <a href="https://ecoexpress.docs.apiary.io/#" target="_blank" rel="noopener noreferrer" className="text-gold-deep underline font-medium">ecoexpress.docs.apiary.io</a>
                 </span>
               </div>
               <button
                 type="button"
                 onClick={() => handleTestConnection('echo')}
                 disabled={testing}
-                className="flex items-center gap-1.5 bg-stone-900 hover:bg-stone-800 text-white px-3 py-1.5 rounded-xl font-semibold transition-all disabled:opacity-50"
+                className="flex items-center gap-1.5 bg-ink hover:bg-ink text-white px-3 py-1.5 rounded-xl font-semibold transition-all disabled:opacity-50"
               >
-                <RefreshCw className={`w-3.5 h-3.5 text-amber-300 ${testing ? 'animate-spin' : ''}`} />
+                <RefreshCw className={`w-3.5 h-3.5 text-gold-light ${testing ? 'animate-spin' : ''}`} />
                 <span>{testing ? 'Testing...' : 'Test Eco Express API'}</span>
               </button>
             </div>
 
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
               <div>
-                <label className="block text-stone-700 font-semibold mb-1">
+                <label className="block text-ink-soft font-semibold mb-1">
                   Authorization Bearer Token:
                 </label>
                 <input
@@ -328,12 +328,12 @@ export const AdminCouriersTab: React.FC<AdminCouriersTabProps> = ({
                       echo: { ...formData.echo, apiKey: e.target.value },
                     })
                   }
-                  className="w-full px-3 py-2 rounded-xl border border-stone-300 font-mono text-xs"
+                  className="w-full px-3 py-2 rounded-xl border border-line-strong font-mono text-xs"
                 />
               </div>
 
               <div>
-                <label className="block text-stone-700 font-semibold mb-1">
+                <label className="block text-ink-soft font-semibold mb-1">
                   Account Number (account_No):
                 </label>
                 <input
@@ -345,12 +345,12 @@ export const AdminCouriersTab: React.FC<AdminCouriersTabProps> = ({
                       echo: { ...formData.echo, accountId: e.target.value },
                     })
                   }
-                  className="w-full px-3 py-2 rounded-xl border border-stone-300 font-mono text-xs"
+                  className="w-full px-3 py-2 rounded-xl border border-line-strong font-mono text-xs"
                 />
               </div>
 
               <div>
-                <label className="block text-stone-700 font-semibold mb-1">
+                <label className="block text-ink-soft font-semibold mb-1">
                   Service Tier:
                 </label>
                 <input
@@ -362,12 +362,12 @@ export const AdminCouriersTab: React.FC<AdminCouriersTabProps> = ({
                       echo: { ...formData.echo, serviceTier: e.target.value },
                     })
                   }
-                  className="w-full px-3 py-2 rounded-xl border border-stone-300"
+                  className="w-full px-3 py-2 rounded-xl border border-line-strong"
                 />
               </div>
 
               <div>
-                <label className="block text-stone-700 font-semibold mb-1">
+                <label className="block text-ink-soft font-semibold mb-1">
                   Origin Dispatch Hub Code:
                 </label>
                 <input
@@ -379,7 +379,7 @@ export const AdminCouriersTab: React.FC<AdminCouriersTabProps> = ({
                       echo: { ...formData.echo, hubCode: e.target.value },
                     })
                   }
-                  className="w-full px-3 py-2 rounded-xl border border-stone-300"
+                  className="w-full px-3 py-2 rounded-xl border border-line-strong"
                 />
               </div>
             </div>
@@ -388,15 +388,15 @@ export const AdminCouriersTab: React.FC<AdminCouriersTabProps> = ({
 
         {/* TEST RESULTS VIEWER */}
         {testResult && (
-          <div className="bg-stone-900 text-stone-200 p-4 rounded-2xl border border-stone-800 text-xs space-y-2 animate-in fade-in-50">
-            <div className="flex items-center justify-between text-amber-300 font-bold border-b border-stone-800 pb-1.5">
+          <div className="bg-ink text-sand p-4 rounded-2xl border border-ink text-xs space-y-2 animate-in fade-in-50">
+            <div className="flex items-center justify-between text-gold-light font-bold border-b border-ink pb-1.5">
               <span className="flex items-center gap-1.5">
-                <CheckCircle2 className="w-4 h-4 text-emerald-400" />
+                <CheckCircle2 className="w-4 h-4 text-success" />
                 <span>API Connection Diagnostics Result:</span>
               </span>
-              <span className="text-[10px] text-stone-500">Response 200 OK</span>
+              <span className="text-[10px] text-ink-muted">Response 200 OK</span>
             </div>
-            <pre className="font-mono text-[11px] overflow-x-auto text-emerald-400 p-2 bg-black/50 rounded-lg">
+            <pre className="font-mono text-[11px] overflow-x-auto text-success p-2 bg-black/50 rounded-lg">
               {JSON.stringify(testResult, null, 2)}
             </pre>
           </div>
@@ -405,13 +405,13 @@ export const AdminCouriersTab: React.FC<AdminCouriersTabProps> = ({
         {/* SAVE CHANGES */}
         <div className="flex items-center justify-between pt-2">
           {savedSuccess && (
-            <span className="text-emerald-600 font-bold text-xs flex items-center gap-1">
+            <span className="text-success font-bold text-xs flex items-center gap-1">
               <CheckCircle2 className="w-4 h-4" />
               Saved on the server.
             </span>
           )}
           {saveError && (
-            <span role="alert" className="text-red-700 font-semibold text-xs flex items-center gap-1">
+            <span role="alert" className="text-danger font-semibold text-xs flex items-center gap-1">
               <AlertCircle className="w-4 h-4" />
               {saveError}
             </span>
@@ -420,7 +420,7 @@ export const AdminCouriersTab: React.FC<AdminCouriersTabProps> = ({
             type="button"
             onClick={handleSave}
             disabled={saving}
-            className="ml-auto bg-[#0f1c2e] hover:bg-stone-800 disabled:opacity-60 text-white font-bold text-xs px-5 py-2.5 rounded-xl shadow transition-all"
+            className="ml-auto bg-ink hover:bg-ink disabled:opacity-60 text-white font-bold text-xs px-5 py-2.5 rounded-xl shadow transition-all"
           >
             {saving ? 'Saving…' : 'Save Carrier Settings'}
           </button>

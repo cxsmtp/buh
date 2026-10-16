@@ -15,8 +15,8 @@ interface FilterSheetProps {
 }
 
 const pill = (on: boolean) =>
-  `inline-flex items-center gap-1.5 px-3.5 py-2 rounded-full text-sm border transition-colors disabled:opacity-40 ${
-    on ? 'bg-[#0f1c2e] border-[#0f1c2e] text-white' : 'bg-white border-stone-300 text-stone-900 hover:border-stone-500'
+  `inline-flex max-w-full min-w-0 items-center gap-1.5 px-3.5 py-2 rounded-full text-sm text-left break-anywhere border transition-colors disabled:opacity-40 ${
+    on ? 'bg-ink border-ink text-white' : 'bg-surface border-line-strong text-ink hover:border-ink-muted'
   }`;
 
 function toggle(list: string[], id: string): string[] {
@@ -36,7 +36,7 @@ export function FilterSheet({ products, categories, filters, onApply, onClose }:
   const options = (label: string, opts: Option[], key: 'cats' | 'sizes' | 'colors') =>
     opts.length > 0 && (
       <fieldset className="space-y-2.5">
-        <legend className="text-sm font-semibold text-stone-900 mb-2.5">{label}</legend>
+        <legend className="label-caps text-ink mb-3">{label}</legend>
         <div className="flex flex-wrap gap-2">
           {opts.map((o) => (
             <button
@@ -47,9 +47,9 @@ export function FilterSheet({ products, categories, filters, onApply, onClose }:
               onClick={() => set({ [key]: toggle(draft[key], o.id) } as Partial<Filters>)}
               className={pill(o.selected)}
             >
-              {o.hex && <span className="w-4 h-4 rounded-full border border-stone-300" style={{ backgroundColor: o.hex }} aria-hidden="true" />}
+              {o.hex && <span className="w-4 h-4 rounded-full border border-line-strong" style={{ backgroundColor: o.hex }} aria-hidden="true" />}
               <span>{o.label}</span>
-              <span className={`text-xs ${o.selected ? 'text-stone-200' : 'text-stone-600'}`}>
+              <span className={`text-xs ${o.selected ? 'text-sand' : 'text-ink-soft'}`}>
                 <span className="sr-only">, </span>
                 {o.count}
               </span>
@@ -62,11 +62,11 @@ export function FilterSheet({ products, categories, filters, onApply, onClose }:
   const switchRow = (label: string, count: number | null, on: boolean, patch: Partial<Filters>) =>
     count !== null && (
       <button type="button" role="switch" aria-checked={on} onClick={() => set(patch)} className="w-full flex items-center justify-between gap-3 py-2.5 text-left">
-        <span className="text-sm text-stone-900">
-          {label} <span className="text-xs text-stone-600">({count})</span>
+        <span className="text-sm text-ink">
+          {label} <span className="text-xs text-ink-soft">({count})</span>
         </span>
-        <span className={`relative inline-block w-11 h-6 rounded-full transition-colors shrink-0 ${on ? 'bg-[#0f1c2e]' : 'bg-stone-300'}`} aria-hidden="true">
-          <span className={`absolute top-0.5 left-0.5 w-5 h-5 rounded-full bg-white shadow transition-transform ${on ? 'translate-x-5' : ''}`} />
+        <span className={`relative inline-block w-11 h-6 rounded-full transition-colors shrink-0 ${on ? 'bg-ink' : 'bg-line-strong'}`} aria-hidden="true">
+          <span className={`absolute top-0.5 left-0.5 w-5 h-5 rounded-full bg-surface  transition-transform ${on ? 'translate-x-5' : ''}`} />
         </span>
       </button>
     );
@@ -76,20 +76,20 @@ export function FilterSheet({ products, categories, filters, onApply, onClose }:
   return (
     <Sheet labelledBy="filter-sheet-title" onClose={onClose} variant="bottom">
       <div className="flex justify-center pt-2 sm:hidden" aria-hidden="true">
-        <span className="w-10 h-1 rounded-full bg-stone-300" />
+        <span className="w-10 h-1 rounded-full bg-line-strong" />
       </div>
-      <div className="flex items-center justify-between px-5 pt-2 pb-3 border-b border-stone-200">
-        <h2 id="filter-sheet-title" className="font-serif text-lg text-stone-900">
+      <div className="flex items-center justify-between px-5 pt-2 pb-3 border-b border-line">
+        <h2 id="filter-sheet-title" className="font-serif text-2xl text-ink">
           Filter &amp; sort
         </h2>
-        <button type="button" onClick={onClose} aria-label="Close filters" className="w-10 h-10 -mr-2 rounded-full flex items-center justify-center text-stone-800 hover:bg-stone-100">
+        <button type="button" onClick={onClose} aria-label="Close filters" className="w-10 h-10 -mr-2 rounded-full flex items-center justify-center text-ink hover:bg-sand">
           <X className="w-5 h-5" aria-hidden="true" />
         </button>
       </div>
 
       <div className="flex-1 min-h-0 overflow-y-auto overscroll-contain px-5 py-4 space-y-6">
         <fieldset className="space-y-2.5">
-          <legend className="text-sm font-semibold text-stone-900 mb-2.5">Sort by</legend>
+          <legend className="label-caps text-ink mb-3">Sort by</legend>
           <div className="flex flex-wrap gap-2">
             {SORTS.map((s) => (
               <button key={s.id} type="button" aria-pressed={draft.sort === s.id} onClick={() => set({ sort: s.id })} className={pill(draft.sort === s.id)}>
@@ -105,7 +105,7 @@ export function FilterSheet({ products, categories, filters, onApply, onClose }:
 
         {facets.prices.length > 0 && (
           <fieldset className="space-y-2.5">
-            <legend className="text-sm font-semibold text-stone-900 mb-2.5">Price</legend>
+            <legend className="label-caps text-ink mb-3">Price</legend>
             <div className="flex flex-wrap gap-2">
               {facets.prices.map((b) => (
                 <button
@@ -117,7 +117,7 @@ export function FilterSheet({ products, categories, filters, onApply, onClose }:
                   className={pill(b.selected)}
                 >
                   <span>{b.label}</span>
-                  <span className={`text-xs ${b.selected ? 'text-stone-200' : 'text-stone-600'}`}>
+                  <span className={`text-xs ${b.selected ? 'text-sand' : 'text-ink-soft'}`}>
                     <span className="sr-only">, </span>
                     {b.count}
                   </span>
@@ -128,7 +128,7 @@ export function FilterSheet({ products, categories, filters, onApply, onClose }:
         )}
 
         {hasToggles && (
-          <div className="divide-y divide-stone-200 border-y border-stone-200">
+          <div className="divide-y divide-line border-y border-line">
             {switchRow('In stock only', facets.inStock, draft.inStock, { inStock: !draft.inStock })}
             {switchRow('On sale', facets.sale, draft.sale, { sale: !draft.sale })}
             {switchRow('New in', facets.newIn, draft.newIn, { newIn: !draft.newIn })}
@@ -136,8 +136,8 @@ export function FilterSheet({ products, categories, filters, onApply, onClose }:
         )}
       </div>
 
-      <div className="shrink-0 border-t border-stone-200 px-5 pt-3 pb-[calc(0.75rem+env(safe-area-inset-bottom,0px))] flex items-center gap-3 bg-white">
-        <button type="button" onClick={() => setDraft(clearFilters(draft))} className="px-4 py-3 rounded-full text-sm font-semibold text-stone-900 underline underline-offset-4">
+      <div className="shrink-0 border-t border-line px-5 pt-3 pb-[calc(0.75rem+env(safe-area-inset-bottom,0px))] flex flex-wrap items-center gap-x-3 gap-y-2 bg-surface">
+        <button type="button" onClick={() => setDraft(clearFilters(draft))} className="shrink-0 px-3 py-3 rounded-full text-sm text-ink underline underline-offset-4">
           Clear all
         </button>
         <button
@@ -146,7 +146,7 @@ export function FilterSheet({ products, categories, filters, onApply, onClose }:
             onApply(draft);
             onClose();
           }}
-          className="flex-1 bg-[#0f1c2e] hover:bg-[#1c2c44] text-white font-semibold text-sm py-3 px-4 rounded-full"
+          className="flex-1 basis-40 min-w-0 bg-ink hover:bg-ink-2 text-ivory font-medium tracking-[0.04em] text-sm py-3 px-4 rounded-full"
         >
           {facets.total === 0 ? 'No pieces match' : `Show ${facets.total} ${facets.total === 1 ? 'piece' : 'pieces'}`}
         </button>
