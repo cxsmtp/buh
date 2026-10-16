@@ -53,11 +53,18 @@ test('settings are validated', async () => {
   await assert.rejects(settings.updateSettings('brand', { accentColor: 'red; background:url(x)' }));
   await assert.rejects(settings.updateSettings('sms', { twilio: { accountSid: 'not-a-sid' } }));
   await assert.rejects(settings.updateSettings('courier', { jeebly: { pickupEmirate: 'Narnia' } }));
-  await settings.updateSettings('brand', { storeName: 'X'.repeat(500), marquee: { messages: Array(50).fill('hi'), speedSeconds: 9999 } });
+  await settings.updateSettings('brand', { storeName: 'X'.repeat(500), marquee: { messages: ['hi'], speedSeconds: 9999 } });
   const brand = settings.getSettings('brand');
   assert.equal(brand.storeName.length, 60);
-  assert.equal(brand.marquee.messages.length, 10);
   assert.equal(brand.marquee.speedSeconds, 120);
+  // The announcement bar: at most 3 lines of up to 60 characters, emoji left out; more is refused.
+  await assert.rejects(settings.updateSettings('brand', { marquee: { messages: Array(4).fill('hi') } }), /Up to 3 announcements/);
+  await assert.rejects(settings.updateSettings('brand', { marquee: { messages: ['ok', 'y'.repeat(61)] } }), /Announcement 2 is 61 characters/);
+  await settings.updateSettings('brand', { marquee: { messages: ['✨ Free delivery across the UAE in 1–2 days', 'Cash on delivery', 'x'.repeat(60)] } });
+  assert.deepEqual(settings.getSettings('brand').marquee.messages, ['Free delivery across the UAE in 1–2 days', 'Cash on delivery', 'x'.repeat(60)]);
+  // Saving the logo and name alone keeps the lines.
+  await settings.updateSettings('brand', { storeName: 'Beautiful UAE Home', tagline: 'Linen' });
+  assert.equal(settings.getSettings('brand').marquee.messages.length, 3);
   // Prototype keys are ignored.
   await settings.updateSettings('bank', JSON.parse('{"__proto__":{"polluted":true},"bankName":"ENBD"}'));
   assert.equal(({} as Record<string, unknown>).polluted, undefined);
