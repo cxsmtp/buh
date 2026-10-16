@@ -245,6 +245,16 @@ const MIGRATIONS: Array<(db: DB) => void> = [
       );
     `);
   },
+  // 7: when each stock move reached the audit log. A move is only reported done once it has;
+  //    if the log could not be written, the retry (same key) writes it. Moves recorded before
+  //    this column existed were audited when they were made.
+  (db) => {
+    db.exec(`
+      ALTER TABLE stock_moves ADD COLUMN audited_at TEXT;
+      UPDATE stock_moves SET audited_at = at;
+      CREATE INDEX stock_moves_unaudited ON stock_moves(id) WHERE audited_at IS NULL;
+    `);
+  },
 ];
 
 let db: DB | null = null;

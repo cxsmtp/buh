@@ -234,6 +234,94 @@ test('backups carry the stock ledger and drafts; the restore script brings them 
   db.close();
 });
 
+// ── Review fixes (BUH-02.05 review) ─────────────────────────────────────────
+
+const rawDb = async () => (await import('@/lib/server/db')).getDb();
+
+test('review: undo refuses a size the product no longer offers (no orphan stock row) and a removed product', async () => {
+  const db = await rawDb();
+  const p = product();
+  // Mark sold out (every size to 0), then take King out of the product in the editor.
+  const soldOut = moves.applyStockMove(p.id, req({ changes: [{ sizeId: 'king', set: 0 }, { sizeId: 'queen', set: 0 }], expected: { king: 2, queen: 1 } }), 'o').move;
+  products.updateProduct(p.id, { profiles: p.profiles.filter((s) => s.id !== 'king'), defaultProfileId: 'queen' }, 'o');
+  const e = errorOf(() => moves.undoStockMove(p.id, soldOut.id, key(), 'o'));
+  assert.equal(e.status, 409);
+  assert.match(e.message, /no longer offers/);
+  assert.equal((db.prepare("SELECT COUNT(*) AS n FROM product_stock WHERE product_id = ? AND size_id = 'king'").get(p.id) as { n: number }).n, 0, 'no orphan King row');
+  assert.equal((db.prepare('SELECT stock FROM products WHERE id = ?').get(p.id) as { stock: number }).stock, 0, 'products.stock not inflated');
+
+  const q = product();
+  const m = moves.applyStockMove(q.id, req({ changes: [{ sizeId: 'king', delta: 1 }], expected: { king: 2 } }), 'o').move;
+  products.setArchived(q.id, true);
+  const archived = errorOf(() => moves.undoStockMove(q.id, m.id, key(), 'o'));
+  assert.equal(archived.status, 400);
+  assert.match(archived.message, /removed/);
+  assert.equal(products.getProduct(q.id)!.stockBySize.king, 3);
+});
+
+test('review: when the audit log cannot be written the move is not reported done; the retry (same key) writes the audit', async () => {
+  const p = product();
+  const k = key();
+  const body = { key: k, reason: 'received', changes: [{ sizeId: 'king', delta: 4 }], expected: { king: 2 } };
+  // The audit log file becomes unwritable (as with a full disk): a directory in its place.
+  const file = path.join(dir, `audit-${new Date().toISOString().slice(0, 7)}.jsonl`);
+  const aside = `${file}.aside`;
+  fs.renameSync(file, aside);
+  fs.mkdirSync(file);
+  let first: { status: number } | null = null;
+  try {
+    first = errorOf(() => moves.applyStockMove(p.id, moves.parseMoveRequest(body), 'o'));
+  } catch {
+    first = null;
+  } finally {
+    fs.rmdirSync(file);
+    fs.renameSync(aside, file);
+  }
+  assert.ok(first, 'not reported as done');
+  assert.equal(first!.status, 503);
+  assert.equal(products.getProduct(p.id)!.stockBySize.king, 6, 'the stock change itself is kept (and recorded in the ledger)');
+  const again = moves.applyStockMove(p.id, moves.parseMoveRequest(body), 'o');
+  assert.equal(again.replayed, true);
+  assert.equal(products.getProduct(p.id)!.stockBySize.king, 6, 'not applied twice');
+  const entries = auditEntries('product.stock_moved').filter((e) => e.details.moveId === again.move.id);
+  assert.equal(entries.length, 1, 'audited exactly once, on the retry');
+  moves.applyStockMove(p.id, moves.parseMoveRequest(body), 'o');
+  assert.equal(auditEntries('product.stock_moved').filter((e) => e.details.moveId === again.move.id).length, 1, 'a later replay does not audit again');
+});
+
+test('review: a duplicate key belongs to its product; a deleted copy is a clear 404', async () => {
+  const a = product();
+  const b = product();
+  const k = key();
+  products.duplicateProduct(a.id, k, 'o');
+  const other = errorOf(() => products.duplicateProduct(b.id, k, 'o'));
+  assert.equal(other.status, 409);
+  const k2 = key();
+  const copy = products.duplicateProduct(a.id, k2, 'o').product;
+  const db = await rawDb();
+  db.prepare('DELETE FROM product_stock WHERE product_id = ?').run(copy.id);
+  db.prepare('DELETE FROM products WHERE id = ?').run(copy.id);
+  products.invalidateProducts();
+  const gone = errorOf(() => products.duplicateProduct(a.id, k2, 'o'));
+  assert.equal(gone.status, 404);
+  assert.match(gone.message, /copy/);
+});
+
+test('review: the editor dropping a size with stock records it (old → 0) in the same correction move', () => {
+  const p = product();
+  products.updateProduct(p.id, { profiles: p.profiles.filter((s) => s.id !== 'queen'), stockBySize: { king: 5 }, expectedStockBySize: { king: 2 } }, 'editor');
+  const m = moves.listStockMoves(p.id)[0];
+  assert.equal(m.reason, 'correction');
+  assert.deepEqual(m.changes, [
+    { sizeId: 'king', from: 2, to: 5 },
+    { sizeId: 'queen', from: 1, to: 0 },
+  ]);
+  // A size dropped with nothing in stock needs no entry.
+  const q = product();
+  products.updateProduct(q.id, { profiles: q.profiles.filter((s) => s.id !== 'single') }, 'editor');
+  assert.equal(moves.listStockMoves(q.id)[0].note, 'new product');
+});
+
 // ── The same through HTTP, against the production build ─────────────────────
 
 describe('stock API (real build)', { skip: !hasBuild }, () => {

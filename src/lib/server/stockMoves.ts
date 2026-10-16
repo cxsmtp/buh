@@ -1,9 +1,8 @@
 import crypto from 'node:crypto';
-import { audit } from './audit';
 import { getDb, inTransaction } from './db';
 import { HttpError } from './http';
 import { getProduct, invalidateProducts, type StoredProduct } from './products';
-import { insertMove, rowToMove, STOCK_REASONS, type MoveRow, type SizeChange, type StockMove, type StockReason } from './stockLedger';
+import { auditBacklog, auditMove, insertMove, rowToMove, STOCK_REASONS, type MoveRow, type SizeChange, type StockMove, type StockReason } from './stockLedger';
 
 /**
  * Moving stock from the Admin Hub: the + / − steppers, a typed number,
@@ -101,7 +100,27 @@ function replay(row: MoveRow, hash: string): MoveResult {
   if (row.request_hash !== hash) throw new HttpError(409, 'This change was already sent with different numbers. Refresh and try again.', {}, { code: 'key_reused' });
   const product = getProduct(row.product_id);
   if (!product) throw new HttpError(404, 'Product not found.');
-  return { move: rowToMove(row), product, replayed: true };
+  const move = rowToMove(row);
+  // The first answer was lost, or the audit log could not be written then: write it now.
+  if (!row.audited_at) mustAudit(move, product);
+  return { move, product, replayed: true };
+}
+
+/** The move is saved; it is reported done only once it is in the audit log too. */
+function mustAudit(move: StockMove, product: StoredProduct, key?: string) {
+  const db = getDb();
+  const done = (db.prepare('SELECT audited_at FROM stock_moves WHERE id = ?').get(move.id) as { audited_at: string | null } | undefined)?.audited_at;
+  if (!(done || auditMove(db, move, { title: product.title, idempotencyKey: key })) || !auditBacklog(db)) {
+    throw new HttpError(503, 'The change is saved but could not be written to the audit log yet. Try again in a moment (it will not be applied twice).', { 'Retry-After': '5' }, { code: 'audit_pending' });
+  }
+}
+
+/** The product as stored now (inside the transaction: no cache), with the sizes it offers. */
+function storedNow(productId: string): { archived: boolean; sizes: Set<string> } | null {
+  const row = getDb().prepare('SELECT data, archived FROM products WHERE id = ?').get(productId) as { data: string; archived: number } | undefined;
+  if (!row) return null;
+  const data = JSON.parse(row.data) as { profiles?: Array<{ id: string }> };
+  return { archived: row.archived === 1, sizes: new Set((data.profiles ?? []).map((p) => p.id)) };
 }
 
 function currentQty(productId: string, sizeId: string): number {
@@ -114,19 +133,6 @@ function setQty(productId: string, sizeId: string, qty: number) {
     .run(productId, sizeId, qty);
 }
 
-function record(move: StockMove, product: StoredProduct, key: string) {
-  audit('product.stock_moved', {
-    by: move.actor,
-    productId: product.id,
-    title: product.title,
-    reason: move.reason,
-    moveId: move.id,
-    undoOf: move.undoOf ?? undefined,
-    idempotencyKey: key,
-    changes: move.changes.map((c) => `${c.sizeId}: ${c.from} → ${c.to}`),
-    note: move.note || undefined,
-  });
-}
 
 /** Apply a move to one product's stock (see the top of this file). */
 export function applyStockMove(productId: string, req: MoveRequest, actor: string): MoveResult {
@@ -146,6 +152,10 @@ export function applyStockMove(productId: string, req: MoveRequest, actor: strin
       replayed = replay(again, hash);
       return null;
     }
+    const stored = storedNow(productId);
+    if (!stored) throw new HttpError(404, 'Product not found.');
+    if (stored.archived) throw new HttpError(400, 'This product was removed: restore it first.');
+    if (req.changes.some((c) => !stored.sizes.has(c.sizeId))) throw new HttpError(409, 'This product no longer offers that size: refresh.', {}, { code: 'stock_changed' });
     const now: Record<string, number> = {};
     for (const c of req.changes) now[c.sizeId] = currentQty(productId, c.sizeId);
     const stale = req.changes.some((c) => req.expected[c.sizeId] !== undefined && req.expected[c.sizeId] !== now[c.sizeId]);
@@ -167,7 +177,7 @@ export function applyStockMove(productId: string, req: MoveRequest, actor: strin
   if (replayed) return replayed;
   invalidateProducts();
   const fresh = getProduct(productId)!;
-  record(move!, fresh, req.key);
+  mustAudit(move!, fresh, req.key);
   return { move: move!, product: fresh, replayed: false };
 }
 
@@ -193,6 +203,12 @@ export function undoStockMove(productId: string, moveId: unknown, keyIn: unknown
     if (row.reason === 'undo') throw new HttpError(400, 'An undo cannot itself be undone: change the number instead.');
     if (getDb().prepare('SELECT 1 FROM stock_moves WHERE undo_of = ?').get(id)) throw new HttpError(409, 'That change was already undone.', {}, { code: 'already_undone' });
     const original = rowToMove(row);
+    // Put back only what can still be put back: the product must still be in the shop and offer every size.
+    const stored = storedNow(productId);
+    if (!stored) throw new HttpError(404, 'Product not found.');
+    if (stored.archived) throw new HttpError(400, 'This product was removed: restore it first, then change the numbers.');
+    const dropped = original.changes.filter((c) => !stored.sizes.has(c.sizeId)).map((c) => c.sizeId);
+    if (dropped.length) throw new HttpError(409, `This change cannot be undone: the product no longer offers ${dropped.join(', ')}. Change the numbers instead.`, {}, { code: 'size_removed' });
     const now: Record<string, number> = {};
     for (const c of original.changes) now[c.sizeId] = currentQty(productId, c.sizeId);
     if (original.changes.some((c) => now[c.sizeId] !== c.to)) throw stockChanged(product, now);
@@ -203,7 +219,7 @@ export function undoStockMove(productId: string, moveId: unknown, keyIn: unknown
   if (replayed) return replayed;
   invalidateProducts();
   const fresh = getProduct(productId)!;
-  record(move!, fresh, key);
+  mustAudit(move!, fresh, key);
   return { move: move!, product: fresh, replayed: false };
 }
 

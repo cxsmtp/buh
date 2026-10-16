@@ -74,7 +74,8 @@ function resync(file: string) {
   }
 }
 
-export function audit(action: string, details: Record<string, unknown> = {}) {
+/** Append an entry. Never throws; returns false when it could not be written (see logs). */
+export function audit(action: string, details: Record<string, unknown> = {}): boolean {
   try {
     // Re-read the chain head each time: another worker may have appended.
     resync(monthFile());
@@ -90,9 +91,11 @@ export function audit(action: string, details: Record<string, unknown> = {}) {
     fs.appendFileSync(loadedFile, `${JSON.stringify({ ...body, mac })}\n`, { mode: 0o600 });
     lastMac = mac;
     seq = body.seq;
+    return true;
   } catch (err) {
     // Auditing must never take the shop down; say so loudly instead.
     logEvent('error', 'audit_write_failed', { action, error: err instanceof Error ? err.message : String(err) });
+    return false;
   }
 }
 

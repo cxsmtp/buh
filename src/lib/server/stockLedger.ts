@@ -1,4 +1,5 @@
 import type Database from 'better-sqlite3';
+import { audit } from './audit';
 
 /**
  * The stock ledger (table stock_moves): one row per change of stock made in the
@@ -42,6 +43,7 @@ export interface MoveRow {
   changes: string;
   note: string;
   undo_of: number | null;
+  audited_at?: string | null;
 }
 
 export function rowToMove(r: MoveRow): StockMove {
@@ -55,6 +57,34 @@ export function rowToMove(r: MoveRow): StockMove {
     note: r.note,
     undoOf: r.undo_of,
   };
+}
+
+/**
+ * Write a recorded move to the audit log (who, why, old → new) and mark it audited. Returns
+ * false when the log could not be written: the move is then not reported as done, and a
+ * retry with the same key, or the next audited move, writes it.
+ */
+export function auditMove(db: Database.Database, move: StockMove, details: { title?: string; idempotencyKey?: string } = {}): boolean {
+  const ok = audit('product.stock_moved', {
+    by: move.actor,
+    productId: move.productId,
+    title: details.title,
+    reason: move.reason,
+    moveId: move.id,
+    undoOf: move.undoOf ?? undefined,
+    idempotencyKey: details.idempotencyKey,
+    changes: move.changes.map((c) => `${c.sizeId}: ${c.from} → ${c.to}`),
+    note: move.note || undefined,
+  });
+  if (ok) db.prepare('UPDATE stock_moves SET audited_at = ? WHERE id = ? AND audited_at IS NULL').run(new Date().toISOString(), move.id);
+  return ok;
+}
+
+/** Moves recorded but not yet in the audit log (the log could not be written then). Oldest first. */
+export function auditBacklog(db: Database.Database, limit = 50): boolean {
+  const rows = db.prepare('SELECT * FROM stock_moves WHERE audited_at IS NULL ORDER BY id LIMIT ?').all(limit) as MoveRow[];
+  for (const r of rows) if (!auditMove(db, rowToMove(r), { idempotencyKey: r.idempotency_key })) return false;
+  return true;
 }
 
 /** Record a move (call inside the transaction that changes the stock). */

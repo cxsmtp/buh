@@ -7,7 +7,7 @@ import { HttpError } from './http';
 import { acceptImageRef } from './images';
 import { bump, changedElsewhere } from './live';
 import { getSettings } from './settings';
-import { insertMove, type SizeChange, type StockMove } from './stockLedger';
+import { auditBacklog, auditMove, insertMove, type SizeChange, type StockMove } from './stockLedger';
 
 /**
  * The catalogue. Stock is kept per product and size in product_stock, so an
@@ -106,9 +106,14 @@ export function invalidateProducts() {
   bump('catalog'); // open pages reload the catalogue
 }
 
-function auditMove(move: StockMove | null, title: string) {
+/**
+ * The editor's stock change into the audit log. The save itself is already done (and the move is in
+ * the ledger); if the log cannot be written now, the next audited stock move writes it.
+ */
+function recordMove(move: StockMove | null, title: string) {
   if (!move) return;
-  audit('product.stock_moved', { by: move.actor, productId: move.productId, title, reason: move.reason, moveId: move.id, changes: move.changes.map((c) => `${c.sizeId}: ${c.from} → ${c.to}`), note: move.note });
+  const db = getDb();
+  if (auditBacklog(db)) auditMove(db, move, { title });
 }
 
 /** Stock for the sizes given in the input: stockBySize, or (older callers) stockCount for the default size. */
@@ -146,7 +151,7 @@ export function createProduct(input: unknown, actor = 'admin'): StoredProduct {
     if (changes.length) movedNow = insertMove(getDb(), { key: `new-${crypto.randomUUID()}`, hash: '', productId: product.id, actor, reason: 'received', changes, note: 'new product' });
   });
   invalidateProducts();
-  auditMove(movedNow, product.title);
+  recordMove(movedNow, product.title);
   return getProduct(product.id)!;
 }
 
@@ -186,6 +191,11 @@ export function updateProduct(id: string, input: unknown, actor = 'admin'): Stor
       }
       writeStock(id, { [size]: qty });
     }
+    // Sizes no longer offered keep no stock: what they had leaves the books in the same move.
+    const offeredNow = new Set(product.profiles.map((pr) => pr.id));
+    for (const r of db.prepare('SELECT size_id, qty FROM product_stock WHERE product_id = ? AND qty > 0 ORDER BY size_id').all(id) as Array<{ size_id: string; qty: number }>) {
+      if (!offeredNow.has(r.size_id)) moved.push({ sizeId: r.size_id, from: r.qty, to: 0 });
+    }
     // Every change of stock is in the ledger, with who made it (here: the product editor).
     if (moved.length) movedNow = insertMove(db, { key: `edit-${crypto.randomUUID()}`, hash: '', productId: id, actor, reason: 'correction', changes: moved, note: 'product editor' });
     // Sizes no longer offered keep no stock.
@@ -193,7 +203,7 @@ export function updateProduct(id: string, input: unknown, actor = 'admin'): Stor
     db.prepare(`DELETE FROM product_stock WHERE product_id = ? AND size_id NOT IN (${offered.map(() => '?').join(',')})`).run(id, ...offered);
   });
   invalidateProducts();
-  auditMove(movedNow, product.title);
+  recordMove(movedNow, product.title);
   return getProduct(id)!;
 }
 
@@ -233,11 +243,18 @@ export function adjustStock(id: string, sizeId: string, delta: number): StoredPr
  */
 export function duplicateProduct(id: string, key: string, actor = 'admin'): { product: StoredProduct; replayed: boolean } {
   if (!/^[A-Za-z0-9_-]{8,80}$/.test(key)) throw new HttpError(400, 'Give an idempotency key.');
-  const done = getDb().prepare('SELECT data FROM kv WHERE key = ?').get(`dup:${key}`) as { data: string } | undefined;
-  if (done) {
-    const copy = getProduct(JSON.parse(done.data) as string);
-    if (copy) return { product: copy, replayed: true };
-  }
+  // The key names one copy of one product: { sourceId, copyId }.
+  const earlier = (): { product: StoredProduct; replayed: boolean } | null => {
+    const row = getDb().prepare('SELECT data FROM kv WHERE key = ?').get(`dup:${key}`) as { data: string } | undefined;
+    if (!row) return null;
+    const done = JSON.parse(row.data) as { sourceId?: string; copyId?: string };
+    if (done.sourceId !== id) throw new HttpError(409, 'This request was already used to copy another product. Refresh and try again.', {}, { code: 'key_reused' });
+    const copy = getProduct(done.copyId ?? '');
+    if (!copy) throw new HttpError(404, 'The copy made by this request no longer exists. Refresh and duplicate again.');
+    return { product: copy, replayed: true };
+  };
+  const first = earlier();
+  if (first) return first;
   const original = getProduct(id);
   if (!original) throw new HttpError(404, 'Product not found.');
   const copyId = `prod-${crypto.randomBytes(6).toString('hex')}`;
@@ -249,19 +266,20 @@ export function duplicateProduct(id: string, key: string, actor = 'admin'): { pr
   const title = `${original.title} (copy)`.slice(0, 160);
   const data = { ...rest, id: copyId, title, sku: undefined, createdAt: new Date().toISOString(), reviewsCount: 0 };
   const db = getDb();
+  let replay: { product: StoredProduct; replayed: boolean } | null = null;
   inTransaction(() => {
-    const again = db.prepare('SELECT data FROM kv WHERE key = ?').get(`dup:${key}`);
-    if (again) return;
+    replay = earlier();
+    if (replay) return;
     const pos = (db.prepare('SELECT position FROM products WHERE id = ?').get(id) as { position: number }).position;
     db.prepare('UPDATE products SET position = position + 1 WHERE position > ?').run(pos);
     db.prepare('INSERT INTO products (id, data, stock, active, position, updated_at) VALUES (?, ?, 0, 0, ?, ?)').run(copyId, JSON.stringify(data), pos + 1, new Date().toISOString());
     writeStock(copyId, Object.fromEntries(original.profiles.map((s) => [s.id, 0])));
-    db.prepare('INSERT INTO kv (key, data, updated_at) VALUES (?, ?, ?)').run(`dup:${key}`, JSON.stringify(copyId), new Date().toISOString());
+    db.prepare('INSERT INTO kv (key, data, updated_at) VALUES (?, ?, ?)').run(`dup:${key}`, JSON.stringify({ sourceId: id, copyId }), new Date().toISOString());
   });
+  if (replay) return replay;
   invalidateProducts();
-  const stored = JSON.parse((db.prepare('SELECT data FROM kv WHERE key = ?').get(`dup:${key}`) as { data: string }).data) as string;
-  audit('product.duplicated', { by: actor, productId: id, copyId: stored, title });
-  return { product: getProduct(stored)!, replayed: stored !== copyId };
+  audit('product.duplicated', { by: actor, productId: id, copyId, title });
+  return { product: getProduct(copyId)!, replayed: false };
 }
 
 /** Remove from the shop for good (kept for past orders); restore brings it back hidden. */
