@@ -4,6 +4,7 @@ One row per release. Benchmarks run `npm run test:load` on the same 4 vCPU host,
 
 | Version | Date | Storefront req/s (p50 / p95 ms) | Serviceability API req/s (p50 / p95 ms) | Failed requests | Tests | Audit (production) | Security scan |
 | --- | --- | --- | --- | --- | --- | --- | --- |
+| BUH-02.05.00 | 2026-10-16 | branch 788 / 826 / 786; main 755 / 830 / 804 (p95 114–175 vs 105–164 ms) | branch 713 / 756 / 626; main 663 / 565 / 628 | 0 | 371 passed | 0 vulnerabilities | Two reviews of updater/proxy, fixed with tests; real containers on Docker, Podman 4.9 and 5.7; Windows line not run on Windows |
 | BUH-02.04.00 | 2026-10-15 | branch 848 / 834 / 832; main 842 / 832 / 787 (p95 138–151 vs 92–149 ms) | branch 694 / 701 / 716; main 718 / 677 / 645 | 0 | 303 passed | 0 vulnerabilities | Two reviews (sign-in 6, updater 7 findings), fixed with tests; Windows script not run on a real Windows Podman machine |
 | BUH-02.03.02 | 2026-10-15 | branch 831 / 868 / 854; main 839 / 827 / 810 (p95 95–152 vs 100–160 ms) | branch 738 / 665 / 676; main 664 / 663 / 701 | 0 | 255 passed | 0 vulnerabilities | Text-only admin change; no scanner here |
 | BUH-02.03.01 | 2026-10-15 | not run: no shop code changed | not run | — | CI full suite | no package changes | not applicable (docs only) |

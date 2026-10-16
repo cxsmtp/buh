@@ -454,6 +454,15 @@ const INDEX: Indexed[] = UAE_AREAS.map((area) => {
   return { area, name: normArea(area.name), aliases: raw.map(normArea), raw };
 });
 
+// Exact-name and alias lookups by key, so resolving an area (on every delivery check) is a map
+// lookup instead of a scan of the whole list.
+const BY_NAME = new Map<string, UAEArea[]>();
+const BY_ALIAS = new Map<string, UAEArea[]>();
+for (const i of INDEX) {
+  BY_NAME.set(i.name, [...(BY_NAME.get(i.name) ?? []), i.area]);
+  for (const a of new Set(i.aliases)) BY_ALIAS.set(a, [...(BY_ALIAS.get(a) ?? []), i.area]);
+}
+
 /** The areas of one emirate, in the order above. */
 export function areasOf(emirate: Emirate): UAEArea[] {
   return UAE_AREAS.filter((a) => a.emirate === emirate);
@@ -472,9 +481,9 @@ export function resolveArea(text: string, emirate?: string): UAEArea | null {
     // An alias shared by two places in one emirate ("Emirates Living") names neither.
     return from.length === 1 ? from[0] : null;
   };
-  const byName = INDEX.filter((i) => i.name === q).map((i) => i.area);
+  const byName = BY_NAME.get(q) ?? [];
   if (byName.length) return pick(byName) ?? byName.find((a) => a.emirate === emirate) ?? byName[0];
-  return pick(INDEX.filter((i) => i.aliases.includes(q)).map((i) => i.area));
+  return pick(BY_ALIAS.get(q) ?? []);
 }
 
 /** A stable key for an area ("Dubai|Discovery Gardens"). */
