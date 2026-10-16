@@ -16,6 +16,11 @@ const NEWER = 'sha256:' + 'c'.repeat(64);
 const BROKEN = 'sha256:broken' + 'd'.repeat(58);
 const CRASH = 'sha256:crash' + 'e'.repeat(59);
 const LATEST = 'ghcr.io/cxsmtp/buh:latest';
+// The buh-updater image (ids with "upd": the fake runs them as the updater).
+const UPD1 = 'sha256:upd1' + '1'.repeat(60);
+const UPD2 = 'sha256:upd2' + '2'.repeat(60);
+const UPDBROKEN = 'sha256:updbroken' + '3'.repeat(55);
+const UPDATER_REF = 'ghcr.io/cxsmtp/buh-updater:latest';
 const key = (ref: string) => ref.replace(/[/:@]/g, '_');
 
 function setup() {
@@ -30,7 +35,7 @@ function setup() {
   for (const d of [env.fake, env.bin, env.state, env.project, path.join(env.fake, 'tags'), path.join(env.fake, 'registry')]) fs.mkdirSync(d, { recursive: true });
   fs.copyFileSync(path.join(root, 'test/fixtures/fake-docker.sh'), path.join(env.bin, 'docker'));
   fs.chmodSync(path.join(env.bin, 'docker'), 0o755);
-  fs.writeFileSync(path.join(env.fake, 'ids'), [OLD, NEW, NEWER, BROKEN, CRASH].join('\n') + '\n');
+  fs.writeFileSync(path.join(env.fake, 'ids'), [OLD, NEW, NEWER, BROKEN, CRASH, UPD1, UPD2, UPDBROKEN].join('\n') + '\n');
   return env;
 }
 type Env = ReturnType<typeof setup>;
@@ -410,7 +415,7 @@ const exists = (e: Env, name: string) => fs.existsSync(path.join(e.fake, 'c', na
 function runningSingle(e: Env) {
   tag(e, LATEST, OLD);
   shopContainer(e, SHOP, OLD);
-  // Set up the way scripts/podman-autoupdate.bat does it (the hand-started one is kept as -previous; dropped here).
+  // Set up the way `setup` does it (the hand-started one is kept as -previous; dropped here).
   const r = runSingle(e, ['adopt']);
   assert.equal(r.code, 0, r.out);
   assert.equal(read(path.join(e.state, 'last-good')).trim(), OLD);
@@ -570,7 +575,7 @@ test('single: a container whose data is in another volume is never touched', () 
   const a = runSingle(e, ['adopt']);
   assert.equal(a.code, 2, a.out);
   assert.match(a.out, /refusing: beautifuluaehome keeps its data in the volume buhome-data, not beautifuluaehome-data/);
-  assert.match(a.out, /podman-autoupdate\.bat beautifuluaehome 443 buhome-data/);
+  assert.match(a.out, /setup beautifuluaehome --volume buhome-data/);
   assert.deepEqual(events(e), []);
 });
 
@@ -616,13 +621,14 @@ test("single: adopt re-creates the owner's container with the full definition (s
 const IMAGE_ENV = ['PATH=/usr/local/bin:/usr/bin:/bin', 'NODE_ENV=production', 'PORT=3000', 'HOSTNAME=0.0.0.0', 'DATA_DIR=/data'];
 const SECRET = `s3cr3t with spaces $&"'|;\\ and =`;
 /** The owner's container, started by hand with its own settings (secrets among them). */
-function ownersContainer(e: Env, name = SHOP, extra: { env?: string[]; bindings?: string[]; mounts?: string[] } = {}) {
-  shopContainer(e, name, OLD);
+function ownersContainer(e: Env, name = SHOP, extra: { env?: string[]; bindings?: string[]; mounts?: string[]; data?: string } = {}) {
+  const data = extra.data ?? `${SHOP}-data`;
+  shopContainer(e, name, OLD, 'running', data);
   const d = path.join(e.fake, 'c', name);
   const env = [...IMAGE_ENV.filter((l) => !l.startsWith('HOSTNAME=')), 'HOSTNAME=4f2a9c', `SESSION_SECRET=${SECRET}`, 'SMTP_PASS=p@ss=word', 'TRUST_PROXY=1', 'TZ=Europe/London', ...(extra.env ?? [])];
   fs.writeFileSync(path.join(d, 'env'), env.join('\n') + '\n');
   fs.writeFileSync(path.join(d, 'bindings'), (extra.bindings ?? ['3000/tcp|0.0.0.0|8443', '3000/tcp|::|8443']).join('\n') + '\n');
-  fs.writeFileSync(path.join(d, 'mounts'), [`volume|${SHOP}-data||/data`, ...(extra.mounts ?? [])].join('\n') + '\n');
+  fs.writeFileSync(path.join(d, 'mounts'), [`volume|${data}||/data`, ...(extra.mounts ?? [])].join('\n') + '\n');
 }
 const envOf = (e: Env, name: string) => fileOf(e, name, 'env').split('\n');
 
@@ -786,7 +792,6 @@ test('single: invalid SHOP_* settings are refused before Docker is touched', () 
     { SHOP_PORT: '65536' },
     { SHOP_PORT: '443 -v /:/host' },
     { SHOP_PORT: '0443' },
-    { SHOP_PORT: '127.0.0.1:443' },
     { SHOP_VOLUME: '../etc' },
     { SHOP_VOLUME: '/var/run/docker.sock' },
     { CONTROL_VOLUME: 'x y' },
@@ -886,4 +891,185 @@ test('single: Settings → Versions requests ("rollback X.Y.Z", "update") switch
     child.kill('SIGTERM');
     await exited;
   }
+});
+
+// ── `setup` and self-update, from the published buh-updater image (no code on the host) ──
+
+const SOCKET = '/run/user/1000/podman/podman.sock';
+const UPDATER = `${SHOP}-updater`;
+const STATE_VOL = (e: Env) => path.join(e.fake, 'volumes', `${SHOP}-updater-state`);
+/** The one-line set-up: `podman run … -e SOCK=… buh-updater setup NAME`, with the fake engine. */
+function runSetup(e: Env, args: string[], extra: Record<string, string> = {}) {
+  if (!fs.existsSync(path.join(e.fake, 'tags', key(UPDATER_REF)))) tag(e, UPDATER_REF, UPD1);
+  return run(e, ['setup', SHOP, ...args], {
+    UPDATER_MODE: '',
+    COMPOSE_PROJECT_NAME: '',
+    SOCK: `unix://${SOCKET}`,
+    UPDATER_IMAGE: UPDATER_REF,
+    FAKE_UPDATER_SH: path.join(root, 'deploy/updater/updater.sh'),
+    ...extra,
+  });
+}
+const updaterEnv = (e: Env) => fileOf(e, UPDATER, 'env').split('\n');
+
+test('setup, a new shop: volumes, the shop on 443 from the published image, then the updater with --restart=always', () => {
+  const e = setup();
+  publish(e, OLD);
+  const r = runSetup(e, []);
+  assert.equal(r.code, 0, r.out);
+  const ev = events(e);
+  for (const v of ['state', 'control', 'status']) assert.ok(ev.includes(`volume create ${SHOP}-updater-${v}`), ev.join('\n'));
+  assert.ok(ev.some((l) => l.startsWith('prep ')));
+  assert.ok(ev.includes('updater adopt'));
+  assert.ok(ev.includes(`run ${SHOP} ${OLD} port=443`));
+  assert.equal(ev.at(-1), `run ${UPDATER} ${UPD1}`);
+  assert.equal(fileOf(e, SHOP, 'data'), `${SHOP}-data`);
+  // The long-running updater: the socket (prefix stripped), label=disable, restart, settings.
+  const args = fileOf(e, UPDATER, 'args');
+  assert.match(args, /--restart=always --stop-timeout 600/);
+  assert.match(args, /--security-opt label=disable -v \/run\/user\/1000\/podman\/podman.sock:\/var\/run\/docker.sock/);
+  assert.match(args, /--read-only --tmpfs \/tmp --cap-drop ALL --cap-add CHOWN --cap-add FOWNER --security-opt no-new-privileges:true --pids-limit 128/);
+  assert.equal(fileOf(e, UPDATER, 'cmd'), 'daemon');
+  const env = updaterEnv(e);
+  for (const kv of [`SHOP_NAME=${SHOP}`, `SHOP_VOLUME=${SHOP}-data`, `SOCK=${SOCKET}`, `UPDATER_IMAGE=${UPDATER_REF}`, 'SHOP_ENV=TZ=Asia/Dubai', 'UPDATE_CHECK_MINUTES=15', `CONTROL_VOLUME=${SHOP}-updater-control`])
+    assert.ok(env.includes(kv), `${kv} in\n${env.join('\n')}`);
+  assert.match(r.out, /Done\. Automatic updates are on for beautifuluaehome/);
+  assert.match(r.out, /podman-restart\.service/);
+  assert.match(r.out, /systemctl --user enable --now podman\.socket podman-restart\.service/, 'rootless advice');
+  assert.ok(fs.existsSync(path.join(STATE_VOL(e), 'last-good')));
+});
+
+test("setup, the owner's container on 127.0.0.1:3000 with an env file: binding, settings and data volume kept; a re-run changes nothing", () => {
+  const e = setup();
+  tag(e, LATEST, OLD);
+  fs.writeFileSync(path.join(e.fake, 'rootful'), '');
+  // `podman run --env-file .env -p 127.0.0.1:3000:3000 -v shopdata:/data …`: the file's lines are in its env.
+  ownersContainer(e, SHOP, { bindings: ['3000/tcp|127.0.0.1|3000'], data: 'shopdata', env: ['NEXT_PUBLIC_APP_URL=https://shop.example', 'BACKUP_PASSPHRASE=two words "quoted"'] });
+  const r = runSetup(e, []);
+  assert.equal(r.code, 0, r.out);
+  assert.ok(events(e).includes(`run ${SHOP} ${OLD} port=3000`), events(e).join('\n'));
+  assert.equal(fileOf(e, SHOP, 'bindings'), '3000/tcp|127.0.0.1|3000', 'still on 127.0.0.1 only');
+  assert.match(fileOf(e, SHOP, 'args'), /-p 127\.0\.0\.1:3000:3000/);
+  assert.equal(fileOf(e, SHOP, 'data'), 'shopdata', 'the volume it had');
+  const env = envOf(e, SHOP);
+  for (const kv of ['NEXT_PUBLIC_APP_URL=https://shop.example', 'BACKUP_PASSPHRASE=two words "quoted"', `SESSION_SECRET=${SECRET}`, 'TZ=Europe/London'])
+    assert.ok(env.includes(kv), `${kv} kept`);
+  assert.ok(updaterEnv(e).includes('SHOP_VOLUME=shopdata'));
+  assert.ok(updaterEnv(e).includes('SHOP_ENV='), 'no extra settings: its own are carried');
+  assert.ok(!r.out.includes('s3cr3t') && !r.out.includes('two words'), 'no value in the output');
+  assert.match(r.out, /sudo systemctl enable --now podman\.socket podman-restart\.service/, 'rootful advice');
+
+  // Again: the shop is left as it is (only the updater is started afresh).
+  fs.rmSync(path.join(e.fake, 'events'));
+  const again = runSetup(e, []);
+  assert.equal(again.code, 0, again.out);
+  assert.match(again.out, /nothing to change/);
+  assert.ok(!events(e).some((l) => l.startsWith(`run ${SHOP} `) || l === `stop ${SHOP}`), events(e).join('\n'));
+  assert.deepEqual(events(e).filter((l) => l.includes(UPDATER)), [`stop ${UPDATER}`, `rm ${UPDATER}`, `run ${UPDATER} ${UPD1}`]);
+});
+
+test('setup refuses, changing nothing: what cannot be carried, a second shop on the volume, data in a host folder, bad input', () => {
+  const cases: [string, (e: Env) => void, string[], Record<string, string>, RegExp][] = [
+    ['extra bind mount', (e) => ownersContainer(e, SHOP, { mounts: ['bind||/srv/x|/x'] }), [], {}, /the bind \/srv\/x at \/x/],
+    ['second shop on the volume', (e) => (ownersContainer(e), shopContainer(e, 'my-other-shop', OLD)), [], {}, /Nothing was changed/],
+    ['host folder', (e) => (ownersContainer(e), fs.writeFileSync(path.join(e.fake, 'c', SHOP, 'data'), '\n')), [], {}, /host folder/],
+    ['bad name', () => {}, [], {}, /container name must be/],
+    ['bad socket', () => {}, [], { SOCK: '/run/x;rm -rf /' }, /socket path/],
+    ['no socket', () => {}, [], { SOCK: '' }, /socket path/],
+    ['bad option', () => {}, ['--privileged', 'x'], {}, /unknown option/],
+    ['bad env', (e) => ownersContainer(e), ['--env', 'A=$(id)'], {}, /SHOP_ENV/],
+  ];
+  for (const [what, prepare, args, extra, message] of cases) {
+    const e = setup();
+    tag(e, LATEST, OLD);
+    prepare(e);
+    const before = exists(e, SHOP) ? fileOf(e, SHOP, 'image') : '';
+    const r = what === 'bad name' ? run(e, ['setup', 'shop;rm'], { SOCK: SOCKET, UPDATER_IMAGE: UPDATER_REF, FAKE_UPDATER_SH: 'x' }) : runSetup(e, args, extra);
+    assert.equal(r.code, 2, `${what}: ${r.out}`);
+    assert.match(r.out, message, what);
+    assert.ok(!exists(e, UPDATER), `${what}: no updater started`);
+    assert.ok(!events(e).some((l) => l.startsWith(`run ${SHOP}`) || l.startsWith(`stop ${SHOP}`)), `${what}: shop untouched: ${events(e).join('\n')}`);
+    if (before) assert.equal(fileOf(e, SHOP, 'image'), before);
+  }
+});
+
+/** The running updater (as SHOP-updater, from UPD1), set up by `setup`. */
+function setUp(e: Env) {
+  tag(e, LATEST, OLD);
+  ownersContainer(e);
+  const r = runSetup(e, []);
+  assert.equal(r.code, 0, r.out);
+  fs.rmSync(path.join(e.fake, 'events'));
+}
+/** A command run inside the updater container named `as`. */
+const asUpdater = (e: Env, as: string, args: string[], extra: Record<string, string> = {}) =>
+  runSingle(e, args, {
+    UPDATER_CONTAINER: as,
+    UPDATER_IMAGE: UPDATER_REF,
+    SOCK: SOCKET,
+    STATE_DIR: STATE_VOL(e),
+    ALERT_DIR: path.join(STATE_VOL(e), 'alerts'),
+    SHOP_ENV: '',
+    SELF_CHECK_SECONDS: '0',
+    ...extra,
+  });
+
+test('self-update: a newer buh-updater image is started as -new, checked, then takes the name; the old one is retired by it', () => {
+  const e = setup();
+  setUp(e);
+  fs.writeFileSync(path.join(e.fake, 'registry', key(UPDATER_REF)), UPD2 + '\n');
+  const r = asUpdater(e, UPDATER, ['self-update']);
+  assert.equal(r.code, 0, r.out);
+  assert.deepEqual(events(e), [`pull ${UPDATER_REF}`, `run ${UPDATER}-new ${UPD2}`, `rename ${UPDATER} ${UPDATER}-old`, `rename ${UPDATER}-new ${UPDATER}`]);
+  assert.equal(fileOf(e, UPDATER, 'image'), UPD2);
+  assert.match(fileOf(e, UPDATER, 'args'), /--restart=always/);
+  assert.match(read(path.join(STATE_VOL(e), 'alerts', 'alerts.log')), /updated itself/);
+
+  // The new one, on its next round, stops and removes the one it replaced; nothing newer: done.
+  fs.rmSync(path.join(e.fake, 'events'));
+  assert.equal(asUpdater(e, UPDATER, ['self-update']).code, 0);
+  assert.deepEqual(events(e), [`stop ${UPDATER}-old`, `rm ${UPDATER}-old`, `pull ${UPDATER_REF}`]);
+  assert.equal(exists(e, `${UPDATER}-old`), false);
+  // The shop was never touched.
+  assert.equal(statusOf(e, SHOP), 'running');
+});
+
+test('self-update: a broken updater image is removed, the running updater stays, and shop updates go on', () => {
+  const e = setup();
+  setUp(e);
+  fs.writeFileSync(path.join(e.fake, 'registry', key(UPDATER_REF)), UPDBROKEN + '\n');
+  const r = asUpdater(e, UPDATER, ['self-update']);
+  assert.equal(r.code, 0, r.out);
+  assert.deepEqual(events(e), [`pull ${UPDATER_REF}`, `run ${UPDATER}-new ${UPDBROKEN}`, `rm ${UPDATER}-new`]);
+  assert.equal(fileOf(e, UPDATER, 'image'), UPD1, 'the running updater is unchanged');
+  assert.equal(exists(e, `${UPDATER}-new`), false);
+  assert.match(read(path.join(STATE_VOL(e), 'alerts', 'alerts.log')), /not used \(it could not reach the engine/);
+  // Not tried again.
+  fs.rmSync(path.join(e.fake, 'events'));
+  asUpdater(e, UPDATER, ['self-update']);
+  assert.ok(!events(e).some((l) => l.startsWith('run ')), events(e).join('\n'));
+  // Shop updates still work.
+  publish(e, NEW);
+  const u = asUpdater(e, UPDATER, ['once']);
+  assert.equal(u.code, 0, u.out);
+  assert.equal(fileOf(e, SHOP, 'image'), NEW);
+});
+
+test('regression: the request and status folders are taken back when the engine gave them to the shop (Podman 5)', { skip: process.getuid?.() !== 0 && 'needs root to chown' }, () => {
+  const e = setup();
+  runningSingle(e);
+  const control = path.join(path.dirname(e.state), 'control');
+  const pub = path.join(path.dirname(e.state), 'public');
+  fs.mkdirSync(control, { mode: 0o755 });
+  fs.mkdirSync(pub, { mode: 0o700 });
+  // What Podman's Docker API did when it started the shop: the folders became the shop user's.
+  fs.chownSync(control, 1001, 1001);
+  fs.chownSync(pub, 1001, 1001);
+  const r = runSingle(e, ['heal'], { CONTROL_DIR: control, PUBLIC_DIR: pub });
+  assert.equal(r.code, 0, r.out);
+  assert.equal(fs.statSync(control).uid, 0);
+  assert.equal(fs.statSync(control).mode & 0o7777, 0o1733);
+  assert.equal(fs.statSync(pub).uid, 0);
+  assert.equal(fs.statSync(pub).mode & 0o7777, 0o755);
+  assert.match(r.out, /it is the updater's again/);
 });
