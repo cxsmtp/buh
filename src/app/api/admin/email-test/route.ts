@@ -3,7 +3,7 @@ import { enforceIpLimit, requireAdmin } from '@/lib/server/guard';
 import { handleRouteError, HttpError, json } from '@/lib/server/http';
 import { logEvent } from '@/lib/server/log';
 import { mailConfig, sender, transport } from '@/lib/server/mail';
-import { markWorking } from '@/lib/server/settingsGuard';
+import { explainMailError, markWorking } from '@/lib/server/settingsGuard';
 import { getSettings } from '@/lib/server/settings';
 
 /** "Send a test email" with the saved settings, to the Send-to address(es). */
@@ -26,8 +26,8 @@ export async function POST(req: Request) {
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
       logEvent('warn', 'email_test_failed', { error: message });
-      // The mail server's own answer helps (wrong password, blocked port); it holds no secrets of ours.
-      throw new HttpError(502, `The mail server refused: ${message.slice(0, 200)}`);
+      // In plain words (wrong port/security pair, refused password, unreachable); no secrets of ours in it.
+      throw new HttpError(502, `Not sent: ${explainMailError(err, { smtpPort: config.port, smtpSecurity: config.secure ? 'tls' : 'starttls' })}.`);
     }
     // These settings demonstrably work: a later failing change won't replace them.
     markWorking('email', tested);

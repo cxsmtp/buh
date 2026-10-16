@@ -249,6 +249,13 @@ test('settings → Email & admin account: a private mail server is refused; the 
   await page.getByRole('button', { name: 'Save email settings' }).click();
   await page.getByText('The mail server must be a public address.').waitFor();
   assert.equal(await page.getByLabel('Sign-in email').inputValue(), 'admin@beautifuluaehome.com');
+  // Reported: port 587 with Security "TLS" failed with an OpenSSL message. A mismatch is now pointed out, with a one-tap fix.
+  await page.getByLabel('Port', { exact: true }).selectOption('587');
+  await page.getByLabel('Security', { exact: true }).selectOption('tls');
+  await page.getByText('Port 587 usually needs Security “STARTTLS”.').waitFor();
+  await page.getByRole('button', { name: 'Use STARTTLS' }).click();
+  assert.equal(await page.getByLabel('Security', { exact: true }).inputValue(), 'starttls');
+  assert.equal(await page.getByText(/usually needs Security/).count(), 0);
   assert.deepEqual(await overflow(page), []);
   assert.deepEqual(errors, []);
   await ctx.close();
