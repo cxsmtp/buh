@@ -1,8 +1,8 @@
 /**
  * Every screen readable, on any device: text contrast measured in a real browser, in light and
  * dark mode (a phone or laptop set to dark mode once made labels invisible on white cards),
- * at phone and desktop width. Covers the shop, a product, the bag, checkout, the chat, the
- * admin sign-in and every Admin Hub tab and settings section.
+ * at phone and desktop width. Covers the shop (its filter sheet, filtered view and search), a product,
+ * the bag, checkout, the chat, the admin sign-in and every Admin Hub tab and settings section.
  */
 import assert from 'node:assert/strict';
 import { after, before, test } from 'node:test';
@@ -132,6 +132,26 @@ for (const colorScheme of ['dark', 'light'] as const) {
       await ready;
       await page.waitForTimeout(500);
       problems.push(...(await lowContrast(page, 'shop')));
+      // The Filter sheet, a story chosen with chips showing, and search with its matches.
+      await page.getByRole('button', { name: /^Filter and sort/ }).click();
+      const filters = page.getByRole('dialog', { name: 'Filter & sort' });
+      await filters.waitFor();
+      await filters.getByRole('button', { name: /^King/ }).click();
+      await page.waitForTimeout(400); // the chosen pill's colour change has finished
+      problems.push(...(await lowContrast(page, 'filters')));
+      await filters.getByRole('button', { name: /^Show/ }).click();
+      await page.getByRole('group', { name: 'Filters on' }).waitFor();
+      await page.getByRole('group', { name: 'Collections' }).getByRole('button').nth(1).click();
+      await page.waitForTimeout(300);
+      problems.push(...(await lowContrast(page, 'filtered shop')));
+      if (width < 768) await page.getByRole('navigation', { name: 'Shop' }).getByRole('button', { name: 'Search' }).click();
+      else await page.getByRole('button', { name: 'Search products' }).click();
+      await page.keyboard.type('set');
+      await page.getByRole('dialog', { name: 'Search the shop' }).getByRole('listitem').first().waitFor();
+      problems.push(...(await lowContrast(page, 'search')));
+      await page.keyboard.press('Escape');
+      await page.goto(server.base, { waitUntil: 'domcontentloaded' });
+      await page.locator('main h3').first().waitFor();
       const p = (await (await fetch(`${server.base}/api/products`)).json()).products[0];
       await page.locator('h3, h4').filter({ hasText: p.title }).first().click();
       await page.getByRole('button', { name: /Add to Bag/ }).waitFor();

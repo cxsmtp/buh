@@ -1,12 +1,14 @@
 'use client';
 
 import React from 'react';
-import { Home, Package, ShoppingBag, Truck, Camera, Users, Settings, Store, Sparkles, ClipboardList, MessagesSquare } from 'lucide-react';
+import { Home, Package, ShoppingBag, Truck, Camera, Users, Settings, Store, ClipboardList, MessagesSquare, Search } from 'lucide-react';
 
 interface BottomNavProps {
   isAdminMode: boolean;
-  storeTab: 'home' | 'catalog';
-  onSetStoreTab: (tab: 'home' | 'catalog') => void;
+  /** Which shop tab is lit: the feed, or search while it is open. */
+  storeTab: 'home' | 'search';
+  onHome: () => void;
+  onOpenSearch: () => void;
   adminTab: 'orders' | 'add-product' | 'inventory' | 'crm' | 'settings' | 'chats';
   onSetAdminTab: (tab: 'orders' | 'add-product' | 'inventory' | 'crm' | 'settings' | 'chats') => void;
   /** Chats waiting for a person. */
@@ -21,7 +23,8 @@ interface BottomNavProps {
 export const BottomNav: React.FC<BottomNavProps> = ({
   isAdminMode,
   storeTab,
-  onSetStoreTab,
+  onHome,
+  onOpenSearch,
   adminTab,
   onSetAdminTab,
   cartCount,
@@ -125,68 +128,37 @@ export const BottomNav: React.FC<BottomNavProps> = ({
     );
   }
 
+  // The shop on a phone: Home, Search, Bag and Orders, like an app's tab bar (hidden on wider screens,
+  // where the header has them). The chat's Help button floats just above it.
+  const tab = (active: boolean) =>
+    `flex-1 flex flex-col items-center justify-center gap-0.5 h-14 text-[11px] ${active ? 'text-[#0f1c2e] font-semibold' : 'text-stone-600'}`;
   return (
-    <div className="fixed bottom-0 left-0 right-0 z-40 bg-white/95 backdrop-blur-md border-t border-stone-200 px-3 py-1.5 flex items-center justify-around shadow-lg md:hidden">
-      {/* Home */}
-      <button
-        onClick={() => onSetStoreTab('home')}
-        className={`flex flex-col items-center py-1 px-3 text-xs ${
-          storeTab === 'home' ? 'text-[#8a6a2c] font-bold' : 'text-stone-500'
-        }`}
-      >
-        <Home className="w-5 h-5" />
-        <span className="text-[10px] mt-0.5">Home</span>
-      </button>
-
-      {/* Catalog */}
-      <button
-        onClick={() => onSetStoreTab('catalog')}
-        className={`flex flex-col items-center py-1 px-3 text-xs ${
-          storeTab === 'catalog' ? 'text-[#8a6a2c] font-bold' : 'text-stone-500'
-        }`}
-      >
-        <Package className="w-5 h-5" />
-        <span className="text-[10px] mt-0.5">Bed Sheets</span>
-      </button>
-
-      {/* Cart with Counter */}
-      <button
-        onClick={onOpenCart}
-        className="flex flex-col items-center py-1 px-3 text-xs relative text-stone-700"
-      >
-        <div className="relative">
-          <ShoppingBag className="w-5 h-5 text-stone-800" />
-          {cartCount > 0 && (
-            <span className="absolute -top-1.5 -right-2 bg-[#c5a059] text-stone-900 text-[10px] font-bold w-4 h-4 rounded-full flex items-center justify-center shadow">
-              {cartCount}
-            </span>
-          )}
-        </div>
-        <span className="text-[10px] mt-0.5">Bag</span>
-      </button>
-
-      {/* Track */}
-      <button
-        onClick={onOpenTrack}
-        className="flex flex-col items-center py-1 px-3 text-xs text-stone-500"
-      >
-        <Truck className="w-5 h-5" />
-        <span className="text-[10px] mt-0.5">Tracking</span>
-      </button>
-
-      {/* Admin Quick Switch */}
-      <button
-        onClick={onToggleAdminMode}
-        className="flex flex-col items-center py-1 px-3 text-xs text-amber-700 relative font-medium"
-      >
-        <div className="relative">
-          <Sparkles className="w-5 h-5 text-amber-600" />
-          {pendingOrdersCount > 0 && (
-            <span className="absolute -top-1 -right-1 w-2.5 h-2.5 rounded-full bg-red-500 ring-1 ring-white"></span>
-          )}
-        </div>
-        <span className="text-[10px] mt-0.5">Admin</span>
-      </button>
-    </div>
+    <nav aria-label="Shop" className="fixed bottom-0 inset-x-0 z-40 bg-[#fbf9f5]/95 backdrop-blur-md border-t border-[#e8e1d5] pb-safe md:hidden">
+      <div className="flex items-stretch max-w-md mx-auto">
+        <button type="button" onClick={onHome} aria-current={storeTab === 'home' ? 'page' : undefined} className={tab(storeTab === 'home')}>
+          <Home className="w-6 h-6" aria-hidden="true" strokeWidth={storeTab === 'home' ? 2.25 : 1.75} />
+          <span>Home</span>
+        </button>
+        <button type="button" onClick={onOpenSearch} className={tab(storeTab === 'search')}>
+          <Search className="w-6 h-6" aria-hidden="true" strokeWidth={storeTab === 'search' ? 2.25 : 1.75} />
+          <span>Search</span>
+        </button>
+        <button type="button" onClick={onOpenCart} aria-label={`Bag${cartCount ? `, ${cartCount} ${cartCount === 1 ? 'piece' : 'pieces'}` : ''}`} className={tab(false)}>
+          <span className="relative">
+            <ShoppingBag className="w-6 h-6" aria-hidden="true" strokeWidth={1.75} />
+            {cartCount > 0 && (
+              <span className="absolute -top-1.5 -right-2.5 bg-[#c5a059] text-stone-950 text-[10px] font-bold min-w-4 h-4 px-1 rounded-full flex items-center justify-center" aria-hidden="true">
+                {cartCount}
+              </span>
+            )}
+          </span>
+          <span>Bag</span>
+        </button>
+        <button type="button" onClick={onOpenTrack} className={tab(false)}>
+          <Truck className="w-6 h-6" aria-hidden="true" strokeWidth={1.75} />
+          <span>Orders</span>
+        </button>
+      </div>
+    </nav>
   );
 };

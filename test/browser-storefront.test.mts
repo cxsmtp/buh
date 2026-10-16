@@ -1,0 +1,355 @@
+/**
+ * The storefront on a phone and a computer (Chromium against the production build): the round
+ * "story" chips, the Filter sheet (options from the real catalogue, removable chips, a shareable
+ * address, Back and Forward), search, the product sheet (swipe, buttons, keyboard, Back closes
+ * it), Add to Bag from the sheet, the phone's tab bar, stock notes, no sideways scrolling and no
+ * page errors. Skipped without a build or Playwright.
+ */
+import assert from 'node:assert/strict';
+import { after, before, test } from 'node:test';
+import { hasBuild, startServer, type RunningServer } from './server.mjs';
+
+type PW = typeof import('playwright');
+const pw: PW | null = hasBuild ? await import('playwright').catch(() => null) : null;
+const skip = !pw;
+
+let server: RunningServer;
+let browser: import('playwright').Browser;
+let cookie = '';
+
+before(async () => {
+  if (skip) return;
+  server = await startServer();
+  browser = await pw!.chromium.launch();
+  const h = { 'content-type': 'application/json', origin: server.base };
+  await fetch(`${server.base}/api/admin/login`, { method: 'POST', headers: h, body: JSON.stringify({ email: 'x@y.z', password: 'x' }) });
+  await new Promise((r) => setTimeout(r, 300));
+  const once = server.log().match(/Password: (\S+)/)![1];
+  const login = await fetch(`${server.base}/api/admin/login`, { method: 'POST', headers: h, body: JSON.stringify({ email: 'admin@beautifuluaehome.com', password: once }) });
+  const first = (login.headers.get('set-cookie') || '').split(';')[0];
+  const changed = await fetch(`${server.base}/api/admin/password`, { method: 'POST', headers: { ...h, cookie: first }, body: JSON.stringify({ currentPassword: once, newPassword: 'Storefront-Owner-Pass-1' }) });
+  cookie = (changed.headers.get('set-cookie') || '').split(';')[0];
+
+  // A shop like the owner's: one piece sold out, one with a single piece left, one not reduced.
+  const patch = (id: string, product: unknown) =>
+    fetch(`${server.base}/api/admin/products/${id}`, { method: 'PATCH', headers: { ...h, cookie }, body: JSON.stringify({ product }) }).then((r) => assert.equal(r.status, 200, id));
+  const products = (await (await fetch(`${server.base}/api/products`)).json()).products as Array<{ id: string; profiles: Array<{ id: string }> }>;
+  const zero = (id: string, keep: Record<string, number> = {}) => Object.fromEntries(products.find((p) => p.id === id)!.profiles.map((s) => [s.id, keep[s.id] ?? 0]));
+  await patch('prod-03', { stockBySize: zero('prod-03') }); // Heritage Paisley: sold out
+  await patch('prod-02', { stockBySize: zero('prod-02', { king: 1 }) }); // Jaipur: only 1 left (a king)
+  await patch('prod-04', { compareAtPrice: null }); // Artisans Chevron: full price
+});
+after(async () => {
+  await browser?.close();
+  server?.stop();
+});
+
+const TITLES = { mughal: /Mughal Botanical/, jaipur: /Jaipur Jaal/, paisley: /Heritage Paisley/, chevron: /Artisans Chevron/ };
+
+async function shop(width: number, path = '/') {
+  const ctx = await browser.newContext({ viewport: { width, height: width < 600 ? 812 : 900 } });
+  const page = await ctx.newPage();
+  const errors: string[] = [];
+  page.on('pageerror', (e) => errors.push(e.message));
+  page.on('console', (m) => {
+    if (m.type() === 'error' && !/Failed to load resource|ERR_|unsplash/i.test(m.text())) errors.push(m.text());
+  });
+  await page.goto(`${server.base}${path}`, { waitUntil: 'domcontentloaded' });
+  await page.locator('main h3').first().waitFor();
+  return { ctx, page, errors };
+}
+
+/** The product names in the feed, in order. */
+const titles = (page: import('playwright').Page) => page.locator('main article h3').allTextContents();
+
+async function overflow(page: import('playwright').Page) {
+  return page.evaluate(() => (document.documentElement.scrollWidth > document.documentElement.clientWidth ? [`${document.documentElement.scrollWidth}px wide`] : []));
+}
+
+/** Is focus inside the open dialog? */
+const focusInDialog = (page: import('playwright').Page) => page.evaluate(() => Boolean(document.activeElement?.closest('[role=dialog]')));
+
+for (const width of [375, 1280]) {
+  test(`stories at ${width}px: round chips from the catalogue filter the feed at once; the address bar follows`, { skip }, async () => {
+    const { ctx, page, errors } = await shop(width);
+    const storyRow = page.getByRole('group', { name: 'Collections' });
+    const stories = storyRow.getByRole('button');
+    // All, New in, On sale (one piece is full price now), then the categories that have pieces, in the owner's order.
+    assert.deepEqual(await stories.evaluateAll((els) => els.map((e) => e.getAttribute('aria-label'))), ['All', 'New in', 'On sale', 'Hand Block Sets', 'Mughal & Hotel 1000TC', 'Indigo Mud-Resist']);
+    assert.equal(await stories.first().getAttribute('aria-pressed'), 'true');
+    assert.equal((await titles(page)).length, 4);
+    await page.evaluate(() => ((window as unknown as { __mark: number }).__mark = 7));
+
+    await storyRow.getByRole('button', { name: 'Mughal & Hotel 1000TC', exact: true }).click();
+    await page.waitForFunction(() => document.querySelectorAll('main article').length === 1);
+    assert.match((await titles(page))[0], TITLES.paisley);
+    assert.equal(await storyRow.getByRole('button', { name: 'Mughal & Hotel 1000TC', exact: true }).getAttribute('aria-pressed'), 'true');
+    assert.match(page.url(), /\?cat=hotel-luxury$/);
+    await page.getByText('1 piece', { exact: true }).waitFor();
+
+    await storyRow.getByRole('button', { name: 'On sale', exact: true }).click();
+    await page.waitForFunction(() => document.querySelectorAll('main article').length === 3);
+    assert.match(page.url(), /\?sale=1$/, 'one story at a time');
+    assert.ok(!(await titles(page)).some((t) => TITLES.chevron.test(t)));
+
+    await storyRow.getByRole('button', { name: 'All', exact: true }).click();
+    await page.waitForFunction(() => document.querySelectorAll('main article').length === 4);
+    assert.equal(new URL(page.url()).search, '');
+    // Back steps through the stories.
+    await page.goBack();
+    await page.waitForFunction(() => document.querySelectorAll('main article').length === 3);
+    await page.goBack();
+    await page.waitForFunction(() => document.querySelectorAll('main article').length === 1);
+    assert.equal(await page.evaluate(() => (window as unknown as { __mark?: number }).__mark), 7, 'no reload');
+    assert.deepEqual(await overflow(page), []);
+    assert.deepEqual(errors, []);
+    await ctx.close();
+  });
+
+  test(`filter sheet at ${width}px: options from the products, counts, chips, Clear, a shareable address, Back and Forward`, { skip }, async () => {
+    const { ctx, page, errors } = await shop(width);
+    const filterButton = page.getByRole('button', { name: /^Filter and sort/ });
+    await filterButton.click();
+    const sheet = page.getByRole('dialog', { name: 'Filter & sort' });
+    await sheet.waitFor();
+    assert.ok(await focusInDialog(page), 'focus moves into the sheet');
+    for (const legend of ['Sort by', 'Category', 'Size', 'Colour', 'Price']) await sheet.getByText(legend, { exact: true }).waitFor();
+    // Toggles only when they would make a difference: one piece is sold out, one is full price.
+    assert.equal(await sheet.getByRole('switch', { name: /In stock only/ }).count(), 1);
+    assert.equal(await sheet.getByRole('switch', { name: /On sale/ }).count(), 1);
+    // Only sizes the products come in (no "Custom").
+    const sizes = await sheet.locator('fieldset', { hasText: 'Size' }).getByRole('button').allTextContents();
+    assert.ok(sizes.some((s) => s.startsWith('King')) && !sizes.some((s) => /Custom/.test(s)), sizes.join('|'));
+    assert.deepEqual(await overflow(page), [], 'the sheet fits');
+
+    // King + in stock only: the sold-out set goes; the button says how many are left.
+    await sheet.getByRole('button', { name: /^King/ }).click();
+    await sheet.getByRole('switch', { name: /In stock only/ }).click();
+    assert.equal(await sheet.getByRole('switch', { name: /In stock only/ }).getAttribute('aria-checked'), 'true');
+    const show = sheet.getByRole('button', { name: /^Show 3 pieces$/ });
+    await show.waitFor();
+    // Tab stays inside the sheet.
+    for (let i = 0; i < 40; i++) await page.keyboard.press('Tab');
+    assert.ok(await focusInDialog(page), 'Tab is trapped in the sheet');
+    await show.click();
+    await sheet.waitFor({ state: 'detached' });
+    await page.waitForFunction(() => document.querySelectorAll('main article').length === 3);
+    assert.ok(!(await titles(page)).some((t) => TITLES.paisley.test(t)));
+    const chips = page.getByRole('group', { name: 'Filters on' });
+    await chips.getByRole('button', { name: 'Remove filter: Size: King' }).waitFor();
+    await chips.getByRole('button', { name: 'Remove filter: In stock' }).waitFor();
+    assert.match(await filterButton.getAttribute('aria-label') || '', /2 on/);
+    const shared = page.url();
+    assert.match(shared, /size=king/);
+    assert.match(shared, /stock=1/);
+
+    // The filtered view, shared: opens the same in another browser.
+    const other = await shop(width, new URL(shared).pathname + new URL(shared).search);
+    await other.page.waitForFunction(() => document.querySelectorAll('main article').length === 3);
+    await other.page.getByRole('button', { name: 'Remove filter: Size: King' }).waitFor();
+    await other.ctx.close();
+
+    // Back: everything again; Forward: filtered again.
+    await page.goBack();
+    await page.waitForFunction(() => document.querySelectorAll('main article').length === 4);
+    assert.equal(await chips.count(), 0);
+    await page.goForward();
+    await page.waitForFunction(() => document.querySelectorAll('main article').length === 3);
+
+    // A chip removes just its filter; Clear all removes the rest.
+    await chips.getByRole('button', { name: 'Remove filter: Size: King' }).click();
+    await page.waitForFunction(() => !location.search.includes('size='));
+    assert.match(page.url(), /stock=1/);
+    await filterButton.click();
+    await sheet.getByRole('button', { name: 'Price: low to high' }).click();
+    await sheet.getByRole('button', { name: /^Show/ }).click();
+    await page.waitForFunction(() => location.search.includes('sort=price-asc'));
+    const shown = await titles(page);
+    assert.match(shown[0], TITLES.mughal, 'cheapest first');
+    await chips.getByRole('button', { name: 'Clear all' }).click();
+    await page.waitForFunction(() => location.search === '' && document.querySelectorAll('main article').length === 4);
+
+    // Escape closes the sheet without applying, and focus goes back to the Filter button.
+    await filterButton.click();
+    await sheet.getByRole('button', { name: /^Single/ }).click();
+    await page.keyboard.press('Escape');
+    await sheet.waitFor({ state: 'detached' });
+    assert.equal(await page.evaluate(() => document.activeElement?.getAttribute('aria-label')), 'Filter and sort');
+    assert.equal(new URL(page.url()).search, '', 'not applied');
+    assert.deepEqual(errors, []);
+    await ctx.close();
+  });
+
+  test(`search at ${width}px: by name, as you type; Enter shows the matches in the shop; a match opens the product`, { skip }, async () => {
+    const { ctx, page, errors } = await shop(width);
+    const openSearch = () =>
+      width < 768 ? page.getByRole('navigation', { name: 'Shop' }).getByRole('button', { name: 'Search' }).click() : page.getByRole('button', { name: 'Search products' }).click();
+    await openSearch();
+    const dialog = page.getByRole('dialog', { name: 'Search the shop' });
+    await dialog.waitFor();
+    assert.equal(await page.evaluate(() => (document.activeElement as HTMLInputElement | null)?.type), 'search', 'ready to type');
+    await page.keyboard.type('jaipur');
+    await dialog.getByRole('button', { name: /Jaipur Jaal/ }).waitFor();
+    assert.equal(await dialog.getByRole('listitem').count(), 1);
+    await page.keyboard.press('Enter');
+    await dialog.waitFor({ state: 'detached' });
+    await page.waitForFunction(() => document.querySelectorAll('main article').length === 1);
+    assert.match((await titles(page))[0], TITLES.jaipur);
+    assert.match(page.url(), /q=jaipur/);
+    await page.getByRole('button', { name: 'Remove filter: “jaipur”' }).waitFor();
+
+    // Nothing found says so.
+    await openSearch();
+    await page.keyboard.press('Control+A');
+    await page.keyboard.type('velvet');
+    await dialog.getByText(/Nothing called “velvet”/).waitFor();
+    // A match opens the product sheet straight away.
+    await page.keyboard.press('Control+A');
+    await page.keyboard.type('paisley');
+    await dialog.getByRole('button', { name: /Heritage Paisley/ }).click();
+    await page.getByRole('dialog', { name: /Heritage Paisley/ }).waitFor();
+    assert.deepEqual(await overflow(page), []);
+    assert.deepEqual(errors, []);
+    await ctx.close();
+  });
+
+  test(`product sheet at ${width}px: photos swipe, buttons and arrow keys; keyboard stays inside; Escape and Back close it`, { skip }, async () => {
+    const { ctx, page, errors } = await shop(width);
+    const card = page.locator('main article a', { hasText: TITLES.mughal });
+    await card.click();
+    const sheet = page.getByRole('dialog', { name: TITLES.mughal });
+    await sheet.waitFor();
+    assert.match(page.url(), /\?p=prod-01$/, 'a shareable link to the open product');
+    assert.ok(await focusInDialog(page));
+    const track = sheet.getByTestId('photo-track');
+    const at = async () => Number(((await track.getAttribute('aria-label')) || '').match(/Photo (\d+) of/)![1]);
+    const count = Number(((await track.getAttribute('aria-label')) || '').match(/of (\d+)/)![1]);
+    assert.ok(count >= 3, `${count} photos`);
+    assert.equal(await at(), 1);
+    assert.equal(await sheet.getByRole('button', { name: 'Previous photo' }).isDisabled(), true);
+
+    await sheet.getByRole('button', { name: 'Next photo' }).click();
+    await page.waitForFunction(() => /Photo 2 of/.test(document.querySelector('[data-testid=photo-track]')!.getAttribute('aria-label')!));
+    // Keyboard: arrow keys on the photos.
+    await track.focus();
+    await page.keyboard.press('ArrowRight');
+    await page.waitForFunction(() => /Photo 3 of/.test(document.querySelector('[data-testid=photo-track]')!.getAttribute('aria-label')!));
+    await page.keyboard.press('Home');
+    await page.waitForFunction(() => /Photo 1 of/.test(document.querySelector('[data-testid=photo-track]')!.getAttribute('aria-label')!) && document.querySelector('[data-testid=photo-track]')!.scrollLeft === 0);
+    // A swipe (dragged with the mouse here; fingers use the browser's own scrolling).
+    const box = (await track.boundingBox())!;
+    await page.mouse.move(box.x + box.width * 0.8, box.y + box.height / 2);
+    await page.mouse.down();
+    await page.mouse.move(box.x + box.width * 0.5, box.y + box.height / 2, { steps: 6 });
+    await page.mouse.move(box.x + box.width * 0.2, box.y + box.height / 2, { steps: 6 });
+    await page.mouse.up();
+    await page.waitForFunction(() => /Photo 2 of/.test(document.querySelector('[data-testid=photo-track]')!.getAttribute('aria-label')!));
+    // The photo really moved (not just the label).
+    await page.waitForFunction(() => {
+      const t = document.querySelector('[data-testid=photo-track]') as HTMLElement;
+      return Math.abs(t.scrollLeft - t.clientWidth) < 2;
+    });
+    await sheet.getByRole('button', { name: 'Show photo 3' }).click();
+    await page.waitForFunction(() => /Photo 3 of/.test(document.querySelector('[data-testid=photo-track]')!.getAttribute('aria-label')!));
+
+    // Sizes and the ask buttons are there; Tab never leaves the sheet.
+    await sheet.getByRole('button', { name: /^King Size Bed/ }).waitFor();
+    await sheet.getByRole('button', { name: 'Ask in chat' }).waitFor();
+    for (let i = 0; i < 60; i++) await page.keyboard.press('Tab');
+    assert.ok(await focusInDialog(page), 'Tab is trapped in the sheet');
+    assert.deepEqual(await overflow(page), []);
+
+    // Escape closes it, back where the shopper was, focus on the card.
+    await page.keyboard.press('Escape');
+    await sheet.waitFor({ state: 'detached' });
+    await page.waitForFunction(() => !location.search.includes('p='));
+    assert.equal(await page.evaluate(() => document.activeElement?.tagName), 'A');
+    assert.match((await page.evaluate(() => document.activeElement?.textContent)) || '', TITLES.mughal);
+
+    // The phone's Back button closes it too (and Forward opens it again).
+    await card.click();
+    await sheet.waitFor();
+    await page.goBack();
+    await sheet.waitFor({ state: 'detached' });
+    await page.goForward();
+    await sheet.waitFor();
+    await sheet.getByRole('button', { name: 'Close' }).click();
+    await sheet.waitFor({ state: 'detached' });
+    assert.deepEqual(errors, []);
+    await ctx.close();
+  });
+
+  test(`add to bag from the sheet at ${width}px: the chosen size goes in the bag; the counts update`, { skip }, async () => {
+    const { ctx, page, errors } = await shop(width);
+    await page.locator('main article a', { hasText: TITLES.jaipur }).click();
+    const sheet = page.getByRole('dialog', { name: TITLES.jaipur });
+    // Only the king is left: the sheet opens on it; the others are sold out.
+    await sheet.getByRole('button', { name: /^King.*only 1 left/ }).waitFor();
+    assert.equal(await sheet.getByRole('button', { name: /^King/ }).getAttribute('aria-pressed'), 'true');
+    await sheet.getByRole('button', { name: /^Queen.*sold out/ }).click();
+    await sheet.getByText('Queen sold out · Ask us').waitFor();
+    assert.equal(await sheet.getByRole('button', { name: /Add to Bag/ }).count(), 0);
+    await sheet.getByRole('button', { name: /^King/ }).click();
+    assert.equal(await sheet.getByRole('button', { name: 'One more' }).isDisabled(), true, 'only one to add');
+    await sheet.getByRole('button', { name: 'Add to Bag (King)' }).click();
+    await sheet.waitFor({ state: 'detached' });
+    await page.getByText('Your Shopping Bag').waitFor();
+    await page.getByRole('button', { name: /Proceed to Checkout/ }).waitFor();
+    assert.equal(await page.getByRole('button', { name: 'View shopping bag, 1 piece' }).count(), 1);
+    if (width < 768) assert.equal(await page.getByRole('navigation', { name: 'Shop' }).getByRole('button', { name: 'Bag, 1 piece' }).count(), 1);
+    assert.deepEqual(errors, []);
+    await ctx.close();
+  });
+
+  test(`feed and tab bar at ${width}px: stock notes from real stock; the tab bar is for phones and covers nothing`, { skip }, async () => {
+    const { ctx, page, errors } = await shop(width);
+    const note = (t: RegExp) => page.locator('main article', { hasText: t }).locator('p').last().textContent();
+    assert.equal(await note(TITLES.paisley), 'Sold out');
+    assert.equal(await note(TITLES.jaipur), 'Only 1 left');
+    // Reduced price: both prices; full price: one.
+    await page.locator('main article', { hasText: TITLES.mughal }).getByText('AED 495').first().waitFor();
+    assert.equal(await page.locator('main article', { hasText: TITLES.chevron }).locator('.line-through').count(), 0);
+    // Photos load lazily after the first screenful, at the size of the card.
+    const imgs = await page.locator('main article img').evaluateAll((els) => els.map((e) => [(e as HTMLImageElement).loading, (e as HTMLImageElement).sizes]));
+    assert.equal(imgs[0][0], 'eager');
+    assert.ok(imgs.every(([, sizes]) => sizes.includes('50vw')), JSON.stringify(imgs));
+
+    const nav = page.getByRole('navigation', { name: 'Shop' });
+    if (width >= 768) {
+      assert.equal(await nav.isVisible(), false, 'no tab bar on a computer');
+    } else {
+      for (const name of ['Home', 'Search', 'Bag', 'Orders']) await nav.getByRole('button', { name: new RegExp(`^${name}`) }).waitFor();
+      // Scrolled to the very bottom, the last thing on the page sits above the tab bar and the Help button.
+      await page.evaluate(() => window.scrollTo(0, document.documentElement.scrollHeight));
+      await page.waitForTimeout(300);
+      const navTop = (await nav.boundingBox())!.y;
+      const help = (await page.getByRole('button', { name: 'Help and chat' }).boundingBox())!;
+      assert.ok(help.y + help.height <= navTop, `Help (${help.y + help.height}) sits above the tab bar (${navTop})`);
+      const promise = (await page.getByRole('heading', { name: /promise/ }).locator('..').boundingBox())!;
+      assert.ok(promise.y + promise.height <= help.y, `content ends (${promise.y + promise.height}) above the Help button (${help.y})`);
+      // Home goes back to the top; Orders opens Track Order.
+      await nav.getByRole('button', { name: 'Home' }).click();
+      await page.waitForFunction(() => window.scrollY === 0);
+      await nav.getByRole('button', { name: 'Orders' }).click();
+      await page.getByText('Track Your UAE Bedding Order').waitFor();
+    }
+    assert.deepEqual(await overflow(page), []);
+    assert.deepEqual(errors, []);
+    await ctx.close();
+  });
+}
+
+test('reduced motion: no ticker, no sliding sheets', { skip }, async () => {
+  const ctx = await browser.newContext({ viewport: { width: 375, height: 812 }, reducedMotion: 'reduce' });
+  const page = await ctx.newPage();
+  await page.goto(server.base, { waitUntil: 'domcontentloaded' });
+  await page.locator('main h3').first().click();
+  await page.getByRole('dialog').waitFor();
+  const [ticker, sheet] = await page.evaluate(() => [
+    getComputedStyle(document.querySelector('.animate-marquee-runner')!).animationName,
+    getComputedStyle(document.querySelector('[role=dialog]')!).animationName,
+  ]);
+  assert.equal(ticker, 'none');
+  assert.equal(sheet, 'none');
+  await ctx.close();
+});

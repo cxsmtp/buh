@@ -79,10 +79,13 @@ function loadCart(products: Product[], lines?: BagLine[]): CartItem[] {
 }
 
 // Store Components
-import { Header } from '@/components/common/Header';
+import { BrandLogo, Header } from '@/components/common/Header';
+import { MarqueeBar } from '@/components/common/MarqueeBar';
 import { BottomNav } from '@/components/common/BottomNav';
 import { HeroBanner } from '@/components/store/HeroBanner';
-import { CategoryFilter, CategoryOption } from '@/components/store/CategoryFilter';
+import { StoryChips } from '@/components/store/StoryChips';
+import { FilterSheet } from '@/components/store/FilterSheet';
+import { SearchSheet } from '@/components/store/SearchSheet';
 import { ProductCard } from '@/components/store/ProductCard';
 import { ProductDetailModal } from '@/components/store/ProductDetailModal';
 import { CartDrawer } from '@/components/store/CartDrawer';
@@ -115,7 +118,19 @@ import { HelpLauncher } from '@/components/store/HelpLauncher';
 import { VersionBadge } from '@/components/common/VersionBadge';
 import { SystemHealthCard } from '@/components/admin/settings/SystemHealthCard';
 
-import { Sparkles, Palette, ShieldCheck, Heart, Search, X } from 'lucide-react';
+import { SlidersHorizontal, X } from 'lucide-react';
+import { EMPTY_FILTERS, SORTS, activeChips, activeCount, applyFilters, buildStories, filtersToSearch, parseFilters, type Filters } from '@/lib/catalogFilter';
+
+const prefersReducedMotion = () => typeof window !== 'undefined' && window.matchMedia?.('(prefers-reduced-motion: reduce)').matches;
+
+/** Put new query keys in the address bar: push (Back returns to the view before) or replace. */
+function writeSearch(search: string, mode: 'push' | 'replace') {
+  const { pathname, hash } = window.location;
+  const url = `${pathname}${search}${hash}`;
+  if (url === `${pathname}${window.location.search}${hash}`) return;
+  if (mode === 'push') window.history.pushState(null, '', url);
+  else window.history.replaceState(null, '', url);
+}
 
 /**
  * The whole shop (storefront and admin hub) in one client app. Rendered at /
@@ -132,14 +147,20 @@ export function ShopApp({ initialProductId }: { initialProductId?: string } = {}
   // From a password-reset email link (#reset=…).
   const [resetToken, setResetToken] = useState<string | null>(null);
 
-  const [storeTab, setStoreTab] = useState<'home' | 'catalog'>('home');
   const [adminTab, setAdminTab] = useState<AdminTab>('orders');
   // The version badge opens Settings → Versions (re-creating the console on that section).
   const [settingsOpen, setSettingsOpen] = useState<{ id?: string; n: number }>({ n: 0 });
-  const [selectedCategory, setSelectedCategory] = useState<CategoryOption>('all');
+  // What the shop shows (search, filters, sort): mirrored in the address bar so it can be shared and Back works.
+  const [filters, setFilters] = useState<Filters>(EMPTY_FILTERS);
+  const [filterOpen, setFilterOpen] = useState(false);
+  // The product sheet added a history entry (?p=…): closing it goes back, so the phone's Back button closes it too.
+  const sheetPushed = useRef(false);
+  const resultsRef = useRef<HTMLDivElement>(null);
 
   // Core Data (all from the server)
   const [products, setProducts] = useState<Product[]>([]);
+  const [catalogLoaded, setCatalogLoaded] = useState(false);
+  const productsRef = useRef<Product[]>([]);
   const [catalogError, setCatalogError] = useState('');
   const [brandSettings, setBrandSettings] = useState<BrandSettings>(INITIAL_BRAND_SETTINGS);
   const [bankDetails, setBankDetails] = useState<BankTransferDetails>(INITIAL_BANK_DETAILS);
@@ -196,12 +217,13 @@ export function ShopApp({ initialProductId }: { initialProductId?: string } = {}
   const [isTrackerOpen, setIsTrackerOpen] = useState(false);
   const [selectedProduct, setSelectedProduct] = useState<Product | null>(null);
   const [searchOpen, setSearchOpen] = useState(false);
-  const [searchQuery, setSearchQuery] = useState('');
 
   // 2. Load the catalogue and branding, and check the admin session, on mount
   const applyCatalog = useCallback(({ products: res, settings }: Awaited<ReturnType<typeof fetchCatalog>>) => {
     if (res.ok) {
+      productsRef.current = res.data.products;
       setProducts(res.data.products);
+      setCatalogLoaded(true);
       // Latest prices and stock in the bag too (quantities capped to what is left).
       setCart((prev) => refreshCart(prev, res.data.products));
       setCatalogError('');
@@ -242,6 +264,8 @@ export function ShopApp({ initialProductId }: { initialProductId?: string } = {}
       const list = applyCatalog(result);
       if (!list) return;
       const params = new URLSearchParams(window.location.search);
+      // A shared view (?cat=…&size=…) opens as it was shared.
+      setFilters(parseFilters(params));
       // A bag carried in a link (?bag=…) joins this browser's bag.
       const fromLink = loadCart(list, decodeBag(params.get('bag')));
       const saved = loadCart(list);
@@ -252,10 +276,14 @@ export function ShopApp({ initialProductId }: { initialProductId?: string } = {}
       setCart(refreshCart(merged, list));
       if (fromLink.length) setIsCartOpen(true);
       // A product link (/p/<id> or ?p=<id>) opens that product.
-      const wanted = initialProductId || params.get('p');
+      const wanted = params.get('p') || initialProductId;
       const product = wanted ? list.find((p) => p.id === wanted) : undefined;
       if (product) setSelectedProduct(product);
-      if (params.has('bag')) window.history.replaceState(null, '', window.location.pathname);
+      if (params.has('bag')) {
+        params.delete('bag');
+        const rest = params.toString();
+        window.history.replaceState(null, '', `${window.location.pathname}${rest ? `?${rest}` : ''}`);
+      }
     });
     try {
       // Old builds kept data and a forgeable admin flag in the browser: clear them.
@@ -462,18 +490,64 @@ export function ShopApp({ initialProductId }: { initialProductId?: string } = {}
     [storeSettings, lowStockThreshold, supportEmail, festival, chatInfo, delivery]
   );
 
-  // Filtered Products for Storefront
-  const filteredProducts = useMemo(() => {
-    return products.filter((p) => {
-      const matchesCategory = selectedCategory === 'all' || p.category === selectedCategory;
-      const matchesSearch = searchQuery
-        ? p.title.toLowerCase().includes(searchQuery.toLowerCase()) ||
-          p.description.toLowerCase().includes(searchQuery.toLowerCase()) ||
-          p.material.toLowerCase().includes(searchQuery.toLowerCase())
-        : true;
-      return matchesCategory && matchesSearch;
-    });
-  }, [products, selectedCategory, searchQuery]);
+  // The storefront: what the search, filters and sort leave, and the round "story" chips.
+  const filteredProducts = useMemo(() => applyFilters(products, filters, categories), [products, filters, categories]);
+  const stories = useMemo(() => buildStories(products, categories), [products, categories]);
+  const activeStory = stories.find((s) => s.isActive(filters))?.id ?? null;
+  const chips = useMemo(() => activeChips(filters, products, categories), [filters, products, categories]);
+  const filterCount = activeCount(filters);
+
+  /** Show other products: a new step in the browser's history (Back returns to this view). */
+  const showFilters = useCallback((next: Filters, mode: 'push' | 'replace' = 'push') => {
+    setFilters(next);
+    writeSearch(filtersToSearch(next, window.location.search), mode);
+    // If the shopper had scrolled past the top of the products, start them at the top of the new list.
+    const top = resultsRef.current?.getBoundingClientRect().top;
+    if (top !== undefined && top < 0) resultsRef.current?.scrollIntoView({ behavior: prefersReducedMotion() ? 'auto' : 'smooth', block: 'start' });
+  }, []);
+
+  const openProduct = useCallback((product: Product) => {
+    setSelectedProduct(product);
+    const params = new URLSearchParams(window.location.search);
+    if (params.get('p') === product.id) return;
+    params.set('p', product.id);
+    writeSearch(`?${params}`, 'push');
+    sheetPushed.current = true;
+  }, []);
+
+  const closeProduct = useCallback(() => {
+    setSelectedProduct(null);
+    if (sheetPushed.current) {
+      sheetPushed.current = false;
+      window.history.back();
+      return;
+    }
+    const params = new URLSearchParams(window.location.search);
+    if (!params.has('p')) return;
+    params.delete('p');
+    const rest = params.toString();
+    writeSearch(rest ? `?${rest}` : '', 'replace');
+  }, []);
+
+  // Back and Forward: the view and the open product follow the address bar.
+  useEffect(() => {
+    const onPop = () => {
+      const params = new URLSearchParams(window.location.search);
+      setFilters(parseFilters(params));
+      const id = params.get('p');
+      const product = id ? productsRef.current.find((p) => p.id === id) ?? null : null;
+      sheetPushed.current = Boolean(product);
+      setSelectedProduct(product);
+      setFilterOpen(false);
+      setSearchOpen(false);
+    };
+    window.addEventListener('popstate', onPop);
+    return () => window.removeEventListener('popstate', onPop);
+  }, []);
+
+  const goHome = useCallback(() => {
+    window.scrollTo({ top: 0, behavior: prefersReducedMotion() ? 'auto' : 'smooth' });
+  }, []);
 
   const totalCartCount = cart.reduce((sum, i) => sum + i.quantity, 0);
   const pendingOrdersCount = orders.filter((o) => o.status === 'pending_confirmation').length;
@@ -499,8 +573,11 @@ export function ShopApp({ initialProductId }: { initialProductId?: string } = {}
           brandSettings={brandSettings}
         />
       ) : (
+        <>
+        <MarqueeBar brandSettings={brandSettings} />
         <Header
           cartCount={totalCartCount}
+          onHome={goHome}
           onOpenCart={() => setIsCartOpen(true)}
           onOpenSearch={() => setSearchOpen(true)}
           onOpenTrack={() => setIsTrackerOpen(true)}
@@ -509,10 +586,11 @@ export function ShopApp({ initialProductId }: { initialProductId?: string } = {}
           pendingOrdersCount={pendingOrdersCount}
           brandSettings={brandSettings}
         />
+        </>
       )}
 
-      {/* Main Content Area */}
-      <main className="flex-1 pb-20 max-w-7xl mx-auto w-full px-3 sm:px-6">
+      {/* Main Content Area (on phones, room at the bottom for the tab bar and the Help button) */}
+      <main className={`flex-1 max-w-7xl mx-auto w-full ${isAdminMode ? 'pb-20 px-3 sm:px-6' : 'pb-36 md:pb-16 px-4 sm:px-6'}`}>
         {isAdminMode ? (
           /* ================= ADMIN MOBILE HUB ================= */
           <div className="py-4 space-y-4">
@@ -742,100 +820,143 @@ export function ShopApp({ initialProductId }: { initialProductId?: string } = {}
           </div>
         ) : (
           /* ================= CUSTOMER STOREFRONT ================= */
-          <div className="space-y-2 sm:space-y-3">
-            {/* Hero Banner with Artisan Heritage */}
-            <HeroBanner onExploreClick={() => setStoreTab('catalog')} />
+          <div className="pt-4 sm:pt-6 space-y-5">
+            <HeroBanner brand={brandSettings} pieces={catalogLoaded ? products.length : null} />
 
-            {/* Category Filter Pills */}
-            <CategoryFilter
-              selectedCategory={selectedCategory}
-              onSelectCategory={setSelectedCategory}
-              categories={categories.filter((c) => products.some((p) => p.category === c.id))}
+            <StoryChips
+              stories={stories}
+              activeId={activeStory}
+              onPick={(story) => showFilters(story.apply(filters))}
+              logo={<BrandLogo brand={brandSettings} className="w-16 h-16 text-xl" />}
             />
 
-            {/* Search Filter Active Notice */}
-            {searchQuery && (
-              <div className="flex items-center justify-between bg-amber-50 px-3.5 py-1.5 rounded-xl border border-amber-200 text-xs text-amber-900 mx-1">
-                <span>Showing results for &quot;<strong>{searchQuery}</strong>&quot; ({filteredProducts.length} items)</span>
+            <div ref={resultsRef} className="scroll-mt-16 space-y-3">
+              {/* Count, and Filter (a bottom sheet) only when wanted */}
+              <div className="flex items-center justify-between gap-3">
+                <p className="text-sm text-stone-700" aria-live="polite">
+                  {catalogLoaded ? `${filteredProducts.length} ${filteredProducts.length === 1 ? 'piece' : 'pieces'}` : ''}
+                </p>
                 <button
-                  onClick={() => setSearchQuery('')}
-                  className="font-bold text-amber-800 hover:underline"
+                  type="button"
+                  onClick={() => setFilterOpen(true)}
+                  aria-haspopup="dialog"
+                  aria-label={filterCount ? `Filter and sort, ${filterCount} on` : 'Filter and sort'}
+                  className="inline-flex items-center gap-2 h-10 px-4 rounded-full border border-stone-300 bg-white text-sm font-medium text-stone-900 hover:border-stone-500"
                 >
-                  Clear Search
+                  <SlidersHorizontal className="w-4 h-4" aria-hidden="true" />
+                  <span>Filter</span>
+                  {filterCount > 0 && (
+                    <span className="min-w-5 h-5 px-1 rounded-full bg-[#0f1c2e] text-white text-[11px] font-bold flex items-center justify-center" aria-hidden="true">
+                      {filterCount}
+                    </span>
+                  )}
                 </button>
               </div>
-            )}
 
-            {/* Products Grid (2 columns on mobile, 4 columns on laptop/desktop) */}
-            <div className="grid grid-cols-2 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-2.5 sm:gap-4 md:gap-5">
-              {filteredProducts.map((prod) => (
-                <ProductCard
-                  key={prod.id}
-                  product={prod}
-                  onSelect={(p) => setSelectedProduct(p)}
-                />
-              ))}
+              {(chips.length > 0 || filters.sort !== 'featured') && (
+                <div className="flex flex-wrap items-center gap-2" role="group" aria-label="Filters on">
+                  {chips.map((chip) => (
+                    <button
+                      key={chip.key}
+                      type="button"
+                      onClick={() => showFilters(chip.without)}
+                      aria-label={`Remove filter: ${chip.label}`}
+                      className="inline-flex items-center gap-1 pl-3 pr-2 h-8 rounded-full bg-[#f4eee3] border border-[#e4dccd] text-xs font-medium text-stone-900 hover:border-stone-400 max-w-full"
+                    >
+                      <span className="truncate">{chip.label}</span>
+                      <X className="w-3.5 h-3.5 shrink-0" aria-hidden="true" />
+                    </button>
+                  ))}
+                  {filters.sort !== 'featured' && (
+                    <button
+                      type="button"
+                      onClick={() => showFilters({ ...filters, sort: 'featured' })}
+                      aria-label={`Remove sort: ${SORTS.find((x) => x.id === filters.sort)?.label}`}
+                      className="inline-flex items-center gap-1 pl-3 pr-2 h-8 rounded-full bg-white border border-stone-300 text-xs font-medium text-stone-900 hover:border-stone-500"
+                    >
+                      <span>{SORTS.find((x) => x.id === filters.sort)?.label}</span>
+                      <X className="w-3.5 h-3.5" aria-hidden="true" />
+                    </button>
+                  )}
+                  {chips.length + (filters.sort !== 'featured' ? 1 : 0) > 1 && (
+                    <button type="button" onClick={() => showFilters(EMPTY_FILTERS)} className="h-8 px-2 text-xs font-semibold text-stone-900 underline underline-offset-4">
+                      Clear all
+                    </button>
+                  )}
+                </div>
+              )}
+
+              {catalogError && (
+                <p role="alert" className="text-sm text-red-800 bg-red-50 border border-red-200 rounded-xl px-3 py-2">{catalogError}</p>
+              )}
+
+              {/* The feed: big photos, two across on phones */}
+              {!catalogLoaded && !catalogError ? (
+                <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-x-3 gap-y-6 sm:gap-x-5" aria-hidden="true">
+                  {[0, 1, 2, 3].map((i) => (
+                    <div key={i} className="space-y-2">
+                      <div className="aspect-[4/5] rounded-2xl bg-[#efe8dc] motion-safe:animate-pulse" />
+                      <div className="h-3 rounded bg-[#efe8dc] w-4/5" />
+                      <div className="h-3 rounded bg-[#efe8dc] w-1/3" />
+                    </div>
+                  ))}
+                </div>
+              ) : filteredProducts.length > 0 ? (
+                <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-x-3 gap-y-6 sm:gap-x-5">
+                  {filteredProducts.map((prod, i) => (
+                    <ProductCard key={prod.id} product={prod} onSelect={openProduct} eager={i < 4} />
+                  ))}
+                </div>
+              ) : catalogLoaded ? (
+                <div className="rounded-2xl border border-dashed border-stone-300 px-4 py-10 text-center space-y-3">
+                  <p className="text-sm text-stone-800">{products.length ? 'Nothing matches these filters.' : 'New pieces are on their way. Please check back soon.'}</p>
+                  {products.length > 0 && (
+                    <button type="button" onClick={() => showFilters(EMPTY_FILTERS)} className="rounded-full bg-[#0f1c2e] text-white text-sm font-semibold px-5 py-2.5">
+                      Show everything
+                    </button>
+                  )}
+                </div>
+              ) : null}
             </div>
 
-            {/* Artisan Craftsmanship Trust Banner */}
-            <div className="bg-stone-50 rounded-3xl p-6 sm:p-8 border border-stone-200 text-center my-8 space-y-3">
-              <div className="w-12 h-12 rounded-full bg-amber-100 text-amber-800 flex items-center justify-center mx-auto shadow-inner">
-                <Palette className="w-6 h-6 text-[#c5a059]" />
-              </div>
-              <h3 className="font-serif text-xl sm:text-2xl font-bold text-[#0f1c2e]">
-                The Beautiful UAE Home Promise
-              </h3>
-              <p className="text-stone-600 text-xs sm:text-sm max-w-xl mx-auto leading-relaxed">
-                Every bedsheet set in our atelier is a tribute to slow handcraft and mindful luxury. Tested and fitted for deep Gulf mattresses, washed in natural mineral dyes, and delivered to your doorstep in Dubai, Abu Dhabi, and all seven Emirates with flexible Cash on Delivery or Bank Transfer.
+            {/* The shop's promise */}
+            <div className="rounded-3xl bg-[#f4eee3] px-5 py-7 sm:p-8 text-center my-6 space-y-2">
+              <h2 className="font-serif text-lg sm:text-xl font-bold text-[#0f1c2e]">The {brandSettings.storeName || 'Beautiful UAE Home'} promise</h2>
+              <p className="text-stone-700 text-[13px] sm:text-sm max-w-xl mx-auto leading-relaxed">
+                Every set is made with slow handcraft, fitted for deep Gulf mattresses, and delivered to your door in all seven emirates, with cash on delivery or bank transfer.
               </p>
             </div>
           </div>
         )}
       </main>
 
-      {/* Search Modal */}
+      {/* Search: matches as you type */}
       {searchOpen && (
-        <div className="fixed inset-0 z-50 flex items-start justify-center bg-black/60 backdrop-blur-sm p-4 pt-16">
-          <div className="bg-white rounded-2xl max-w-lg w-full p-4 shadow-2xl space-y-3 animate-in slide-in-from-top-4">
-            <div className="flex items-center justify-between pb-2 border-b border-stone-200">
-              <span className="font-serif font-bold text-sm text-[#0f1c2e]">
-                Search Handprinted & Machine Printed Bed Linens
-              </span>
-              <button
-                onClick={() => setSearchOpen(false)}
-                className="p-1 text-stone-500 hover:text-stone-700"
-              >
-                <X className="w-5 h-5" />
-              </button>
-            </div>
+        <SearchSheet
+          products={products}
+          categories={categories}
+          initial={filters.q}
+          onClose={() => setSearchOpen(false)}
+          onSubmit={(q) => {
+            setSearchOpen(false);
+            showFilters({ ...filters, q });
+          }}
+          onOpenProduct={(p) => {
+            setSearchOpen(false);
+            openProduct(p);
+          }}
+        />
+      )}
 
-            <div className="relative">
-              <input
-                type="text"
-                autoFocus
-                placeholder="Search botanical prints, linen, king size, Egyptian cotton..."
-                value={searchQuery}
-                onChange={(e) => setSearchQuery(e.target.value)}
-                className="w-full px-3.5 py-2.5 rounded-xl border border-stone-300 text-xs focus:ring-2 focus:ring-[#c5a059] focus:outline-none"
-              />
-            </div>
-
-            <div className="flex justify-end gap-2 pt-1">
-              <button
-                onClick={() => setSearchOpen(false)}
-                className="bg-[#0f1c2e] text-white font-semibold text-xs px-4 py-2 rounded-xl"
-              >
-                View Results ({filteredProducts.length})
-              </button>
-            </div>
-          </div>
-        </div>
+      {/* Filter & sort */}
+      {filterOpen && (
+        <FilterSheet products={products} categories={categories} filters={filters} onApply={(next) => showFilters(next)} onClose={() => setFilterOpen(false)} />
       )}
 
       {/* Product Detail Modal */}
       <ProductDetailModal
         product={selectedProduct ? products.find((p) => p.id === selectedProduct.id) ?? selectedProduct : null}
-        onClose={() => setSelectedProduct(null)}
+        onClose={closeProduct}
         onAddToCart={handleAddToCart}
       />
 
@@ -874,8 +995,9 @@ export function ShopApp({ initialProductId }: { initialProductId?: string } = {}
       {/* Mobile Bottom Navigation */}
       <BottomNav
         isAdminMode={isAdminMode}
-        storeTab={storeTab}
-        onSetStoreTab={setStoreTab}
+        storeTab={searchOpen ? 'search' : 'home'}
+        onHome={goHome}
+        onOpenSearch={() => setSearchOpen(true)}
         adminTab={adminTab}
         onSetAdminTab={setAdminTab}
         cartCount={totalCartCount}

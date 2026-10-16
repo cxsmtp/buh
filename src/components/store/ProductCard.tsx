@@ -1,131 +1,86 @@
 'use client';
 
-import React, { useState } from 'react';
+import React from 'react';
 import { Product } from '@/types';
-import { Star, Sparkles, Layers, ArrowRight } from 'lucide-react';
 import { useShop } from '@/lib/client/shop';
 import { LocalPrice } from '@/lib/client/currency';
+import { isOnSale, productPhoto } from '@/lib/catalogFilter';
+import { CARD_SIZES, photoSources } from '@/lib/client/photos';
 
 interface ProductCardProps {
   product: Product;
   onSelect: (product: Product) => void;
+  /** The first few cards on the screen load straight away; the rest as they scroll near. */
+  eager?: boolean;
 }
 
-export const ProductCard: React.FC<ProductCardProps> = ({ product, onSelect }) => {
-  // Always display the primary luxury staged photo directly in one go
-  const currentImage = product.aiTransformedImage || product.featuredImage || product.galleryImages[0];
+/**
+ * One piece in the shop's feed: a big photo, its name, the price (and the price before, when
+ * reduced), and a small note when only a few are left or it has sold out. A link to the product's
+ * own page (shareable, opens in a new tab), opening the product sheet when tapped.
+ */
+export const ProductCard: React.FC<ProductCardProps> = ({ product, onSelect, eager = false }) => {
   const { lowStockThreshold } = useShop();
   const soldOut = product.stockCount === 0;
   const fewLeft = !soldOut && product.stockCount <= lowStockThreshold;
+  const sale = isOnSale(product);
+  const photo = photoSources(productPhoto(product));
 
   return (
-    <div
-      onClick={() => onSelect(product)}
-      className="group bg-white rounded-2xl overflow-hidden border border-stone-200 hover:border-[#c5a059]/60 shadow-xs hover:shadow-md transition-all cursor-pointer flex flex-col justify-between"
-    >
-      {/* Product Image Container */}
-      <div className="relative aspect-[4/3] sm:aspect-[4/3] bg-stone-100 overflow-hidden">
-        {/* eslint-disable-next-line @next/next/no-img-element */}
-        <img
-          src={currentImage}
-          alt={product.title}
-          className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-500"
-          loading="lazy"
-        />
-
-        {/* Luxury Artisan Tag */}
-        <div className="absolute top-1.5 sm:top-2.5 left-1.5 sm:left-2.5">
-          <span className="bg-[#0f1c2e]/85 backdrop-blur-md text-amber-200 text-[9px] sm:text-[10px] font-semibold px-2 py-0.5 sm:px-2.5 sm:py-1 rounded-full shadow border border-amber-300/30 flex items-center gap-1">
-            <Sparkles className="w-2.5 h-2.5 sm:w-3 sm:h-3 text-[#c5a059]" />
-            <span>Artisan Linens</span>
-          </span>
+    <article className="group min-w-0">
+      <a
+        href={`/p/${encodeURIComponent(product.id)}`}
+        onClick={(e) => {
+          // A normal tap opens the sheet; Ctrl/⌘-click or a middle click still opens a new tab.
+          if (e.metaKey || e.ctrlKey || e.shiftKey || e.altKey || e.button !== 0) return;
+          e.preventDefault();
+          onSelect(product);
+        }}
+        className="block rounded-2xl focus-visible:outline-offset-4"
+      >
+        <div className="relative aspect-[4/5] rounded-2xl overflow-hidden bg-[#efe8dc]">
+          {photo.src && (
+            // eslint-disable-next-line @next/next/no-img-element
+            <img
+              src={photo.src}
+              srcSet={photo.srcSet}
+              sizes={photo.srcSet ? CARD_SIZES : undefined}
+              alt=""
+              width={540}
+              height={675}
+              loading={eager ? 'eager' : 'lazy'}
+              decoding="async"
+              draggable={false}
+              className={`photo absolute inset-0 w-full h-full object-cover transition-transform duration-500 motion-safe:group-hover:scale-[1.03] ${soldOut ? 'grayscale-[60%]' : ''}`}
+            />
+          )}
+          {sale && (
+            <span className="absolute top-2 left-2 rounded-full bg-white/95 text-[#7a2e1d] text-[10px] font-bold uppercase tracking-wider px-2 py-0.5 shadow-sm">
+              Sale
+            </span>
+          )}
         </div>
-
-        {/* Most designs are one or two pieces: say so */}
-        {(soldOut || fewLeft) && (
-          <span className={`absolute top-8 sm:top-10 left-1.5 sm:left-2.5 text-[9px] sm:text-[10px] font-bold px-2 py-0.5 rounded-full shadow ${soldOut ? 'bg-stone-700 text-white' : 'bg-amber-500 text-white'}`}>
-            {soldOut ? 'Sold out' : product.stockCount === 1 ? 'Only 1 left' : `Only ${product.stockCount} left`}
-          </span>
-        )}
-
-        {/* Savings Badge */}
-        {product.compareAtPrice && product.compareAtPrice > product.price && (
-          <span className="absolute top-1.5 sm:top-2.5 right-1.5 sm:right-2.5 bg-red-600 text-white text-[9px] sm:text-[10px] font-bold px-1.5 sm:px-2 py-0.5 rounded-full shadow">
-            Save AED {product.compareAtPrice - product.price}
-          </span>
-        )}
-
-        {/* Bottom Material & Thread Count Pill */}
-        <div className="absolute bottom-1.5 sm:bottom-2 left-1.5 sm:left-2 right-1.5 sm:right-2 flex items-center justify-between text-[9px] sm:text-[10px] bg-black/65 backdrop-blur-md text-white px-2 py-0.5 rounded-md">
-          <span className="font-medium truncate">{product.material.split('(')[0]}</span>
-          <span className="font-bold text-amber-300 ml-1 shrink-0">{product.threadCount} TC</span>
-        </div>
-      </div>
-
-      {/* Product Information */}
-      <div className="p-2.5 sm:p-3.5 flex flex-col flex-1 justify-between gap-1.5">
-        <div>
-          {/* Star Rating */}
-          <div className="flex items-center gap-1 text-[10px] sm:text-[11px] text-stone-500 mb-0.5">
-            <div className="flex items-center text-amber-500">
-              <Star className="w-2.5 h-2.5 sm:w-3 sm:h-3 fill-amber-400 text-amber-400" />
-            </div>
-            <span className="font-semibold text-stone-800">{product.rating}</span>
-            <span className="hidden sm:inline">({product.reviewsCount} reviews)</span>
-          </div>
-
-          {/* Title */}
-          <h3 className="font-serif font-bold text-xs sm:text-sm text-stone-900 group-hover:text-[#9f7e38] transition-colors line-clamp-1 sm:line-clamp-2 leading-snug">
+        <div className="pt-2 px-0.5 space-y-0.5">
+          <h3 className="font-serif text-[13px] sm:text-sm leading-snug text-stone-900 line-clamp-2 group-hover:text-[#7d5f24]">
             {product.title}
           </h3>
-
-          {/* Size Pills Available */}
-          <div className="flex items-center gap-1 mt-1 sm:mt-1.5 flex-wrap">
-            <span className="text-[9px] text-stone-500 font-medium hidden sm:inline-flex items-center gap-0.5">
-              <Layers className="w-2.5 h-2.5 text-[#c5a059]" />
-              Sizes:
-            </span>
-            {product.profiles.slice(0, 3).map((p) => (
-              <span
-                key={p.id}
-                className="text-[8px] sm:text-[9px] px-1 sm:px-1.5 py-0.2 rounded bg-stone-100 text-stone-600 border border-stone-200"
-              >
-                {p.name.split(' ')[0]}
+          <p className="flex items-baseline flex-wrap gap-x-1.5 text-sm">
+            <span className="font-semibold text-[#0f1c2e]">{`AED ${product.price}`}</span>
+            {sale && (
+              <span className="text-xs text-stone-600 line-through">
+                <span className="sr-only">was </span>
+                {`AED ${product.compareAtPrice}`}
               </span>
-            ))}
-            {product.profiles.length > 3 && (
-              <span className="text-[8px] text-stone-500">+{product.profiles.length - 3}</span>
             )}
-          </div>
+          </p>
+          <LocalPrice aed={product.price} className="text-[11px] block" />
+          {(soldOut || fewLeft) && (
+            <p className={`text-[11px] font-semibold ${soldOut ? 'text-stone-600' : 'text-[#8a4b0f]'}`}>
+              {soldOut ? 'Sold out' : product.stockCount === 1 ? 'Only 1 left' : `Only ${product.stockCount} left`}
+            </p>
+          )}
         </div>
-
-        {/* Price & Action */}
-        <div className="pt-1.5 border-t border-stone-100 flex items-center justify-between gap-1 mt-1">
-          <div>
-            <div className="flex items-baseline gap-1">
-              <span className="text-[10px] text-stone-500">From</span>
-              <span className="text-xs sm:text-sm md:text-base font-bold text-[#0f1c2e]">
-                AED {product.price}
-              </span>
-            </div>
-            <LocalPrice aed={product.price} className="text-[10px] block" />
-            <span className="text-[9px] text-emerald-600 font-medium hidden sm:block">
-              Express Delivery
-            </span>
-          </div>
-
-          <button
-            onClick={(e) => {
-              e.stopPropagation();
-              onSelect(product);
-            }}
-            className="flex items-center gap-1 bg-stone-900 group-hover:bg-[#c5a059] text-white text-[10px] sm:text-xs font-semibold px-2.5 py-1 sm:px-3 sm:py-1.5 rounded-lg transition-colors shadow-xs shrink-0"
-          >
-            <span>Sizes</span>
-            <ArrowRight className="w-2.5 h-2.5 sm:w-3 sm:h-3" />
-          </button>
-        </div>
-      </div>
-    </div>
+      </a>
+    </article>
   );
 };

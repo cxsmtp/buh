@@ -1,5 +1,19 @@
 # User guide
 
+## For customers: browsing the shop
+
+The shop looks and works like a boutique's Instagram page, on a phone first.
+
+- **At the top:** the shop's logo, name, tagline and address (Settings → Branding & bank, Store & contact), how delivery and payment work, and the festival greeting when one is on.
+- **Round story chips:** **All**, **New in** and **On sale** (each only when it shows fewer pieces than All), then one per category, in the order of Settings → Catalogue, each with a photo from inside it. A category with no pieces in the shop has no chip. One tap shows just that.
+- **The feed:** big photos, two across on a phone (three or four on a computer), with the name, the price (and the price before, crossed out, when it is reduced) and **Only 1 left** or **Sold out** from the real stock.
+- **Tap a photo** and the product opens full screen: swipe the photos (or use the arrows, the dots or the arrow keys), choose the size and colour, **Add to Bag**, or **Ask in chat / on WhatsApp / on Instagram**. **Share** sends its link. The phone's Back button closes it.
+- **Filter** (next to the number of pieces) opens a sheet with only the choices that make a difference for the pieces in the shop: category, size, colour (worked out from each colour's swatch: blue, cream, red…), price range, **In stock only**, **On sale**, **New in**, and the sort (newest, price). Each choice shows how many pieces it leaves; **Show N pieces** applies them. Every filter on shows as a chip under the button: tap it to remove it, or **Clear all**.
+- **Search** (the tab bar on a phone, the magnifier on a computer) finds pieces by name, colour, category or fabric as you type; tap one to open it, or **See all** to show them in the shop.
+- **Links keep the view:** the address holds the search, filters and the open product, so a filtered view can be sent on WhatsApp and Back steps through what you looked at.
+- **On a phone** the tab bar at the bottom has **Home** (back to the top), **Search**, **Bag** and **Orders** (Track Order); the Help button sits just above it.
+- Everything works with the keyboard (Tab, Enter, Escape closes a sheet), and the shop moves less for people whose phone is set to reduce motion.
+
 ## For customers: placing an order
 
 1. Choose a set, a bed size and a colour, then **Add to Bag** and **Proceed to Checkout**.
@@ -96,7 +110,7 @@ On each product, customers see **Ask in chat**, **Ask on WhatsApp** and **Ask on
 - **Delivery:** the emirates you deliver to, areas you don't serve, the delivery time customers see (1–2 days), and same-day delivery: switch it on, set the extra charge, the cut-off time (UAE) and where it's offered. Customers see a green tick for their area and choose standard or same day; the courier is never named to them.
 - **Email & admin account:** the mail server, where backups and alerts go, the mailbox for chat replies, and your sign-in email.
 - **Passkeys & recovery codes:** your ways back in if you forget the password (see above).
-- **Catalogue:** the size presets offered when adding a product (name, measurements, price difference, pieces in the set), the categories shown in the shop, and the **Only N left** level.
+- **Catalogue:** the size presets offered when adding a product (name, measurements, price difference, pieces in the set), the categories shown in the shop (each category with pieces in it is a round story chip at the top of the shop, in this order, with its first piece's photo; **New in** and **On sale** chips come from each product's **New arrival** tick and its **Was (AED)** price), and the **Only N left** level.
 - **Branding & bank:** logo, colours, the scrolling bar, and bank-transfer details.
 - **Festival themes:** see below.
 - **Phone verification:** the SMS gateway (see below).
