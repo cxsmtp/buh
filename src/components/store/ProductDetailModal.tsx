@@ -102,7 +102,7 @@ const ProductDetailContent: React.FC<ProductDetailModalProps & { product: Produc
         <button type="button" onClick={onClose} aria-label="Close" data-autofocus className="w-10 h-10 rounded-full flex items-center justify-center text-stone-800 hover:bg-stone-100">
           <X className="w-5 h-5" aria-hidden="true" />
         </button>
-        <span className="flex-1 min-w-0 truncate text-sm font-semibold text-stone-900 md:invisible" aria-hidden="true">
+        <span className="flex-1 min-w-0 truncate text-sm font-semibold text-stone-900 twopane:invisible" aria-hidden="true">
           {product.title}
         </span>
         <button type="button" onClick={() => void share()} aria-label="Share" className="w-10 h-10 rounded-full flex items-center justify-center text-stone-800 hover:bg-stone-100">
@@ -110,9 +110,9 @@ const ProductDetailContent: React.FC<ProductDetailModalProps & { product: Produc
         </button>
       </div>
 
-      <div className="flex-1 min-h-0 overflow-y-auto overscroll-contain md:grid md:grid-cols-2 md:grid-rows-[minmax(0,1fr)] md:overflow-hidden">
-        <div className="md:overflow-y-auto md:p-5">
-          <div className="md:rounded-2xl md:overflow-hidden">
+      <div className="flex-1 min-h-0 overflow-y-auto overscroll-contain twopane:grid twopane:grid-cols-2 twopane:grid-rows-[minmax(0,1fr)] twopane:overflow-hidden">
+        <div className="twopane:overflow-y-auto twopane:p-5">
+          <div className="twopane:rounded-2xl twopane:overflow-hidden">
             <PhotoCarousel images={images} title={product.title}>
               {sale && (
                 <span className="absolute top-3 left-3 rounded-full bg-white/95 text-[#7a2e1d] text-[11px] font-bold uppercase tracking-wider px-2.5 py-1 shadow-sm">Sale</span>
@@ -121,7 +121,7 @@ const ProductDetailContent: React.FC<ProductDetailModalProps & { product: Produc
           </div>
         </div>
 
-        <div className="md:overflow-y-auto px-4 sm:px-5 pt-4 pb-6 space-y-5">
+        <div className="twopane:overflow-y-auto px-4 sm:px-5 pt-4 pb-6 space-y-5">
           <div className="space-y-1.5">
             <h2 id={titleId} className="font-serif text-xl sm:text-2xl leading-snug text-stone-900">
               {product.title}
@@ -281,7 +281,7 @@ const ProductDetailContent: React.FC<ProductDetailModalProps & { product: Produc
       </div>
 
       {/* Always in reach: the total and Add to Bag */}
-      <div className="shrink-0 border-t border-stone-200 bg-white px-4 py-3 pb-safe flex items-center gap-3">
+      <div className="shrink-0 border-t border-stone-200 bg-white px-4 pt-3 pb-[calc(0.75rem+env(safe-area-inset-bottom,0px))] flex items-center gap-3">
         <div className="min-w-0">
           <div className="text-[11px] text-stone-600">Total</div>
           <div className="text-lg font-semibold text-[#0f1c2e] leading-tight">{`AED ${totalPrice}`}</div>

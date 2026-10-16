@@ -1,12 +1,14 @@
 /**
  * Every screen readable, on any device: text contrast measured in a real browser, in light and
  * dark mode (a phone or laptop set to dark mode once made labels invisible on white cards),
- * at phone and desktop width. Covers the shop (its filter sheet, filtered view and search), a product,
- * the bag, checkout, the chat, the admin sign-in and every Admin Hub tab and settings section.
+ * at phone and desktop width. Covers the shop (its filter sheet, filtered view and search), the
+ * "Install the app" offer, a product and its full-screen photo, the bag, checkout, the chat, the
+ * admin sign-in, the offline page and every Admin Hub tab and settings section.
  */
 import assert from 'node:assert/strict';
 import { after, before, test } from 'node:test';
 import { hasBuild, startServer, type RunningServer } from './server.mjs';
+import { openAdminSection } from './helpers.mjs';
 
 type PW = typeof import('playwright');
 const pw: PW | null = hasBuild ? await import('playwright').catch(() => null) : null;
@@ -32,6 +34,17 @@ after(async () => {
   await browser?.close();
   server?.stop();
 });
+
+/**
+ * Wait until nothing on the page is still sliding or fading (a sheet coming up, a button's colour
+ * changing): every finite CSS animation and transition has finished. Endless ones (a spinner, the
+ * ticker) are left out. Measuring mid-slide reads colours that are on their way.
+ */
+async function settled(page: import('playwright').Page) {
+  await page.waitForFunction(() =>
+    document.getAnimations().every((an) => an.playState !== 'running' || an.effect?.getComputedTiming().iterations === Infinity)
+  );
+}
 
 /** Text whose contrast against what is behind it is below `min` (WCAG ratio). */
 async function lowContrast(page: import('playwright').Page, where: string, min = 3): Promise<string[]> {
@@ -132,6 +145,18 @@ for (const colorScheme of ['dark', 'light'] as const) {
       await ready;
       await page.waitForTimeout(500);
       problems.push(...(await lowContrast(page, 'shop')));
+      // The "Install the app" offer (the phone's install event, stood in for here).
+      await page.evaluate(() => {
+        const e = new Event('beforeinstallprompt') as Event & { prompt?: () => Promise<void>; userChoice?: Promise<unknown> };
+        e.prompt = async () => {};
+        e.userChoice = Promise.resolve({ outcome: 'dismissed' });
+        window.dispatchEvent(e);
+      });
+      const install = page.getByRole('region', { name: 'Install the app' });
+      await install.waitFor({ timeout: 9000 });
+      await page.waitForTimeout(400); // risen into place
+      problems.push(...(await lowContrast(page, 'install offer')));
+      await install.getByRole('button', { name: 'Not now' }).click();
       // The Filter sheet, a story chosen with chips showing, and search with its matches.
       await page.getByRole('button', { name: /^Filter and sort/ }).click();
       const filters = page.getByRole('dialog', { name: 'Filter & sort' });
@@ -156,6 +181,11 @@ for (const colorScheme of ['dark', 'light'] as const) {
       await page.locator('h3, h4').filter({ hasText: p.title }).first().click();
       await page.getByRole('button', { name: /Add to Bag/ }).waitFor();
       problems.push(...(await lowContrast(page, 'product')));
+      await page.getByRole('button', { name: 'Zoom photo' }).click();
+      await page.getByTestId('photo-zoom').waitFor();
+      problems.push(...(await lowContrast(page, 'photo zoom')));
+      await page.keyboard.press('Escape');
+      await page.getByTestId('photo-zoom').waitFor({ state: 'detached' });
       await page.getByRole('button', { name: /Add to Bag/ }).click();
       await page.getByRole('button', { name: /Proceed to Checkout/ }).waitFor();
       problems.push(...(await lowContrast(page, 'bag')));
@@ -178,6 +208,10 @@ for (const colorScheme of ['dark', 'light'] as const) {
       await page.locator('header button:has-text("Admin Hub")').click();
       await page.getByText('Admin Hub Security Access').waitFor();
       problems.push(...(await lowContrast(page, 'sign-in')));
+      // What the installed app shows without a connection.
+      await page.goto(`${server.base}/offline`, { waitUntil: 'domcontentloaded' });
+      await page.getByRole('heading', { name: 'You are offline' }).waitFor();
+      problems.push(...(await lowContrast(page, 'offline page')));
       await ctx.close();
 
       // The Admin Hub: every tab and every settings section.
@@ -191,11 +225,49 @@ for (const colorScheme of ['dark', 'light'] as const) {
       await a.locator('header button:has-text("Admin Hub")').click();
       const nav = a.getByRole('navigation', { name: 'Admin sections' });
       await nav.waitFor();
-      for (const tab of ['Orders', 'Chats', 'Stock', 'CRM', 'Settings']) {
-        await nav.getByRole('button', { name: new RegExp(tab) }).click();
-        await a.waitForTimeout(400);
+      for (const tab of ['Orders', 'Chats', 'Inventory', 'Customers', 'Settings']) {
+        await openAdminSection(a, new RegExp(`^${tab}`));
+        await settled(a);
         problems.push(...(await lowContrast(a, `admin ${tab}`)));
+        if (tab === 'Inventory') {
+          // The phone inventory: a product opened with its steppers, the Undo toast, Received stock,
+          // the history, the step-by-step editor, and the More menu.
+          await a.getByRole('button', { name: /^Stock and actions for/ }).first().click();
+          await a.getByRole('button', { name: /^One more/ }).first().click();
+          await a.getByRole('button', { name: 'Undo' }).waitFor();
+          await settled(a);
+          problems.push(...(await lowContrast(a, 'inventory open, Undo toast')));
+          await a.getByRole('button', { name: /^Received stock for/ }).first().click();
+          await a.getByRole('dialog', { name: 'Received stock' }).waitFor();
+          await settled(a);
+          problems.push(...(await lowContrast(a, 'received stock')));
+          await a.keyboard.press('Escape');
+          await a.getByRole('button', { name: /^Stock history of/ }).first().click();
+          await a.getByRole('dialog', { name: 'Stock history' }).getByText(/by /).first().waitFor();
+          await settled(a);
+          problems.push(...(await lowContrast(a, 'stock history')));
+          await a.keyboard.press('Escape');
+          await a.getByRole('button', { name: 'Add product' }).first().click();
+          const wizard = a.getByRole('dialog', { name: 'Add a product' });
+          await wizard.waitFor();
+          await settled(a);
+          problems.push(...(await lowContrast(a, 'editor: photos')));
+          for (const step of ['Details', 'Sizes', 'Publish']) {
+            await wizard.getByRole('navigation', { name: 'Steps' }).getByRole('button', { name: new RegExp(step) }).click();
+            await settled(a);
+          }
+          problems.push(...(await lowContrast(a, 'editor: step shown')));
+          await a.keyboard.press('Escape');
+          if (width < 640) {
+            await nav.getByRole('button', { name: 'More' }).click();
+            await a.getByRole('dialog', { name: 'More' }).waitFor();
+            await settled(a);
+            problems.push(...(await lowContrast(a, 'more menu')));
+            await a.keyboard.press('Escape');
+          }
+        }
       }
+      await a.getByRole('navigation', { name: 'Settings sections' }).waitFor(); // loaded with the Admin Hub, on demand
       const sections = a.getByRole('navigation', { name: 'Settings sections' }).getByRole('button');
       const count = await sections.count();
       assert.ok(count >= 10);

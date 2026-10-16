@@ -33,8 +33,11 @@ export function contentSecurityPolicy(): string {
     // Product photos come from https hosts; admin uploads are data:/blob: URLs.
     "img-src 'self' data: blob: https:",
     "font-src 'self' data:",
-    // Order-confirmation confetti draws in a worker created from a blob: URL.
+    // The shop's own service worker (/sw.js) and the order-confirmation confetti, which draws in a
+    // worker created from a blob: URL. Nothing from other sites.
     "worker-src 'self' blob:",
+    // The installable app's manifest (/manifest.webmanifest), from this site only.
+    "manifest-src 'self'",
     `connect-src 'self'${isDev ? ' ws: wss:' : ''} ${fb.connect.join(' ')}`,
     `frame-src 'self' ${fb.frame.join(' ')}`,
     "object-src 'none'",

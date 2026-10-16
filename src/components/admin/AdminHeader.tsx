@@ -25,7 +25,7 @@ export const AdminHeader: React.FC<AdminHeaderProps> = ({
   const totalRevenue = orders.reduce((sum, o) => sum + o.total, 0);
 
   return (
-    <div className="bg-[#0f1c2e] text-white p-4 border-b border-stone-800 shadow-md">
+    <div className="bg-[#0f1c2e] text-white p-4 pt-[max(1rem,env(safe-area-inset-top,0px))] border-b border-stone-800 shadow-md">
       <div className="max-w-7xl mx-auto flex flex-col sm:flex-row sm:items-center justify-between gap-3">
         {/* Brand & Mode */}
         <div className="flex items-center justify-between sm:justify-start gap-3">

@@ -9,7 +9,7 @@ import { FIREBASE_PROJECT_ID } from './firebaseAuth';
 import { bump, changedElsewhere } from './live';
 import { envGateways } from '@/lib/otpService';
 import { HttpError } from './http';
-import { acceptImageRef } from './images';
+import { acceptImageRef, LOGO_MAX_SIDE } from './images';
 import { assertPublicHttpsUrl } from './outbound';
 import { supportEmail as envSupportEmail } from './runtimeConfig';
 
@@ -377,7 +377,7 @@ const VALIDATORS: { [K in SettingsKey]: (input: Obj, current: SettingsMap[K]) =>
       badgeText: text(input.badgeText, 'Badge', 30, current.badgeText),
       logoType: input.logoType === 'image' ? 'image' : 'text',
       logoText: text(input.logoText, 'Logo text', 4, current.logoText),
-      logoImageUrl: input.logoImageUrl === undefined ? current.logoImageUrl : acceptImageRef(input.logoImageUrl, 'Logo image'),
+      logoImageUrl: input.logoImageUrl === undefined ? current.logoImageUrl : acceptImageRef(input.logoImageUrl, 'Logo image', { maxSide: LOGO_MAX_SIDE }),
       accentColor: accent,
       marquee: {
         enabled: bool(marquee.enabled, current.marquee.enabled),

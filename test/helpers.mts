@@ -19,3 +19,16 @@ export function jsonRequest(body: unknown, headers: Record<string, string> = {},
     body: text,
   });
 }
+
+/**
+ * Open an Admin Hub section from the bottom bar: directly on wider screens, or through
+ * More on a phone (where the bar holds Orders, Inventory, Chats and More).
+ */
+export async function openAdminSection(page: import('playwright').Page, name: RegExp): Promise<void> {
+  const nav = page.getByRole('navigation', { name: 'Admin sections' });
+  await nav.waitFor();
+  const direct = nav.getByRole('button', { name });
+  if ((await direct.count()) && (await direct.first().isVisible())) return direct.first().click();
+  await nav.getByRole('button', { name: 'More' }).click();
+  await page.getByRole('dialog', { name: 'More' }).getByRole('button', { name }).click();
+}

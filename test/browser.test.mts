@@ -295,9 +295,8 @@ test('the shop and the admin hub share one store: a customer order reaches the o
   await admin.getByText(/checkout shows these details now/).waitFor();
 
   // 4. Hiding a product removes it from the shop.
-  await admin.getByRole('button', { name: /Inventory Stock/ }).click();
-  const jaipur = admin.locator('div', { hasText: /^Jaipur/ }).first();
-  void jaipur;
+  await admin.getByRole('navigation', { name: 'Admin sections' }).getByRole('button', { name: /^Inventory/ }).click();
+  await admin.getByRole('button', { name: /^Stock and actions for/ }).first().click();
   await admin.getByTitle('Shown in the shop: click to hide').first().click();
   await admin.getByTitle('Hidden from the shop: click to show').first().waitFor();
 
@@ -387,14 +386,23 @@ test('regression: every admin tab and settings section fits a 375 px phone, SMS 
   await page.locator('header button:has-text("Admin Hub")').click();
   await page.getByRole('status').filter({ hasText: /Backup/ }).waitFor(); // admin data loaded
   const nav = page.getByRole('navigation', { name: 'Admin sections' });
-  for (const tab of ['Orders', 'Stock', 'CRM', 'Settings']) {
-    // A real tap at the button's centre (the bar is fixed to the bottom of the screen).
-    const box = (await nav.locator('button', { hasText: new RegExp(`^${tab}`) }).boundingBox())!;
+  // On a phone the bar holds Orders, Inventory, Chats and More; Customers and Settings are under More.
+  for (const tab of ['Orders', 'Inventory', 'Chats', 'More']) {
+    // A real tap at the button's centre (the bar is fixed to the bottom of the screen); every target is at least 44 px.
+    const box = (await nav.getByRole('button', { name: new RegExp(`^${tab}`) }).boundingBox())!;
+    assert.ok(box.height >= 44 && box.width >= 44, `${tab}: ${box.width}x${box.height}`);
     await page.mouse.click(box.x + box.width / 2, box.y + box.height / 2);
-    await nav.locator('button.font-bold', { hasText: new RegExp(`^${tab}`) }).waitFor();
+    if (tab === 'More') {
+      await page.getByRole('dialog', { name: 'More' }).getByRole('button', { name: /^Customers/ }).click();
+    } else {
+      await nav.locator('button[aria-current=page]', { hasText: new RegExp(`^${tab}`) }).waitFor();
+    }
     await page.waitForTimeout(200);
     assert.deepEqual(await overflow(page), [], `${tab} tab`);
   }
+  assert.equal(await nav.getByRole('button', { name: /^Settings/ }).count(), 0, 'Settings is under More on a phone');
+  await nav.getByRole('button', { name: 'More' }).click();
+  await page.getByRole('dialog', { name: 'More' }).getByRole('button', { name: /^Settings/ }).click();
   // Every settings section fits too, including the SMS gateway.
   for (const section of ['Store & contact', 'Catalogue', 'Branding & bank', 'Festival themes', 'Phone verification', 'Couriers', 'System & backups']) {
     await page.getByRole('navigation', { name: 'Settings sections' }).getByRole('button', { name: section }).click();

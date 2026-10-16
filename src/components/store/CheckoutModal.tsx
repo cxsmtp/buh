@@ -472,8 +472,8 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
   }
 
   return (
-    <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center bg-black/75 backdrop-blur-md p-0 sm:p-4 overflow-y-auto">
-      <div className="bg-white text-stone-900 w-full max-w-xl sm:rounded-3xl max-h-[92vh] flex flex-col overflow-hidden shadow-2xl border border-stone-200">
+    <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center bg-black/75 backdrop-blur-md p-0 sm:p-4 overflow-y-auto overscroll-contain">
+      <div className="bg-white text-stone-900 w-full max-w-xl sm:rounded-3xl max-h-[92vh] flex flex-col overflow-hidden shadow-2xl border border-stone-200 pb-safe sm:pb-0 sheet-up sm:[animation-name:sheet-fade]">
         
         {/* Header */}
         <div className="px-4 py-3.5 border-b border-stone-200 flex items-center justify-between bg-stone-50">
