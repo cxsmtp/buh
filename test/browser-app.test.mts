@@ -40,7 +40,7 @@ after(async () => {
 
 type Ctx = { ctx: import('playwright').BrowserContext; page: import('playwright').Page; errors: string[]; photoWidths: number[] };
 
-async function open(width: number, opts: { dpr?: number; ua?: string; sw?: boolean; path?: string; reducedMotion?: 'reduce' } = {}): Promise<Ctx> {
+async function open(width: number, opts: { dpr?: number; ua?: string; sw?: boolean; path?: string; reducedMotion?: 'reduce'; base?: string } = {}): Promise<Ctx> {
   const phone = width < 768;
   const ctx = await browser.newContext({
     viewport: { width, height: phone ? 860 : width < 1100 ? 1024 : 900 },
@@ -62,7 +62,7 @@ async function open(width: number, opts: { dpr?: number; ua?: string; sw?: boole
   page.on('console', (m) => {
     if (m.type() === 'error' && !/Failed to load resource|ERR_|unsplash/i.test(m.text())) errors.push(m.text());
   });
-  await page.goto(`${server.base}${opts.path ?? '/'}`, { waitUntil: 'domcontentloaded' });
+  await page.goto(`${opts.base ?? server.base}${opts.path ?? '/'}`, { waitUntil: 'domcontentloaded' });
   await page.locator('main h3').first().waitFor();
   return { ctx, page, errors, photoWidths };
 }
@@ -219,8 +219,27 @@ test('CSP and headers: the worker and manifest from this site only; the worker c
   assert.match(await sw.text(), /const VERSION = "BUH-\d\d\.\d\d\.\d\d";/);
 });
 
+/** Stop a server and wait until its port answers no more (the network is really gone, for the worker too). */
+async function stopAndWait(s: RunningServer) {
+  s.stop();
+  for (let i = 0; i < 100 && (await fetch(`${s.base}/api/health`).then(() => true, () => false)); i++) await new Promise((r) => setTimeout(r, 100));
+}
+
+async function workerInControl(page: import('playwright').Page) {
+  await page.evaluate(async () => {
+    const reg = await navigator.serviceWorker.ready;
+    if (!navigator.serviceWorker.controller) await new Promise((r) => navigator.serviceWorker.addEventListener('controllerchange', r, { once: true }));
+    const w = reg.active!;
+    if (w.state !== 'activated') await new Promise((r) => w.addEventListener('statechange', () => w.state === 'activated' && r(null)));
+  });
+}
+
 test('service worker at 412px: registers for the whole site, keeps the shell, never answers API or admin requests, and shows the offline page with the network off', { skip }, async () => {
-  const { ctx, page, errors } = await open(412, { sw: true });
+  // Its own server, switched off for the offline part (Playwright's offline mode does not reach the worker's own requests).
+  let own = await startServer();
+  const port = Number(new URL(own.base).port);
+  const { ctx, page, errors } = await open(412, { sw: true, base: own.base });
+  const server = own;
   const state = await page.evaluate(async () => {
     const reg = await navigator.serviceWorker.ready;
     if (!navigator.serviceWorker.controller) await new Promise((r) => navigator.serviceWorker.addEventListener('controllerchange', r, { once: true }));
@@ -267,6 +286,7 @@ test('service worker at 412px: registers for the whole site, keeps the shell, ne
   assert.deepEqual(all.filter((p) => p === '/' || p.startsWith('/p/')), [], 'pages are never kept: a new version shows at once');
 
   // Offline: a calm page, not the browser's error. The API is not faked.
+  await stopAndWait(own);
   await ctx.setOffline(true);
   await page.goto(`${server.base}/p/prod-01`, { waitUntil: 'domcontentloaded' });
   await page.getByRole('heading', { name: 'You are offline' }).waitFor();
@@ -277,12 +297,40 @@ test('service worker at 412px: registers for the whole site, keeps the shell, ne
   // Try again while still offline: the offline page again. Back online: the shop opens by itself.
   await page.getByRole('button', { name: 'Try again' }).click();
   await page.getByRole('heading', { name: 'You are offline' }).waitFor();
+  own = await startServer({}, { port });
   await ctx.setOffline(false);
   await page.locator('main h3').first().waitFor();
   assert.match(page.url(), /\/p\/prod-01$/);
   await page.getByRole('dialog', { name: /Mughal Botanical/ }).waitFor();
   assert.deepEqual(errors.filter((e) => !/Failed to fetch|NetworkError|net::/i.test(e)), []);
   await ctx.close();
+  own.stop();
+});
+
+test('kill switch in a real browser: SW_RESET=true removes the installed worker and its caches at once; /reset-app clears the site only then', { skip }, async () => {
+  let own = await startServer();
+  const port = Number(new URL(own.base).port);
+  assert.equal((await fetch(`${own.base}/reset-app`)).status, 404, 'no reset link unless the owner switches it on');
+  const { ctx, page } = await open(412, { sw: true, base: own.base });
+  await workerInControl(page);
+  assert.ok(await page.evaluate(async () => (await caches.keys()).some((k) => k.startsWith('buh-'))));
+  // The owner sets SW_RESET=true and restarts the shop.
+  await stopAndWait(own);
+  own = await startServer({ SW_RESET: 'true' }, { port });
+  const sw = await fetch(`${own.base}/sw.js`);
+  assert.equal(sw.headers.get('x-buh-sw'), 'reset');
+  const reset = await fetch(`${own.base}/reset-app`);
+  assert.equal(reset.status, 200);
+  assert.equal(reset.headers.get('clear-site-data'), '"cache", "storage"');
+  // The next open: no waiting for tabs to close.
+  await page.reload({ waitUntil: 'domcontentloaded' });
+  await page.locator('main h3').first().waitFor();
+  await page.waitForFunction(async () => (await navigator.serviceWorker.getRegistrations()).length === 0 && !(await caches.keys()).some((k) => k.startsWith('buh-')), null, { timeout: 10000, polling: 250 });
+  // The shop still works, as a plain website.
+  await page.reload({ waitUntil: 'domcontentloaded' });
+  await page.locator('main h3').first().waitFor();
+  await ctx.close();
+  own.stop();
 });
 
 test('safe areas: the header, tab bar, sheets and footer buttons keep clear of a notch and the home bar', { skip }, async () => {
@@ -448,6 +496,33 @@ test('install offer on an iPhone: Share, then Add to Home Screen; Got it closes 
   await card.getByRole('button', { name: 'Got it' }).click();
   await card.waitFor({ state: 'detached' });
   assert.equal(await overflow(page), 0);
+  assert.deepEqual(errors, []);
+  await ctx.close();
+});
+
+test('install offer: stays hidden while the chat is open, and only counts as shown once it was on screen', { skip }, async () => {
+  const { ctx, page, errors } = await open(412, { ua: ANDROID_UA });
+  await page.evaluate(() => {
+    const e = new Event('beforeinstallprompt') as Event & { prompt?: () => Promise<void>; userChoice?: Promise<unknown> };
+    e.prompt = async () => {};
+    e.userChoice = Promise.resolve({ outcome: 'dismissed' });
+    window.dispatchEvent(e);
+  });
+  await page.getByRole('button', { name: 'Help and chat' }).click();
+  const chat = page.getByRole('dialog', { name: 'Chat with the shop' });
+  await chat.waitFor();
+  await page.waitForTimeout(7500);
+  const card = page.getByRole('region', { name: 'Install the app' });
+  assert.equal(await card.count(), 0, 'not over the chat');
+  assert.equal(await page.evaluate(() => localStorage.getItem('buh_install_prompt')), null, 'not marked as shown while hidden');
+  await page.keyboard.press('Escape');
+  await chat.waitFor({ state: 'detached' });
+  await card.waitFor({ timeout: 3000 });
+  await page.waitForFunction(() => localStorage.getItem('buh_install_prompt') === 'shown', null, { timeout: 3000 });
+  // Opening the chat again hides it at once.
+  await page.getByRole('button', { name: 'Help and chat' }).click();
+  await chat.waitFor();
+  await card.waitFor({ state: 'detached', timeout: 2000 });
   assert.deepEqual(errors, []);
   await ctx.close();
 });

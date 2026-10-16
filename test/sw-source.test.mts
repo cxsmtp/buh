@@ -3,15 +3,22 @@
  * (and so may cache) and which it leaves alone. Never: anything not a GET (orders, checkout,
  * sign-in), any /api/ address but the public photos (prices, orders, tracking, chat, codes, live
  * updates and all of /api/admin/), other sites. A new version installs and then waits for the
- * page's go-ahead; it clears the old version's caches when it takes over.
+ * page's go-ahead; it clears the old version's caches when it takes over. Kill switch: a 404 for
+ * /sw.js (a rollback to a version from before the app) or the reset worker makes it remove itself
+ * and its caches; a 5xx or no network does not. Navigation preload stays off.
  */
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { serviceWorkerSource } from '@/lib/serviceWorker';
+import { resetWorkerSource, serviceWorkerSource } from '@/lib/serviceWorker';
 
 type Listener = (e: unknown) => void;
 
-function load(version = 'BUH-02.05.00') {
+type SwAnswer = { status: number; header?: string } | 'offline';
+
+function load(version = 'BUH-02.05.00', swAnswer: SwAnswer = { status: 200, header: 'app' }, source = serviceWorkerSource(version)) {
+  let unregistered = 0;
+  const preload: string[] = [];
+  const waits: Promise<unknown>[] = [];
   const listeners: Record<string, Listener> = {};
   const deleted: string[] = [];
   const fetched: string[] = [];
@@ -33,7 +40,10 @@ function load(version = 'BUH-02.05.00') {
     location: { origin: 'https://shop.test' },
     addEventListener: (type: string, fn: Listener) => (listeners[type] = fn),
     skipWaiting: () => void skipped++,
-    registration: { navigationPreload: null },
+    registration: {
+      navigationPreload: { enable: async () => void preload.push('on'), disable: async () => void preload.push('off') },
+      unregister: async () => (unregistered++, true),
+    },
     clients: { claim: async () => {} },
   };
   const caches = {
@@ -45,21 +55,35 @@ function load(version = 'BUH-02.05.00') {
   const fakeFetch = async (r: string | { url: string }) => {
     const url = typeof r === 'string' ? r : r.url;
     fetched.push(url);
+    if (new URL(url, 'https://shop.test').pathname === '/sw.js') {
+      if (swAnswer === 'offline') throw new TypeError('Failed to fetch');
+      return { ok: swAnswer.status < 400, status: swAnswer.status, headers: new Map(swAnswer.header ? [['X-BUH-SW', swAnswer.header]] : []) };
+    }
     return { ok: true, status: 200, type: 'basic', headers: new Map([['Cache-Control', 'public']]), clone() { return this; }, text: async () => '<script src="/_next/static/chunks/a1.js"></script><link href="/_next/static/css/b2.css">' };
   };
-  new Function('self', 'caches', 'fetch', 'Response', 'URL', serviceWorkerSource(version))(self, caches, fakeFetch, class {}, URL);
+  new Function('self', 'caches', 'fetch', 'Response', 'URL', source)(self, caches, fakeFetch, class {}, URL);
 
   /** Does the worker answer this request (respondWith), or leave it to the network? */
   const answers = (url: string, init: { method?: string; mode?: string } = {}) => {
     let answered = false;
     listeners.fetch({
       request: { url: new URL(url, 'https://shop.test').href, method: init.method ?? 'GET', mode: init.mode ?? 'cors' },
-      respondWith: () => (answered = true),
-      waitUntil: () => {},
+      respondWith: (p: unknown) => {
+        answered = true;
+        void Promise.resolve(p).catch(() => {});
+      },
+      waitUntil: (p: Promise<unknown>) => void waits.push(p),
     });
     return answered;
   };
-  return { listeners, answers, store, deleted, fetched, skipped: () => skipped };
+  /** Run a lifecycle event (install, activate) to the end. */
+  const run = async (type: string) => {
+    let done: Promise<unknown> = Promise.resolve();
+    listeners[type]({ waitUntil: (p: Promise<unknown>) => (done = p) });
+    await done;
+  };
+  const settled = () => Promise.all(waits.splice(0));
+  return { listeners, answers, run, settled, store, deleted, fetched, preload, skipped: () => skipped, unregistered: () => unregistered };
 }
 
 test('the worker never answers orders, checkout, admin, personal data or other sites', () => {
@@ -131,4 +155,66 @@ test('each release is a different worker; the version cannot inject code', () =>
   const src = serviceWorkerSource('x"; alert(1); "');
   assert.match(src, /const VERSION = "xalert1";/);
   assert.doesNotMatch(src, /alert\(1\)/);
+});
+
+test('kill switch: a rolled-back server (no /sw.js, 404) makes the worker remove itself and its caches', async () => {
+  const sw = load('BUH-02.06.00', { status: 404 });
+  await sw.run('activate');
+  assert.equal(sw.unregistered(), 1, 'unregistered');
+  assert.deepEqual([...sw.store.keys()], ['other-app'], 'every buh- cache gone, other caches untouched');
+});
+
+test('kill switch: the reset worker answer (SW_RESET=true) removes it too; a 5xx during an update or no network does not', async () => {
+  const reset = load('BUH-02.06.00', { status: 200, header: 'reset' });
+  await reset.run('activate');
+  assert.equal(reset.unregistered(), 1);
+  for (const answer of [{ status: 502 }, { status: 503 }, { status: 200, header: 'app' }, 'offline'] as SwAnswer[]) {
+    const sw = load('BUH-02.06.00', answer);
+    await sw.run('activate');
+    assert.equal(sw.unregistered(), 0, JSON.stringify(answer));
+    assert.ok(sw.store.has('buh-images'));
+  }
+});
+
+test('kill switch: opening pages checks /sw.js again, at most every 10 minutes', async () => {
+  const sw = load('BUH-02.06.00', { status: 200, header: 'app' });
+  await sw.run('activate');
+  const checks = () => sw.fetched.filter((u) => u.endsWith('/sw.js')).length;
+  assert.equal(checks(), 1, 'checked on taking over');
+  sw.answers('/', { mode: 'navigate' });
+  sw.answers('/p/prod-01', { mode: 'navigate' });
+  await sw.settled();
+  assert.equal(checks(), 1, 'not again within 10 minutes');
+  // Ten minutes later (the clock moves), a page open checks again and finds the server rolled back.
+  const realNow = Date.now;
+  Date.now = () => realNow() + 11 * 60 * 1000;
+  try {
+    const later = load('BUH-02.06.00', { status: 404 });
+    later.answers('/', { mode: 'navigate' });
+    await later.settled();
+    assert.equal(later.unregistered(), 1);
+  } finally {
+    Date.now = realNow;
+  }
+});
+
+test('navigation preload stays off (an /api/ page opened directly would be fetched twice)', async () => {
+  const sw = load();
+  await sw.run('activate');
+  assert.deepEqual(sw.preload, ['off']);
+  assert.doesNotMatch(serviceWorkerSource('BUH-02.06.00'), /preloadResponse|navigationPreload\.enable/);
+});
+
+test('the reset worker takes over at once (no waiting for tabs to close), clears the caches and unregisters', async () => {
+  const sw = load('x', { status: 200 }, resetWorkerSource());
+  sw.listeners.install({});
+  assert.equal(sw.skipped(), 1, 'skips waiting');
+  await sw.run('activate');
+  assert.equal(sw.unregistered(), 1);
+  assert.deepEqual([...sw.store.keys()], ['other-app']);
+  assert.equal(sw.listeners.fetch, undefined, 'answers nothing: every request goes to the network');
+});
+
+test('/reset-app is left to the network, so its Clear-Site-Data reaches the browser', () => {
+  assert.equal(load().answers('/reset-app', { mode: 'navigate' }), false);
 });

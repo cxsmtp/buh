@@ -48,8 +48,21 @@ export function registerServiceWorker(): void {
       reg.addEventListener('updatefound', () => watch(reg.installing));
     })
     .catch(() => {
-      // No worker (private mode, blocked): the shop works the same, just without offline.
+      // No worker (private mode, blocked): the shop works the same, just without offline. If the
+      // server has no worker at all (404), remove any earlier one and its caches from this phone.
+      void removeStrandedWorker();
     });
+}
+
+async function removeStrandedWorker(): Promise<void> {
+  try {
+    const res = await fetch('/sw.js', { cache: 'no-store' });
+    if (res.status !== 404) return;
+    for (const reg of await navigator.serviceWorker.getRegistrations()) await reg.unregister();
+    for (const key of await caches.keys()) if (key.startsWith('buh-')) await caches.delete(key);
+  } catch {
+    // offline: try again next time
+  }
 }
 
 /** Ask the server for a new worker now (the shop learned of a new version over /api/events). */

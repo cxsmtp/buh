@@ -33,6 +33,8 @@ The shop can sit on the home screen of a phone or tablet and open full screen, w
 - During a festival the phone's status bar takes the festival's colour.
 - Installing needs the shop on **https://** (the deployment's Caddy gives it). Install it on your own phone the same way; the Admin Hub works in the app too.
 - What the app keeps on the phone, and what it never keeps: docs/security.md, "The installed app".
+- **If the app misbehaves on phones** (an emergency): set `SW_RESET=true` in the shop's settings and restart the shop. Each phone that opens the shop then drops the app's saved copy and works as a plain website (the icon stays; it opens the website). For a phone that is still stuck, open `https://yourdomain/reset-app` on it: it also clears that phone's bag. When things are fixed, set `SW_RESET=false` (or remove it) and restart: phones pick the app up again on their next visit.
+- **Going back to a version from before the app** (BUH-02.05.00 or older) is safe: the shop works as a website at once, and the app's saved copy removes itself from each phone the next time the shop is opened (within about 10 minutes).
 
 ## For customers: placing an order
 

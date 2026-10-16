@@ -16,13 +16,13 @@ export interface RunningServer {
   dataDir: string;
 }
 
-export async function startServer(env: Record<string, string> = {}): Promise<RunningServer> {
+export async function startServer(env: Record<string, string> = {}, opts: { port?: number } = {}): Promise<RunningServer> {
   for (const dir of ['public', '.next/static']) {
     fs.cpSync(dir, path.join('.next/standalone', dir), { recursive: true });
   }
   // A port the system says is free. A random one could belong to a server another test file
   // (run in parallel) started, and the health check below would then talk to that one instead.
-  const port = await freePort();
+  const port = opts.port ?? (await freePort());
   const base = `http://127.0.0.1:${port}`;
   const dataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'buh-e2e-'));
   let log = '';

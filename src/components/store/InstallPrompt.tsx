@@ -1,10 +1,35 @@
 'use client';
 
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useState, useSyncExternalStore } from 'react';
 import { Share, SquarePlus, X } from 'lucide-react';
 import { isIos, isStandalone, type InstallPromptEvent } from '@/lib/client/pwa';
 
 const SEEN_KEY = 'buh_install_prompt';
+/**
+ * Anything open on the page that the card must not sit on: a sheet or dialog (product, filters,
+ * search, bag, checkout, the chat or help panel, phone verification, sign-in) or Google's
+ * reCAPTCHA challenge during phone sign-in. Watched on the page itself, so a new panel counts too.
+ */
+const OVERLAY = '[role="dialog"], [aria-modal="true"], iframe[src*="recaptcha"][src*="bframe"]';
+function overlayOpen(): boolean {
+  for (const el of document.querySelectorAll<HTMLElement>(OVERLAY)) {
+    const r = el.getBoundingClientRect();
+    if (r.width > 0 && r.height > 0 && getComputedStyle(el).visibility !== 'hidden') return true;
+  }
+  return false;
+}
+function useOverlayOpen(): boolean {
+  return useSyncExternalStore(
+    (notify) => {
+      const mo = new MutationObserver(() => notify());
+      mo.observe(document.body, { childList: true, subtree: true, attributes: true, attributeFilter: ['role', 'aria-modal', 'style', 'class', 'hidden'] });
+      return () => mo.disconnect();
+    },
+    overlayOpen,
+    () => false
+  );
+}
+
 /** How long a shopper has been looking before the offer appears (never straight away). */
 export const INSTALL_DELAY_MS = 6000;
 
@@ -36,7 +61,8 @@ interface InstallPromptProps {
  * says how (Share, then Add to Home Screen), since Safari has no button for it.
  *
  * Shown once per device (Install, Not now or ✕ all count), only after a few seconds of looking,
- * never while something is open (and so never during checkout), never inside the installed app.
+ * never while something is open (a sheet, the bag, checkout, the chat, phone sign-in), never inside
+ * the installed app. It counts as shown only after it has been on screen for a second.
  */
 export function InstallPrompt({ blocked, logo }: InstallPromptProps) {
   const [offer, setOffer] = useState<InstallPromptEvent | null>(null);
@@ -44,6 +70,8 @@ export function InstallPrompt({ blocked, logo }: InstallPromptProps) {
   const [ready, setReady] = useState(false);
   const [open, setOpen] = useState(false);
   const [done, setDone] = useState(false);
+  const overlay = useOverlayOpen();
+  const hidden = blocked || overlay;
 
   useEffect(() => {
     if (isStandalone() || seen()) return;
@@ -74,15 +102,21 @@ export function InstallPrompt({ blocked, logo }: InstallPromptProps) {
   // Appear once there is something to offer, the shopper has looked around, and nothing is open.
   const eligible = ready && !done && (offer !== null || ios);
   useEffect(() => {
-    if (!eligible || blocked || open) return;
-    const t = setTimeout(() => {
-      setOpen(true);
-      markSeen('shown'); // once per device, even if the page is closed without an answer
-    }, 400);
+    if (!eligible || hidden || open) return;
+    const t = setTimeout(() => setOpen(true), 400);
     return () => clearTimeout(t);
-  }, [eligible, blocked, open]);
+  }, [eligible, hidden, open]);
 
-  if (!open || done || blocked) return null;
+  // Once it has really been on screen (a second, nothing over it), it has been shown: once per
+  // device, even if the page is closed without an answer.
+  const visible = open && !done && !hidden;
+  useEffect(() => {
+    if (!visible) return;
+    const t = setTimeout(() => markSeen('shown'), 1000);
+    return () => clearTimeout(t);
+  }, [visible]);
+
+  if (!visible) return null;
 
   const close = () => {
     markSeen('dismissed');

@@ -23,6 +23,19 @@
  * which sends SKIP_WAITING. Otherwise it takes over when the shop is next opened. On taking over
  * it deletes the old version's caches.
  *
+ * Kill switch (never stranded on a phone):
+ *  - The worker checks /sw.js itself when it takes over and then at most every 10 minutes while
+ *    pages are opened. A 404 (the server was rolled back to a version from before the app, which
+ *    has no /sw.js) or the reset answer (below) makes it delete its caches and unregister: the
+ *    shop then works exactly as a plain website. A 502/503 during an update, or no network, is
+ *    not a 404 and changes nothing.
+ *  - With SW_RESET=true on the server, /sw.js is a reset worker (resetWorkerSource): it takes over
+ *    at once, without waiting for tabs to close, deletes the caches, unregisters, and answers
+ *    nothing, so even a broken worker is replaced on the next page open.
+ *
+ * Navigation preload stays off: a navigation the worker does not answer (an /api/ address opened
+ * as a page) would otherwise be fetched twice.
+ *
  * The source is plain JavaScript in a string (no build step, nothing from the app bundled in),
  * written without template-literal placeholders so the version is the only thing inserted.
  */
@@ -31,6 +44,26 @@ export function serviceWorkerSource(version: string): string {
   return `'use strict';
 const VERSION = ${v};
 ${SW_BODY}`;
+}
+
+/** Marks the reset worker's response, so a running worker knows to remove itself. */
+export const SW_RESET_HEADER = 'X-BUH-SW';
+
+/** SW_RESET=true: the worker that removes the app's worker and caches from every phone that opens the shop. */
+export function resetWorkerSource(): string {
+  return `'use strict';
+// Beautiful UAE Home: reset. Removes the shop's offline copy and this worker; the shop works as a website.
+self.addEventListener('install', () => self.skipWaiting());
+self.addEventListener('activate', (event) => {
+  event.waitUntil(
+    (async () => {
+      for (const key of await caches.keys()) if (key.startsWith('buh-')) await caches.delete(key);
+      await self.clients.claim();
+      await self.registration.unregister();
+    })()
+  );
+});
+`;
 }
 
 const SW_BODY = String.raw`const SHELL = 'buh-shell-' + VERSION;
@@ -67,15 +100,39 @@ self.addEventListener('activate', (event) => {
       for (const key of await caches.keys()) {
         if (key.startsWith('buh-') && key !== SHELL && key !== STATIC && key !== IMAGES) await caches.delete(key);
       }
+      // Off (an earlier build turned it on): navigations this worker leaves alone would be fetched twice.
       if (self.registration.navigationPreload) {
         try {
-          await self.registration.navigationPreload.enable();
+          await self.registration.navigationPreload.disable();
         } catch (e) {}
       }
       await self.clients.claim();
+      await checkStillWanted();
     })()
   );
 });
+
+const CHECK_EVERY_MS = 10 * 60 * 1000;
+let lastCheck = 0;
+
+/**
+ * Is this worker still wanted? Asks the server for /sw.js: a 404 (rolled back to a version from
+ * before the app) or the reset worker means no, and the worker removes itself and its caches.
+ * Anything else (the normal worker, a 5xx during an update, no network) leaves it as it is.
+ */
+async function checkStillWanted() {
+  lastCheck = Date.now();
+  let res;
+  try {
+    res = await fetch('/sw.js', { cache: 'no-store', credentials: 'omit' });
+  } catch (e) {
+    return false;
+  }
+  if (res.status !== 404 && res.headers.get('X-BUH-SW') !== 'reset') return false;
+  for (const key of await caches.keys()) if (key.startsWith('buh-')) await caches.delete(key);
+  await self.registration.unregister();
+  return true;
+}
 
 self.addEventListener('message', (event) => {
   if (event.data && event.data.type === 'SKIP_WAITING') self.skipWaiting();
@@ -93,9 +150,10 @@ self.addEventListener('fetch', (event) => {
     return;
   }
   // Prices, stock, orders, tracking, chat, codes, live updates and all of /api/admin/: never cached.
-  if (path.startsWith('/api/') || path === '/sw.js') return;
+  if (path.startsWith('/api/') || path === '/sw.js' || path === '/reset-app') return;
   if (req.mode === 'navigate') {
     event.respondWith(pageOrOffline(event));
+    if (Date.now() - lastCheck > CHECK_EVERY_MS) event.waitUntil(checkStillWanted().catch(() => {}));
     return;
   }
   if (path.startsWith('/_next/static/')) {
@@ -110,8 +168,6 @@ self.addEventListener('fetch', (event) => {
 /** Pages: always the server's latest; the offline page only when there is no network. */
 async function pageOrOffline(event) {
   try {
-    const preloaded = await event.preloadResponse;
-    if (preloaded) return preloaded;
     return await fetch(event.request);
   } catch (e) {
     const offline = await caches.match(OFFLINE, { cacheName: SHELL });

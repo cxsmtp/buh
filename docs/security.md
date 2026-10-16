@@ -149,9 +149,20 @@ The worker never stores a response marked `no-store` or `private`, nor one from 
 
 **Updates:** `/sw.js` is sent with `Cache-Control: no-cache` and contains the release's version, so every release is a new worker. It installs in the background and **waits**; the page shows **New version ready — Refresh**, which tells it to take over (`SKIP_WAITING`) and reloads; otherwise it takes over when the app is next opened. On taking over it deletes the previous version's caches. A shopper's page that is in the background switches by itself, never with a product, the bag or checkout open (as before).
 
-**Removing it:** the browser's site settings → Clear data removes the worker and its caches; nothing in it is needed to place or find an order.
+**Kill switch (never stranded on a phone):**
 
-Tested by `test/sw-source.test.mts` (every rule above) and `test/browser-app.test.mts` (in Chromium: registers for `/`, API and admin responses never come from the worker, nothing under `/api/` but photos is stored, the offline page with the network off).
+- The worker asks the server for `/sw.js` when it takes over and then at most every 10 minutes while pages are opened (also after the browser restarts it, which phones do often). A **404** (the shop was rolled back to a version from before the app, BUH-02.05.00 or older, which has no `/sw.js`) or the **reset** answer (below) makes it delete its caches and unregister. A 502/503 during an update, or no network, is not a 404 and changes nothing.
+- The page does the same when registering fails because `/sw.js` is a 404.
+- **`SW_RESET=true`** (a server setting, for emergencies such as a broken worker): `/sw.js` becomes a reset worker that takes over at once (no waiting for tabs to close), deletes the caches, unregisters and answers nothing. Every phone that opens the shop is cleaned on that visit. While it is on, **`/reset-app`** answers with `Clear-Site-Data: "cache", "storage"`, the browser's own wipe of this site's caches, workers and storage (it also empties that phone's bag and saved delivery details; sign-in cookies are kept). It is a 404 while `SW_RESET` is off, so nobody can wipe a shopper's bag with a link.
+- **Rolling back to a version from before the app:** the shop works as a website straight away (pages always come from the server). Each phone's leftover worker removes itself the next time the shop is opened after the worker restarts, usually the same visit, at most about 10 minutes later. Nothing it kept is needed to place or find an order.
+
+**Navigation preload** is off: a page address the worker leaves alone (an `/api/` address opened directly, `/sw.js`, `/reset-app`) would otherwise be fetched twice.
+
+**Icons** are drawn once per logo and size, and requests that arrive while one is drawn wait for it. A logo larger than 4096 px on a side is refused when saved (the size is read from the PNG/JPEG/WebP header) and is never drawn (the letters are), so a small file that claims a huge size cannot exhaust the server.
+
+**Removing it by hand:** the browser's site settings → Clear data removes the worker and its caches.
+
+Tested by `test/sw-source.test.mts` (every rule above, the 404 and reset kill switch, the 10-minute re-check, preload off), `test/app-icons.test.mts` (one drawing for many requests, the logo size limit) and `test/browser-app.test.mts` (in Chromium: registers for `/`, API and admin responses never come from the worker, nothing under `/api/` but photos is stored, the offline page with the server down, and `SW_RESET=true` removing the worker and its caches on the next open).
 
 ## Deployment
 
