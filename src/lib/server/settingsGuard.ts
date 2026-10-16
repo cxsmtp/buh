@@ -46,6 +46,9 @@ export function explainMailError(err: unknown, s: Pick<EmailSettings, 'smtpPort'
     const want = s.smtpPort === 465 ? 'TLS' : 'STARTTLS';
     return `the port and the security setting don't match: port ${s.smtpPort} needs Security “${want}” (465 → TLS; 587, 2525 and 25 → STARTTLS)`;
   }
+  if (/missing credentials/i.test(text)) {
+    return 'no password is saved for this mail server: type the (app) password and press “Save email settings”';
+  }
   if (e?.code === 'EAUTH' || e?.responseCode === 535 || /\b535\b|authentication failed|username and password not accepted/i.test(text)) {
     return 'the mail server refused the username or password (Gmail and Outlook need an app password, not your normal password)';
   }

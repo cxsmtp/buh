@@ -143,5 +143,7 @@ test('mail errors in plain words: refused password, unreachable server, unknown 
   assert.match(guard.explainMailError(Object.assign(new Error('Invalid login: 535-5.7.8 Username and Password not accepted'), { code: 'EAUTH', responseCode: 535 }), { smtpPort: 587, smtpSecurity: 'starttls' }), /app password/);
   assert.match(guard.explainMailError(Object.assign(new Error('connect ETIMEDOUT 1.2.3.4:587'), { code: 'ETIMEDOUT' }), { smtpPort: 587, smtpSecurity: 'starttls' }), /could not reach the mail server on port 587/);
   assert.match(guard.explainMailError(new Error('getaddrinfo ENOTFOUND smtp.gmial.com'), { smtpPort: 587, smtpSecurity: 'starttls' }), /not found/);
+  // Reported: "Missing credentials for "PLAIN"" when the typed password had not been saved yet.
+  assert.match(guard.explainMailError(Object.assign(new Error('Missing credentials for "PLAIN"'), { code: 'EAUTH' }), { smtpPort: 587, smtpSecurity: 'starttls' }), /no password is saved/);
   assert.equal(guard.explainMailError(new Error('450 mailbox busy'), { smtpPort: 587, smtpSecurity: 'starttls' }), 'the mail server said: 450 mailbox busy');
 });

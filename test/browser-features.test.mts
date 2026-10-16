@@ -256,6 +256,9 @@ test('settings → Email & admin account: a private mail server is refused; the 
   await page.getByRole('button', { name: 'Use STARTTLS' }).click();
   assert.equal(await page.getByLabel('Security', { exact: true }).inputValue(), 'starttls');
   assert.equal(await page.getByText(/usually needs Security/).count(), 0);
+  // Reported: "Saved automatically" showed while the typed password was not saved, then the test email failed.
+  await page.getByLabel('Password', { exact: true }).first().fill('abcd efgh ijkl mnop');
+  await page.getByText(/The password you typed is not saved yet/).waitFor();
   assert.deepEqual(await overflow(page), []);
   assert.deepEqual(errors, []);
   await ctx.close();
