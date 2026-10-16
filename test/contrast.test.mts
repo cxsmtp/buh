@@ -34,6 +34,17 @@ after(async () => {
   server?.stop();
 });
 
+/**
+ * Wait until nothing on the page is still sliding or fading (a sheet coming up, a button's colour
+ * changing): every finite CSS animation and transition has finished. Endless ones (a spinner, the
+ * ticker) are left out. Measuring mid-slide reads colours that are on their way.
+ */
+async function settled(page: import('playwright').Page) {
+  await page.waitForFunction(() =>
+    document.getAnimations().every((an) => an.playState !== 'running' || an.effect?.getComputedTiming().iterations === Infinity)
+  );
+}
+
 /** Text whose contrast against what is behind it is below `min` (WCAG ratio). */
 async function lowContrast(page: import('playwright').Page, where: string, min = 3): Promise<string[]> {
   // Plain script text: the test runner's compiler would otherwise add helpers the page doesn't have.
@@ -194,7 +205,7 @@ for (const colorScheme of ['dark', 'light'] as const) {
       await nav.waitFor();
       for (const tab of ['Orders', 'Chats', 'Inventory', 'Customers', 'Settings']) {
         await openAdminSection(a, new RegExp(`^${tab}`));
-        await a.waitForTimeout(400);
+        await settled(a);
         problems.push(...(await lowContrast(a, `admin ${tab}`)));
         if (tab === 'Inventory') {
           // The phone inventory: a product opened with its steppers, the Undo toast, Received stock,
@@ -202,37 +213,39 @@ for (const colorScheme of ['dark', 'light'] as const) {
           await a.getByRole('button', { name: /^Stock and actions for/ }).first().click();
           await a.getByRole('button', { name: /^One more/ }).first().click();
           await a.getByRole('button', { name: 'Undo' }).waitFor();
+          await settled(a);
           problems.push(...(await lowContrast(a, 'inventory open, Undo toast')));
           await a.getByRole('button', { name: /^Received stock for/ }).first().click();
           await a.getByRole('dialog', { name: 'Received stock' }).waitFor();
-          await a.waitForTimeout(400);
+          await settled(a);
           problems.push(...(await lowContrast(a, 'received stock')));
           await a.keyboard.press('Escape');
           await a.getByRole('button', { name: /^Stock history of/ }).first().click();
           await a.getByRole('dialog', { name: 'Stock history' }).getByText(/by /).first().waitFor();
-          await a.waitForTimeout(400);
+          await settled(a);
           problems.push(...(await lowContrast(a, 'stock history')));
           await a.keyboard.press('Escape');
           await a.getByRole('button', { name: 'Add product' }).first().click();
           const wizard = a.getByRole('dialog', { name: 'Add a product' });
           await wizard.waitFor();
-          await a.waitForTimeout(400); // the sheet has finished sliding in
+          await settled(a);
           problems.push(...(await lowContrast(a, 'editor: photos')));
           for (const step of ['Details', 'Sizes', 'Publish']) {
             await wizard.getByRole('navigation', { name: 'Steps' }).getByRole('button', { name: new RegExp(step) }).click();
-            await a.waitForTimeout(150);
+            await settled(a);
           }
           problems.push(...(await lowContrast(a, 'editor: step shown')));
           await a.keyboard.press('Escape');
           if (width < 640) {
             await nav.getByRole('button', { name: 'More' }).click();
             await a.getByRole('dialog', { name: 'More' }).waitFor();
-            await a.waitForTimeout(400);
+            await settled(a);
             problems.push(...(await lowContrast(a, 'more menu')));
             await a.keyboard.press('Escape');
           }
         }
       }
+      await a.getByRole('navigation', { name: 'Settings sections' }).waitFor(); // loaded with the Admin Hub, on demand
       const sections = a.getByRole('navigation', { name: 'Settings sections' }).getByRole('button');
       const count = await sections.count();
       assert.ok(count >= 10);

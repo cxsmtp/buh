@@ -1,6 +1,7 @@
 'use client';
 
 import React, { useState, useEffect, useMemo, useCallback, useRef } from 'react';
+import dynamic from 'next/dynamic';
 import { Product, Order, Customer, CourierSettings, CartItem, BedProfileMeasurement, BrandSettings, SmsGatewaySettings, BankTransferDetails, CatalogSettings, StoreSettings, ThemeSettings, EmailSettings, AssistantSettings, DeliverySettings, PhoneVerificationConfig } from '@/types';
 import { DEFAULT_ASSISTANT, DEFAULT_CATALOG, DEFAULT_DELIVERY, DEFAULT_EMAIL_SETTINGS, DEFAULT_STORE, DEFAULT_THEME_SETTINGS } from '@/data/catalogDefaults';
 import { askWhatsAppLink, piecesLeft, refreshCart, ShopProvider, type FestivalView, type ShopInfo } from '@/lib/client/shop';
@@ -93,31 +94,33 @@ import { CartDrawer } from '@/components/store/CartDrawer';
 import { CheckoutModal } from '@/components/store/CheckoutModal';
 import { OrderTrackerModal } from '@/components/store/OrderTrackerModal';
 
-// Admin Components
-import { AdminHeader } from '@/components/admin/AdminHeader';
-import { AdminOrdersTab } from '@/components/admin/AdminOrdersTab';
-import { AdminInventoryTab } from '@/components/admin/AdminInventoryTab';
-import { AdminCrmTab } from '@/components/admin/AdminCrmTab';
-import { AdminCouriersTab } from '@/components/admin/AdminCouriersTab';
-import { AdminBrandingTab } from '@/components/admin/AdminBrandingTab';
-import { AdminSmsTab } from '@/components/admin/AdminSmsTab';
-import { AdminLoginModal } from '@/components/admin/AdminLoginModal';
-import { BackupStatus } from '@/components/admin/BackupStatus';
-import { RestoreNotice } from '@/components/admin/RestoreNotice';
-import { CatalogSettingsCard } from '@/components/admin/settings/CatalogSettingsCard';
-import { SettingsConsole } from '@/components/admin/settings/SettingsConsole';
-import { StoreSettingsCard } from '@/components/admin/settings/StoreSettingsCard';
-import { ThemeSettingsCard } from '@/components/admin/settings/ThemeSettingsCard';
-import { SettingsHistoryCard } from '@/components/admin/settings/SettingsHistoryCard';
-import { EmailSettingsCard } from '@/components/admin/settings/EmailSettingsCard';
-import { SignInRecoveryCard } from '@/components/admin/settings/SignInRecoveryCard';
-import { VersionsCard } from '@/components/admin/settings/VersionsCard';
-import { AssistantSettingsCard } from '@/components/admin/settings/AssistantSettingsCard';
-import { DeliverySettingsCard } from '@/components/admin/settings/DeliverySettingsCard';
-import { AdminChatsTab } from '@/components/admin/AdminChatsTab';
+// The Admin Hub is loaded only when it is opened (and the sign-in only when asked for):
+// shoppers never download or render admin code.
+const AdminHeader = dynamic(() => import('@/components/admin/AdminHeader').then((m) => m.AdminHeader), { ssr: false });
+const AdminOrdersTab = dynamic(() => import('@/components/admin/AdminOrdersTab').then((m) => m.AdminOrdersTab), { ssr: false });
+const AdminInventoryTab = dynamic(() => import('@/components/admin/AdminInventoryTab').then((m) => m.AdminInventoryTab), { ssr: false });
+const AdminCrmTab = dynamic(() => import('@/components/admin/AdminCrmTab').then((m) => m.AdminCrmTab), { ssr: false });
+const AdminCouriersTab = dynamic(() => import('@/components/admin/AdminCouriersTab').then((m) => m.AdminCouriersTab), { ssr: false });
+const AdminBrandingTab = dynamic(() => import('@/components/admin/AdminBrandingTab').then((m) => m.AdminBrandingTab), { ssr: false });
+const AdminSmsTab = dynamic(() => import('@/components/admin/AdminSmsTab').then((m) => m.AdminSmsTab), { ssr: false });
+const AdminLoginModal = dynamic(() => import('@/components/admin/AdminLoginModal').then((m) => m.AdminLoginModal), { ssr: false });
+const BackupStatus = dynamic(() => import('@/components/admin/BackupStatus').then((m) => m.BackupStatus), { ssr: false });
+const RestoreNotice = dynamic(() => import('@/components/admin/RestoreNotice').then((m) => m.RestoreNotice), { ssr: false });
+const CatalogSettingsCard = dynamic(() => import('@/components/admin/settings/CatalogSettingsCard').then((m) => m.CatalogSettingsCard), { ssr: false });
+const SettingsConsole = dynamic(() => import('@/components/admin/settings/SettingsConsole').then((m) => m.SettingsConsole), { ssr: false });
+const StoreSettingsCard = dynamic(() => import('@/components/admin/settings/StoreSettingsCard').then((m) => m.StoreSettingsCard), { ssr: false });
+const ThemeSettingsCard = dynamic(() => import('@/components/admin/settings/ThemeSettingsCard').then((m) => m.ThemeSettingsCard), { ssr: false });
+const SettingsHistoryCard = dynamic(() => import('@/components/admin/settings/SettingsHistoryCard').then((m) => m.SettingsHistoryCard), { ssr: false });
+const EmailSettingsCard = dynamic(() => import('@/components/admin/settings/EmailSettingsCard').then((m) => m.EmailSettingsCard), { ssr: false });
+const SignInRecoveryCard = dynamic(() => import('@/components/admin/settings/SignInRecoveryCard').then((m) => m.SignInRecoveryCard), { ssr: false });
+const VersionsCard = dynamic(() => import('@/components/admin/settings/VersionsCard').then((m) => m.VersionsCard), { ssr: false });
+const AssistantSettingsCard = dynamic(() => import('@/components/admin/settings/AssistantSettingsCard').then((m) => m.AssistantSettingsCard), { ssr: false });
+const DeliverySettingsCard = dynamic(() => import('@/components/admin/settings/DeliverySettingsCard').then((m) => m.DeliverySettingsCard), { ssr: false });
+const AdminChatsTab = dynamic(() => import('@/components/admin/AdminChatsTab').then((m) => m.AdminChatsTab), { ssr: false });
+const SystemHealthCard = dynamic(() => import('@/components/admin/settings/SystemHealthCard').then((m) => m.SystemHealthCard), { ssr: false });
+
 import { HelpLauncher } from '@/components/store/HelpLauncher';
 import { VersionBadge } from '@/components/common/VersionBadge';
-import { SystemHealthCard } from '@/components/admin/settings/SystemHealthCard';
 
 import { SlidersHorizontal, X } from 'lucide-react';
 import { EMPTY_FILTERS, SORTS, activeChips, activeCount, applyFilters, buildStories, filtersToSearch, parseFilters, type Filters } from '@/lib/catalogFilter';
@@ -553,7 +556,10 @@ export function ShopApp({ initialProductId }: { initialProductId?: string } = {}
   const totalCartCount = cart.reduce((sum, i) => sum + i.quantity, 0);
   const pendingOrdersCount = orders.filter((o) => o.status === 'pending_confirmation').length;
   // Products on sale that are sold out or running low: the badge on Inventory.
-  const stockAlertCount = useMemo(() => stockAlerts(adminProducts, adminSettings.catalog.value.lowStockThreshold).count, [adminProducts, adminSettings.catalog.value.lowStockThreshold]);
+  const stockAlertCount = useMemo(
+    () => (isAdminMode && isAdminAuthenticated ? stockAlerts(adminProducts, adminSettings.catalog.value.lowStockThreshold).count : 0),
+    [isAdminMode, isAdminAuthenticated, adminProducts, adminSettings.catalog.value.lowStockThreshold]
+  );
 
   return (
     <ShopProvider value={shopInfo}>
@@ -1020,6 +1026,7 @@ export function ShopApp({ initialProductId }: { initialProductId?: string } = {}
       />
 
       {/* Admin Login Modal */}
+      {isAdminLoginOpen && (
       <AdminLoginModal
         isOpen={isAdminLoginOpen}
         onClose={() => setIsAdminLoginOpen(false)}
@@ -1030,6 +1037,7 @@ export function ShopApp({ initialProductId }: { initialProductId?: string } = {}
         resetToken={resetToken}
         onResetDone={() => setResetToken(null)}
       />
+      )}
       {!isAdminMode && <HelpLauncher />}
       {isAdminMode && (
         <VersionBadge
