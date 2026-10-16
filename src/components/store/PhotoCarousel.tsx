@@ -24,23 +24,57 @@ export function PhotoCarousel({ images, title, children }: PhotoCarouselProps) {
   const drag = useRef<{ x: number; left: number; from: number } | null>(null);
   const count = images.length;
 
+  // The photo a button, dot, key or drag is sliding to. While the slide is under way the scroll
+  // position still points at the photos it passes (it starts on the old one), so the counter must
+  // not follow it: a second tap or arrow key in that moment counted from the old photo, and screen
+  // readers heard "photo 1" right after "photo 2".
+  const target = useRef<number | null>(null);
+
   const go = useCallback(
     (i: number) => {
       const el = track.current;
       if (!el || !count) return;
       const next = Math.max(0, Math.min(count - 1, i));
-      el.scrollTo({ left: next * el.clientWidth, behavior: reducedMotion() ? 'auto' : 'smooth' });
+      const left = next * el.clientWidth;
+      // Already there: no scroll will happen (and nothing would clear the target).
+      target.current = Math.abs(el.scrollLeft - left) < 2 ? null : next;
+      el.scrollTo({ left, behavior: reducedMotion() ? 'auto' : 'smooth' });
       setIndex(next);
     },
     [count]
   );
 
-  // Keep the dots in step with a finger swipe.
+  // Keep the dots in step with a finger swipe (not with a slide we started: see target).
+  const lastScroll = useRef(0);
   const onScroll = () => {
+    lastScroll.current = performance.now();
     const el = track.current;
     if (!el || drag.current) return;
-    const i = Math.round(el.scrollLeft / Math.max(1, el.clientWidth));
-    if (i !== index) setIndex(Math.max(0, Math.min(count - 1, i)));
+    const w = Math.max(1, el.clientWidth);
+    if (target.current !== null) {
+      if (Math.abs(el.scrollLeft - target.current * w) < 2) target.current = null; // arrived
+      return;
+    }
+    const i = Math.max(0, Math.min(count - 1, Math.round(el.scrollLeft / w)));
+    if (i !== index) setIndex(i);
+  };
+  // A slide that stopped short of its photo (the browser gave up on it) must not leave the counter
+  // stuck. But scrollend also fires when our own next slide interrupts the previous one, with a new
+  // slide already under way: so only once the track has really stopped moving.
+  const onScrollEnd = () => {
+    if (target.current === null || drag.current) return;
+    const ended = performance.now();
+    setTimeout(() => {
+      const el = track.current;
+      if (!el || target.current === null || drag.current || lastScroll.current > ended) return;
+      target.current = null;
+      const i = Math.max(0, Math.min(count - 1, Math.round(el.scrollLeft / Math.max(1, el.clientWidth))));
+      setIndex(i);
+    }, 300);
+  };
+  // A finger takes over from a slide we started.
+  const release = () => {
+    target.current = null;
   };
 
   // A resize (phone turned sideways) keeps the same photo in view.
@@ -65,6 +99,7 @@ export function PhotoCarousel({ images, title, children }: PhotoCarouselProps) {
   // Mouse drag (touch uses the browser's own swipe).
   const onPointerDown = (e: React.PointerEvent) => {
     if (e.pointerType !== 'mouse' || e.button !== 0 || count < 2 || !track.current) return;
+    target.current = null;
     drag.current = { x: e.clientX, left: track.current.scrollLeft, from: index };
     track.current.setPointerCapture(e.pointerId);
     track.current.style.scrollSnapType = 'none';
@@ -94,6 +129,9 @@ export function PhotoCarousel({ images, title, children }: PhotoCarouselProps) {
         tabIndex={0}
         aria-label={`Photo ${index + 1} of ${count}. Use the arrow keys for the others.`}
         onScroll={onScroll}
+        onScrollEnd={onScrollEnd}
+        onTouchStart={release}
+        onWheel={release}
         onKeyDown={onKeyDown}
         onPointerDown={onPointerDown}
         onPointerMove={onPointerMove}

@@ -228,14 +228,32 @@ for (const width of [375, 1280]) {
     assert.equal(await at(), 1);
     assert.equal(await sheet.getByRole('button', { name: 'Previous photo' }).isDisabled(), true);
 
+    // Every number the photo counter shows, in order (screen readers hear each one).
+    await page.evaluate(() => {
+      const t = document.querySelector('[data-testid=photo-track]')!;
+      const w = window as unknown as { __seen: number[] };
+      w.__seen = [];
+      new MutationObserver(() => w.__seen.push(Number(t.getAttribute('aria-label')!.match(/Photo (\d+)/)![1]))).observe(t, { attributes: true, attributeFilter: ['aria-label'] });
+    });
+    const seen = () => page.evaluate(() => (window as unknown as { __seen: number[] }).__seen.splice(0));
+    // Settled on photo n: the counter says n and the photo has finished sliding into place.
+    const settled = (n: number) =>
+      page.waitForFunction((want) => {
+        const t = document.querySelector('[data-testid=photo-track]') as HTMLElement;
+        return t.getAttribute('aria-label')!.startsWith(`Photo ${want} of`) && Math.abs(t.scrollLeft - (want - 1) * t.clientWidth) < 2;
+      }, n);
+
+    // Regression (flaky under load): Next, then the arrow key while the photo is still sliding.
+    // The counter used to follow the scroll position back to photo 1 mid-slide, so the arrow key
+    // counted from 1 and stopped at 2. It now counts from the photo being slid to.
     await sheet.getByRole('button', { name: 'Next photo' }).click();
-    await page.waitForFunction(() => /Photo 2 of/.test(document.querySelector('[data-testid=photo-track]')!.getAttribute('aria-label')!));
-    // Keyboard: arrow keys on the photos.
     await track.focus();
     await page.keyboard.press('ArrowRight');
-    await page.waitForFunction(() => /Photo 3 of/.test(document.querySelector('[data-testid=photo-track]')!.getAttribute('aria-label')!));
+    await settled(3);
+    assert.deepEqual(await seen(), [2, 3], 'the counter only moves forward');
     await page.keyboard.press('Home');
-    await page.waitForFunction(() => /Photo 1 of/.test(document.querySelector('[data-testid=photo-track]')!.getAttribute('aria-label')!) && document.querySelector('[data-testid=photo-track]')!.scrollLeft === 0);
+    await settled(1);
+    assert.deepEqual(await seen(), [1]);
     // A swipe (dragged with the mouse here; fingers use the browser's own scrolling).
     const box = (await track.boundingBox())!;
     await page.mouse.move(box.x + box.width * 0.8, box.y + box.height / 2);
@@ -243,14 +261,11 @@ for (const width of [375, 1280]) {
     await page.mouse.move(box.x + box.width * 0.5, box.y + box.height / 2, { steps: 6 });
     await page.mouse.move(box.x + box.width * 0.2, box.y + box.height / 2, { steps: 6 });
     await page.mouse.up();
-    await page.waitForFunction(() => /Photo 2 of/.test(document.querySelector('[data-testid=photo-track]')!.getAttribute('aria-label')!));
-    // The photo really moved (not just the label).
-    await page.waitForFunction(() => {
-      const t = document.querySelector('[data-testid=photo-track]') as HTMLElement;
-      return Math.abs(t.scrollLeft - t.clientWidth) < 2;
-    });
+    await settled(2);
     await sheet.getByRole('button', { name: 'Show photo 3' }).click();
-    await page.waitForFunction(() => /Photo 3 of/.test(document.querySelector('[data-testid=photo-track]')!.getAttribute('aria-label')!));
+    await settled(3);
+    await sheet.getByRole('button', { name: 'Previous photo' }).click();
+    await settled(2);
 
     // Sizes and the ask buttons are there; Tab never leaves the sheet.
     await sheet.getByRole('button', { name: /^King Size Bed/ }).waitFor();
@@ -263,7 +278,7 @@ for (const width of [375, 1280]) {
     await page.keyboard.press('Escape');
     await sheet.waitFor({ state: 'detached' });
     await page.waitForFunction(() => !location.search.includes('p='));
-    assert.equal(await page.evaluate(() => document.activeElement?.tagName), 'A');
+    await page.waitForFunction(() => document.activeElement?.tagName === 'A');
     assert.match((await page.evaluate(() => document.activeElement?.textContent)) || '', TITLES.mughal);
 
     // The phone's Back button closes it too (and Forward opens it again).
