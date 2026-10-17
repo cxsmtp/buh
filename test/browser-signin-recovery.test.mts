@@ -49,11 +49,10 @@ async function overflow(page: import('playwright').Page) {
   return page.evaluate(() => (document.documentElement.scrollWidth > document.documentElement.clientWidth ? [`${document.documentElement.scrollWidth}px wide`] : []));
 }
 
-async function openSignIn(page: import('playwright').Page, base: string) {
+async function openSignIn(page: import('playwright').Page, url: string) {
   const checked = page.waitForResponse((r) => r.url().endsWith('/api/admin/session'));
-  await page.goto(base, { waitUntil: 'domcontentloaded' });
+  await page.goto(url, { waitUntil: 'domcontentloaded' });
   await checked;
-  await page.locator('header button:has-text("Admin Hub")').click();
   await page.getByText('Admin Hub Security Access').waitFor();
 }
 
@@ -69,7 +68,7 @@ for (const width of [375, 1280]) {
     const page = await ctx.newPage();
     const errors: string[] = [];
     page.on('pageerror', (e) => errors.push(e.message));
-    await openSignIn(page, server.base);
+    await openSignIn(page, server.adminUrl);
     await page.getByRole('button', { name: 'Sign in with a passkey' }).waitFor();
     assert.deepEqual(await overflow(page), []);
 
@@ -98,9 +97,8 @@ for (const width of [375, 1280]) {
     const errors: string[] = [];
     page.on('pageerror', (e) => errors.push(e.message));
     const checked = page.waitForResponse((r) => r.url().endsWith('/api/admin/session'));
-    await page.goto(server.base, { waitUntil: 'domcontentloaded' });
+    await page.goto(server.adminUrl, { waitUntil: 'domcontentloaded' });
     await checked;
-    await page.locator('header button:has-text("Admin Hub")').click();
     await openSettingsSection(page);
 
     // At this address (no NEXT_PUBLIC_APP_URL, not localhost) passkeys can't work: say so plainly.
@@ -131,7 +129,7 @@ for (const width of [375, 1280]) {
     const text = fs.readFileSync(file, 'utf8');
     for (const c of codes) assert.ok(text.includes(c));
     await page.getByRole('button', { name: 'Print' }).waitFor();
-    await page.getByRole('button', { name: 'Copy' }).waitFor();
+    await page.getByRole('button', { name: 'Copy', exact: true }).waitFor();
 
     await page.getByRole('button', { name: 'I’ve saved them' }).or(page.getByRole('button', { name: "I've saved them" })).click();
     await page.getByText(/10 of 10 codes left/).waitFor();
@@ -159,7 +157,7 @@ test('forgot the password on a phone: a recovery code signs in, warns when few a
   const page = await ctx.newPage();
   const errors: string[] = [];
   page.on('pageerror', (e) => errors.push(e.message));
-  await openSignIn(page, server.base);
+  await openSignIn(page, server.adminUrl);
   await page.getByRole('button', { name: 'Use a recovery code' }).click();
   await page.locator('#admin-recovery-email').fill(EMAIL);
   await page.locator('#admin-recovery-code').fill(codes[8].toLowerCase());
@@ -175,7 +173,6 @@ test('forgot the password on a phone: a recovery code signs in, warns when few a
 
   // A reload keeps the owner on "choose a new password".
   await page.reload({ waitUntil: 'domcontentloaded' });
-  await page.locator('header button:has-text("Admin Hub")').click();
   await page.locator('#admin-recovery-new').waitFor();
 
   password = 'Chosen-After-Recovery-7';
@@ -204,7 +201,7 @@ test('passkey round trip (virtual authenticator): add at desktop width, sign in 
     options: { protocol: 'ctap2', transport: 'internal', hasResidentKey: true, hasUserVerification: true, isUserVerified: true, automaticPresenceSimulation: true },
   });
 
-  await openSignIn(page, base);
+  await openSignIn(page, `${base}${server.adminPath}`);
   await page.locator('input[autocomplete="username"]').first().fill(EMAIL);
   await page.locator('input[autocomplete="current-password"]').fill(password);
   await page.getByRole('button', { name: 'Unlock Admin Portal' }).click();
@@ -226,7 +223,7 @@ test('passkey round trip (virtual authenticator): add at desktop width, sign in 
   // Signed out; on a phone, sign in with the passkey alone (no email, no password).
   await ctx.clearCookies();
   await page.setViewportSize({ width: 375, height: 860 });
-  await openSignIn(page, base);
+  await openSignIn(page, `${base}${server.adminPath}`);
   assert.deepEqual(await overflow(page), []);
   await page.getByRole('button', { name: 'Sign in with a passkey' }).click();
   await page.getByRole('navigation', { name: 'Admin sections' }).waitFor();
@@ -254,7 +251,6 @@ test('passkey round trip (virtual authenticator): add at desktop width, sign in 
 
   // Remove it (asks first, with the password: this session came from the new password); then it no longer opens the Admin Hub.
   await page.reload({ waitUntil: 'domcontentloaded' });
-  await page.locator('header button:has-text("Admin Hub")').click();
   await openSettingsSection(page);
   await page.getByRole('button', { name: 'Remove passkey Test laptop' }).click();
   await passkeys.getByLabel('Current password').fill('wrong-password');
@@ -264,7 +260,7 @@ test('passkey round trip (virtual authenticator): add at desktop width, sign in 
   await page.getByRole('button', { name: 'Yes, remove' }).click();
   await page.getByText('No passkeys yet.').waitFor();
   await ctx.clearCookies();
-  await openSignIn(page, base);
+  await openSignIn(page, `${base}${server.adminPath}`);
   await page.getByRole('button', { name: 'Sign in with a passkey' }).click();
   await page.getByText(/That passkey was not accepted/).waitFor();
   assert.deepEqual(errors, []);
@@ -297,7 +293,7 @@ test('after a restore the Admin Hub says to review passkeys and make new codes; 
   put.run('admin:passkeys-suspended', JSON.stringify(['restoredKey1']), new Date().toISOString());
   put.run('admin:restored', JSON.stringify({ at: new Date().toISOString(), backup: 'buh-backup-20260101-1200.tar.gz' }), new Date().toISOString());
   db.close();
-  shop = await startServer({ DATA_DIR: dataDir });
+  shop = await startServer({ DATA_DIR: dataDir }, { adminPath: shop.adminPath });
   try {
     const login = await fetch(`${shop.base}/api/admin/login`, { method: 'POST', headers: { 'content-type': 'application/json', origin: shop.base }, body: JSON.stringify({ email: EMAIL, password: pw }) });
     const [name, value] = (login.headers.get('set-cookie') || '').split(';')[0].split('=');
@@ -308,9 +304,8 @@ test('after a restore the Admin Hub says to review passkeys and make new codes; 
       const errors: string[] = [];
       page.on('pageerror', (e) => errors.push(e.message));
       const checked = page.waitForResponse((r) => r.url().endsWith('/api/admin/session'));
-      await page.goto(shop.base, { waitUntil: 'domcontentloaded' });
+      await page.goto(shop.adminUrl, { waitUntil: 'domcontentloaded' });
       await checked;
-      await page.locator('header button:has-text("Admin Hub")').click();
       const banner = page.getByRole('alert').filter({ hasText: 'restored from a backup' });
       await banner.getByText(/Review your passkeys and create new recovery codes/).waitFor();
       await banner.getByText(/1 restored passkey is switched off/).waitFor();

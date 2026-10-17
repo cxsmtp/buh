@@ -9,7 +9,7 @@
 | **Orders reach you** | Every order is stored on the server with prices and stock checked there, and appears in the Admin Hub: book the courier, follow it to delivery, confirm bank transfers, cancel (stock returns). |
 | **Backed up every 12 hours** | The shop emails itself to you: the full database, Excel-ready CSVs of orders and customers, and receipts, optionally encrypted. Status and **Back up now** in the Admin Hub; tested restore. |
 | **Verified orders only** | Customers confirm their UAE mobile with a 6-digit SMS code (through the shop's SMS gateway or Firebase Phone Auth) before they can order. Other countries are invited to email the shop instead. |
-| **An admin hub only you can open** | Server-checked sign-in with lockout, a one-time first password you replace at first sign-in, passkeys and one-time recovery codes if you forget it, and an audit log of every sign-in and courier booking. |
+| **An admin hub only you can open** | Not on the shop at all: only at your own private link (you bookmark it on your phone and laptop; every other address, /admin included, is an ordinary "not found"). Server-checked sign-in with lockout, a one-time first password you replace at first sign-in, passkeys and one-time recovery codes if you forget it, and an audit log of every sign-in and courier booking. |
 | **Inventory from your phone** | Stock per size as coloured chips, big − / + with Undo, Received stock, low and sold-out lists with a badge; two devices never overwrite each other and every change is logged (who, why, old → new). A step-by-step editor: camera photos first, then price, sizes and publish, saved as a draft as you go. |
 | **Made for Instagram and WhatsApp** | Product links that preview with photo and price, Ask on WhatsApp / Instagram (each switchable), a Meta/Google product feed, and orders that show where the customer came from. |
 | **A chat that answers, then hands over** | The Help button answers sizes, delivery, payment, care and discount questions from what you teach it, hands everything else to you (Admin Hub → Chats, and by email: reply to the email to answer), and tells a waiting customer you'll get back to them. |
@@ -28,7 +28,7 @@ Node 20+:
 npm ci && npm run dev
 ```
 
-Open <http://localhost:3000>. The terminal prints the first admin password once; sign in from **Admin Hub** and choose your own. Without an SMS gateway, checkout runs in test mode and shows the code on screen.
+Open <http://localhost:3000>. The terminal prints the first admin password and the private **admin link** once (the Admin Hub is only there); open the link, sign in and choose your own password. Without an SMS gateway, checkout runs in test mode and shows the code on screen.
 
 **Production:** a Hostinger KVM VPS with Docker Compose. The shop runs behind Caddy, which provides automatic HTTPS. Step by step: [HOSTINGER_DEPLOYMENT_GUIDE.md](HOSTINGER_DEPLOYMENT_GUIDE.md).
 
@@ -58,6 +58,12 @@ $S = (podman info --format '{{.Host.RemoteSocket.Path}}') -replace '^unix://', '
 
 A Linux server with Podman (shop, HTTPS proxy and updater, from images only): [guide](HOSTINGER_DEPLOYMENT_GUIDE.md#hostinger-vps-with-podman-images-only).
 
+**The admin link.** The Admin Hub is only at a private link, printed once in the log when it is made (`podman logs beautifuluaehome`) and emailed when email is set up. Bookmark it on your phone and laptop; change it in Settings → Security. Lost it? Make a new one (only a fingerprint is kept, so the old one can't be shown again):
+
+```
+podman exec beautifuluaehome node scripts/admin-link.mjs --new
+```
+
 To try it on your own computer with Podman on Windows, run `scripts\run-local-podman.bat` (test mode, http://localhost:3000).
 
 ## Configure
@@ -69,7 +75,7 @@ Copy `.env.production.example` to `.env.production`. The settings that matter mo
 - **`NEXT_PUBLIC_SUPPORT_EMAIL`:** shown to customers with non-UAE numbers.
 - **Backup email (`SMTP_*`, `BACKUP_EMAIL`, `BACKUP_PASSPHRASE`):** where the 12-hourly backups go.
 - **`DATA_DIR`:** the database, photos, receipts, backups and audit log (a Docker volume in production).
-- **`TRUST_PROXY=1`:** only behind nginx.
+- **`TRUST_PROXY=1`:** only behind the HTTPS proxy (Caddy or nginx); it also turns on the scanner slow-down.
 
 Everything an owner does in the shop: [docs/user-guide.md](docs/user-guide.md).
 

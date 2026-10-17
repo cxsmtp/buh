@@ -11,12 +11,16 @@
  * What it never touches (the request goes to the server as if there were no worker):
  *  - anything that is not a GET (orders, checkout, sign-in, every change);
  *  - every other /api/ address: products and prices, orders, order tracking, the chat, phone
- *    codes, live updates, and all of /api/admin/;
+ *    codes, live updates, and every admin address;
+ *  - every page other than the shop's own (/ and /p/…): the Admin Hub's private link above all,
+ *    which the worker cannot even recognise. Nor anything such a page loads: the hub is served
+ *    with Referrer-Policy: no-referrer, so its requests carry no referrer, and requests without
+ *    one are left alone;
  *  - other sites (Unsplash photos, Google sign-in scripts).
  *
- * Pages always come from the server while online (never from the cache), so a new version of the
- * shop shows at once and the version switch works as before. Offline, a page request gets the
- * calm offline page instead of the browser's error.
+ * The shop's pages always come from the server while online (never from the cache), so a new
+ * version of the shop shows at once and the version switch works as before. Offline, a shop page
+ * request gets the calm offline page instead of the browser's error.
  *
  * Updates: the worker's text carries the shop's version, so each release is a new worker. It
  * installs in the background and then waits; the page offers "New version ready — refresh",
@@ -149,14 +153,18 @@ self.addEventListener('fetch', (event) => {
     event.respondWith(cacheFirst(event, IMAGES, MAX_IMAGES));
     return;
   }
-  // Prices, stock, orders, tracking, chat, codes, live updates and all of /api/admin/: never cached.
+  // Prices, stock, orders, tracking, chat, codes, live updates and the owner's addresses: never cached.
   if (path.startsWith('/api/') || path === '/sw.js' || path === '/reset-app') return;
   if (req.mode === 'navigate') {
+    // Only the shop's own pages. Any other address (the owner's private pages among them) is
+    // left to the browser: never answered, never cached.
+    if (path !== '/' && !path.startsWith('/p/')) return;
     event.respondWith(pageOrOffline(event));
     if (Date.now() - lastCheck > CHECK_EVERY_MS) event.waitUntil(checkStillWanted().catch(() => {}));
     return;
   }
-  if (path.startsWith('/_next/static/')) {
+  // A page served with no referrer (the owner's private pages) loads its files without the worker.
+  if (path.startsWith('/_next/static/') && req.referrer) {
     event.respondWith(cacheFirst(event, STATIC, MAX_STATIC));
     return;
   }

@@ -35,8 +35,15 @@ test('forgot password: a link only for the admin email, single use, ends every s
   await setUp();
   const session = (await auth.signIn('admin@beautifuluaehome.com', PW)).token;
   assert.equal(await auth.startPasswordReset('someone@else.com'), null, 'no link for another email');
-  const token = await auth.startPasswordReset('  ADMIN@beautifuluaehome.com ');
+  const reset = await auth.startPasswordReset('  ADMIN@beautifuluaehome.com ');
+  const token = reset?.token;
   assert.ok(token && token.length >= 40);
+  // The email's link opens the Admin Hub through its own one-time path, valid while the link is.
+  const { matchesResetGrant } = await import('@/lib/server/adminLink');
+  assert.match(reset!.grant, /^[A-Za-z0-9_-]{43}$/);
+  assert.notEqual(reset!.grant, token);
+  assert.equal(matchesResetGrant(reset!.grant), true);
+  assert.equal(matchesResetGrant('x'.repeat(43)), false);
 
   assert.equal(await statusOf(auth.completePasswordReset('not-the-token', 'Brand-New-Passphrase-2')), 400);
   await auth.completePasswordReset(token!, 'Brand-New-Passphrase-2');
@@ -44,10 +51,11 @@ test('forgot password: a link only for the admin email, single use, ends every s
   assert.equal(await statusOf(auth.signIn('admin@beautifuluaehome.com', PW)), 401, 'old password no longer works');
   assert.ok((await auth.signIn('admin@beautifuluaehome.com', 'Brand-New-Passphrase-2')).token);
   assert.equal(await statusOf(auth.completePasswordReset(token!, 'Third-Passphrase-333')), 400, 'the link works once');
+  assert.equal(matchesResetGrant(reset!.grant), false, 'its door grant ends with it');
 });
 
 test('two uses of one reset link at the same moment: only one succeeds', async () => {
-  const token = (await auth.startPasswordReset('admin@beautifuluaehome.com'))!;
+  const token = (await auth.startPasswordReset('admin@beautifuluaehome.com'))!.token;
   const results = await Promise.all([
     statusOf(auth.completePasswordReset(token, 'Racing-Passphrase-AAA')),
     statusOf(auth.completePasswordReset(token, 'Racing-Passphrase-BBB')),
@@ -63,7 +71,9 @@ test('a reset link expires after 30 minutes; asking again keeps earlier links va
   // A stranger who knows the email can't flood the owner or cancel the owner's link.
   assert.equal(await auth.startPasswordReset('admin@beautifuluaehome.com'), null, 'no fourth link within the hour');
   t.mock.timers.enable({ apis: ['Date'], now: Date.now() + 31 * 60 * 1000 });
-  assert.equal(await statusOf(auth.completePasswordReset(second, 'Expired-Passphrase-1')), 400, 'expired');
+  assert.equal(await statusOf(auth.completePasswordReset(second.token, 'Expired-Passphrase-1')), 400, 'expired');
+  const { matchesResetGrant } = await import('@/lib/server/adminLink');
+  assert.equal(matchesResetGrant(second.grant), false, 'an expired link’s door grant ends too');
   assert.ok(await auth.startPasswordReset('admin@beautifuluaehome.com'), 'a new link once the old ones expired');
   t.mock.timers.reset();
 });
@@ -134,9 +144,12 @@ test('regression: the answer to "Forgot password?" is as quick for the admin ema
   process.env.NEXT_PUBLIC_APP_URL = 'https://shop.example';
   await settings.updateSettings('email', { smtpHost: '', sendTo: '' });
   const { POST } = await import('@/app/api/admin/password/forgot/route');
+  const door = await import('@/lib/server/adminLink');
+  door.createLinkIfAbsent('test');
+  const cookie = `${door.DOOR_COOKIE}=${door.issueDoorToken()}`;
   const ask = async (email: string) => {
     const started = Date.now();
-    const res = await POST(new Request('https://shop.example/api/admin/password/forgot', { method: 'POST', headers: { 'content-type': 'application/json', origin: 'https://shop.example', host: 'shop.example' }, body: JSON.stringify({ email }) }));
+    const res = await POST(new Request('https://shop.example/api/admin/password/forgot', { method: 'POST', headers: { 'content-type': 'application/json', origin: 'https://shop.example', host: 'shop.example', cookie }, body: JSON.stringify({ email }) }));
     return { ms: Date.now() - started, body: await res.json() };
   };
   const stranger = await ask('stranger@example.com');

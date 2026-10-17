@@ -2,6 +2,34 @@
 
 What protects the shop, how it works, and what the owner must do. Each item has a test in `test/`.
 
+## The private admin link (BUH-02.08)
+
+The Admin Hub is not on the public site. Nothing in the shop's pages, scripts, `/sw.js`, `robots.txt` or the sitemap names it (no button, tab, route name or "admin" string; the only "admin" in the shop's scripts is inside Firebase's own error messages). It is served at one private path, and every admin address answers exactly like an address that does not exist until the browser has been through that path. Tested by `test/admin-door.test.mts` and `test/admin-door-e2e.test.mts`.
+
+| What | How |
+| --- | --- |
+| **The link** | One path segment of 24 random bytes (192 bits) in base64url, 32 characters: `https://yourdomain.ae/k7Qm2vXa9pTeLr4w…`. Made on the first start, or by the update that brought private links (atomically: when two copies start together, one makes it). |
+| **Only its hash is kept** | The database (kv `admin:link`, in backups) holds SHA-256 of the segment with a purpose prefix, plus a random version. A copy of the database or a backup does not reveal the link. Checks hash what was asked for and compare digests with `timingSafeEqual`. |
+| **Shown once** | On the console, in a box next to the first password (`podman logs beautifuluaehome`; it stays in that container log, and in journald under Quadlet, until the container is removed, so keep the server's login private), and emailed to the admin email when email is set up. `logEvent` lines only ever carry the first 4 characters. The answer to "Change the admin link" carries the new link once. |
+| **The door cookie** | Visiting the link sets `buh_door`: `HttpOnly`, `SameSite=Strict`, `Secure` in production, path `/`, 30 days, renewed at most once a day while used. It is a token signed with the server's key (`SESSION_SECRET` or `DATA_DIR/session.key`) and bound to the link's version and hash. |
+| **Unknown without the door** | Every `/api/admin/…` address (sign-in, passkeys, recovery codes, forgot and reset password, versions, events, stock, all of them), `/api/courier/dispatch`, `/api/courier/test` and `/api/ai-transform`, without a valid door cookie, are handed to Next.js as an address that does not exist, so the answer is the shop's ordinary 404, byte for byte the same body and headers as any unknown `/api/…` address. Only then do the normal checks (session, same-site, password) apply. |
+| **Guessable paths** | `/admin`, `/login`, `/wp-admin`, `/dashboard`, `/administrator`, `/admin.php`, `/.env` and the hub page's internal name (`/hub`) are the ordinary 404, byte for byte the same as any unknown address. |
+| **Central, and checked twice** | The door is checked at the HTTP server itself, before Next.js routes the request (`src/lib/server/frontGate.ts`, installed at start by `src/instrumentation.ts`): a Next.js proxy's rewrite leaves its own headers on the answer, which would tell a 404 apart, and a proxy that runs for every request costs the storefront. Every admin route also calls `requireDoor` (directly or through `requireAdmin`), so a request that ever reached one another way still gets a 404; a test lists every route file under `src/app/api/admin` and checks both (the code, and over HTTP that each method answers like an unknown address without the door, with or without a session). Paths are normalised first (`/api//admin`, `/api/%61dmin`, dot segments). |
+| **Headers on the link** | `Referrer-Policy: no-referrer` (the link never leaves in a Referer), `X-Robots-Tag: noindex, nofollow`, `Cache-Control: no-store`, and `<meta name="robots" content="noindex, nofollow">`. |
+| **Service worker** | Never answers, caches or even recognises the link: it handles only the shop's own pages (`/`, `/p/…`), and leaves alone every file requested without a referrer (the hub's, which are sent with no-referrer). |
+| **Changing it** | Settings → Security → **Change the admin link**: the current password (counted like a sign-in attempt) or a passkey sign-in in the last 10 minutes. A new segment and version: the old link and every door cookie stop working at once, in every running copy; the browser that changed it gets a new door. The new link is in that answer only, and emailed. Audit log `admin.link_changed`, never the link. |
+| **Lost it** | Because only a hash is kept, the link can never be printed again. `podman exec beautifuluaehome node scripts/admin-link.mjs --new` (shipped in the image, no code on disk) makes a new one and prints it; the old one and every door stop working; the change is audited. Without `--new` it only says when the link was made. |
+| **Password-reset email** | The emailed link is `https://yourdomain.ae/<grant>#reset=<token>`: the path is a separate single-reset door grant (32 random bytes, only its hash stored with the reset link, valid while the reset link is), so the reset works on a phone that never had the admin link; the token stays in the fragment. Setting the new password, or the 30-minute expiry, ends the grant, and the door it gives lasts only that long (not 30 days). It is not used up by the first visit, because mail apps check links before the owner opens them. |
+| **Passkeys** | Unchanged: the WebAuthn ceremony runs on the same origin; its routes are behind the door like every other admin route. |
+| **Updating an existing shop** | The update makes the link: printed once, emailed (when email is set up), and for an owner who was signed in at that moment (a session older than the link), opening the shop sends them to it once (a 303 with no-referrer). That one-time copy is encrypted with the server's key, never in backups, deleted once shown or after 8 hours. Existing admin sessions carry on. |
+| **Backups and restore** | Backups keep the link's hash (a restored shop keeps the owner's bookmark), never the one-time copy. A backup from before BUH-02.08 has none: the first start makes and prints a new link. If the link was changed after the backup was taken, make a new one after restoring. |
+| **Access logs** | The proxies mask it: Caddy (`deploy/shop-snippets.caddy` for the access log, and the global `log` block of each Caddyfile for Caddy's own messages) and nginx (`log_format buh_masked`) log only its first 4 characters, no Referer, and no `Location` (the one-time move of a signed-in owner to a new link is a redirect to it). nginx's error log cannot be filtered (it repeats the request line), so the nginx site keeps it at `crit`. Checked against caddy 2.8.4 and nginx 1.27 with the shop down (the case where the request is logged as an error). |
+| **Limits** | The link is a second lock, not the only one: the password, passkey or recovery code is still needed. Anyone who has the link and a door cookie still meets the sign-in. Keep the link private like a password; change it when in doubt. |
+
+## Scanner slow-down
+
+With `TRUST_PROXY=1` (behind the shop's proxy, which sets the real address), an address that gets 10 "not found" answers in a minute waits 1 s per request, and at 30 in a minute gets `429 Too Many Requests` (with `Retry-After`) for 10 minutes, on every address of the shop. Counted: 404s to pages and to admin addresses. Never counted: the shop's own files (`/_next/…`, a missing photo, an icon) and the public APIs, which an old page left open across an update can ask for by the dozen; a taken-down product (`/p/…`, which search engines and old shares ask for); and a 404 to a browser holding a valid door (the hub asking for a deleted order). A hub tab left open after the link was changed stops calling at its first unknown-address answer and says so, well under 10, so it can never shut its owner out. A shopping visit has no such 404 at all. The counts live in a map of their own in the shop's rate limiter (at most 50,000 addresses, the least recently seen dropped first), so a flood of 404s from many addresses can never push out the sign-in or phone counters. Without `TRUST_PROXY` nothing is counted (every visitor would look the same). Tested in Chromium too: a whole visit at 375 px never meets a 429.
+
 ## Admin hub
 
 | What | How |
@@ -12,13 +40,13 @@ What protects the shop, how it works, and what the owner must do. Each item has 
 | **Wrong passwords** | Wrong recovery codes count together with wrong passwords. 5 in 15 minutes from one address pause sign-in for that email from that address for 15 minutes, so a stranger cannot lock the owner out from somewhere else. 50 in an hour from anywhere pause it everywhere (a spread-out guess). While paused, the password is not checked at all, so a pause never reveals that a guess was right. Unknown emails get the same answers, so they reveal nothing about which accounts exist. Behind nginx with `TRUST_PROXY=1`; without a trusted proxy every visitor counts as one address. |
 | **Throttling** | 30 sign-in attempts per 10 minutes per address in the app; 10 per minute in nginx. |
 | **Sessions** | HMAC-signed cookie: `HttpOnly`, `SameSite=Strict`, `Secure` in production, 8 hours. **Sign out** ends every session on the server (a copied cookie stops working), and so does changing the password. Rotating `ADMIN_PASSWORD_HASH` ends sessions too. The session generation starts at a random number in a new or restored data folder (backups never carry `session-state.json`, `session.key` or `admin.json`), so a cookie from before a restore can't come back to life even when `SESSION_SECRET` and `ADMIN_PASSWORD_HASH` are unchanged. |
-| **Every admin route checks it** | Courier dispatch and test, SMS test and the AI studio all call `requireAdmin` on the server. |
+| **Every admin route checks it** | Courier dispatch and test, SMS test and the AI studio all call `requireAdmin` on the server (which checks the door first). |
 | **Cross-site requests refused** | State-changing calls must come from this site (Origin / Referer / Sec-Fetch-Site, compared with the `Host` header; `X-Forwarded-Host` is never trusted), in addition to `SameSite=Strict`. |
 
 ## Admin password reset and email settings
 
 - **Forgot password?** gives the same answer, just as fast, for any email: the email is sent after answering, so neither the words nor the timing reveal the admin email. Limited to 5 an hour per address, and at most 3 links an hour are sent for the account; asking again never cancels a link already sent, so a stranger can't lock the owner out of recovery. Each link holds a random 256-bit token; only its SHA-256 is stored, it works for 30 minutes, and using any one ends the others, every session and any sign-in pause. Accounts set by `ADMIN_EMAIL` get no link.
-- The token is in the link's fragment (`/#reset=…`), which browsers never send to a server, so it stays out of access logs; the page removes it from the address bar at once.
+- The token is in the link's fragment (`/<grant>#reset=…`), which browsers never send to a server, so it stays out of access logs; the page removes it from the address bar at once. The path is the single-reset door grant (above).
 - Changing the sign-in email needs the current password (counted like a sign-in attempt) and ends other sessions.
 - The SMTP password is write-only, and is dropped when the server changes. A mail server typed in Settings must resolve to a public address (no loopback, private or cloud-metadata ranges), the shop connects to the address it checked, and the certificate is checked against the name. Ports: 25, 465, 587, 2525.
 
@@ -112,7 +140,7 @@ Carrier endpoints are fixed in code.
 
 ## Audit log
 
-`DATA_DIR/audit-YYYY-MM.jsonl` records sign-ins, refusals, password changes, courier dispatches and tests, SMS tests, and stock moves (who, reason, old → new). Each line carries an HMAC over the previous line, so editing, deleting or reordering a line is detected (`verifyAuditLog`).
+`DATA_DIR/audit-YYYY-MM.jsonl` records sign-ins, refusals, password changes, admin link changes (never the link), courier dispatches and tests, SMS tests, and stock moves (who, reason, old → new). Each line carries an HMAC over the previous line, so editing, deleting or reordering a line is detected (`verifyAuditLog`).
 
 ## Headers
 
@@ -142,9 +170,10 @@ The shop installs as an app (manifest at `/manifest.webmanifest`, icons at `/ico
 **What it never touches** (the request goes to the server as if there were no worker, and nothing is stored):
 
 - anything that is not a `GET`: orders, checkout, phone codes, sign-in, every admin change;
-- every other `/api/` address: products, prices and stock, orders and order tracking, the chat, settings, live updates (`/api/events`), and all of `/api/admin/`;
+- every other `/api/` address: products, prices and stock, orders and order tracking, the chat, settings, live updates (`/api/events`), and every admin address;
 - other sites (Unsplash photos, Google reCAPTCHA);
-- pages (`/`, `/p/…`): always fetched from the server while online and never stored, so a new version shows at once and the zero-downtime version switch works exactly as before. Only when the phone is offline does a page request get the stored offline page.
+- pages (`/`, `/p/…`): always fetched from the server while online and never stored, so a new version shows at once and the zero-downtime version switch works exactly as before. Only when the phone is offline does a page request get the stored offline page;
+- every other page (the Admin Hub's private link among them): not answered at all; and any file requested without a referrer (the hub's own scripts and styles, sent with `Referrer-Policy: no-referrer`).
 
 The worker never stores a response marked `no-store` or `private`, nor one from another site. All API answers carry `Cache-Control: no-store` anyway.
 

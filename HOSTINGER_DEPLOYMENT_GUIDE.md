@@ -51,11 +51,25 @@ Everything the shop stores lives in one Docker volume and is backed up every 12 
    docker compose pull app-blue && docker compose up -d
    ```
    Then <https://yourdomain.ae> shows the shop with a valid certificate. To build the image on the server instead, use `docker compose up -d --build` (a few minutes).
-7. **First admin sign-in.** The one-time password is in the log:
+7. **First admin sign-in.** The one-time password and your private **admin link** are in the log (the Admin Hub is only at that link, never on the shop's pages):
    ```bash
-   docker compose logs app-blue | grep -A3 "first admin"
+   docker compose logs app-blue | grep -A3 "first admin\|Admin link"
    ```
-   Open the shop and click **Admin Hub**. Sign in with that email and password, then choose your own password.
+   Open the admin link, sign in with that email and password, then choose your own password. Bookmark the link on your phone and laptop (section "The private admin link" below).
+
+### The private admin link
+
+The Admin Hub has no button or address on the shop: addresses like `/admin` are an ordinary "not found". It is only at a private link like `https://yourdomain.ae/k7Qm2vXa9pTeLr4w…`.
+
+- **Where it is:** printed in the log when it is made (the first start, or the update that brought it; it stays in `podman logs` until the container is removed), and emailed to the admin email when email is set up. An owner signed in during that update is taken to it once when they next open the shop.
+- **Bookmark it:** on the phone, open it and Share → **Add to Home Screen** (iPhone) or ⋮ → **Add to Home screen** (Android); on the laptop, Ctrl+D (⌘+D). One link for both: the phone gets the phone view, the laptop the full view, and **Phone view / Laptop view** at the top switches it per device.
+- **Change it:** Admin Hub → Settings → **Security** → **Change the admin link** (your password). The old link stops working at once; the new one is shown once and emailed.
+- **Lost it?** Only a fingerprint is kept, so it can't be printed again, and "Forgot password" needs the link too: the only way back in is a new link, made on the server (SSH or hPanel's browser terminal). The old one stops working:
+  ```bash
+  podman exec beautifuluaehome node scripts/admin-link.mjs --new
+  ```
+- **Access logs** never hold it: the Caddy and nginx configs here log only its first 4 characters, and drop the redirect that moves a signed-in owner to a new link.
+- **Scanners:** with `TRUST_PROXY=1`, an address that gets 10 "not found" answers in a minute is slowed, and at 30 refused (429) for 10 minutes. Shoppers never are (a taken-down product doesn't count), and neither is your own hub: a tab left open after the link was changed stops at once and says so.
 
 ## 2. Go-live checklist (in the Admin Hub)
 
@@ -133,7 +147,7 @@ On the server (this replaces the live data; the current data is kept aside in `r
    docker compose start updater
    ```
 
-Then sign in with the new one-time password from `docker compose logs app-blue`, and re-enter the courier and SMS keys. Restored passkeys are switched off and old recovery codes no longer work (the backup may be older than a passkey you removed): follow the banner in the Admin Hub to keep your passkeys and create new codes. Keys and the admin account are deliberately not in backups.
+Then sign in with the new one-time password from `docker compose logs app-blue` at your admin link (the backup keeps it; a backup from before BUH-02.08 prints a new one in the log; if you changed the link after the backup, make a new one with `docker compose exec app-blue node scripts/admin-link.mjs --new`), and re-enter the courier and SMS keys. Restored passkeys are switched off and old recovery codes no longer work (the backup may be older than a passkey you removed): follow the banner in the Admin Hub to keep your passkeys and create new codes. Keys and the admin account are deliberately not in backups.
 
 To check a backup on your own computer (Node 20+, in a checkout of this repository after `npm ci`):
 
@@ -266,7 +280,7 @@ Once, at a quiet time. The shop keeps serving except for a second or two while C
    docker compose up -d --remove-orphans
    ```
 
-The version (`BUH-xx.xx.xx`) shows next to the Admin Hub title.
+The version (`BUH-xx.xx.xx`) shows next to the Admin Hub title. After the update to BUH-02.08 the Admin Hub is only at its private link: `docker compose logs app-blue | grep "Admin link"`.
 
 ### Private images: log Podman in once
 
@@ -405,9 +419,13 @@ podman run --rm --pull=newer --security-opt label=disable -v /run/podman/podman.
    podman run -d --name beautifuluaehome --restart=always -p 127.0.0.1:3000:3000 -v beautifuluaehome-data:/data --env-file /etc/buh/shop.env --read-only --tmpfs /tmp --cap-drop ALL --security-opt no-new-privileges:true --pids-limit 512 ghcr.io/cxsmtp/buh:latest
    ```
    (The images are private: log in first, as in "Private images" above: `podman login ghcr.io -u YOUR-GITHUB-NAME --authfile /root/.config/containers/auth.json`, then `chmod 600 /root/.config/containers/auth.json`.)
-6. **The first admin password** (printed once, on the first start):
+6. **The first admin password and the admin link** (printed once, on the first start; the Admin Hub is only at that link):
    ```bash
    podman logs beautifuluaehome
+   ```
+   Already running an older version? After the update, the same command shows the new admin link once (look for `Admin link:`). Lost it later:
+   ```bash
+   podman exec beautifuluaehome node scripts/admin-link.mjs --new
    ```
 7. **Automatic updates and HTTPS** (replace the domain and the e-mail, where Let's Encrypt writes before a certificate expires). This starts the proxy and the updater:
    ```bash
@@ -475,7 +493,7 @@ Day to day: Settings → Versions in the Admin Hub; the commands in the section 
    ```bash
    podman start beautifuluaehome && podman start beautifuluaehome-updater
    ```
-3. Sign in with the new one-time password from `podman logs beautifuluaehome` (the admin account is not in backups), re-enter the courier and SMS keys, and follow the Admin Hub's banner about passkeys (section 4).
+3. Sign in with the new one-time password from `podman logs beautifuluaehome` (the admin account is not in backups) at your admin link (the backup keeps it; `podman exec beautifuluaehome node scripts/admin-link.mjs --new` makes a new one), re-enter the courier and SMS keys, and follow the Admin Hub's banner about passkeys (section 4).
 
 ## 6. Logs and health
 
@@ -517,7 +535,7 @@ Back up `/var/lib/buhome`: the built-in 12-hour email backups run the same way.
 
 What is built in, and what you must do, is in [docs/security.md](docs/security.md). In short:
 
-1. **Admin sign-in is checked on the server.** Passwords are scrypt-hashed, the session cookie is HttpOnly, and sign-in pauses after 5 wrong attempts from one address. The first start prints a one-time password to the log.
+1. **The Admin Hub is hidden and its sign-in is checked on the server.** It is only at a private link (kept as a hash; every admin address is a plain 404 without it). Passwords are scrypt-hashed, the session cookie is HttpOnly, and sign-in pauses after 5 wrong attempts from one address. The first start prints a one-time password and the admin link to the log.
 2. **Prices, stock and totals are computed on the server** from the catalogue. Every order carries a phone number proven by an SMS code.
 3. **Every admin action is checked on the server** and audited. Courier and SMS keys are write-only: they never reach a browser.
 4. **Security headers on every page:** a Content Security Policy, `X-Frame-Options: DENY`, `nosniff`, HSTS and a tight `Permissions-Policy`.

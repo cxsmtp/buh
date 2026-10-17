@@ -94,9 +94,8 @@ async function adminInventory(width: number, { live = true } = {}) {
   const errors: string[] = [];
   page.on('pageerror', (e) => errors.push(e.message));
   const checked = page.waitForResponse((r) => r.url().endsWith('/api/admin/session'));
-  await page.goto(server.base, { waitUntil: 'domcontentloaded' });
+  await page.goto(server.adminUrl, { waitUntil: 'domcontentloaded' });
   await checked;
-  await page.locator('header button:has-text("Admin Hub")').click();
   await page.getByRole('status').filter({ hasText: /Backup/ }).waitFor();
   await openAdminSection(page, /^Inventory/);
   await page.getByRole('heading', { name: 'Inventory' }).waitFor();

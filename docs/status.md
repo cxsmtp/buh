@@ -4,6 +4,7 @@ One row per release. Benchmarks run `npm run test:load` on the same 4 vCPU host,
 
 | Version | Date | Storefront req/s (p50 / p95 ms) | Serviceability API req/s (p50 / p95 ms) | Failed requests | Tests | Audit (production) | Security scan |
 | --- | --- | --- | --- | --- | --- | --- | --- |
+| BUH-02.08.00 | 2026-10-17 | branch 836 / 861 / 855 / 891; main 806 / 849 / 803 / 836 (p95 91–134 vs 105–124 ms) | branch 700 / 717 / 704 / 650; main 608 / 709 / 690 / 656 | 0 | 492 passed | 0 vulnerabilities | Independent review of the private admin link: no way in; 2 medium and 6 low findings fixed with tests or documented; no automated scanner here |
 | BUH-02.07.00 | 2026-10-16 | branch 880 / 921 / 946; main 876 / 875 / 903 (p95 104–143 vs 133–160 ms) | branch 749 / 721 / 770; main 812 / 714 / 807 | 0 | 464 passed | 0 vulnerabilities | Design and layout change; fit test at 6 phone widths, sideways and 200% text; not seen on a real device |
 | BUH-02.06.00 | 2026-10-16 | branch 814 / 872 / 893; main 823 / 735 / 857 (p95 102–156 vs 118–180 ms) | branch 746 / 710 / 753; main 697 / 706 / 783 | 0 | 436 passed | 0 vulnerabilities | Review of stock moves and the app, 8 findings fixed with tests; no real-device install tried |
 | BUH-02.05.00 | 2026-10-16 | branch 788 / 826 / 786; main 755 / 830 / 804 (p95 114–175 vs 105–164 ms) | branch 713 / 756 / 626; main 663 / 565 / 628 | 0 | 371 passed | 0 vulnerabilities | Two reviews of updater/proxy, fixed with tests; real containers on Docker, Podman 4.9 and 5.7; Windows line not run on Windows |

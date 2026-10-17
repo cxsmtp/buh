@@ -85,7 +85,7 @@ export function HelpLauncher() {
     }
     if (!res.ok) return;
     const data = (await res.json()) as View;
-    if (data.messages.some((m) => m.author === 'admin')) setUnseen(true);
+    if (data.messages.some((m) => fromTeam(m.author))) setUnseen(true);
     merge(data);
   }, [merge]);
 
@@ -344,6 +344,11 @@ export function HelpLauncher() {
   );
 }
 
+/** A reply from a person at the shop (not the shopper, the assistant or a notice). */
+function fromTeam(author: ChatMessage['author']): boolean {
+  return author !== 'customer' && author !== 'bot' && author !== 'system';
+}
+
 function Bubble({ author, body }: { author: ChatMessage['author']; body: string }) {
   if (author === 'system') {
     return <p className="text-center text-[11px] text-ink-muted px-4 py-1 whitespace-pre-wrap">{body}</p>;
@@ -351,8 +356,8 @@ function Bubble({ author, body }: { author: ChatMessage['author']; body: string 
   const mine = author === 'customer';
   return (
     <div className={`flex ${mine ? 'justify-end' : 'justify-start'}`}>
-      <div className={`max-w-[85%] rounded-2xl px-3 py-2 whitespace-pre-wrap break-words ${mine ? 'bg-ink text-white rounded-br-md' : author === 'admin' ? 'bg-warning-soft border border-warning-line text-ink rounded-bl-md' : 'bg-surface border border-line text-ink rounded-bl-md'}`}>
-        {author === 'admin' && <div className="text-[10px] font-semibold text-warning mb-0.5">The team</div>}
+      <div className={`max-w-[85%] rounded-2xl px-3 py-2 whitespace-pre-wrap break-words ${mine ? 'bg-ink text-white rounded-br-md' : fromTeam(author) ? 'bg-warning-soft border border-warning-line text-ink rounded-bl-md' : 'bg-surface border border-line text-ink rounded-bl-md'}`}>
+        {fromTeam(author) && <div className="text-[10px] font-semibold text-warning mb-0.5">The team</div>}
         {body}
       </div>
     </div>

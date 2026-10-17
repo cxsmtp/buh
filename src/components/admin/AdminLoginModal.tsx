@@ -11,6 +11,7 @@ const quiet = 'text-ink-soft hover:text-ink font-semibold py-1 underline-offset-
 
 interface AdminLoginModalProps {
   isOpen: boolean;
+  /** The owner closed the sign-in (not called after a successful sign-in: onLoginSuccess is). */
   onClose: () => void;
   onLoginSuccess: () => void;
   /** A one-time token from a password-reset email link (#reset=…): opens "Choose a new password". */
@@ -71,7 +72,6 @@ export const AdminLoginModal: React.FC<AdminLoginModalProps> = ({
     setEnvManaged(false);
     setMustChange(false);
     onLoginSuccess();
-    onClose();
   };
 
   const handlePasskey = async () => {
@@ -203,7 +203,6 @@ export const AdminLoginModal: React.FC<AdminLoginModalProps> = ({
     }
     setPassword('');
     onLoginSuccess();
-    onClose();
   };
 
   const handleChangePassword = async (e: React.FormEvent) => {
@@ -228,7 +227,6 @@ export const AdminLoginModal: React.FC<AdminLoginModalProps> = ({
     setConfirmPassword('');
     setMustChange(false);
     onLoginSuccess();
-    onClose();
   };
 
   return (

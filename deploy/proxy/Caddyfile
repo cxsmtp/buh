@@ -18,6 +18,19 @@
 	# Read when the certificate manager starts: Caddy stops with "{env.ACME_EMAIL} is empty"
 	# when it is not set.
 	email {env.ACME_EMAIL}
+	# Caddy's own messages (a shop copy that cannot be reached, say) name the request too: the
+	# Admin Hub's private link is masked there as well (the access log: shop-snippets.caddy).
+	log {
+		format filter {
+			wrap json
+			fields {
+				request>uri regexp "^/([A-Za-z0-9_-]{4})[A-Za-z0-9_-]{28,}" "/${1}..."
+				request>headers>Referer delete
+				# The one-time move to a new admin link is a redirect: its Location is the link.
+				resp_headers>Location delete
+			}
+		}
+	}
 }
 
 import shop-snippets.caddy

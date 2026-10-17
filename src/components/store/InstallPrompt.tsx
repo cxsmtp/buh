@@ -49,7 +49,7 @@ function markSeen(how: string) {
 }
 
 interface InstallPromptProps {
-  /** Something is open (checkout, the bag, a product, the admin hub): wait. */
+  /** Something is open (checkout, the bag, a product): wait. */
   blocked: boolean;
   /** The logo, shown on the card. */
   logo?: React.ReactNode;

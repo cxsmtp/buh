@@ -59,9 +59,8 @@ async function adminPage(width: number) {
   const errors: string[] = [];
   page.on('pageerror', (e) => errors.push(e.message));
   const checked = page.waitForResponse((r) => r.url().endsWith('/api/admin/session'));
-  await page.goto(server.base, { waitUntil: 'domcontentloaded' });
+  await page.goto(server.adminUrl, { waitUntil: 'domcontentloaded' });
   await checked;
-  await page.locator('header button:has-text("Admin Hub")').click();
   await page.getByRole('status').filter({ hasText: /Backup/ }).waitFor();
   return { ctx, page, errors };
 }
@@ -225,9 +224,8 @@ test('forgot password on a phone: the same answer for any email; a reset link op
   const errors: string[] = [];
   page.on('pageerror', (e) => errors.push(e.message));
   const checked = page.waitForResponse((r) => r.url().endsWith('/api/admin/session'));
-  await page.goto(server.base, { waitUntil: 'domcontentloaded' });
+  await page.goto(server.adminUrl, { waitUntil: 'domcontentloaded' });
   await checked;
-  await page.locator('header button:has-text("Admin Hub")').click();
   await page.getByRole('button', { name: 'Forgot password?' }).click();
   await page.locator('#admin-forgot-email').fill('stranger@example.com');
   await page.getByRole('button', { name: 'Email Me a Reset Link' }).click();
@@ -236,7 +234,7 @@ test('forgot password on a phone: the same answer for any email; a reset link op
   await page.close();
 
   const reset = await browser.newPage({ viewport: { width: 375, height: 800 } });
-  await reset.goto(`${server.base}/#reset=not-a-real-token`, { waitUntil: 'domcontentloaded' });
+  await reset.goto(`${server.adminUrl}#reset=not-a-real-token`, { waitUntil: 'domcontentloaded' });
   await reset.locator('#admin-reset-password').waitFor();
   assert.ok(!reset.url().includes('reset='), 'the token leaves the address bar at once');
   await reset.locator('#admin-reset-password').fill('Another-Long-Passphrase-9');

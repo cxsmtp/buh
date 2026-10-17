@@ -233,6 +233,9 @@ export async function createBackup(now = new Date()): Promise<BackupResult> {
       // Passkeys (public keys) and recovery codes (hashes) stay in (the restore script switches
       // them off until the owner reviews them); half-finished passkey sign-ins are left out.
       copy.exec('DELETE FROM webauthn_challenges');
+      // The admin link's fingerprint stays in (a restored shop keeps the owner's bookmark); the copy
+      // kept for showing a new link once to a signed-in owner never leaves the server.
+      copy.exec("DELETE FROM kv WHERE key = 'admin:link-reveal'");
       copy.exec('VACUUM');
     } finally {
       copy.close();

@@ -1,4 +1,4 @@
-import { enforceIpLimit } from '@/lib/server/guard';
+import { enforceIpLimit, requireDoor } from '@/lib/server/guard';
 import { allowFields, assertSameOrigin, handleRouteError, json, readJsonBody } from '@/lib/server/http';
 import { challengeCookie, requireRelyingParty, startPasskeySignIn } from '@/lib/server/passkeys';
 
@@ -9,6 +9,7 @@ import { challengeCookie, requireRelyingParty, startPasskeySignIn } from '@/lib/
  */
 export async function POST(req: Request) {
   try {
+    requireDoor(req);
     assertSameOrigin(req);
     enforceIpLimit(req, 'passkey-sign-in', 30, 10 * 60 * 1000, 'Too many sign-in attempts from this address. Wait a few minutes.');
     allowFields(await readJsonBody(req, 256), []);

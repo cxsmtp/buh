@@ -1,7 +1,13 @@
 'use client';
 
-/** Fired when an admin call comes back 401, so the page can drop admin mode. */
-export const ADMIN_SIGNED_OUT_EVENT = 'buh:admin-signed-out';
+/** Fired when a call comes back 401 (detail: { url }), so a page that cares (the hub) can ask to sign in again. */
+export const UNAUTHORIZED_EVENT = 'buh:unauthorized';
+/**
+ * Fired when a call comes back as an unknown address (the HTML "not found" page, not a
+ * JSON answer from a route; detail: { url }). The hub listens: for its own calls it means
+ * the private link was changed, so it stops calling and says so.
+ */
+export const UNKNOWN_ADDRESS_EVENT = 'buh:unknown-address';
 
 export interface ApiResult<T = Record<string, unknown>> {
   ok: boolean;
@@ -31,10 +37,10 @@ export async function sendJson<T = Record<string, unknown>>(method: 'GET' | 'POS
       body: body === undefined ? undefined : JSON.stringify(body),
     });
     const data = (await res.json().catch(() => ({}))) as T;
-    // Only admin calls mean "signed out"; a shopper's 401 (e.g. an expired phone check) must not open the admin login.
-    const adminCall = /^\/api\/(admin\/|courier\/(dispatch|test)|ai-transform)/.test(url) && !url.startsWith('/api/admin/login');
-    if (res.status === 401 && adminCall) {
-      window.dispatchEvent(new Event(ADMIN_SIGNED_OUT_EVENT));
+    // Which calls mean "signed out" is for the listener to decide (the shop has none).
+    if (res.status === 401) window.dispatchEvent(new CustomEvent(UNAUTHORIZED_EVENT, { detail: { url } }));
+    if (res.status === 404 && !(res.headers.get('content-type') || '').includes('json')) {
+      window.dispatchEvent(new CustomEvent(UNKNOWN_ADDRESS_EVENT, { detail: { url } }));
     }
     return { ok: res.ok, status: res.status, data };
   } catch {

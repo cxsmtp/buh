@@ -6,6 +6,8 @@
  *
  * Keys starting with "global:" are shop-wide counters. They live outside the
  * capped map, so a flood of other keys can never evict (and so reset) them.
+ * Keys starting with "scan-" (the scanner slow-down's counts, made by any 404) have a
+ * capped map of their own, so a flood of 404s can't evict sign-in or phone counters.
  */
 
 const MAX_KEYS = 50_000;
@@ -16,6 +18,11 @@ interface Bucket {
 
 const buckets = new Map<string, Bucket>();
 const globalBuckets = new Map<string, Bucket>();
+const scanBuckets = new Map<string, Bucket>();
+
+function storeFor(key: string): Map<string, Bucket> {
+  return key.startsWith('global:') ? globalBuckets : key.startsWith('scan-') ? scanBuckets : buckets;
+}
 
 export interface LimitResult {
   ok: boolean;
@@ -30,14 +37,14 @@ export interface LimitRule {
 }
 
 function bucketFor(key: string, create: boolean): Bucket | undefined {
-  const store = key.startsWith('global:') ? globalBuckets : buckets;
+  const store = storeFor(key);
   let bucket = store.get(key);
   if (!bucket) {
     if (!create) return undefined;
     bucket = { hits: [] };
-  } else if (store === buckets) {
+  } else if (store !== globalBuckets) {
     // Refresh insertion order so eviction drops the least recently used key.
-    buckets.delete(key);
+    store.delete(key);
   }
   store.set(key, bucket);
   return bucket;
@@ -48,18 +55,18 @@ function prune(bucket: Bucket, windowMs: number, now: number) {
   while (bucket.hits.length && bucket.hits[0] <= since) bucket.hits.shift();
 }
 
-function evictIfFull(now: number) {
-  if (buckets.size <= MAX_KEYS) return;
+function evictIfFull(now: number, store: Map<string, Bucket> = buckets) {
+  if (store === globalBuckets || store.size <= MAX_KEYS) return;
   // Prefer keys whose hits have all expired; only then the least recently used.
-  for (const [key, bucket] of buckets) {
+  for (const [key, bucket] of store) {
     const last = bucket.hits[bucket.hits.length - 1];
-    if (last === undefined || now - last > 60 * 60 * 1000) buckets.delete(key);
-    if (buckets.size <= MAX_KEYS * 0.9) return;
+    if (last === undefined || now - last > 60 * 60 * 1000) store.delete(key);
+    if (store.size <= MAX_KEYS * 0.9) return;
   }
-  while (buckets.size > MAX_KEYS) {
-    const oldest = buckets.keys().next().value;
+  while (store.size > MAX_KEYS) {
+    const oldest = store.keys().next().value;
     if (oldest === undefined) break;
-    buckets.delete(oldest);
+    store.delete(oldest);
   }
 }
 
@@ -85,7 +92,7 @@ export function takeAll(rules: LimitRule[], now = Date.now()): { rule: LimitRule
     if (!result.ok) return { rule, result };
   }
   for (const rule of rules) bucketFor(rule.key, true)!.hits.push(now);
-  evictIfFull(now);
+  for (const store of new Set(rules.map((r) => storeFor(r.key)))) evictIfFull(now, store);
   return null;
 }
 
@@ -105,16 +112,21 @@ export function peekLimit(key: string, max: number, windowMs: number, now = Date
 /** Count one hit, e.g. a test email that was actually sent. */
 export function recordHit(key: string, now = Date.now()) {
   bucketFor(key, true)!.hits.push(now);
-  evictIfFull(now);
+  evictIfFull(now, storeFor(key));
 }
 
 export function resetRateLimit(key: string) {
-  buckets.delete(key);
-  globalBuckets.delete(key);
+  storeFor(key).delete(key);
 }
 
 /** Test hook. */
 export function _clearAllRateLimits() {
   buckets.clear();
   globalBuckets.clear();
+  scanBuckets.clear();
+}
+
+/** Test hook: how many keys each store holds. */
+export function _rateLimitSizes() {
+  return { keys: buckets.size, global: globalBuckets.size, scan: scanBuckets.size };
 }
