@@ -14,7 +14,7 @@ import { peekLimit, recordHit } from './rateLimit';
  *   taken down (/p/…, which a search engine or an old share can ask for); and a 404
  *   to a browser holding a valid door (the hub asking for an order that was deleted).
  *   A hub tab left open after the link was changed stops calling at its first unknown
- *   address (DOOR_CLOSED_EVENT in src/lib/apiClient.ts), well under the limit.
+ *   address (UNKNOWN_ADDRESS_EVENT, src/components/admin/AdminApp.tsx), well under the limit.
  * - 10 such 404s in a minute: every further request from that address waits 1 s.
  *   30 in a minute: 429 Too Many Requests for 10 minutes, for every address of the shop.
  *   A shopper never gets near that (a whole visit has no 404 at all).

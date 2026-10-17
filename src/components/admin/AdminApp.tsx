@@ -5,7 +5,7 @@ import { Archive, Box, Copy, Feather, KeyRound, LayoutGrid, Laptop, Link2, Mail,
 import type { AssistantSettings, BankTransferDetails, BrandSettings, CatalogSettings, CourierSettings, Customer, DeliverySettings, EmailSettings, Order, Product, SmsGatewaySettings, StoreSettings, ThemeSettings } from '@/types';
 import { DEFAULT_ASSISTANT, DEFAULT_CATALOG, DEFAULT_DELIVERY, DEFAULT_EMAIL_SETTINGS, DEFAULT_STORE, DEFAULT_THEME_SETTINGS } from '@/data/catalogDefaults';
 import { INITIAL_BANK_DETAILS, INITIAL_BRAND_SETTINGS, INITIAL_COURIER_SETTINGS, INITIAL_SMS_SETTINGS } from '@/data/initialData';
-import { DOOR_CLOSED_EVENT, getJson, postJson, sendJson, UNAUTHORIZED_EVENT } from '@/lib/apiClient';
+import { getJson, postJson, sendJson, UNAUTHORIZED_EVENT, UNKNOWN_ADDRESS_EVENT } from '@/lib/apiClient';
 import { useLiveUpdates } from '@/lib/client/live';
 import { stockAlerts } from '@/lib/client/stock';
 import { VersionBadge } from '@/components/common/VersionBadge';
@@ -84,6 +84,9 @@ async function fetchPublic() {
   return getJson<{ brand: BrandSettings; bank: BankTransferDetails }>('/api/settings/public');
 }
 
+/** The calls the front gate answers as an unknown address without a door (src/lib/server/frontGate.ts). */
+const ADMIN_CALL = /^\/api\/(?:admin(?:\/|$|\?)|courier\/(?:dispatch|test)(?:$|\?)|ai-transform(?:$|\?))/;
+
 /** Is this page the admin link itself (not a password-reset email's single-reset path)? */
 const onAdminLink = () => /^\/[A-Za-z0-9_-]{32}$/.test(window.location.pathname);
 
@@ -153,12 +156,15 @@ export function AdminApp() {
       if (!url.startsWith('/api/admin/login')) setAuth((a) => (a === 'closed' ? a : 'out'));
     };
     // The link was changed (on another device, or from the server): stop every call and say so.
-    const onDoorClosed = () => setAuth('closed');
+    // (An admin call answered as an unknown address: this browser's door no longer opens.)
+    const onUnknownAddress = (e: Event) => {
+      if (ADMIN_CALL.test(String((e as CustomEvent<{ url?: string }>).detail?.url || ''))) setAuth('closed');
+    };
     window.addEventListener(UNAUTHORIZED_EVENT, onUnauthorized);
-    window.addEventListener(DOOR_CLOSED_EVENT, onDoorClosed);
+    window.addEventListener(UNKNOWN_ADDRESS_EVENT, onUnknownAddress);
     return () => {
       window.removeEventListener(UNAUTHORIZED_EVENT, onUnauthorized);
-      window.removeEventListener(DOOR_CLOSED_EVENT, onDoorClosed);
+      window.removeEventListener(UNKNOWN_ADDRESS_EVENT, onUnknownAddress);
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
