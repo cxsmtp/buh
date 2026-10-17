@@ -349,8 +349,11 @@ test('review fix: a flood of passkey sign-in starts never refuses one; the oldes
 
   // The route has no shop-wide counter: hundreds of starts in a row, no 429 (no trusted proxy here).
   const { POST } = await import('@/app/api/admin/login/passkey/options/route');
+  const door = await import('@/lib/server/adminLink');
+  door.createLinkIfAbsent('test');
+  const cookie = `${door.DOOR_COOKIE}=${door.issueDoorToken()}`;
   for (let i = 0; i < 350; i++) {
-    const res = await POST(new Request('http://localhost:3000/api/admin/login/passkey/options', { method: 'POST', headers: { 'content-type': 'application/json', origin: 'http://localhost:3000', host: 'localhost:3000' }, body: '{}' }));
+    const res = await POST(new Request('http://localhost:3000/api/admin/login/passkey/options', { method: 'POST', headers: { 'content-type': 'application/json', origin: 'http://localhost:3000', host: 'localhost:3000', cookie }, body: '{}' }));
     assert.equal(res.status, 200, `start ${i}`);
   }
   db.prepare('DELETE FROM webauthn_challenges').run();

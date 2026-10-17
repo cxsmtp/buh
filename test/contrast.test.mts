@@ -140,7 +140,7 @@ for (const colorScheme of ['dark', 'light'] as const) {
       const ctx = await browser.newContext({ viewport: { width, height: 900 }, colorScheme });
       const page = await ctx.newPage();
       const problems: string[] = [];
-      const ready = page.waitForResponse((r) => r.url().endsWith('/api/admin/session'));
+      const ready = page.waitForResponse((r) => r.url().endsWith('/api/settings/public'));
       await page.goto(server.base, { waitUntil: 'domcontentloaded' });
       await ready;
       await page.waitForTimeout(500);
@@ -205,7 +205,8 @@ for (const colorScheme of ['dark', 'light'] as const) {
       await page.getByRole('dialog', { name: 'Chat with the shop' }).waitFor();
       problems.push(...(await lowContrast(page, 'chat')));
       await page.keyboard.press('Escape');
-      await page.locator('header button:has-text("Admin Hub")').click();
+      // The Admin Hub's sign-in, at its private link (the shop itself has no way in).
+      await page.goto(server.adminUrl, { waitUntil: 'domcontentloaded' });
       await page.getByText('Admin Hub Security Access').waitFor();
       problems.push(...(await lowContrast(page, 'sign-in')));
       // What the installed app shows without a connection.
@@ -220,9 +221,8 @@ for (const colorScheme of ['dark', 'light'] as const) {
       await admin.addCookies([{ name: n, value: v, url: server.base }]);
       const a = await admin.newPage();
       const signed = a.waitForResponse((r) => r.url().endsWith('/api/admin/session'));
-      await a.goto(server.base, { waitUntil: 'domcontentloaded' });
+      await a.goto(server.adminUrl, { waitUntil: 'domcontentloaded' });
       await signed;
-      await a.locator('header button:has-text("Admin Hub")').click();
       const nav = a.getByRole('navigation', { name: 'Admin sections' });
       await nav.waitFor();
       for (const tab of ['Orders', 'Chats', 'Inventory', 'Customers', 'Settings']) {

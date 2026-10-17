@@ -20,9 +20,18 @@
 		-X-Powered-By
 	}
 
+	# Access log. The Admin Hub's private link (one 32-character path) and a password-reset
+	# email's one-time path (43 characters) are masked to their first 4 characters, so the
+	# log never holds a working link.
 	log {
 		output stdout
-		format console
+		format filter {
+			wrap console
+			fields {
+				request>uri regexp "^/([A-Za-z0-9_-]{4})[A-Za-z0-9_-]{28,}" "/${1}..."
+				request>headers>Referer delete
+			}
+		}
 	}
 }
 

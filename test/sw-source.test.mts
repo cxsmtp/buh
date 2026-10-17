@@ -64,10 +64,10 @@ function load(version = 'BUH-02.05.00', swAnswer: SwAnswer = { status: 200, head
   new Function('self', 'caches', 'fetch', 'Response', 'URL', source)(self, caches, fakeFetch, class {}, URL);
 
   /** Does the worker answer this request (respondWith), or leave it to the network? */
-  const answers = (url: string, init: { method?: string; mode?: string } = {}) => {
+  const answers = (url: string, init: { method?: string; mode?: string; referrer?: string } = {}) => {
     let answered = false;
     listeners.fetch({
-      request: { url: new URL(url, 'https://shop.test').href, method: init.method ?? 'GET', mode: init.mode ?? 'cors' },
+      request: { url: new URL(url, 'https://shop.test').href, method: init.method ?? 'GET', mode: init.mode ?? 'cors', referrer: init.referrer ?? 'https://shop.test/' },
       respondWith: (p: unknown) => {
         answered = true;
         void Promise.resolve(p).catch(() => {});
@@ -110,6 +110,20 @@ test('the worker never answers orders, checkout, admin, personal data or other s
   }
   // Even opened as a page (a link to /api/health), an API address is left alone.
   assert.equal(sw.answers('/api/admin/orders', { mode: 'navigate' }), false);
+});
+
+test('the worker never handles the Admin Hub: its private link, or anything a page without a referrer loads', () => {
+  const sw = load();
+  // The private link (the worker cannot tell it from any other address, so every non-shop page is left alone).
+  assert.equal(sw.answers('/k7Qm2vXa9pTeLr4wZbN0c3dE5fG6hJ8s', { mode: 'navigate' }), false);
+  assert.equal(sw.answers('/' + 'g'.repeat(43), { mode: 'navigate' }), false, 'a password-reset email’s path');
+  assert.equal(sw.answers('/admin', { mode: 'navigate' }), false);
+  assert.equal(sw.answers('/hub', { mode: 'navigate' }), false);
+  // The hub is served with Referrer-Policy: no-referrer, so its scripts are fetched without one: never cached.
+  assert.equal(sw.answers('/_next/static/chunks/hub-abc123.js', { mode: 'no-cors', referrer: '' }), false);
+  assert.equal(sw.answers('/_next/static/chunks/main-abc123.js', { mode: 'no-cors', referrer: 'https://shop.test/' }), true);
+  const source = serviceWorkerSource('BUH-02.08.00');
+  assert.doesNotMatch(source, /admin/i, 'nothing in the worker (served to everyone) names the admin side');
 });
 
 test('the worker answers pages (offline fallback), the shop’s own files, icons and public photos', () => {

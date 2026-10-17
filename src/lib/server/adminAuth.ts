@@ -518,6 +518,8 @@ interface ResetLink {
   hash: string;
   expires: number;
   email: string;
+  /** Hash of the link's door grant: the path that opens the Admin Hub for this reset (adminLink.ts). */
+  grant?: string;
 }
 
 /**
@@ -527,7 +529,7 @@ interface ResetLink {
  * links stay valid (a stranger asking again can't cancel the owner's link), and
  * at most 3 are sent an hour (null after that: the owner already has them).
  */
-export async function startPasswordReset(emailInput: string): Promise<string | null> {
+export async function startPasswordReset(emailInput: string): Promise<{ token: string; grant: string } | null> {
   const account = await loadAccount();
   if (account.managedByEnv || emailInput.trim().toLowerCase() !== account.email) return null;
   const { kvGet, kvSet } = await import('./kv');
@@ -535,8 +537,11 @@ export async function startPasswordReset(emailInput: string): Promise<string | n
   const live = resetLinks(kvGet<unknown>(RESET_KEY)?.data).filter((l) => l.expires > now && l.email === account.email);
   if (live.filter((l) => l.expires > now + RESET_TTL_MS - 60 * 60 * 1000).length >= RESET_PER_HOUR) return null;
   const token = crypto.randomBytes(32).toString('base64url');
-  kvSet(RESET_KEY, [...live, { hash: crypto.createHash('sha256').update(token).digest('base64url'), expires: now + RESET_TTL_MS, email: account.email }]);
-  return token;
+  // The email's link opens the Admin Hub through its own one-time path (the browser may never have been through the admin link).
+  const { newResetGrant } = await import('./adminLink');
+  const { grant, grantHash } = newResetGrant();
+  kvSet(RESET_KEY, [...live, { hash: crypto.createHash('sha256').update(token).digest('base64url'), expires: now + RESET_TTL_MS, email: account.email, grant: grantHash }]);
+  return { token, grant };
 }
 
 /** Stored links (an older build kept one object, not a list). */

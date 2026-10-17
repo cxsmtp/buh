@@ -132,9 +132,8 @@ test('international numbers are offered email instead of a code', { skip }, asyn
 test('admin: one-time password, forced change, then the hub opens with its version', { skip }, async () => {
   const page = await browser.newPage({ viewport: { width: 1280, height: 900 } });
   const checked = page.waitForResponse((r) => r.url().endsWith('/api/admin/session'));
-  await page.goto(server.base, { waitUntil: 'domcontentloaded' });
+  await page.goto(server.adminUrl, { waitUntil: 'domcontentloaded' });
   await checked;
-  await page.locator('header button:has-text("Admin Hub")').click();
   await page.locator('input[type=email]').fill('admin@beautifuluaehome.com');
   await page.locator('input[autocomplete=current-password]').fill('definitely-wrong');
   await page.getByRole('button', { name: /Unlock Admin Portal/ }).click();
@@ -159,7 +158,6 @@ test('admin: one-time password, forced change, then the hub opens with its versi
   const rechecked = page.waitForResponse((r) => r.url().endsWith('/api/admin/session'));
   await page.reload({ waitUntil: 'domcontentloaded' });
   await rechecked;
-  await page.locator('header button:has-text("Admin Hub")').click();
   await page.getByText(/Orders & Dispatches/).first().waitFor();
   await page.close();
 });
@@ -266,9 +264,8 @@ test('the shop and the admin hub share one store: a customer order reaches the o
   const ctx = await browser.newContext({ viewport: { width: 1280, height: 900 } });
   const admin = await ctx.newPage();
   const adminChecked = admin.waitForResponse((r) => r.url().endsWith('/api/admin/session'));
-  await admin.goto(server.base, { waitUntil: 'domcontentloaded' });
+  await admin.goto(server.adminUrl, { waitUntil: 'domcontentloaded' });
   await adminChecked; // hydrated: the click opens the sign-in
-  await admin.locator('header button:has-text("Admin Hub")').click();
   await admin.locator('input[type=email]').fill('admin@beautifuluaehome.com');
   await admin.locator('input[autocomplete=current-password]').fill('Browser-Owner-Pass-1');
   await admin.getByRole('button', { name: /Unlock Admin Portal/ }).click();
@@ -381,9 +378,8 @@ test('regression: every admin tab and settings section fits a 375 px phone, SMS 
   const page = await ctx.newPage();
   // Not "networkidle": the live-updates stream stays open. Wait for the admin session check instead.
   const sessionChecked = page.waitForResponse((r) => r.url().endsWith('/api/admin/session'));
-  await page.goto(server.base, { waitUntil: 'domcontentloaded' });
+  await page.goto(server.adminUrl, { waitUntil: 'domcontentloaded' });
   await sessionChecked;
-  await page.locator('header button:has-text("Admin Hub")').click();
   await page.getByRole('status').filter({ hasText: /Backup/ }).waitFor(); // admin data loaded
   const nav = page.getByRole('navigation', { name: 'Admin sections' });
   // On a phone the bar holds Orders, Inventory, Chats and More; Customers and Settings are under More.

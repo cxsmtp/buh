@@ -7,9 +7,9 @@ import { Sheet } from '@/components/common/Sheet';
 type AdminTabId = 'orders' | 'add-product' | 'inventory' | 'crm' | 'settings' | 'chats';
 
 /**
- * The Admin Hub's bottom bar. On a phone: Orders, Inventory, Chats and More (big targets);
- * More holds Add product, Customers, Settings and View shop. On wider screens every section
- * has its own button. Badges: orders to confirm, products sold out or low, chats waiting.
+ * The Admin Hub's bottom bar in the phone view: Orders, Inventory, Chats and More (big
+ * targets); More holds Add product, Customers, Settings and View shop. (The laptop view has
+ * tabs at the top instead.) Badges: orders to confirm, products sold out or low, chats waiting.
  */
 export function AdminBar({
   adminTab,
@@ -43,7 +43,7 @@ export function AdminBar({
   };
   return (
     <>
-      <nav aria-label="Admin sections" className="fixed bottom-0 left-0 right-0 z-40 bg-surface/95 backdrop-blur-md border-t border-line px-1 pb-safe flex items-stretch">
+      <nav aria-label="Admin sections" className="fixed bottom-0 left-0 right-0 mx-auto max-w-[480px] z-40 bg-surface/95 backdrop-blur-md border-t border-line px-1 pb-safe flex items-stretch">
         <button type="button" onClick={() => go('orders')} aria-current={adminTab === 'orders' ? 'page' : undefined} className={`${item(adminTab === 'orders')} flex`}>
           <ClipboardList className="w-6 h-6" aria-hidden="true" />
           <span className="max-w-full truncate">Orders</span>
@@ -59,27 +59,10 @@ export function AdminBar({
           <span className="max-w-full truncate">Chats</span>
           {badge(chatsWaiting, `${chatsWaiting} waiting`)}
         </button>
-        {/* Phones: the rest under More. */}
-        <button type="button" onClick={() => setMore(true)} aria-haspopup="dialog" aria-expanded={more} className={`${item(inMore)} flex sm:hidden`}>
+        {/* The rest under More. */}
+        <button type="button" onClick={() => setMore(true)} aria-haspopup="dialog" aria-expanded={more} className={`${item(inMore)} flex`}>
           <Menu className="w-6 h-6" aria-hidden="true" />
           <span className="max-w-full truncate">More</span>
-        </button>
-        {/* Wider screens: every section in the bar. */}
-        <button type="button" onClick={() => go('add-product')} aria-current={adminTab === 'add-product' ? 'page' : undefined} className={`${item(adminTab === 'add-product')} hidden sm:flex`}>
-          <Camera className="w-6 h-6" aria-hidden="true" />
-          <span className="max-w-full truncate">Add</span>
-        </button>
-        <button type="button" onClick={() => go('crm')} aria-current={adminTab === 'crm' ? 'page' : undefined} className={`${item(adminTab === 'crm')} hidden sm:flex`}>
-          <Users className="w-6 h-6" aria-hidden="true" />
-          <span className="max-w-full truncate">Customers</span>
-        </button>
-        <button type="button" onClick={() => go('settings')} aria-current={adminTab === 'settings' ? 'page' : undefined} className={`${item(adminTab === 'settings')} hidden sm:flex`}>
-          <Settings className="w-6 h-6" aria-hidden="true" />
-          <span className="max-w-full truncate">Settings</span>
-        </button>
-        <button type="button" onClick={onToggleAdminMode} className={`${item(false)} hidden sm:flex`} title="Return to Customer Storefront">
-          <Store className="w-6 h-6" aria-hidden="true" />
-          <span className="max-w-full truncate">View Shop</span>
         </button>
       </nav>
       {more && (

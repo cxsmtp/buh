@@ -135,7 +135,12 @@ if (hasTable('kv')) {
   const now = new Date().toISOString();
   if (passkeyIds.length) put.run('admin:passkeys-suspended', JSON.stringify(passkeyIds), now);
   put.run('admin:restored', JSON.stringify({ at: now, backup: path.basename(file) }), now);
+  db.prepare("DELETE FROM kv WHERE key = 'admin:link-reveal'").run();
 }
+// The Admin Hub's private link comes back with the backup (only its fingerprint is stored), so the
+// owner's bookmark keeps working. A backup without one (from before BUH-02.08) gets a new link,
+// printed on the first start.
+const hasAdminLink = hasTable('kv') && Boolean(db.prepare("SELECT 1 FROM kv WHERE key = 'admin:link' AND data != 'null'").get());
 db.close();
 const passkeys = passkeyIds.length;
 if (replace) {
@@ -155,6 +160,12 @@ if (replace) {
   console.log(`Restored to ${target}: ${orders} orders, ${products} products, ${stockMoves} stock moves, ${drafts} product drafts. Integrity check: ok.`);
   console.log('Next: stop the shop, set DATA_DIR to this folder (or swap folders), start it, and sign in with the new one-time password from the log.');
 }
+console.log('');
+console.log(
+  hasAdminLink
+    ? 'Admin Hub: the private admin link from this backup works again. If you changed it after this backup was taken, make a new one: node scripts/admin-link.mjs --new'
+    : 'Admin Hub: this backup has no private admin link; the first start prints a new one in the log.'
+);
 if (passkeys || voidedCodes) {
   console.log('');
   console.log('!!! IMPORTANT: Admin Hub passkeys and recovery codes from this backup are switched off !!!');

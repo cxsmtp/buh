@@ -1,11 +1,12 @@
 import { signIn, sessionCookie } from '@/lib/server/adminAuth';
 import { audit } from '@/lib/server/audit';
-import { clientIp, enforceIpLimit } from '@/lib/server/guard';
+import { clientIp, enforceIpLimit, requireDoor } from '@/lib/server/guard';
 import { assertSameOrigin, handleRouteError, HttpError, json, readJsonBody, str } from '@/lib/server/http';
 
 export async function POST(req: Request) {
   const ip = clientIp(req);
   try {
+    requireDoor(req);
     assertSameOrigin(req);
     // 30 attempts per 10 minutes per address, on top of the per-account lockout.
     enforceIpLimit(req, 'signin', 30, 10 * 60 * 1000, 'Too many sign-in attempts from this address. Wait a few minutes.');

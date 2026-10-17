@@ -1,6 +1,7 @@
 import { sweepChats } from './chat';
 import { startChatMail } from './chatMail';
 import { ensureAdminAccount } from './adminAuth';
+import { ensureAdminLink } from './adminLinkSetup';
 import { MIN_PASSPHRASE_LENGTH, emailConfigured, startBackupSchedule } from './backup';
 import { getDb } from './db';
 import { startMonitor } from './monitor';
@@ -24,6 +25,12 @@ export async function onStartup() {
     startChat();
   } catch (err) {
     logEvent('error', 'startup_failed', { error: err instanceof Error ? err.message : String(err) });
+  }
+  try {
+    // The Admin Hub's private link: made (and printed once) on the first start, or by the update that brought it.
+    ensureAdminLink();
+  } catch (err) {
+    logEvent('error', 'admin_link_init_failed', { error: err instanceof Error ? err.message : String(err) });
   }
   if (process.env.NODE_ENV === 'production' && !emailConfigured()) {
     console.error('!! Backups are not emailed: set up email in Admin Hub → Settings → Email (or SMTP_HOST, SMTP_USER, SMTP_PASS and BACKUP_EMAIL in .env.production).');

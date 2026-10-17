@@ -306,9 +306,7 @@ for (const shape of SHAPES) {
     await page.keyboard.press('Escape');
 
     // Admin sign-in, forgotten password and a recovery code.
-    const hub = page.locator('header button:has-text("Admin Hub")');
-    if (await hub.isVisible()) await hub.click();
-    else await page.getByRole('navigation', { name: 'Shop' }).getByRole('button', { name: /Admin|Account|Me/ }).first().click();
+    await page.goto(server.adminUrl, { waitUntil: 'domcontentloaded' });
     await page.getByText('Admin Hub Security Access').waitFor();
     await fit(page, problems, at('sign-in'), [/Unlock Admin Portal/]);
     await page.getByRole('button', { name: /Use a recovery code/ }).click();
@@ -345,9 +343,8 @@ for (const shape of SHAPES) {
     const at = (s: string) => `${s} @${shape.name}`;
     try {
     const signed = a.waitForResponse((r) => r.url().endsWith('/api/admin/session'));
-    await a.goto(server.base, { waitUntil: 'domcontentloaded' });
+    await a.goto(server.adminUrl, { waitUntil: 'domcontentloaded' });
     await signed;
-    await a.locator('header button:has-text("Admin Hub")').click();
     const nav = a.getByRole('navigation', { name: 'Admin sections' });
     await nav.waitFor();
     await a.waitForTimeout(500);
