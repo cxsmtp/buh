@@ -1,6 +1,6 @@
 # Changelog
 
-## BUH-02.08.00 — 2026-10-17 20:30 UTC · [#24](https://github.com/cxsmtp/buh/pull/24)
+## BUH-02.08.00 — 2026-10-17 19:36 UTC · [#24](https://github.com/cxsmtp/buh/pull/24)
 
 - **The Admin Hub is off the shop.** The public site has no admin button, tab or address: /admin, /login, /wp-admin and every admin address answer exactly like a page that doesn't exist, byte for byte, so nobody can find it by guessing or scanning.
 - **Your own private link.** The hub opens only at a random 32-character link (shown in the log and emailed when it is made). Bookmark it on your phone and laptop: a phone gets the phone view, a laptop the full view, and a switch at the top changes it.
@@ -9,8 +9,8 @@
 - **A hub tab left open says so.** If the link was changed elsewhere, an open hub tab stops at once with "This link no longer opens the Admin Hub", and never counts as a scanner.
 - **Scanners are slowed, then shut out.** Behind the shop's proxy, an address asking for many missing pages is slowed and then refused for 10 minutes; shoppers, taken-down products and your own hub never count. Logs (the shop's, Caddy's and nginx's) never hold the link.
 - **Status.**
-  - **Benchmark:** BENCH
-  - **Tests:** TESTS
+  - **Benchmark:** same host, main (BUH-02.07.00) vs this branch, 3 alternating rounds plus a check round with main first, 0 failed requests. Storefront main 806 / 849 / 803 / 836 req/s, branch 836 / 861 / 855 / 891 (p95 105–124 vs 91–134 ms); courier check main 608 / 709 / 690 / 656, branch 700 / 717 / 704 / 650; catalogue main 787 / 761 / 722 / 775, branch 718 / 850 / 807 / 798. Level; the branch's one slow catalogue tail (p95 257 ms) was its cold first run, and the check round with main first gave 141 vs 154 ms.
+  - **Tests:** 492 passed, including the private link at the HTTP server (every admin route, path tricks, byte-identical 404s, headers, rotation, recovery, the reset email, the update), a hub tab left open after the link changed, the scanner store's own cap, and 375 and 1280 px views.
   - **Dependency audit:** production 0 vulnerabilities; no new packages.
   - **Security scan:** an independent review of the gate (path tricks, forged doors, timing, headers, logs) found no way in; its 2 medium and 6 low findings were fixed with tests or documented. No automated scanner here.
 
