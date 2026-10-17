@@ -148,7 +148,8 @@ test('the front gate: admin addresses without a door become an unknown address; 
     assert.match(hub.cookie, /^buh_door=[^;]+; Path=\/; Max-Age=2592000; HttpOnly; SameSite=Strict/);
     assert.equal(link.hubHeaderMatches(hub.hubHeader), true);
   }
-  assert.equal(gate.decide(`/${segment.slice(0, 31)}x`, '').kind, 'pass', 'a near miss is just an unknown address');
+  const nearMiss = segment.slice(0, 31) + (segment[31] === 'x' ? 'y' : 'x');
+  assert.equal(gate.decide(`/${nearMiss}`, '').kind, 'pass', 'a near miss is just an unknown address');
   // A trailing slash: Next.js redirects to the address without it, which comes back through the gate.
   assert.equal(gate.decide('/api/admin/login/', '').kind, 'pass');
 });
@@ -158,7 +159,7 @@ test('the password-reset email opens the hub through its own one-time grant', as
   await auth.ensureAdminAccount();
   const reset = (await auth.startPasswordReset('admin@beautifuluaehome.com'))!;
   assert.equal(gate.decide(`/${reset.grant}`, '').kind, 'hub');
-  assert.equal(gate.decide(`/${reset.grant.slice(0, 42)}A`, '').kind, 'pass');
+  assert.equal(gate.decide(`/${reset.grant.slice(0, 42)}${reset.grant[42] === 'A' ? 'B' : 'A'}`, '').kind, 'pass');
   await auth.completePasswordReset(reset.token, 'A-New-Long-Passphrase-1');
   assert.equal(gate.decide(`/${reset.grant}`, '').kind, 'pass', 'used: the grant is gone');
 });
