@@ -83,19 +83,19 @@ The shop can sit on the home screen of a phone or tablet and open full screen, w
 
 The Admin Hub is not on the shop's pages: there is no button, tab or link to it, and addresses like /admin, /login or /wp-admin are an ordinary "page not found", exactly like any address that does not exist. It is only at your own private link, which looks like `https://yourdomain.ae/k7Qm2vXa9pTeLr4w…` (32 random letters and digits).
 
-- **Where to find it:** the first start prints it once in the log, in a box next to the first password (`podman logs beautifuluaehome`, or `docker compose logs app-blue`). When email is set up it is also emailed to your admin email.
+- **Where to find it:** the first start prints it in the log, in a box next to the first password (`podman logs beautifuluaehome`). It stays in that container log until the container is removed, so keep the server's login private. When email is set up it is also emailed to your admin email.
 - **Updating from an earlier version:** the update makes your link. It is printed once in the log and emailed (when email is set up), and if you are signed in at that moment, the next time you open the shop you are taken to it once. The Admin Hub then says **The Admin Hub has moved to this private link**.
 - **Bookmark it on your phone:** open the link, then on an iPhone Share → **Add to Home Screen** (or Add Bookmark); on Android the ⋮ menu → **Add to Home screen** (or the bookmark star). **On your laptop:** open it and press Ctrl+D (⌘+D on a Mac). The hub says "This is your private Admin Hub link" until you press **I've bookmarked it**.
 - **One link for every device:** a phone gets the phone view (one column, the tab bar at the bottom), a laptop the full view (tabs at the top). The **Phone view / Laptop view** switch at the top changes it; each device remembers its choice.
 - **Keep it private:** don't share or post it. Opening it lets a browser reach the sign-in for 30 days (renewed while you use it); your password, a passkey or a recovery code is still needed.
 - **Change it** (if someone may have seen it): Settings → **Security** → **Change the admin link**, with your current password (or no password within 10 minutes of a passkey sign-in). The old link, and every phone or laptop that used it, stop working at once; the new link is shown once (copy it, then **Open the new link** and bookmark it again) and emailed. The audit log notes the change, never the link.
-- **Lost it?** Only a fingerprint of the link is kept, so it can't be shown again, by anyone. Make a new one on the server; the old one stops working:
+- **Lost it?** Only a fingerprint of the link is kept, so it can't be shown again, by anyone, and "Forgot password" needs the link too. The only way back in is a new link, made on the server (on the VPS: SSH, or hPanel's browser terminal); the old one stops working:
 
 ```
 podman exec beautifuluaehome node scripts/admin-link.mjs --new
 ```
 
-  (Docker Compose: `docker compose exec app-blue node scripts/admin-link.mjs --new`.) Without `--new` it only says when the link was made.
+  Without `--new` it only says when the link was made.
 - **After restoring a backup:** the link from the backup works again. If you changed the link after that backup was taken, make a new one with the command above.
 
 ### First sign-in

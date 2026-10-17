@@ -5,7 +5,7 @@ import { Archive, Box, Copy, Feather, KeyRound, LayoutGrid, Laptop, Link2, Mail,
 import type { AssistantSettings, BankTransferDetails, BrandSettings, CatalogSettings, CourierSettings, Customer, DeliverySettings, EmailSettings, Order, Product, SmsGatewaySettings, StoreSettings, ThemeSettings } from '@/types';
 import { DEFAULT_ASSISTANT, DEFAULT_CATALOG, DEFAULT_DELIVERY, DEFAULT_EMAIL_SETTINGS, DEFAULT_STORE, DEFAULT_THEME_SETTINGS } from '@/data/catalogDefaults';
 import { INITIAL_BANK_DETAILS, INITIAL_BRAND_SETTINGS, INITIAL_COURIER_SETTINGS, INITIAL_SMS_SETTINGS } from '@/data/initialData';
-import { getJson, postJson, sendJson, UNAUTHORIZED_EVENT } from '@/lib/apiClient';
+import { DOOR_CLOSED_EVENT, getJson, postJson, sendJson, UNAUTHORIZED_EVENT } from '@/lib/apiClient';
 import { useLiveUpdates } from '@/lib/client/live';
 import { stockAlerts } from '@/lib/client/stock';
 import { VersionBadge } from '@/components/common/VersionBadge';
@@ -84,7 +84,7 @@ async function fetchPublic() {
   return getJson<{ brand: BrandSettings; bank: BankTransferDetails }>('/api/settings/public');
 }
 
-/** Is this page the admin link itself (not a password-reset email's one-time path)? */
+/** Is this page the admin link itself (not a password-reset email's single-reset path)? */
 const onAdminLink = () => /^\/[A-Za-z0-9_-]{32}$/.test(window.location.pathname);
 
 /**
@@ -94,7 +94,7 @@ const onAdminLink = () => /^\/[A-Za-z0-9_-]{32}$/.test(window.location.pathname)
  * device remembers.
  */
 export function AdminApp() {
-  const [auth, setAuth] = useState<'checking' | 'out' | 'in'>('checking');
+  const [auth, setAuth] = useState<'checking' | 'out' | 'in' | 'closed'>('checking');
   const [view, setViewState] = useState<HubView>(initialView);
   // From a password-reset email link (#reset=…), read once and taken out of the address bar.
   const [resetToken, setResetToken] = useState<string | null>(() => new URLSearchParams(window.location.hash.slice(1)).get('reset'));
@@ -141,7 +141,8 @@ export function AdminApp() {
 
   const checkSession = useCallback(async () => {
     const { ok, data } = await getJson<{ authenticated?: boolean; mustChangePassword?: boolean }>('/api/admin/session');
-    setAuth(ok && data.authenticated === true && !data.mustChangePassword ? 'in' : 'out');
+    const next = ok && data.authenticated === true && !data.mustChangePassword ? 'in' : 'out';
+    setAuth((a) => (a === 'closed' ? a : next));
   }, []);
 
   useEffect(() => {
@@ -149,10 +150,16 @@ export function AdminApp() {
     void Promise.resolve().then(checkSession);
     const onUnauthorized = (e: Event) => {
       const url = String((e as CustomEvent<{ url?: string }>).detail?.url || '');
-      if (!url.startsWith('/api/admin/login')) setAuth('out');
+      if (!url.startsWith('/api/admin/login')) setAuth((a) => (a === 'closed' ? a : 'out'));
     };
+    // The link was changed (on another device, or from the server): stop every call and say so.
+    const onDoorClosed = () => setAuth('closed');
     window.addEventListener(UNAUTHORIZED_EVENT, onUnauthorized);
-    return () => window.removeEventListener(UNAUTHORIZED_EVENT, onUnauthorized);
+    window.addEventListener(DOOR_CLOSED_EVENT, onDoorClosed);
+    return () => {
+      window.removeEventListener(UNAUTHORIZED_EVENT, onUnauthorized);
+      window.removeEventListener(DOOR_CLOSED_EVENT, onDoorClosed);
+    };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -256,6 +263,12 @@ export function AdminApp() {
     return (
       <div className="min-h-screen flex flex-col items-center justify-center px-4 bg-ivory" data-hub-view={view}>
         <p className="font-serif text-xl text-ink-soft">{brandSettings.storeName || 'Beautiful UAE Home'}</p>
+        {auth === 'closed' && (
+          <div role="alert" data-testid="door-closed" className="mt-4 max-w-sm text-center text-ink-soft">
+            <p className="font-semibold text-ink">This link no longer opens the Admin Hub.</p>
+            <p className="mt-2 text-sm">The private link was changed. Open the new link (or your new bookmark) to carry on.</p>
+          </div>
+        )}
         {auth === 'out' && (
           <AdminLoginModal
             isOpen

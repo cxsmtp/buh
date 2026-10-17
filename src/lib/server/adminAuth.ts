@@ -537,7 +537,7 @@ export async function startPasswordReset(emailInput: string): Promise<{ token: s
   const live = resetLinks(kvGet<unknown>(RESET_KEY)?.data).filter((l) => l.expires > now && l.email === account.email);
   if (live.filter((l) => l.expires > now + RESET_TTL_MS - 60 * 60 * 1000).length >= RESET_PER_HOUR) return null;
   const token = crypto.randomBytes(32).toString('base64url');
-  // The email's link opens the Admin Hub through its own one-time path (the browser may never have been through the admin link).
+  // The email's link opens the Admin Hub through its own single-reset path (the browser may never have been through the admin link).
   const { newResetGrant } = await import('./adminLink');
   const { grant, grantHash } = newResetGrant();
   kvSet(RESET_KEY, [...live, { hash: crypto.createHash('sha256').update(token).digest('base64url'), expires: now + RESET_TTL_MS, email: account.email, grant: grantHash }]);

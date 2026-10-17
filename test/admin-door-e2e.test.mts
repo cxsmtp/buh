@@ -6,7 +6,7 @@
  * noindex and no-store; the shop's pages and scripts carry nothing of it. In Chromium: no way in
  * from the shop at 375 and 1280 px; the link opens the sign-in on a phone and the full hub on a
  * laptop, with a Phone view / Laptop view switch remembered per device; changing the link; the
- * server command; the password-reset email through its one-time path; the update that brings
+ * server command; the password-reset email through its single-reset path; the update that brings
  * the link (logged, emailed, shown once to a signed-in owner); the scanner slow-down, which a
  * shopper never meets. Skipped without a build (and the browser parts without Playwright).
  */
@@ -357,13 +357,40 @@ test('lost the link: the server command makes a new one (it cannot print the old
   await ctx.close();
 });
 
-test('forgot password: the emailed link opens the hub through its one-time path on a phone that never had the link; then it is gone', { skip: skip || skipBrowser }, async () => {
+test('a hub tab left open when the link is changed stops calling and says so (so it can never set off the scanner slow-down)', { skip: skip || skipBrowser }, async () => {
+  const ctx = await browser.newContext({ viewport: { width: 1280, height: 900 } });
+  const [n, v] = cookie.split('=');
+  await ctx.addCookies([{ name: n, value: v, url: server.base }]);
+  const page = await ctx.newPage();
+  await page.clock.install();
+  await page.goto(`${server.base}${adminPath}`, { waitUntil: 'domcontentloaded' });
+  await page.getByRole('navigation', { name: 'Admin sections' }).waitFor();
+  // The link is changed elsewhere (here: the server command).
+  const env = { ...process.env, DATA_DIR: server.dataDir, NEXT_PUBLIC_APP_URL: server.base };
+  adminPath = adminPathIn(execFileSync(process.execPath, ['scripts/admin-link.mjs', '--new'], { env }).toString())!;
+  await openDoor(server.base, adminPath);
+  let calls = 0;
+  page.on('request', (r) => {
+    if (new URL(r.url()).pathname.startsWith('/api/admin')) calls++;
+  });
+  await page.clock.fastForward('01:05');
+  await page.getByTestId('door-closed').waitFor();
+  const seen = calls;
+  assert.ok(seen < 10, `${seen} calls before it stopped (the slow-down starts at 10)`);
+  await page.clock.fastForward('10:00');
+  await page.waitForTimeout(300);
+  assert.equal(calls, seen, 'no more calls once it knows');
+  assert.equal(await overflow(page), 0);
+  await ctx.close();
+});
+
+test('forgot password: the emailed link opens the hub through its single-reset path on a phone that never had the link; then it is gone', { skip: skip || skipBrowser }, async () => {
   const since = mails.length;
   const ask = await fetch(`${server.base}/api/admin/password/forgot`, { method: 'POST', headers: { 'content-type': 'application/json', origin: server.base }, body: JSON.stringify({ email: EMAIL }) });
   assert.equal(ask.status, 200);
   const mail = await mailMatching(/Choose a new password here/, since);
   const link = mail.match(/(http:\/\/127\.0\.0\.1:\d+\/[A-Za-z0-9_-]{43})#reset=([A-Za-z0-9_%-]+)/)!;
-  assert.ok(link, 'a link with a one-time path and the token in the fragment');
+  assert.ok(link, 'a link with a single-reset path and the token in the fragment');
   assert.ok(!mail.includes(adminPath.slice(1)), 'not the admin link itself');
   const phone = await browser.newContext({ viewport: { width: 375, height: 800 }, isMobile: true });
   const page = await phone.newPage();

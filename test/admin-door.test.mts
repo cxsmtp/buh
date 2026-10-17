@@ -2,7 +2,7 @@
  * BUH-02.08: the Admin Hub is only at a private link. The link (≥ 128 bits, here 192) is kept
  * only as a hash and checked in constant time; changing it ends the old link and every door
  * cookie at once; every admin route checks the door; the reset email opens the hub through a
- * one-time grant; logs never carry the link; backups keep the hash (not the one-time copy);
+ * single-reset grant; logs never carry the link; backups keep the hash (not the one-time copy);
  * the server command makes a new link from the published image's own files; and the scanner
  * slow-down counts only what a scanner does. (Over HTTP and in a browser: admin-door-e2e.)
  */
@@ -154,11 +154,20 @@ test('the front gate: admin addresses without a door become an unknown address; 
   assert.equal(gate.decide('/api/admin/login/', '').kind, 'pass');
 });
 
-test('the password-reset email opens the hub through its own one-time grant', async () => {
+test('the password-reset email opens the hub through its own grant: the door lasts only while the reset is open, and setting the password ends it', async () => {
   const auth = await import('@/lib/server/adminAuth');
   await auth.ensureAdminAccount();
   const reset = (await auth.startPasswordReset('admin@beautifuluaehome.com'))!;
-  assert.equal(gate.decide(`/${reset.grant}`, '').kind, 'hub');
+  const opened = gate.decide(`/${reset.grant}`, '');
+  assert.equal(opened.kind, 'hub');
+  if (opened.kind === 'hub') {
+    const maxAge = Number(/Max-Age=(\d+)/.exec(opened.cookie)![1]);
+    assert.ok(maxAge > 0 && maxAge <= 30 * 60, `the door lasts the reset's 30 minutes, not 30 days (${maxAge} s)`);
+    const token = opened.cookie.split(';')[0].split('=')[1];
+    assert.equal(link.verifyDoorToken(token).ok, true);
+    assert.equal(link.verifyDoorToken(token, Date.now() + 31 * 60_000).ok, false, 'its door has ended once the reset would have');
+  }
+  assert.equal(gate.decide(`/${reset.grant}`, '').kind, 'hub', 'a mail app checking the link first does not use it up');
   assert.equal(gate.decide(`/${reset.grant.slice(0, 42)}${reset.grant[42] === 'A' ? 'B' : 'A'}`, '').kind, 'pass');
   await auth.completePasswordReset(reset.token, 'A-New-Long-Passphrase-1');
   assert.equal(gate.decide(`/${reset.grant}`, '').kind, 'pass', 'used: the grant is gone');
@@ -261,8 +270,8 @@ test('scanner slow-down: 10 misses in a minute slow an address, 30 shut it out f
   const calm = '203.0.113.9';
   for (let i = 0; i < 100; i++) scan.recordMiss(calm, t0 + i * 61_000);
   assert.equal(scan.verdictFor(calm, t0 + 100 * 61_000).action, 'pass');
-  for (const p of ['/_next/static/chunks/old.js', '/api/images/gone.jpg', '/icons/x.png', '/api/orders/lookup', '/api/products']) assert.equal(scan.countsAsProbe(p), false, p);
-  for (const p of ['/wp-admin', '/.env', '/admin', '/api/admin/login', '/p/gone']) assert.equal(scan.countsAsProbe(p), true, p);
+  for (const p of ['/_next/static/chunks/old.js', '/api/images/gone.jpg', '/icons/x.png', '/api/orders/lookup', '/api/products', '/p/gone']) assert.equal(scan.countsAsProbe(p), false, p);
+  for (const p of ['/wp-admin', '/.env', '/admin', '/api/admin/login']) assert.equal(scan.countsAsProbe(p), true, p);
   // Only behind the shop's proxy: without TRUST_PROXY=1 there is no address to count.
   const saved = process.env.TRUST_PROXY;
   delete process.env.TRUST_PROXY;
@@ -271,4 +280,17 @@ test('scanner slow-down: 10 misses in a minute slow an address, 30 shut it out f
   assert.equal(scan.addressOf({ 'x-real-ip': ip }), ip);
   if (saved === undefined) delete process.env.TRUST_PROXY;
   else process.env.TRUST_PROXY = saved;
+});
+
+test('a flood of 404s from many addresses never pushes out the sign-in and phone counters (the scanner counts have their own store)', async () => {
+  const rl = await import('@/lib/server/rateLimit');
+  rl._clearAllRateLimits();
+  const t0 = 1_900_000_000_000;
+  rl.recordHit('login:owner@test', t0);
+  for (let i = 0; i < 60_000; i++) scan.recordMiss(`2001:db8::${i.toString(16)}`, t0 + 1);
+  assert.equal(rl.peekLimit('login:owner@test', 1, 60_000, t0 + 2).ok, false, 'the sign-in count survived');
+  const sizes = rl._rateLimitSizes();
+  assert.ok(sizes.scan <= 50_000, `scanner store capped (${sizes.scan})`);
+  assert.equal(sizes.keys, 1);
+  rl._clearAllRateLimits();
 });

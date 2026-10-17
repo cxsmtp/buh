@@ -40,7 +40,7 @@ const RESET_KEY = 'admin:password-reset';
 export const LINK_BYTES = 24;
 /** A link segment: 32 base64url characters (192 bits). */
 export const LINK_PATTERN = /^[A-Za-z0-9_-]{32}$/;
-/** A password-reset email's one-time door grant: 43 base64url characters (256 bits). */
+/** A password-reset email's single-reset door grant: 43 base64url characters (256 bits). */
 export const GRANT_PATTERN = /^[A-Za-z0-9_-]{43}$/;
 
 /** The internal page the link is served from. Never reachable by its own name (src/lib/server/frontGate.ts). */
@@ -133,9 +133,9 @@ function doorMac(body: string, rec: LinkRecord): string {
 }
 
 /** A door token for the current link (null when there is no link yet). */
-export function issueDoorToken(now = Date.now(), rec: LinkRecord | null = currentLink()): string | null {
+export function issueDoorToken(now = Date.now(), rec: LinkRecord | null = currentLink(), ttlMs = DOOR_TTL_MS): string | null {
   if (!rec) return null;
-  const body = Buffer.from(JSON.stringify({ v: rec.version, iat: now, exp: now + DOOR_TTL_MS } satisfies DoorPayload)).toString('base64url');
+  const body = Buffer.from(JSON.stringify({ v: rec.version, iat: now, exp: now + Math.min(ttlMs, DOOR_TTL_MS) } satisfies DoorPayload)).toString('base64url');
   return `${body}.${doorMac(body, rec)}`;
 }
 
@@ -167,7 +167,7 @@ export function doorTokenFromCookieHeader(header: string | null | undefined): st
   return undefined;
 }
 
-export function doorCookie(token: string) {
+export function doorCookie(token: string, ttlMs = DOOR_TTL_MS) {
   return {
     name: DOOR_COOKIE,
     value: token,
@@ -175,7 +175,7 @@ export function doorCookie(token: string) {
     secure: process.env.NODE_ENV === 'production' && process.env.INSECURE_COOKIES !== '1',
     sameSite: 'strict' as const,
     path: '/',
-    maxAge: Math.floor(DOOR_TTL_MS / 1000),
+    maxAge: Math.max(1, Math.floor(Math.min(ttlMs, DOOR_TTL_MS) / 1000)),
   };
 }
 
@@ -192,21 +192,28 @@ export function hubHeaderMatches(given: string | null | undefined): boolean {
 // ── The password-reset email's door grant ───────────────────────────────────
 
 /**
- * A password-reset email opens the hub through a one-time grant (its own random
- * path, valid while the reset link is), so a reset works from a phone's mail app
- * that has never been through the admin link.
+ * A password-reset email opens the hub through a grant of its own (a random path,
+ * valid only while that reset is open: 30 minutes, ended by setting the password), so
+ * a reset works from a phone's mail app that has never been through the admin link.
+ * The door it gives lasts only as long as the grant (not 30 days). Not used up on the
+ * first visit on purpose: a mail app's link check opens links before the owner does.
+ * Returns when the grant ends (ms), or 0 when it doesn't open anything.
  */
-export function matchesResetGrant(segment: string, now = Date.now()): boolean {
-  if (!GRANT_PATTERN.test(segment)) return false;
+export function resetGrantExpiry(segment: string, now = Date.now()): number {
+  if (!GRANT_PATTERN.test(segment)) return 0;
   const raw = kvGet<unknown>(RESET_KEY)?.data;
   const links = Array.isArray(raw) ? raw : [];
   const given = hashSegment(segment, 'buh-reset-grant');
-  let found = false;
+  let found = 0;
   for (const l of links as Array<{ grant?: unknown; expires?: unknown }>) {
     // Every entry is compared (no early exit), so the time taken says nothing.
-    if (typeof l?.grant === 'string' && typeof l.expires === 'number' && l.expires > now && sameDigest(given, l.grant)) found = true;
+    if (typeof l?.grant === 'string' && typeof l.expires === 'number' && l.expires > now && sameDigest(given, l.grant)) found = l.expires;
   }
   return found;
+}
+
+export function matchesResetGrant(segment: string, now = Date.now()): boolean {
+  return resetGrantExpiry(segment, now) > 0;
 }
 
 export function newResetGrant(): { grant: string; grantHash: string } {

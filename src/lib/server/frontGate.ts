@@ -1,6 +1,7 @@
 import http from 'node:http';
 import { SESSION_COOKIE, verifySessionToken } from './adminAuth';
 import {
+  DOOR_TTL_MS,
   GRANT_PATTERN,
   HUB_HEADER,
   HUB_ROUTE,
@@ -12,7 +13,7 @@ import {
   hubHeaderValue,
   issueDoorToken,
   matchesLink,
-  matchesResetGrant,
+  resetGrantExpiry,
   setLinkNotice,
   takeReveal,
   verifyDoorToken,
@@ -26,7 +27,7 @@ import { SLOW_MS, addressOf, countsAsProbe, recordMiss, verdictFor } from './sca
  *
  * The Admin Hub's door (src/lib/server/adminLink.ts):
  * - The private admin link (one 32-character path) and a password-reset email's
- *   one-time path (43 characters): the hub page (/hub inside), with the door cookie,
+ *   own path (43 characters, open only while that reset is): the hub page (/hub inside), with the door cookie,
  *   Referrer-Policy: no-referrer, X-Robots-Tag: noindex, nofollow and no-store.
  * - Every admin address (/api/admin/…, /api/courier/dispatch and /test,
  *   /api/ai-transform) without a valid door cookie, and the hub page's own name: the
@@ -108,9 +109,10 @@ export function decide(rawUrl: string | undefined, cookieHeader: string | undefi
   const segment = path.slice(1);
   if ((LINK_PATTERN.test(segment) || GRANT_PATTERN.test(segment)) && path === `/${segment}`) {
     const rec = currentLink();
-    const opens = LINK_PATTERN.test(segment) ? matchesLink(segment, rec) : matchesResetGrant(segment, now);
-    const token = opens ? issueDoorToken(now, rec) : null;
-    if (token) return { kind: 'hub', url: `${HUB_ROUTE}${query}`, cookie: serializeCookie(doorCookie(token)), hubHeader: hubHeaderValue(rec) };
+    // The link: a door for 30 days. A reset email's grant: a door only while that reset is open.
+    const ttl = LINK_PATTERN.test(segment) ? (matchesLink(segment, rec) ? DOOR_TTL_MS : 0) : Math.max(0, resetGrantExpiry(segment, now) - now);
+    const token = ttl > 0 ? issueDoorToken(now, rec, ttl) : null;
+    if (token) return { kind: 'hub', url: `${HUB_ROUTE}${query}`, cookie: serializeCookie(doorCookie(token, ttl)), hubHeader: hubHeaderValue(rec) };
   }
   return { kind: 'pass' };
 }
@@ -201,7 +203,8 @@ export function installFrontGate(): void {
       slow = verdict.action === 'slow';
       if (countsAsProbe(normalizePath(rawPath).path)) {
         res.on('finish', () => {
-          if (res.statusCode === 404) recordMiss(ip);
+          // Not the owner's own misses (a deleted order): a valid door is one this shop issued.
+          if (res.statusCode === 404 && !verifyDoorToken(doorTokenFromCookieHeader(typeof req.headers.cookie === 'string' ? req.headers.cookie : '')).ok) recordMiss(ip);
         });
       }
     }

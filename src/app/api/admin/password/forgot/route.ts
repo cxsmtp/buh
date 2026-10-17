@@ -29,7 +29,7 @@ export async function POST(req: Request) {
     if (reset) {
       audit('admin.password_reset_requested', { ip: clientIp(req), emailed: emailConfigured() });
       // Not awaited: waiting for the mail server would make the admin email's answer slower than any other.
-      // The path is the link's one-time door grant (it opens the Admin Hub); the token stays in the fragment.
+      // The path is the link's single-reset door grant (it opens the Admin Hub); the token stays in the fragment.
       if (emailConfigured()) void sendLink(email.trim().toLowerCase(), `${base}/${reset.grant}#reset=${encodeURIComponent(reset.token)}`);
     }
     return json({ success: true, message: ANSWER });
@@ -40,7 +40,7 @@ export async function POST(req: Request) {
 
 /**
  * The token is in the fragment (#), which browsers never send to a server, so it stays out of access logs.
- * The path is a separate one-time grant, valid as long as the reset link, masked in the logs.
+ * The path is a separate single-reset grant, valid as long as the reset link, masked in the logs.
  */
 async function sendLink(to: string, link: string) {
   try {

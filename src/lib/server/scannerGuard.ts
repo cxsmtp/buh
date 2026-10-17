@@ -10,12 +10,17 @@ import { peekLimit, recordHit } from './rateLimit';
  *   Without it every visitor looks the same, so nothing is counted.
  * - Counted: 404 answers to pages and to the admin addresses. Not counted: the shop's
  *   own files (/_next/…, a missing photo, an icon), which an old page left open
- *   across an update can ask for by the dozen, and the public APIs.
+ *   across an update can ask for by the dozen; the public APIs; a product that was
+ *   taken down (/p/…, which a search engine or an old share can ask for); and a 404
+ *   to a browser holding a valid door (the hub asking for an order that was deleted).
+ *   A hub tab left open after the link was changed stops calling at its first unknown
+ *   address (DOOR_CLOSED_EVENT in src/lib/apiClient.ts), well under the limit.
  * - 10 such 404s in a minute: every further request from that address waits 1 s.
  *   30 in a minute: 429 Too Many Requests for 10 minutes, for every address of the shop.
  *   A shopper never gets near that (a whole visit has no 404 at all).
- * - Memory stays bounded: the counts are kept by the shop's rate limiter (capped at
- *   50,000 addresses, the least recently seen dropped first).
+ * - Memory stays bounded: the counts are kept by the shop's rate limiter, in a map of
+ *   their own (capped at 50,000 addresses, the least recently seen dropped first), so
+ *   404s can never push out the sign-in or phone counters.
  *
  * It works at the HTTP server itself (src/lib/server/frontGate.ts, installed once at start),
  * because only there is a 404 seen as a 404, for every kind of address.
@@ -29,7 +34,7 @@ export const SLOW_MS = 1000;
 
 /** Does a 404 at this path count as probing? */
 export function countsAsProbe(path: string): boolean {
-  if (path.startsWith('/_next/') || path.startsWith('/api/images/') || path.startsWith('/icons/')) return false;
+  if (path.startsWith('/_next/') || path.startsWith('/api/images/') || path.startsWith('/icons/') || path.startsWith('/p/')) return false;
   if (path.startsWith('/api/')) return path.startsWith('/api/admin') || path === '/api/courier/dispatch' || path === '/api/courier/test' || path === '/api/ai-transform';
   return true;
 }

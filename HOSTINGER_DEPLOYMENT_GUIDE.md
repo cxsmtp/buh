@@ -61,19 +61,15 @@ Everything the shop stores lives in one Docker volume and is backed up every 12 
 
 The Admin Hub has no button or address on the shop: addresses like `/admin` are an ordinary "not found". It is only at a private link like `https://yourdomain.ae/k7Qm2vXa9pTeLr4w…`.
 
-- **Where it is:** printed once in the log when it is made (the first start, or the update that brought it), and emailed to the admin email when email is set up. An owner signed in during that update is taken to it once when they next open the shop.
+- **Where it is:** printed in the log when it is made (the first start, or the update that brought it; it stays in `podman logs` until the container is removed), and emailed to the admin email when email is set up. An owner signed in during that update is taken to it once when they next open the shop.
 - **Bookmark it:** on the phone, open it and Share → **Add to Home Screen** (iPhone) or ⋮ → **Add to Home screen** (Android); on the laptop, Ctrl+D (⌘+D). One link for both: the phone gets the phone view, the laptop the full view, and **Phone view / Laptop view** at the top switches it per device.
 - **Change it:** Admin Hub → Settings → **Security** → **Change the admin link** (your password). The old link stops working at once; the new one is shown once and emailed.
-- **Lost it?** Only a fingerprint is kept, so it can't be printed again. Make a new one (the old one stops working); with Docker Compose:
-  ```bash
-  docker compose exec app-blue node scripts/admin-link.mjs --new
-  ```
-  With Podman:
+- **Lost it?** Only a fingerprint is kept, so it can't be printed again, and "Forgot password" needs the link too: the only way back in is a new link, made on the server (SSH or hPanel's browser terminal). The old one stops working:
   ```bash
   podman exec beautifuluaehome node scripts/admin-link.mjs --new
   ```
-- **Access logs** never hold it: the Caddy and nginx configs here log only its first 4 characters.
-- **Scanners:** with `TRUST_PROXY=1`, an address that gets 30 "not found" answers in a minute is slowed, then refused (429) for 10 minutes. Shoppers never are.
+- **Access logs** never hold it: the Caddy and nginx configs here log only its first 4 characters, and drop the redirect that moves a signed-in owner to a new link.
+- **Scanners:** with `TRUST_PROXY=1`, an address that gets 10 "not found" answers in a minute is slowed, and at 30 refused (429) for 10 minutes. Shoppers never are (a taken-down product doesn't count), and neither is your own hub: a tab left open after the link was changed stops at once and says so.
 
 ## 2. Go-live checklist (in the Admin Hub)
 

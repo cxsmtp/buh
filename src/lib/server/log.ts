@@ -8,7 +8,7 @@ const SECRET_KEY = /(pass(word)?|secret|token|api.?key|auth|authorization|cookie
 const PHONE = /\+?\d[\d\s-]{7,}\d/g;
 const EMAIL = /([A-Za-z0-9._%+-])[A-Za-z0-9._%+-]*@([A-Za-z0-9.-]+\.[A-Za-z]{2,})/g;
 // A long random path segment: the private admin link (32 characters) or a password-reset
-// email's one-time path (43). Only its first 4 characters are ever logged.
+// email's single-reset path (43). Only its first 4 characters are ever logged.
 const SECRET_PATH = /\/([A-Za-z0-9_-]{4})[A-Za-z0-9_-]{28,}/g;
 
 export function maskPhone(phone: string): string {

@@ -1,5 +1,19 @@
 # Changelog
 
+## BUH-02.08.00 — 2026-10-17 20:30 UTC · [#24](https://github.com/cxsmtp/buh/pull/24)
+
+- **The Admin Hub is off the shop.** The public site has no admin button, tab or address: /admin, /login, /wp-admin and every admin address answer exactly like a page that doesn't exist, byte for byte, so nobody can find it by guessing or scanning.
+- **Your own private link.** The hub opens only at a random 32-character link (shown in the log and emailed when it is made). Bookmark it on your phone and laptop: a phone gets the phone view, a laptop the full view, and a switch at the top changes it.
+- **Change or recover the link.** Settings → Security → Change the admin link ends the old link on every device at once. Lost it? `podman exec beautifuluaehome node scripts/admin-link.mjs --new` on the server makes a new one; "Forgot password" emails work on a phone that never had the link.
+- **Updating keeps you in.** The update makes your link, logs and emails it, and if you are signed in, takes you to it once the next time you open the shop.
+- **A hub tab left open says so.** If the link was changed elsewhere, an open hub tab stops at once with "This link no longer opens the Admin Hub", and never counts as a scanner.
+- **Scanners are slowed, then shut out.** Behind the shop's proxy, an address asking for many missing pages is slowed and then refused for 10 minutes; shoppers, taken-down products and your own hub never count. Logs (the shop's, Caddy's and nginx's) never hold the link.
+- **Status.**
+  - **Benchmark:** BENCH
+  - **Tests:** TESTS
+  - **Dependency audit:** production 0 vulnerabilities; no new packages.
+  - **Security scan:** an independent review of the gate (path tricks, forged doors, timing, headers, logs) found no way in; its 2 medium and 6 low findings were fixed with tests or documented. No automated scanner here.
+
 ## BUH-02.07.00 — 2026-10-16 19:35 UTC · [#23](https://github.com/cxsmtp/buh/pull/23)
 
 - **Fits every phone.** Reported: on a phone some screens went past the edge and you had to scroll sideways to reach a ✕. Every screen and pop-up (bag, checkout, confirmation, filter, product, chat, sign-in and the whole Admin Hub) now fits phones from 320 px wide, held sideways and with large text; every ✕ and main button stays in view.
