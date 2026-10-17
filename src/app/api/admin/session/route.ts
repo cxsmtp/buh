@@ -1,9 +1,11 @@
 import { cookies } from 'next/headers';
 import { SESSION_COOKIE, verifySessionToken } from '@/lib/server/adminAuth';
 import { handleRouteError, json } from '@/lib/server/http';
+import { requireDoor } from '@/lib/server/guard';
 
-export async function GET() {
+export async function GET(req: Request) {
   try {
+    requireDoor(req);
     const session = await verifySessionToken((await cookies()).get(SESSION_COOKIE)?.value);
     if (!session) return json({ authenticated: false });
     return json({

@@ -2,7 +2,7 @@ import { cookies } from 'next/headers';
 import { adminAccountInfo, passkeySession, sessionCookie } from '@/lib/server/adminAuth';
 import { emailAdmin, readableUtc } from '@/lib/server/adminAlerts';
 import { audit } from '@/lib/server/audit';
-import { clientIp, enforceIpLimit } from '@/lib/server/guard';
+import { clientIp, enforceIpLimit, requireDoor } from '@/lib/server/guard';
 import { allowFields, assertSameOrigin, handleRouteError, HttpError, json, readJsonBody } from '@/lib/server/http';
 import {
   CHALLENGE_COOKIE,
@@ -24,6 +24,7 @@ import {
 export async function POST(req: Request) {
   const ip = clientIp(req);
   try {
+    requireDoor(req);
     assertSameOrigin(req);
     enforceIpLimit(req, 'passkey-sign-in', 30, 10 * 60 * 1000, 'Too many sign-in attempts from this address. Wait a few minutes.');
     const body = await readJsonBody(req, 16 * 1024);

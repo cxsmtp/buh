@@ -2,10 +2,12 @@ import { cookies } from 'next/headers';
 import { clearedSessionCookie, endAllSessions, SESSION_COOKIE, verifySessionToken } from '@/lib/server/adminAuth';
 import { audit } from '@/lib/server/audit';
 import { assertSameOrigin, handleRouteError, json } from '@/lib/server/http';
+import { requireDoor } from '@/lib/server/guard';
 
 /** Sign out everywhere: the session generation is bumped, so copied cookies stop working too. */
 export async function POST(req: Request) {
   try {
+    requireDoor(req);
     assertSameOrigin(req);
     const session = await verifySessionToken((await cookies()).get(SESSION_COOKIE)?.value);
     if (session) {

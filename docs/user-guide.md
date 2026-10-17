@@ -54,7 +54,7 @@ The shop can sit on the home screen of a phone or tablet and open full screen, w
 
 - The app's name and icon come from **Settings → Branding & bank**: the store name (a name in capitals shows as "Beautiful UAE Home"; the label under the icon is shortened to fit, e.g. "UAE Home") and the logo (a PNG or JPEG logo on white, or the logo's letters on the brand colour). A new logo reaches installed phones when they next check, usually within a day.
 - During a festival the phone's status bar takes the deep shade of the festival's accent; otherwise the shop's ink.
-- Installing needs the shop on **https://** (the deployment's Caddy gives it). Install it on your own phone the same way; the Admin Hub works in the app too.
+- Installing needs the shop on **https://** (the deployment's Caddy gives it). Install it on your own phone the same way. The Admin Hub is not in the shop's app: add your admin link to the home screen separately (see "Your private admin link").
 - What the app keeps on the phone, and what it never keeps: docs/security.md, "The installed app".
 - **If the app misbehaves on phones** (an emergency): set `SW_RESET=true` in the shop's settings and restart the shop. Each phone that opens the shop then drops the app's saved copy and works as a plain website (the icon stays; it opens the website). For a phone that is still stuck, open `https://yourdomain/reset-app` on it: it also clears that phone's bag. When things are fixed, set `SW_RESET=false` (or remove it) and restart: phones pick the app up again on their next visit.
 - **Going back to a version from before the app** (BUH-02.05.00 or older) is safe: the shop works as a website at once, and the app's saved copy removes itself from each phone the next time the shop is opened (within about 10 minutes).
@@ -79,11 +79,30 @@ The shop can sit on the home screen of a phone or tablet and open full screen, w
 
 ## For the owner: the Admin Hub
 
+### Your private admin link
+
+The Admin Hub is not on the shop's pages: there is no button, tab or link to it, and addresses like /admin, /login or /wp-admin are an ordinary "page not found", exactly like any address that does not exist. It is only at your own private link, which looks like `https://yourdomain.ae/k7Qm2vXa9pTeLr4w…` (32 random letters and digits).
+
+- **Where to find it:** the first start prints it in the log, in a box next to the first password (`podman logs beautifuluaehome`). It stays in that container log until the container is removed, so keep the server's login private. When email is set up it is also emailed to your admin email.
+- **Updating from an earlier version:** the update makes your link. It is printed once in the log and emailed (when email is set up), and if you are signed in at that moment, the next time you open the shop you are taken to it once. The Admin Hub then says **The Admin Hub has moved to this private link**.
+- **Bookmark it on your phone:** open the link, then on an iPhone Share → **Add to Home Screen** (or Add Bookmark); on Android the ⋮ menu → **Add to Home screen** (or the bookmark star). **On your laptop:** open it and press Ctrl+D (⌘+D on a Mac). The hub says "This is your private Admin Hub link" until you press **I've bookmarked it**.
+- **One link for every device:** a phone gets the phone view (one column, the tab bar at the bottom), a laptop the full view (tabs at the top). The **Phone view / Laptop view** switch at the top changes it; each device remembers its choice.
+- **Keep it private:** don't share or post it. Opening it lets a browser reach the sign-in for 30 days (renewed while you use it); your password, a passkey or a recovery code is still needed.
+- **Change it** (if someone may have seen it): Settings → **Security** → **Change the admin link**, with your current password (or no password within 10 minutes of a passkey sign-in). The old link, and every phone or laptop that used it, stop working at once; the new link is shown once (copy it, then **Open the new link** and bookmark it again) and emailed. The audit log notes the change, never the link.
+- **Lost it?** Only a fingerprint of the link is kept, so it can't be shown again, by anyone, and "Forgot password" needs the link too. The only way back in is a new link, made on the server (on the VPS: SSH, or hPanel's browser terminal); the old one stops working:
+
+```
+podman exec beautifuluaehome node scripts/admin-link.mjs --new
+```
+
+  Without `--new` it only says when the link was made.
+- **After restoring a backup:** the link from the backup works again. If you changed the link after that backup was taken, make a new one with the command above.
+
 ### First sign-in
 
 - **Docker / PM2:** the first start prints a one-time password in the log (`docker compose logs app-blue` or `pm2 logs buhome-app`).
-- Sign in from **Admin Hub** with that email and password, then choose your own password: at least 12 characters, with at least 5 different characters.
-- **Forgot password?** on the sign-in screen emails a link to the admin email (works once, for 30 minutes); every device is signed out when you choose the new password. It needs email set up (Settings → Email & admin account).
+- Open your admin link and sign in with that email and password, then choose your own password: at least 12 characters, with at least 5 different characters.
+- **Forgot password?** on the sign-in screen emails a link to the admin email (works once, for 30 minutes; it opens the Admin Hub by itself, also on a phone that has never had the admin link); every device is signed out when you choose the new password. It needs email set up (Settings → Email & admin account).
 - No email set up? On the server: `docker compose exec app-blue rm /data/admin.json`, then `docker compose restart app-blue app-green`, then read the new one-time password with `docker compose logs app-blue` (Podman: `podman exec beautifuluaehome rm /data/admin.json`, `podman restart beautifuluaehome`, `podman logs beautifuluaehome`). You can also set `ADMIN_EMAIL` and `ADMIN_PASSWORD_HASH` (from `npm run hash-password`).
 - **Settings → Email & admin account:** your mail server (SMTP), where backups and alerts go, **Send a test email**, and your sign-in email (current password needed).
 - 5 wrong passwords (or recovery codes) from one place pause sign-in there for 15 minutes; try again later or from another network. **Sign out** signs you out on every device.
@@ -99,7 +118,7 @@ Set these up once, in **Settings → Passkeys & recovery codes**, so you can alw
 - **Using a code:** on the sign-in screen press **Use a recovery code**, type your admin email and one code. Each code works once. Every other device is signed out, you choose a new password, and the admin email gets a note that a code was used. Settings shows how many codes are left and warns when 2 or fewer remain: create a new set then.
 - If your password is set on the server (`ADMIN_PASSWORD_HASH` in .env.production), a recovery code still signs you in, but the password can only be changed there: `npm run hash-password`, put the new hash in .env.production, restart the shop. In that setup **a recovery code is a full key to the Admin Hub for 30 minutes**, so keep the codes as safe as the password.
 - **After restoring a backup:** the backup may be older than a passkey you removed or your newest codes, so restored recovery codes stop working and restored passkeys are switched off. Sign in with the password, then follow the banner (**Review now**): press **Keep** (password needed) on each passkey you still have, **Remove** the others, and create new recovery codes. Press **Done, hide this** when finished.
-- The version (BUH-xx.xx.xx) shows bottom left on every page. In the Admin Hub, tap it for **Settings → Versions**: every release with what changed, and (with automatic updates on) **Switch to this version** for any release from BUH-02.00.00, or **Update to the latest**. The shop stays open while it switches, and the database is saved first.
+- The version (BUH-xx.xx.xx) shows bottom left on every page (in the shop it is only text). In the Admin Hub, tap it for **Settings → Versions**: every release with what changed, and (with automatic updates on) **Switch to this version** for any release from BUH-02.00.00, or **Update to the latest**. The shop stays open while it switches, and the database is saved first.
 - **Updates** (with the updater turned on, see the deployment guide) install themselves without closing the shop or signing you out. If a new version does not start properly, the shop stays on the one before and an alert is written. A customer in the middle of checkout carries on: their bag, details and SMS code are kept.
 - **One Podman container (a Windows laptop or a Linux server):** paste the one-line `setup` command once (Settings → Versions shows it, one line for Command Prompt and one for PowerShell; deployment guide, "One Podman container"). The images are private, so Podman must be logged in to `ghcr.io` first (deployment guide, "Private images"); when that login expires, Settings → Versions says so in red and updates wait until you log in again. The page also has a switch, **Install new versions automatically** (on by default): off, nothing is checked or installed by itself, but "Update to the latest", switching versions and restarting a stopped shop still work; it says when the last check ran and what it found. Under **Installed on this server** you see each version installed, with its digest, when, and why; a release marked "verified" runs exactly the contents it was first published with. If a version ever comes back with other contents, it is refused and the page warns you in red. Nothing is downloaded or kept on the computer but the images. The same then happens, with one difference: at the switch the shop is closed for a few seconds. The new version is tried first beside the running one, and if it does not answer, the old one is put back. Settings → Versions then says "Automatic updates: Podman (one container)". The shop keeps its own settings and port. From then on, update with **Update to the latest**, not with the old Podman commands (stop the updater first if you must). Without it, the page shows the two Podman commands to update by hand. The updater also keeps itself up to date. After the computer restarts, start Podman (`podman machine start`, or let Podman Desktop start it); the shop and the updater come back if Podman's restart service is on (the set-up prints the one line for it), otherwise run `podman start beautifuluaehome-updater` and it starts the shop.
 
@@ -174,6 +193,7 @@ On each product, customers see **Ask in chat**, **Ask on WhatsApp** and **Ask on
 - **Chat assistant:** see Chats above.
 - **Delivery:** the emirates you deliver to, areas you don't serve (a short form counts: "JVC" also covers "Jumeirah Village Circle (JVC)"), the delivery time customers see (1–2 days), and same-day delivery: switch it on, set the extra charge, the cut-off time (UAE) and where it's offered. Customers see a green tick for their area and choose standard or same day; the courier is never named to them.
 - **Email & admin account:** the mail server, where backups and alerts go, the mailbox for chat replies, and your sign-in email.
+- **Security:** your private admin link: **Change the admin link** (see "Your private admin link" above).
 - **Passkeys & recovery codes:** your ways back in if you forget the password (see above).
 - **Catalogue:** the size presets offered when adding a product (name, measurements, price difference, pieces in the set), the categories shown in the shop (each category with pieces in it is a round story chip at the top of the shop, in this order, with its first piece's photo; **New in** and **On sale** chips come from each product's **New arrival** tick and its **Was (AED)** price), and the **Only N left** level.
 - **Branding & bank:** the shop's name, tagline and logo (the logo's letters sit on one of the palette's tones: champagne gold, antique gold, ink or dusty rose), and bank-transfer details.
@@ -260,4 +280,4 @@ Enter the Jeebly and Eco Express keys and use **Test connection**. Keys are kept
 
 ### Audit log
 
-`DATA_DIR/audit-YYYY-MM.jsonl` lists sign-ins (by password, passkey or recovery code), refused sign-ins, password changes, passkeys added or removed, new recovery codes, courier bookings and tests, SMS tests, and every stock change made in the Admin Hub (who, why, old → new). Each line is chained to the one before, so edits are detectable.
+`DATA_DIR/audit-YYYY-MM.jsonl` lists sign-ins (by password, passkey or recovery code), refused sign-ins, password changes, passkeys added or removed, new recovery codes, admin link changes (never the link), courier bookings and tests, SMS tests, and every stock change made in the Admin Hub (who, why, old → new). Each line is chained to the one before, so edits are detectable.

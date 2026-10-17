@@ -1,6 +1,6 @@
 import { startPasswordReset } from '@/lib/server/adminAuth';
 import { audit } from '@/lib/server/audit';
-import { clientIp, enforceIpLimit } from '@/lib/server/guard';
+import { clientIp, enforceIpLimit, requireDoor } from '@/lib/server/guard';
 import { assertSameOrigin, handleRouteError, json, readJsonBody, str } from '@/lib/server/http';
 import { logEvent } from '@/lib/server/log';
 import { emailConfigured, sender, transport } from '@/lib/server/mail';
@@ -18,17 +18,19 @@ const ANSWER =
 
 export async function POST(req: Request) {
   try {
+    requireDoor(req);
     assertSameOrigin(req);
     enforceIpLimit(req, 'password-forgot', 5, 60 * 60 * 1000, 'Too many requests from this address. Try again in an hour.');
     const body = await readJsonBody(req, 1024);
     const email = str(body.email, 'Email', 254);
     // Worked out for every request (and inside it: it reads this request's Host), so both answers cost the same.
     const base = await siteUrl();
-    const token = await startPasswordReset(email);
-    if (token) {
+    const reset = await startPasswordReset(email);
+    if (reset) {
       audit('admin.password_reset_requested', { ip: clientIp(req), emailed: emailConfigured() });
       // Not awaited: waiting for the mail server would make the admin email's answer slower than any other.
-      if (emailConfigured()) void sendLink(email.trim().toLowerCase(), `${base}/#reset=${encodeURIComponent(token)}`);
+      // The path is the link's single-reset door grant (it opens the Admin Hub); the token stays in the fragment.
+      if (emailConfigured()) void sendLink(email.trim().toLowerCase(), `${base}/${reset.grant}#reset=${encodeURIComponent(reset.token)}`);
     }
     return json({ success: true, message: ANSWER });
   } catch (err) {
@@ -36,7 +38,10 @@ export async function POST(req: Request) {
   }
 }
 
-/** The token is in the fragment (#), which browsers never send to a server, so it stays out of access logs. */
+/**
+ * The token is in the fragment (#), which browsers never send to a server, so it stays out of access logs.
+ * The path is a separate single-reset grant, valid as long as the reset link, masked in the logs.
+ */
 async function sendLink(to: string, link: string) {
   try {
     const shop = getSettings('brand').storeName || 'Beautiful UAE Home';

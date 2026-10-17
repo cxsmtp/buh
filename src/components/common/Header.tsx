@@ -1,7 +1,7 @@
 'use client';
 
 import React from 'react';
-import { ShoppingBag, Search, MapPin, Layers } from 'lucide-react';
+import { ShoppingBag, Search, MapPin } from 'lucide-react';
 import { BrandSettings } from '@/types';
 import { PALETTE } from '@/lib/design/tokens';
 
@@ -10,9 +10,6 @@ interface HeaderProps {
   onOpenCart: () => void;
   onOpenSearch: () => void;
   onOpenTrack: () => void;
-  isAdminMode: boolean;
-  onToggleAdminMode: () => void;
-  pendingOrdersCount?: number;
   brandSettings?: BrandSettings;
   /** The logo (and name) take the shopper back to the top of the shop. */
   onHome?: () => void;
@@ -39,7 +36,7 @@ export function BrandLogo({ brand, className = 'w-9 h-9 text-base' }: { brand?: 
  * The slim bar that stays at the top while scrolling: the logo and name, and the bag. On wider
  * screens also search and Track Order (on phones those are in the tab bar at the bottom).
  */
-export const Header: React.FC<HeaderProps> = ({ cartCount, onOpenCart, onOpenSearch, onOpenTrack, isAdminMode, onToggleAdminMode, pendingOrdersCount = 0, brandSettings, onHome }) => {
+export const Header: React.FC<HeaderProps> = ({ cartCount, onOpenCart, onOpenSearch, onOpenTrack, brandSettings, onHome }) => {
   const name = brandSettings?.storeName || 'Beautiful UAE Home';
   return (
     <header className="sticky top-0 z-40 bg-ivory/95 backdrop-blur-md border-b border-line pt-safe">
@@ -47,8 +44,8 @@ export const Header: React.FC<HeaderProps> = ({ cartCount, onOpenCart, onOpenSea
         <button
           type="button"
           className="flex items-center gap-2.5 min-w-0 rounded-full text-left"
-          onClick={() => (isAdminMode ? onToggleAdminMode() : onHome?.())}
-          aria-label={isAdminMode ? 'Back to the shop' : `${name}: top of the shop`}
+          onClick={() => onHome?.()}
+          aria-label={`${name}: top of the shop`}
         >
           <BrandLogo brand={brandSettings} />
           <span className="min-w-0">
@@ -58,44 +55,21 @@ export const Header: React.FC<HeaderProps> = ({ cartCount, onOpenCart, onOpenSea
         </button>
 
         <div className="flex items-center gap-1 sm:gap-2 shrink-0">
-          {!isAdminMode && (
-            <>
-              <button type="button" onClick={onOpenSearch} className="hidden md:flex w-10 h-10 items-center justify-center rounded-full text-ink hover:bg-sand-deep/60" aria-label="Search products">
-                <Search className="w-5 h-5" aria-hidden="true" />
-              </button>
-              <button type="button" onClick={onOpenTrack} className="hidden md:flex items-center gap-1.5 h-10 px-3 rounded-full text-sm text-ink hover:bg-sand-deep/60">
-                <MapPin className="w-4 h-4 text-gold-deep" aria-hidden="true" />
-                <span>Track Order</span>
-              </button>
-            </>
-          )}
-
-          {/* The owner's way in (signed-in check on the server) */}
-          <button
-            type="button"
-            onClick={onToggleAdminMode}
-            title={isAdminMode ? 'Admin Hub' : 'Admin Hub (for the shop owner)'}
-            className={`relative flex items-center gap-1.5 h-10 px-2.5 rounded-full text-xs font-semibold transition-colors ${
-              isAdminMode ? 'bg-warning text-white' : 'text-ink-soft hover:bg-sand-deep/60'
-            }`}
-          >
-            <Layers className="w-4 h-4" aria-hidden="true" />
-            <span className={isAdminMode ? 'hidden sm:inline' : 'sr-only'}>Admin Hub</span>
-            {pendingOrdersCount > 0 && (
-              <span className="absolute -top-0.5 -right-0.5 min-w-4 h-4 px-1 rounded-full bg-danger text-[10px] font-semibold text-white flex items-center justify-center">{pendingOrdersCount}</span>
+          <button type="button" onClick={onOpenSearch} className="hidden md:flex w-10 h-10 items-center justify-center rounded-full text-ink hover:bg-sand-deep/60" aria-label="Search products">
+            <Search className="w-5 h-5" aria-hidden="true" />
+          </button>
+          <button type="button" onClick={onOpenTrack} className="hidden md:flex items-center gap-1.5 h-10 px-3 rounded-full text-sm text-ink hover:bg-sand-deep/60">
+            <MapPin className="w-4 h-4 text-gold-deep" aria-hidden="true" />
+            <span>Track Order</span>
+          </button>
+          <button type="button" onClick={onOpenCart} className="relative w-10 h-10 flex items-center justify-center rounded-full bg-ink text-white hover:bg-ink-2" aria-label={`View shopping bag${cartCount ? `, ${cartCount} ${cartCount === 1 ? 'piece' : 'pieces'}` : ''}`}>
+            <ShoppingBag className="w-5 h-5 text-gold-light" aria-hidden="true" />
+            {cartCount > 0 && (
+              <span className="absolute -top-1 -right-1 bg-gold text-ink text-[11px] font-semibold min-w-5 h-5 px-1 rounded-full flex items-center justify-center ring-2 ring-ivory" aria-hidden="true">
+                {cartCount}
+              </span>
             )}
           </button>
-
-          {!isAdminMode && (
-            <button type="button" onClick={onOpenCart} className="relative w-10 h-10 flex items-center justify-center rounded-full bg-ink text-white hover:bg-ink-2" aria-label={`View shopping bag${cartCount ? `, ${cartCount} ${cartCount === 1 ? 'piece' : 'pieces'}` : ''}`}>
-              <ShoppingBag className="w-5 h-5 text-gold-light" aria-hidden="true" />
-              {cartCount > 0 && (
-                <span className="absolute -top-1 -right-1 bg-gold text-ink text-[11px] font-semibold min-w-5 h-5 px-1 rounded-full flex items-center justify-center ring-2 ring-ivory" aria-hidden="true">
-                  {cartCount}
-                </span>
-              )}
-            </button>
-          )}
         </div>
       </div>
     </header>

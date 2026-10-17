@@ -76,6 +76,16 @@ jobs:
           curl -sf http://127.0.0.1:3000/api/products | grep -q '"products"'
           curl -sf http://127.0.0.1:3000/api/settings/public | grep -q 'help@ci.example'
           docker logs buh-test 2>&1 | grep -q 'first admin account created'
+          # The Admin Hub's private link: printed once; /admin is a plain 404; the image's own command makes a new link.
+          LINK=$(docker logs buh-test 2>&1 | grep -o 'Admin link: /[A-Za-z0-9_-]*' | head -1 | cut -d' ' -f3)
+          test "${#LINK}" = "33"
+          curl -sf "http://127.0.0.1:3000$LINK" | grep -q '<title>Admin Hub'
+          test "$(curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:3000/admin)" = "404"
+          test "$(curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:3000/api/admin/session)" = "404"
+          docker exec buh-test node scripts/admin-link.mjs | grep -q 'cannot be shown again'
+          NEW=$(docker exec buh-test node scripts/admin-link.mjs --new | grep -o 'Admin link: /[A-Za-z0-9_-]*' | cut -d' ' -f3)
+          curl -sf "http://127.0.0.1:3000$NEW" | grep -q '<title>Admin Hub'
+          test "$(curl -s -o /dev/null -w '%{http_code}' "http://127.0.0.1:3000$LINK")" = "404"
           test "$(docker exec buh-test id -u)" = "1001"
           docker exec buh-test node scripts/backup-now.mjs | grep -E 'pre-update-|nothing to back up'
           docker exec buh-test node -e "require('fs').writeFileSync('/app/x','x')" && exit 1 || echo "app folder is read-only"

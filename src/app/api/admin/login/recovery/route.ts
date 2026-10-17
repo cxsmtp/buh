@@ -1,7 +1,7 @@
 import { sessionCookie, signInWithRecoveryCode } from '@/lib/server/adminAuth';
 import { emailAdmin, readableUtc } from '@/lib/server/adminAlerts';
 import { audit } from '@/lib/server/audit';
-import { clientIp, enforceIpLimit } from '@/lib/server/guard';
+import { clientIp, enforceIpLimit, requireDoor } from '@/lib/server/guard';
 import { allowFields, assertSameOrigin, handleRouteError, HttpError, json, readJsonBody, str } from '@/lib/server/http';
 
 /**
@@ -14,6 +14,7 @@ import { allowFields, assertSameOrigin, handleRouteError, HttpError, json, readJ
 export async function POST(req: Request) {
   const ip = clientIp(req);
   try {
+    requireDoor(req);
     assertSameOrigin(req);
     // Shares the sign-in allowance of this address with passwords.
     enforceIpLimit(req, 'signin', 30, 10 * 60 * 1000, 'Too many sign-in attempts from this address. Wait a few minutes.');

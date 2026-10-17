@@ -1,34 +1,14 @@
 'use client';
 
 import React, { useState, useEffect, useMemo, useCallback, useRef } from 'react';
-import dynamic from 'next/dynamic';
-import { Product, Order, Customer, CourierSettings, CartItem, BedProfileMeasurement, BrandSettings, SmsGatewaySettings, BankTransferDetails, CatalogSettings, StoreSettings, ThemeSettings, EmailSettings, AssistantSettings, DeliverySettings, PhoneVerificationConfig } from '@/types';
-import { DEFAULT_ASSISTANT, DEFAULT_CATALOG, DEFAULT_DELIVERY, DEFAULT_EMAIL_SETTINGS, DEFAULT_STORE, DEFAULT_THEME_SETTINGS } from '@/data/catalogDefaults';
+import { Product, Order, CartItem, BedProfileMeasurement, BrandSettings, BankTransferDetails, CatalogSettings, StoreSettings, DeliverySettings, PhoneVerificationConfig } from '@/types';
+import { DEFAULT_CATALOG, DEFAULT_DELIVERY, DEFAULT_STORE } from '@/data/catalogDefaults';
 import { askWhatsAppLink, piecesLeft, refreshCart, ShopProvider, type FestivalView, type ShopInfo } from '@/lib/client/shop';
 import { captureLanding, decodeBag, type BagLine, type Landing } from '@/lib/client/landing';
 import { useLiveUpdates } from '@/lib/client/live';
-import { stockAlerts } from '@/lib/client/stock';
-import { INITIAL_BANK_DETAILS, INITIAL_BRAND_SETTINGS, INITIAL_COURIER_SETTINGS, INITIAL_SMS_SETTINGS } from '@/data/initialData';
-import { ADMIN_SIGNED_OUT_EVENT, getJson, postJson, sendJson } from '@/lib/apiClient';
+import { INITIAL_BANK_DETAILS, INITIAL_BRAND_SETTINGS } from '@/data/initialData';
+import { getJson } from '@/lib/apiClient';
 import { applyUpdate, checkForUpdate, registerServiceWorker, useUpdateWaiting } from '@/lib/client/pwa';
-
-/** Settings as the admin hub receives them: secrets blank, with which are saved. */
-interface AdminSetting<T> {
-  value: T;
-  secretsSet: Record<string, boolean>;
-}
-interface AdminSettings {
-  courier: AdminSetting<CourierSettings>;
-  sms: AdminSetting<SmsGatewaySettings>;
-  catalog: AdminSetting<CatalogSettings>;
-  store: AdminSetting<StoreSettings>;
-  theme: AdminSetting<ThemeSettings>;
-  email: AdminSetting<EmailSettings>;
-  assistant: AdminSetting<AssistantSettings>;
-  delivery: AdminSetting<DeliverySettings>;
-}
-
-type AdminTab = 'orders' | 'add-product' | 'inventory' | 'crm' | 'settings' | 'chats';
 
 /** Catalogue + public settings from the server (no React state here). */
 async function fetchCatalog() {
@@ -37,18 +17,6 @@ async function fetchCatalog() {
     getJson<{ brand: BrandSettings; bank: BankTransferDetails; supportEmail?: string; store?: StoreSettings; catalog?: { categories: CatalogSettings['categories']; lowStockThreshold: number }; festival?: FestivalView | null; phoneVerification?: PhoneVerificationConfig; chat?: { name: string; greeting: string } | null; delivery?: DeliverySettings }>('/api/settings/public'),
   ]);
   return { products, settings };
-}
-
-/** Everything the admin hub shows (no React state here). */
-async function fetchAdminData() {
-  const [orders, customers, products, settings, chats] = await Promise.all([
-    getJson<{ orders: Order[] }>('/api/admin/orders'),
-    getJson<{ customers: Customer[] }>('/api/admin/customers'),
-    getJson<{ products: Product[] }>('/api/admin/products'),
-    getJson<AdminSettings>('/api/admin/settings'),
-    getJson<{ waiting: number }>('/api/admin/chats'),
-  ]);
-  return { orders, customers, products, settings, chats };
 }
 
 const CART_KEY = 'buh_cart_v2';
@@ -95,39 +63,12 @@ import { CartDrawer } from '@/components/store/CartDrawer';
 import { CheckoutModal } from '@/components/store/CheckoutModal';
 import { OrderTrackerModal } from '@/components/store/OrderTrackerModal';
 
-// The Admin Hub is loaded only when it is opened (and the sign-in only when asked for):
-// shoppers never download or render admin code.
-const AdminHeader = dynamic(() => import('@/components/admin/AdminHeader').then((m) => m.AdminHeader), { ssr: false });
-const AdminOrdersTab = dynamic(() => import('@/components/admin/AdminOrdersTab').then((m) => m.AdminOrdersTab), { ssr: false });
-const AdminInventoryTab = dynamic(() => import('@/components/admin/AdminInventoryTab').then((m) => m.AdminInventoryTab), { ssr: false });
-const AdminCrmTab = dynamic(() => import('@/components/admin/AdminCrmTab').then((m) => m.AdminCrmTab), { ssr: false });
-const AdminCouriersTab = dynamic(() => import('@/components/admin/AdminCouriersTab').then((m) => m.AdminCouriersTab), { ssr: false });
-const AdminBrandingTab = dynamic(() => import('@/components/admin/AdminBrandingTab').then((m) => m.AdminBrandingTab), { ssr: false });
-const AdminSmsTab = dynamic(() => import('@/components/admin/AdminSmsTab').then((m) => m.AdminSmsTab), { ssr: false });
-const AdminLoginModal = dynamic(() => import('@/components/admin/AdminLoginModal').then((m) => m.AdminLoginModal), { ssr: false });
-const BackupStatus = dynamic(() => import('@/components/admin/BackupStatus').then((m) => m.BackupStatus), { ssr: false });
-const RestoreNotice = dynamic(() => import('@/components/admin/RestoreNotice').then((m) => m.RestoreNotice), { ssr: false });
-const CatalogSettingsCard = dynamic(() => import('@/components/admin/settings/CatalogSettingsCard').then((m) => m.CatalogSettingsCard), { ssr: false });
-const SettingsConsole = dynamic(() => import('@/components/admin/settings/SettingsConsole').then((m) => m.SettingsConsole), { ssr: false });
-const StoreSettingsCard = dynamic(() => import('@/components/admin/settings/StoreSettingsCard').then((m) => m.StoreSettingsCard), { ssr: false });
-const MarqueeSettingsCard = dynamic(() => import('@/components/admin/settings/MarqueeSettingsCard').then((m) => m.MarqueeSettingsCard), { ssr: false });
-const ThemeSettingsCard = dynamic(() => import('@/components/admin/settings/ThemeSettingsCard').then((m) => m.ThemeSettingsCard), { ssr: false });
-const SettingsHistoryCard = dynamic(() => import('@/components/admin/settings/SettingsHistoryCard').then((m) => m.SettingsHistoryCard), { ssr: false });
-const EmailSettingsCard = dynamic(() => import('@/components/admin/settings/EmailSettingsCard').then((m) => m.EmailSettingsCard), { ssr: false });
-const SignInRecoveryCard = dynamic(() => import('@/components/admin/settings/SignInRecoveryCard').then((m) => m.SignInRecoveryCard), { ssr: false });
-const VersionsCard = dynamic(() => import('@/components/admin/settings/VersionsCard').then((m) => m.VersionsCard), { ssr: false });
-const AssistantSettingsCard = dynamic(() => import('@/components/admin/settings/AssistantSettingsCard').then((m) => m.AssistantSettingsCard), { ssr: false });
-const DeliverySettingsCard = dynamic(() => import('@/components/admin/settings/DeliverySettingsCard').then((m) => m.DeliverySettingsCard), { ssr: false });
-const AdminChatsTab = dynamic(() => import('@/components/admin/AdminChatsTab').then((m) => m.AdminChatsTab), { ssr: false });
-const SystemHealthCard = dynamic(() => import('@/components/admin/settings/SystemHealthCard').then((m) => m.SystemHealthCard), { ssr: false });
-
 import { HelpLauncher } from '@/components/store/HelpLauncher';
 import { InstallPrompt } from '@/components/store/InstallPrompt';
 import { THEME_COLOR } from '@/lib/design/tokens';
-import type { BrandDraft } from '@/components/admin/AdminBrandingTab';
 import { VersionBadge } from '@/components/common/VersionBadge';
 
-import { Archive, Box, Feather, KeyRound, LayoutGrid, Mail, MessageSquare, Palette, ShieldCheck, SlidersHorizontal, Smartphone, Store, Truck, X } from 'lucide-react';
+import { SlidersHorizontal, X } from 'lucide-react';
 import { festiveVars } from '@/components/store/FestiveGreeting';
 import { EMPTY_FILTERS, SORTS, activeChips, activeCount, applyFilters, buildStories, filtersToSearch, parseFilters, type Filters } from '@/lib/catalogFilter';
 
@@ -143,23 +84,13 @@ function writeSearch(search: string, mode: 'push' | 'replace') {
 }
 
 /**
- * The whole shop (storefront and admin hub) in one client app. Rendered at /
- * and at /p/<product id>, which opens that product straight away: the links
- * shared on WhatsApp and Instagram (they preview with the product photo).
+ * The storefront, one client app. Rendered at / and at /p/<product id>, which
+ * opens that product straight away: the links shared on WhatsApp and Instagram
+ * (they preview with the product photo). The Admin Hub is not here: it is its
+ * own page at the owner's private link (src/lib/server/frontGate.ts), so nothing in the shop's
+ * pages or scripts leads to it.
  */
 export function ShopApp({ initialProductId }: { initialProductId?: string } = {}) {
-  // Theme state based on device settings
-
-  // App Navigation & Modes
-  const [isAdminMode, setIsAdminMode] = useState(false);
-  const [isAdminAuthenticated, setIsAdminAuthenticated] = useState(false);
-  const [isAdminLoginOpen, setIsAdminLoginOpen] = useState(false);
-  // From a password-reset email link (#reset=…).
-  const [resetToken, setResetToken] = useState<string | null>(null);
-
-  const [adminTab, setAdminTab] = useState<AdminTab>('orders');
-  // The version badge opens Settings → Versions (re-creating the console on that section).
-  const [settingsOpen, setSettingsOpen] = useState<{ id?: string; n: number }>({ n: 0 });
   // What the shop shows (search, filters, sort): mirrored in the address bar so it can be shared and Back works.
   const [filters, setFilters] = useState<Filters>(EMPTY_FILTERS);
   const [filterOpen, setFilterOpen] = useState(false);
@@ -183,9 +114,6 @@ export function ShopApp({ initialProductId }: { initialProductId?: string } = {}
   const [festival, setFestival] = useState<FestivalView | null>(null);
   const [chatInfo, setChatInfo] = useState<{ name: string; greeting: string } | null>(null);
   const [delivery, setDelivery] = useState<DeliverySettings>(DEFAULT_DELIVERY);
-  // Admin Hub → Chats: conversations waiting for a person (badge), and a counter that reloads the tab.
-  const [chatsWaiting, setChatsWaiting] = useState(0);
-  const [chatsKey, setChatsKey] = useState(0);
   // Where this visitor first came from (Instagram, WhatsApp…), sent with the order.
   const [landing] = useState<Landing | null>(() => (typeof window === 'undefined' ? null : captureLanding()));
   // Pre-fills Track Order (only rendered once opened, so no server/client mismatch).
@@ -196,30 +124,6 @@ export function ShopApp({ initialProductId }: { initialProductId?: string } = {}
       return '';
     }
   });
-  // Admin hub only
-  const [orders, setOrders] = useState<Order[]>([]);
-  const [customers, setCustomers] = useState<Customer[]>([]);
-  const [adminProducts, setAdminProducts] = useState<Product[]>([]);
-  const [adminSettings, setAdminSettings] = useState<AdminSettings>({
-    courier: { value: INITIAL_COURIER_SETTINGS, secretsSet: {} },
-    sms: { value: INITIAL_SMS_SETTINGS, secretsSet: {} },
-    catalog: { value: DEFAULT_CATALOG, secretsSet: {} },
-    store: { value: DEFAULT_STORE, secretsSet: {} },
-    theme: { value: DEFAULT_THEME_SETTINGS, secretsSet: {} },
-    email: { value: DEFAULT_EMAIL_SETTINGS, secretsSet: {} },
-    assistant: { value: DEFAULT_ASSISTANT, secretsSet: {} },
-    delivery: { value: DEFAULT_DELIVERY, secretsSet: {} },
-  });
-  const [adminLoadError, setAdminLoadError] = useState('');
-  // Settings forms copy their values once; they are re-created when the server's values first arrive
-  // (not after the owner's own save, which would wipe the "Saved" message, nor on every refresh).
-  const [publicSettingsLoaded, setPublicSettingsLoaded] = useState(false);
-  const [adminSettingsLoaded, setAdminSettingsLoaded] = useState(false);
-  // Bumped after a settings version is restored, so the forms show the restored values.
-  const [settingsEpoch, setSettingsEpoch] = useState(0);
-  // Bumped per settings group by Undo, so only that form shows the restored values.
-  const [undone, setUndone] = useState<Record<string, number>>({});
-
   // Modals & Drawers
   const [cart, setCart] = useState<CartItem[]>([]);
   const [isCartOpen, setIsCartOpen] = useState(false);
@@ -228,7 +132,7 @@ export function ShopApp({ initialProductId }: { initialProductId?: string } = {}
   const [selectedProduct, setSelectedProduct] = useState<Product | null>(null);
   const [searchOpen, setSearchOpen] = useState(false);
 
-  // 2. Load the catalogue and branding, and check the admin session, on mount
+  // Load the catalogue and branding on mount
   const applyCatalog = useCallback(({ products: res, settings }: Awaited<ReturnType<typeof fetchCatalog>>) => {
     if (res.ok) {
       productsRef.current = res.data.products;
@@ -253,7 +157,6 @@ export function ShopApp({ initialProductId }: { initialProductId?: string } = {}
         setLowStockThreshold(settings.data.catalog.lowStockThreshold);
         setCategories(settings.data.catalog.categories);
       }
-      setPublicSettingsLoaded(true);
     }
     return res.ok ? res.data.products : null;
   }, []);
@@ -261,15 +164,6 @@ export function ShopApp({ initialProductId }: { initialProductId?: string } = {}
   const loadCatalog = useCallback(async () => applyCatalog(await fetchCatalog()), [applyCatalog]);
 
   useEffect(() => {
-    // A password-reset link: take the token out of the address bar at once, then ask for the new password.
-    const reset = new URLSearchParams(window.location.hash.slice(1)).get('reset') || new URLSearchParams(window.location.search).get('reset');
-    if (reset) {
-      window.history.replaceState(null, '', window.location.pathname);
-      void Promise.resolve().then(() => {
-        setResetToken(reset);
-        setIsAdminLoginOpen(true);
-      });
-    }
     void fetchCatalog().then((result) => {
       const list = applyCatalog(result);
       if (!list) return;
@@ -301,8 +195,8 @@ export function ShopApp({ initialProductId }: { initialProductId?: string } = {}
       }
     });
     try {
-      // Old builds kept data and a forgeable admin flag in the browser: clear them.
-      for (const key of ['buh_admin_auth', 'buh_admin_creds', 'buh_products_v1', 'buh_orders_v1', 'buh_customers_v1', 'buh_courier_settings_v1', 'buh_bank_details_v1', 'buh_brand_settings_v1', 'buh_sms_settings_v1']) {
+      // Old builds kept data in the browser: clear it.
+      for (const key of ['buh_products_v1', 'buh_orders_v1', 'buh_customers_v1', 'buh_courier_settings_v1', 'buh_bank_details_v1', 'buh_brand_settings_v1', 'buh_sms_settings_v1']) {
         localStorage.removeItem(key);
       }
     } catch {
@@ -311,26 +205,6 @@ export function ShopApp({ initialProductId }: { initialProductId?: string } = {}
 
     // The service worker: fast repeat opens, an offline page, installable as an app (src/lib/serviceWorker.ts).
     registerServiceWorker();
-
-    // Admin sign-in lives in an HttpOnly cookie the server checks; ask it.
-    let cancelled = false;
-    fetch('/api/admin/session', { credentials: 'same-origin' })
-      .then((res) => res.json())
-      .then((data) => {
-        if (!cancelled) setIsAdminAuthenticated(data.authenticated === true && !data.mustChangePassword);
-      })
-      .catch(() => {});
-
-    const onSignedOut = () => {
-      setIsAdminAuthenticated(false);
-      setIsAdminMode(false);
-      setIsAdminLoginOpen(true);
-    };
-    window.addEventListener(ADMIN_SIGNED_OUT_EVENT, onSignedOut);
-    return () => {
-      cancelled = true;
-      window.removeEventListener(ADMIN_SIGNED_OUT_EVENT, onSignedOut);
-    };
   }, [applyCatalog, initialProductId]);
 
   // The bag survives a reload.
@@ -338,54 +212,18 @@ export function ShopApp({ initialProductId }: { initialProductId?: string } = {}
     if (products.length) saveCart(cart);
   }, [cart, products.length]);
 
-  // 3. Admin hub data, loaded once signed in and refreshed every minute while open.
-  const applyAdminData = useCallback(({ orders: o, customers: c, products: p, settings: st, chats: ch }: Awaited<ReturnType<typeof fetchAdminData>>) => {
-    if (ch.ok) setChatsWaiting(ch.data.waiting);
-    if (o.ok) setOrders(o.data.orders);
-    if (c.ok) setCustomers(c.data.customers);
-    if (p.ok) setAdminProducts(p.data.products);
-    if (st.ok) {
-      setAdminSettings({ courier: st.data.courier, sms: st.data.sms, catalog: st.data.catalog, store: st.data.store, theme: st.data.theme, email: st.data.email, assistant: st.data.assistant, delivery: st.data.delivery });
-      setAdminSettingsLoaded(true);
-    }
-    setAdminLoadError(o.ok && c.ok && p.ok && st.ok ? '' : 'Some admin data could not be loaded. Check your connection and refresh.');
-  }, []);
-
-  const loadAdminData = useCallback(async () => applyAdminData(await fetchAdminData()), [applyAdminData]);
-
   // Live updates: changes made anywhere (a sale, a price, a setting) show on open pages within seconds,
   // reloading only the data: the bag, an open product and half-filled forms stay as they are.
   const [updateReady, setUpdateReady] = useState(false);
-  const [newOrderNotice, setNewOrderNotice] = useState(false);
   // Several changes in a row (e.g. tapping + on stock) give one reload.
   const reloadTimers = useRef<Record<string, ReturnType<typeof setTimeout>>>({});
   const debounced = useCallback((key: string, fn: () => void) => {
     clearTimeout(reloadTimers.current[key]);
     reloadTimers.current[key] = setTimeout(fn, 400);
   }, []);
-  useLiveUpdates(isAdminMode && isAdminAuthenticated ? null : '/api/events', {
+  useLiveUpdates('/api/events', {
     onCatalog: () => debounced('catalog', () => void loadCatalog()),
     onSettings: () => debounced('catalog', () => void loadCatalog()),
-    onNewVersion: () => {
-      setUpdateReady(true);
-      checkForUpdate();
-    },
-  });
-  useLiveUpdates(isAdminMode && isAdminAuthenticated ? '/api/admin/events' : null, {
-    onCatalog: () => debounced('admin', () => void Promise.all([loadAdminData(), loadCatalog()])),
-    onSettings: () => debounced('admin', () => void Promise.all([loadAdminData(), loadCatalog()])),
-    onOrders: () => {
-      setNewOrderNotice(true);
-      debounced('admin', () => void loadAdminData());
-    },
-    onChats: () => {
-      setChatsKey((n) => n + 1);
-      debounced('chats', () =>
-        void getJson<{ waiting: number }>('/api/admin/chats').then(({ ok, data }) => {
-          if (ok) setChatsWaiting(data.waiting);
-        })
-      );
-    },
     onNewVersion: () => {
       setUpdateReady(true);
       checkForUpdate();
@@ -398,15 +236,15 @@ export function ShopApp({ initialProductId }: { initialProductId?: string } = {}
   // background (the bag is saved), never in the middle of a checkout.
   useEffect(() => {
     if (!newVersion) return;
-    // Only a shopper's page with nothing open: never the admin hub (unsaved edits) or an open product or bag.
-    const busy = isAdminMode || isCheckoutOpen || isCartOpen || isTrackerOpen || selectedProduct !== null;
+    // Only with nothing open: never in the middle of a checkout, an open product or the bag.
+    const busy = isCheckoutOpen || isCartOpen || isTrackerOpen || selectedProduct !== null;
     if (busy) return;
     const onHide = () => {
       if (document.visibilityState === 'hidden') applyUpdate();
     };
     document.addEventListener('visibilitychange', onHide);
     return () => document.removeEventListener('visibilitychange', onHide);
-  }, [newVersion, isAdminMode, isCheckoutOpen, isCartOpen, isTrackerOpen, selectedProduct]);
+  }, [newVersion, isCheckoutOpen, isCartOpen, isTrackerOpen, selectedProduct]);
 
   // The phone's status bar (and the installed app's title bar) takes the festival's colour while
   // a festival's look is on, else the shop's ink.
@@ -423,54 +261,6 @@ export function ShopApp({ initialProductId }: { initialProductId?: string } = {}
       m.content = color;
     });
   }, [festival]);
-
-  useEffect(() => {
-    if (!isAdminAuthenticated) return;
-    void fetchAdminData().then(applyAdminData);
-    if (!isAdminMode) return;
-    const t = setInterval(() => void fetchAdminData().then(applyAdminData), 60_000);
-    return () => clearInterval(t);
-  }, [isAdminAuthenticated, isAdminMode, applyAdminData]);
-
-  /** Save one settings group on the server; resolves to an error message or null. */
-  const saveSettings = async (key: 'brand' | 'bank' | 'courier' | 'sms' | 'catalog' | 'store' | 'theme' | 'email' | 'assistant' | 'delivery', settings: unknown): Promise<string | null> => {
-    const { ok, data } = await sendJson<{ message?: string }>('PUT', `/api/admin/settings/${key}`, { settings });
-    if (!ok) return data.message || 'Could not save. Please try again.';
-    await Promise.all([loadAdminData(), key === 'brand' || key === 'bank' || key === 'catalog' || key === 'store' || key === 'theme' || key === 'assistant' || key === 'delivery' ? loadCatalog() : Promise.resolve(null)]);
-    return null;
-  };
-
-  // Settings save themselves (autosave): reload what the hub and the shop show; after Undo, re-create the forms.
-  const autoSaveHooks = {
-    onSaved: async () => {
-      await Promise.all([loadAdminData(), loadCatalog()]);
-    },
-    // Only the section whose settings were restored is re-created (others may hold unsaved typing).
-    onUndone: (key: string) => setUndone((u) => ({ ...u, [key]: (u[key] ?? 0) + 1 })),
-  };
-
-  const handleUpdateBrandSettings = (newSettings: BrandDraft) => saveSettings('brand', newSettings);
-  const handleUpdateBank = (bank: BankTransferDetails) => saveSettings('bank', bank);
-  const handleUpdateSmsSettings = (newSettings: SmsGatewaySettings) => saveSettings('sms', newSettings);
-  const handleUpdateSettings = (newSettings: CourierSettings) => saveSettings('courier', newSettings);
-
-  const handleToggleAdminMode = () => {
-    if (isAdminMode) {
-      setIsAdminMode(false);
-    } else {
-      if (isAdminAuthenticated) {
-        setIsAdminMode(true);
-      } else {
-        setIsAdminLoginOpen(true);
-      }
-    }
-  };
-
-  const handleLogoutAdmin = () => {
-    void postJson('/api/admin/logout', {});
-    setIsAdminAuthenticated(false);
-    setIsAdminMode(false);
-  };
 
   // Cart Handlers
   const handleAddToCart = (product: Product, profile: BedProfileMeasurement, color: string, quantity: number) => {
@@ -520,12 +310,6 @@ export function ShopApp({ initialProductId }: { initialProductId?: string } = {}
     }
     // Stock changed: refresh the catalogue.
     void loadCatalog();
-    if (isAdminAuthenticated) void loadAdminData();
-  };
-
-  const handleOrderChanged = (changed: Order) => {
-    setOrders((prev) => prev.map((o) => (o.id === changed.id ? changed : o)));
-    void loadAdminData(); // customers and stock may have changed too
   };
 
   const shopInfo = useMemo<ShopInfo>(
@@ -598,12 +382,6 @@ export function ShopApp({ initialProductId }: { initialProductId?: string } = {}
   }, []);
 
   const totalCartCount = cart.reduce((sum, i) => sum + i.quantity, 0);
-  const pendingOrdersCount = orders.filter((o) => o.status === 'pending_confirmation').length;
-  // Products on sale that are sold out or running low: the badge on Inventory.
-  const stockAlertCount = useMemo(
-    () => (isAdminMode && isAdminAuthenticated ? stockAlerts(adminProducts, adminSettings.catalog.value.lowStockThreshold).count : 0),
-    [isAdminMode, isAdminAuthenticated, adminProducts, adminSettings.catalog.value.lowStockThreshold]
-  );
 
   return (
     <ShopProvider value={shopInfo}>
@@ -616,17 +394,6 @@ export function ShopApp({ initialProductId }: { initialProductId?: string } = {}
         </div>
       )}
       {/* Header */}
-      {isAdminMode ? (
-        <AdminHeader
-          orders={orders}
-          products={products}
-          customers={customers}
-          onExitAdmin={() => setIsAdminMode(false)}
-          onLogoutAdmin={handleLogoutAdmin}
-          brandSettings={brandSettings}
-        />
-      ) : (
-        <>
         <MarqueeBar brandSettings={brandSettings} />
         <Header
           cartCount={totalCartCount}
@@ -634,370 +401,129 @@ export function ShopApp({ initialProductId }: { initialProductId?: string } = {}
           onOpenCart={() => setIsCartOpen(true)}
           onOpenSearch={() => setSearchOpen(true)}
           onOpenTrack={() => setIsTrackerOpen(true)}
-          isAdminMode={isAdminMode}
-          onToggleAdminMode={handleToggleAdminMode}
-          pendingOrdersCount={pendingOrdersCount}
           brandSettings={brandSettings}
         />
-        </>
-      )}
 
       {/* Main Content Area (on phones, room at the bottom for the tab bar and the Help button) */}
-      <main className={`flex-1 max-w-7xl mx-auto w-full ${isAdminMode ? 'pb-[calc(5rem+env(safe-area-inset-bottom,0px))] px-3 sm:px-6' : 'pb-[calc(5rem+env(safe-area-inset-bottom,0px))] md:pb-16 px-4 sm:px-6'}`}>
-        {isAdminMode ? (
-          /* ================= ADMIN MOBILE HUB ================= */
-          <div className="py-4 space-y-4">
-            {/* Admin Desktop/Tablet Navigation Tabs */}
-            <div className="hidden sm:flex items-center gap-2 border-b border-line pb-2 overflow-x-auto no-scrollbar">
-              {[
-                { id: 'orders', label: 'Orders & Dispatches', badge: pendingOrdersCount },
-                { id: 'chats', label: 'Chats', badge: chatsWaiting },
-                { id: 'add-product', label: 'Add product' },
-                { id: 'inventory', label: 'Inventory', badge: stockAlertCount },
-                { id: 'crm', label: 'Customers' },
-                { id: 'settings', label: 'Settings' },
-              ].map((tab) => (
-                <button
-                  key={tab.id}
-                  onClick={() => setAdminTab(tab.id as typeof adminTab)}
-                  className={`px-4 py-2 rounded-xl text-xs font-bold transition-all flex items-center gap-1.5 shrink-0 ${
-                    adminTab === tab.id
-                      ? 'bg-ink text-white shadow-sm'
-                      : 'bg-surface text-ink-soft hover:bg-sand border border-line'
-                  }`}
-                >
-                  <span>{tab.label}</span>
-                  {tab.badge && tab.badge > 0 ? (
-                    <span className="w-4 h-4 rounded-full bg-gold text-ink text-[10px] font-bold flex items-center justify-center">
-                      {tab.badge}
-                    </span>
-                  ) : null}
-                </button>
-              ))}
-            </div>
+      <main className="flex-1 max-w-7xl mx-auto w-full pb-[calc(5rem+env(safe-area-inset-bottom,0px))] md:pb-16 px-4 sm:px-6">
+        <div className="pt-4 sm:pt-6 space-y-5">
+          <HeroBanner brand={brandSettings} pieces={catalogLoaded ? products.length : null} />
 
-            {newOrderNotice && (
-              <div role="status" className="rounded-2xl border border-success-line bg-success-soft text-success px-3.5 py-2.5 text-xs flex items-center gap-2">
-                <strong>Orders updated</strong>
-                <span className="opacity-80">A new or changed order just came in.</span>
-                <button type="button" className="ml-auto font-semibold underline" onClick={() => { setAdminTab('orders'); setNewOrderNotice(false); }}>View orders</button>
-                <button type="button" className="font-semibold" aria-label="Dismiss" onClick={() => setNewOrderNotice(false)}>✕</button>
-              </div>
-            )}
-            <BackupStatus />
-            <RestoreNotice
-              onReview={() => {
-                setSettingsOpen((x) => ({ id: 'signin', n: x.n + 1 }));
-                setAdminTab('settings');
-              }}
-            />
-            {adminLoadError && (
-              <p role="alert" className="text-xs text-danger bg-danger-soft border border-danger-line rounded-xl px-3 py-2">{adminLoadError}</p>
-            )}
+          <StoryChips
+            stories={stories}
+            activeId={activeStory}
+            onPick={(story) => showFilters(story.apply(filters))}
+            logo={<BrandLogo brand={brandSettings} className="w-16 h-16 text-xl" />}
+            motif={festival?.festivalId && festival.showBanner ? festival.theme.motif : null}
+          />
 
-            {/* Active Admin Tab Content */}
-            {adminTab === 'orders' && (
-              <AdminOrdersTab
-                orders={orders}
-                onOrderChanged={handleOrderChanged}
-                courierSettings={adminSettings.courier.value}
-              />
-            )}
-
-            {(adminTab === 'add-product' || adminTab === 'inventory') && (
-              <AdminInventoryTab
-                key={adminTab}
-                startAdding={adminTab === 'add-product'}
-                products={adminProducts}
-                catalog={adminSettings.catalog.value}
-                onProductUpdated={(updated) => setAdminProducts((list) => list.map((x) => (x.id === updated.id ? { ...x, ...updated } : x)))}
-                onChanged={async () => {
-                  await Promise.all([loadAdminData(), loadCatalog()]);
-                }}
-              />
-            )}
-
-            {adminTab === 'chats' && <AdminChatsTab refreshKey={chatsKey} />}
-
-            {adminTab === 'crm' && (
-              <AdminCrmTab customers={customers} orders={orders} />
-            )}
-
-            {adminTab === 'settings' && (
-              <SettingsConsole
-                key={settingsOpen.n}
-                openId={settingsOpen.id}
-                sections={[
-                  {
-                    id: 'store',
-                    label: 'Store & contact',
-                    icon: <Store />,
-                    hint: 'WhatsApp, email, social accounts, address, currency display and the announcement bar.',
-                    content: (
-                      <>
-                        <StoreSettingsCard key={`store-${adminSettingsLoaded}-${settingsEpoch}-${undone['store'] ?? 0}`} value={adminSettings.store.value} onSave={(v) => saveSettings('store', v)} auto={autoSaveHooks} />
-                        <MarqueeSettingsCard key={`marquee-${publicSettingsLoaded}-${settingsEpoch}-${undone['brand'] ?? 0}`} brand={brandSettings} onSave={(v) => saveSettings('brand', v)} />
-                      </>
-                    ),
-                  },
-                  {
-                    id: 'catalog',
-                    label: 'Catalogue',
-                    icon: <LayoutGrid />,
-                    hint: 'Size presets, categories and the low-stock warning.',
-                    content: <CatalogSettingsCard key={`catalog-${adminSettingsLoaded}-${settingsEpoch}-${undone['catalog'] ?? 0}`} value={adminSettings.catalog.value} onSave={(v) => saveSettings('catalog', v)} auto={autoSaveHooks} />,
-                  },
-                  {
-                    id: 'branding',
-                    label: 'Branding & bank',
-                    icon: <Palette />,
-                    hint: 'Logo, name, tagline and bank-transfer details.',
-                    content: (
-                      <AdminBrandingTab
-                        key={`branding-${publicSettingsLoaded}-${settingsEpoch}-${undone['brand'] ?? 0}-${undone['bank'] ?? 0}`}
-                        brandSettings={brandSettings}
-                        onUpdateBrandSettings={handleUpdateBrandSettings}
-                        bank={bankDetails}
-                        onUpdateBank={handleUpdateBank}
-                        auto={autoSaveHooks}
-                      />
-                    ),
-                  },
-                  {
-                    id: 'themes',
-                    label: 'Festival themes',
-                    icon: <Feather />,
-                    hint: 'Eid, Diwali, Christmas, Lunar New Year and 30 more: picked automatically, or chosen by you.',
-                    content: <ThemeSettingsCard key={`theme-${adminSettingsLoaded}-${settingsEpoch}`} value={adminSettings.theme.value} onSave={(v) => saveSettings('theme', v)} />,
-                  },
-                  {
-                    id: 'sms',
-                    label: 'Phone verification',
-                    icon: <Smartphone />,
-                    hint: 'The SMS gateway that sends checkout codes.',
-                    content: (
-                      <AdminSmsTab
-                        key={`sms-${adminSettingsLoaded}-${settingsEpoch}-${undone['sms'] ?? 0}`}
-                        smsSettings={adminSettings.sms.value}
-                        secretsSet={adminSettings.sms.secretsSet}
-                        onUpdateSmsSettings={handleUpdateSmsSettings}
-                        auto={autoSaveHooks}
-                      />
-                    ),
-                  },
-                  {
-                    id: 'couriers',
-                    label: 'Couriers',
-                    icon: <Truck />,
-                    hint: 'Jeebly and Eco Express keys, pickup details and routing.',
-                    content: (
-                      <AdminCouriersTab
-                        key={`couriers-${adminSettingsLoaded}-${settingsEpoch}-${undone['courier'] ?? 0}`}
-                        settings={adminSettings.courier.value}
-                        secretsSet={adminSettings.courier.secretsSet}
-                        onUpdateSettings={handleUpdateSettings}
-                        auto={autoSaveHooks}
-                      />
-                    ),
-                  },
-                  {
-                    id: 'delivery',
-                    label: 'Delivery',
-                    icon: <Box />,
-                    hint: 'Where you deliver, the time customers see, and same-day delivery with its charge.',
-                    content: <DeliverySettingsCard key={`delivery-${adminSettingsLoaded}-${settingsEpoch}-${undone['delivery'] ?? 0}`} value={adminSettings.delivery.value} onSave={(v) => saveSettings('delivery', v)} auto={autoSaveHooks} />,
-                  },
-                  {
-                    id: 'assistant',
-                    label: 'Chat assistant',
-                    icon: <MessageSquare />,
-                    hint: 'What the shop’s chat answers by itself (its memory), and when it hands over to you.',
-                    content: (
-                      <AssistantSettingsCard
-                        key={`assistant-${adminSettingsLoaded}-${settingsEpoch}-${undone['assistant'] ?? 0}`}
-                        value={adminSettings.assistant.value}
-                        sizes={adminSettings.catalog.value.sizes}
-                        onSave={(v) => saveSettings('assistant', v)}
-                        auto={autoSaveHooks}
-                      />
-                    ),
-                  },
-                  {
-                    id: 'email',
-                    label: 'Email & admin account',
-                    icon: <Mail />,
-                    hint: 'The mail server for backups, alerts and password resets; your sign-in email.',
-                    content: (
-                      <EmailSettingsCard
-                        key={`email-${adminSettingsLoaded}-${settingsEpoch}-${undone['email'] ?? 0}`}
-                        value={adminSettings.email.value}
-                        passwordSaved={Boolean(adminSettings.email.secretsSet.smtpPass)}
-                        imapPasswordSaved={Boolean(adminSettings.email.secretsSet.imapPass)}
-                        onSave={(v) => saveSettings('email', v)}
-                        auto={autoSaveHooks}
-                      />
-                    ),
-                  },
-                  {
-                    id: 'signin',
-                    label: 'Passkeys & recovery codes',
-                    icon: <KeyRound />,
-                    hint: 'Ways back in if you forget your password: a passkey on your phone, and one-time recovery codes.',
-                    content: <SignInRecoveryCard />,
-                  },
-                  {
-                    id: 'versions',
-                    label: 'Versions',
-                    icon: <Archive />,
-                    hint: 'Every release and what changed; switch to any of them without closing the shop.',
-                    content: <VersionsCard />,
-                  },
-                  {
-                    id: 'system',
-                    label: 'System & backups',
-                    icon: <ShieldCheck />,
-                    hint: 'Backups, earlier versions of the settings, version and health.',
-                    content: (
-                      <div className="space-y-3 text-xs text-ink-soft">
-                        <SystemHealthCard />
-                        <BackupStatus />
-                        <SettingsHistoryCard
-                          onRestored={() =>
-                            void Promise.all([loadAdminData(), loadCatalog()]).then(() => setSettingsEpoch((n) => n + 1))
-                          }
-                        />
-                        <p>
-                          Version <strong>{process.env.NEXT_PUBLIC_APP_VERSION}</strong>. Health check:{' '}
-                          <a className="underline" href="/api/health" target="_blank" rel="noopener noreferrer">/api/health</a>
-                        </p>
-                      </div>
-                    ),
-                  },
-                ]}
-              />
-            )}
-          </div>
-        ) : (
-          /* ================= CUSTOMER STOREFRONT ================= */
-          <div className="pt-4 sm:pt-6 space-y-5">
-            <HeroBanner brand={brandSettings} pieces={catalogLoaded ? products.length : null} />
-
-            <StoryChips
-              stories={stories}
-              activeId={activeStory}
-              onPick={(story) => showFilters(story.apply(filters))}
-              logo={<BrandLogo brand={brandSettings} className="w-16 h-16 text-xl" />}
-              motif={festival?.festivalId && festival.showBanner ? festival.theme.motif : null}
-            />
-
-            <div ref={resultsRef} className="scroll-mt-16 space-y-3">
-              {/* Count, and Filter (a bottom sheet) only when wanted */}
-              <div className="flex flex-wrap items-center justify-between gap-3 border-t border-line pt-4">
-                <p className="label-caps text-ink-muted" aria-live="polite">
-                  {catalogLoaded ? `${filteredProducts.length} ${filteredProducts.length === 1 ? 'piece' : 'pieces'}` : ''}
-                </p>
-                <div className="flex items-center gap-2">
-                <button
-                  type="button"
-                  onClick={() => setFilterOpen(true)}
-                  aria-haspopup="dialog"
-                  aria-label={filterCount ? `Filter and sort, ${filterCount} on` : 'Filter and sort'}
-                  className="inline-flex items-center gap-2 h-10 px-4 rounded-full border border-line-strong bg-transparent text-[13px] tracking-[0.04em] text-ink hover:border-ink-muted min-w-0"
-                >
-                  <SlidersHorizontal className="w-4 h-4 shrink-0" aria-hidden="true" strokeWidth={1.5} />
-                  <span>Filter</span>
-                  {filterCount > 0 && (
-                    <span className="min-w-5 h-5 px-1 rounded-full bg-ink text-white text-[11px] font-bold flex items-center justify-center" aria-hidden="true">
-                      {filterCount}
-                    </span>
-                  )}
-                </button>
-                </div>
-              </div>
-
-              {(chips.length > 0 || filters.sort !== 'featured') && (
-                <div className="flex flex-wrap items-center gap-2" role="group" aria-label="Filters on">
-                  {chips.map((chip) => (
-                    <button
-                      key={chip.key}
-                      type="button"
-                      onClick={() => showFilters(chip.without)}
-                      aria-label={`Remove filter: ${chip.label}`}
-                      className="inline-flex items-center gap-1 pl-3 pr-2 h-8 rounded-full bg-sand border border-line text-xs font-medium text-ink hover:border-line-strong max-w-full"
-                    >
-                      <span className="truncate">{chip.label}</span>
-                      <X className="w-3.5 h-3.5 shrink-0" aria-hidden="true" />
-                    </button>
-                  ))}
-                  {filters.sort !== 'featured' && (
-                    <button
-                      type="button"
-                      onClick={() => showFilters({ ...filters, sort: 'featured' })}
-                      aria-label={`Remove sort: ${SORTS.find((x) => x.id === filters.sort)?.label}`}
-                      className="inline-flex items-center gap-1 pl-3 pr-2 h-8 rounded-full bg-surface border border-line-strong text-xs font-medium text-ink hover:border-ink-muted"
-                    >
-                      <span>{SORTS.find((x) => x.id === filters.sort)?.label}</span>
-                      <X className="w-3.5 h-3.5" aria-hidden="true" />
-                    </button>
-                  )}
-                  {chips.length + (filters.sort !== 'featured' ? 1 : 0) > 1 && (
-                    <button type="button" onClick={() => showFilters(EMPTY_FILTERS)} className="h-8 px-2 text-xs font-semibold text-ink underline underline-offset-4">
-                      Clear all
-                    </button>
-                  )}
-                </div>
-              )}
-
-              {catalogError && (
-                <p role="alert" className="text-sm text-danger bg-danger-soft border border-danger-line rounded-xl px-3 py-2">{catalogError}</p>
-              )}
-
-              {/* The feed: big photos (on phones one per row, edge to edge, or two across) */}
-              {!catalogLoaded && !catalogError ? (
-                <div className={feedGrid} aria-hidden="true" data-testid="feed-skeleton">
-                  {[0, 1, 2, 3].map((i) => (
-                    <div key={i} className={`space-y-2 ${'-mx-4 sm:mx-0'}`}>
-                      <div className={`aspect-[4/5] bg-sand-deep motion-safe:animate-pulse ${'sm:rounded-lg'}`} />
-                      <div className={`space-y-2 ${'px-4 sm:px-0'}`}>
-                        <div className="h-3 rounded bg-sand-deep w-4/5 motion-safe:animate-pulse" />
-                        <div className="h-3 rounded bg-sand-deep w-1/3 motion-safe:animate-pulse" />
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              ) : filteredProducts.length > 0 ? (
-                <div key={feedKey} className={`${feedGrid} feed-in`} data-testid="feed">
-                  {filteredProducts.map((prod, i) => (
-                    <ProductCard key={prod.id} product={prod} onSelect={openProduct} eager={i < 2} layout={feedLayout} />
-                  ))}
-                </div>
-              ) : catalogLoaded ? (
-                <div className="rounded-2xl border border-dashed border-line-strong px-4 py-10 text-center space-y-3">
-                  <p className="text-sm text-ink">{products.length ? 'Nothing matches these filters.' : 'New pieces are on their way. Please check back soon.'}</p>
-                  {products.length > 0 && (
-                    <button type="button" onClick={() => showFilters(EMPTY_FILTERS)} className="rounded-full bg-ink text-white text-sm font-semibold px-5 py-2.5">
-                      Show everything
-                    </button>
-                  )}
-                </div>
-              ) : null}
-            </div>
-
-            {/* The shop's promise */}
-            <div className="border-y border-line px-5 py-10 sm:py-12 text-center my-8 space-y-3">
-              <p className="label-caps text-gold-deep">Our promise</p>
-              <h2 className="font-serif text-2xl sm:text-3xl text-ink">Made slowly, delivered with care</h2>
-              <p className="text-ink-soft text-[13px] sm:text-sm max-w-xl mx-auto leading-relaxed">
-                Every set is made with slow handcraft, fitted for deep Gulf mattresses, and delivered to your door in all seven emirates, with cash on delivery or bank transfer.
+          <div ref={resultsRef} className="scroll-mt-16 space-y-3">
+            {/* Count, and Filter (a bottom sheet) only when wanted */}
+            <div className="flex flex-wrap items-center justify-between gap-3 border-t border-line pt-4">
+              <p className="label-caps text-ink-muted" aria-live="polite">
+                {catalogLoaded ? `${filteredProducts.length} ${filteredProducts.length === 1 ? 'piece' : 'pieces'}` : ''}
               </p>
+              <div className="flex items-center gap-2">
+              <button
+                type="button"
+                onClick={() => setFilterOpen(true)}
+                aria-haspopup="dialog"
+                aria-label={filterCount ? `Filter and sort, ${filterCount} on` : 'Filter and sort'}
+                className="inline-flex items-center gap-2 h-10 px-4 rounded-full border border-line-strong bg-transparent text-[13px] tracking-[0.04em] text-ink hover:border-ink-muted min-w-0"
+              >
+                <SlidersHorizontal className="w-4 h-4 shrink-0" aria-hidden="true" strokeWidth={1.5} />
+                <span>Filter</span>
+                {filterCount > 0 && (
+                  <span className="min-w-5 h-5 px-1 rounded-full bg-ink text-white text-[11px] font-bold flex items-center justify-center" aria-hidden="true">
+                    {filterCount}
+                  </span>
+                )}
+              </button>
+              </div>
             </div>
 
-            {/* The version: in the footer on phones (never over the feed), bottom left on wider screens */}
-            <footer className="pb-2">
-              <VersionBadge inFooter />
-            </footer>
+            {(chips.length > 0 || filters.sort !== 'featured') && (
+              <div className="flex flex-wrap items-center gap-2" role="group" aria-label="Filters on">
+                {chips.map((chip) => (
+                  <button
+                    key={chip.key}
+                    type="button"
+                    onClick={() => showFilters(chip.without)}
+                    aria-label={`Remove filter: ${chip.label}`}
+                    className="inline-flex items-center gap-1 pl-3 pr-2 h-8 rounded-full bg-sand border border-line text-xs font-medium text-ink hover:border-line-strong max-w-full"
+                  >
+                    <span className="truncate">{chip.label}</span>
+                    <X className="w-3.5 h-3.5 shrink-0" aria-hidden="true" />
+                  </button>
+                ))}
+                {filters.sort !== 'featured' && (
+                  <button
+                    type="button"
+                    onClick={() => showFilters({ ...filters, sort: 'featured' })}
+                    aria-label={`Remove sort: ${SORTS.find((x) => x.id === filters.sort)?.label}`}
+                    className="inline-flex items-center gap-1 pl-3 pr-2 h-8 rounded-full bg-surface border border-line-strong text-xs font-medium text-ink hover:border-ink-muted"
+                  >
+                    <span>{SORTS.find((x) => x.id === filters.sort)?.label}</span>
+                    <X className="w-3.5 h-3.5" aria-hidden="true" />
+                  </button>
+                )}
+                {chips.length + (filters.sort !== 'featured' ? 1 : 0) > 1 && (
+                  <button type="button" onClick={() => showFilters(EMPTY_FILTERS)} className="h-8 px-2 text-xs font-semibold text-ink underline underline-offset-4">
+                    Clear all
+                  </button>
+                )}
+              </div>
+            )}
+
+            {catalogError && (
+              <p role="alert" className="text-sm text-danger bg-danger-soft border border-danger-line rounded-xl px-3 py-2">{catalogError}</p>
+            )}
+
+            {/* The feed: big photos (on phones one per row, edge to edge, or two across) */}
+            {!catalogLoaded && !catalogError ? (
+              <div className={feedGrid} aria-hidden="true" data-testid="feed-skeleton">
+                {[0, 1, 2, 3].map((i) => (
+                  <div key={i} className={`space-y-2 ${'-mx-4 sm:mx-0'}`}>
+                    <div className={`aspect-[4/5] bg-sand-deep motion-safe:animate-pulse ${'sm:rounded-lg'}`} />
+                    <div className={`space-y-2 ${'px-4 sm:px-0'}`}>
+                      <div className="h-3 rounded bg-sand-deep w-4/5 motion-safe:animate-pulse" />
+                      <div className="h-3 rounded bg-sand-deep w-1/3 motion-safe:animate-pulse" />
+                    </div>
+                  </div>
+                ))}
+              </div>
+            ) : filteredProducts.length > 0 ? (
+              <div key={feedKey} className={`${feedGrid} feed-in`} data-testid="feed">
+                {filteredProducts.map((prod, i) => (
+                  <ProductCard key={prod.id} product={prod} onSelect={openProduct} eager={i < 2} layout={feedLayout} />
+                ))}
+              </div>
+            ) : catalogLoaded ? (
+              <div className="rounded-2xl border border-dashed border-line-strong px-4 py-10 text-center space-y-3">
+                <p className="text-sm text-ink">{products.length ? 'Nothing matches these filters.' : 'New pieces are on their way. Please check back soon.'}</p>
+                {products.length > 0 && (
+                  <button type="button" onClick={() => showFilters(EMPTY_FILTERS)} className="rounded-full bg-ink text-white text-sm font-semibold px-5 py-2.5">
+                    Show everything
+                  </button>
+                )}
+              </div>
+            ) : null}
           </div>
-        )}
+
+          {/* The shop's promise */}
+          <div className="border-y border-line px-5 py-10 sm:py-12 text-center my-8 space-y-3">
+            <p className="label-caps text-gold-deep">Our promise</p>
+            <h2 className="font-serif text-2xl sm:text-3xl text-ink">Made slowly, delivered with care</h2>
+            <p className="text-ink-soft text-[13px] sm:text-sm max-w-xl mx-auto leading-relaxed">
+              Every set is made with slow handcraft, fitted for deep Gulf mattresses, and delivered to your door in all seven emirates, with cash on delivery or bank transfer.
+            </p>
+          </div>
+
+          {/* The version: in the footer on phones (never over the feed), bottom left on wider screens */}
+          <footer className="pb-2">
+            <VersionBadge inFooter />
+          </footer>
+        </div>
       </main>
 
       {/* Search: matches as you type */}
@@ -1064,51 +590,20 @@ export function ShopApp({ initialProductId }: { initialProductId?: string } = {}
 
       {/* Mobile Bottom Navigation */}
       <BottomNav
-        isAdminMode={isAdminMode}
         storeTab={searchOpen ? 'search' : 'home'}
         onHome={goHome}
         onOpenSearch={() => setSearchOpen(true)}
-        adminTab={adminTab}
-        onSetAdminTab={setAdminTab}
         cartCount={totalCartCount}
         onOpenCart={() => setIsCartOpen(true)}
         onOpenTrack={() => setIsTrackerOpen(true)}
-        onToggleAdminMode={handleToggleAdminMode}
-        pendingOrdersCount={pendingOrdersCount}
-        chatsWaiting={chatsWaiting}
-        stockAlerts={stockAlertCount}
         helpSlot={Boolean(chatInfo) || Boolean(storeSettings.showWhatsAppButton && askWhatsAppLink(storeSettings, ''))}
       />
 
-      {/* Admin Login Modal */}
-      {isAdminLoginOpen && (
-      <AdminLoginModal
-        isOpen={isAdminLoginOpen}
-        onClose={() => setIsAdminLoginOpen(false)}
-        onLoginSuccess={() => {
-          setIsAdminAuthenticated(true);
-          setIsAdminMode(true);
-        }}
-        resetToken={resetToken}
-        onResetDone={() => setResetToken(null)}
+      <HelpLauncher />
+      <InstallPrompt
+        blocked={isCheckoutOpen || isCartOpen || isTrackerOpen || selectedProduct !== null || searchOpen || filterOpen}
+        logo={<BrandLogo brand={brandSettings} className="w-11 h-11 text-base" />}
       />
-      )}
-      {!isAdminMode && <HelpLauncher />}
-      {!isAdminMode && (
-        <InstallPrompt
-          blocked={isCheckoutOpen || isCartOpen || isTrackerOpen || selectedProduct !== null || searchOpen || filterOpen || isAdminLoginOpen}
-          logo={<BrandLogo brand={brandSettings} className="w-11 h-11 text-base" />}
-        />
-      )}
-      {isAdminMode && (
-        <VersionBadge
-          raised
-          onOpen={() => {
-            setSettingsOpen((x) => ({ id: 'versions', n: x.n + 1 }));
-            setAdminTab('settings');
-          }}
-        />
-      )}
     </div>
     </ShopProvider>
   );

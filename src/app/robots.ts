@@ -1,7 +1,7 @@
 import type { MetadataRoute } from 'next';
 import { siteUrl } from '@/lib/server/siteUrl';
 
-/** /robots.txt: the shop is public; the APIs and admin are not for crawlers. */
+/** /robots.txt: the shop is public; the APIs are not for crawlers. (The Admin Hub is never named here.) */
 export const dynamic = 'force-dynamic';
 
 export default async function robots(): Promise<MetadataRoute.Robots> {
