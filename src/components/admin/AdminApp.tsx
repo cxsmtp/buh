@@ -234,9 +234,10 @@ export function AdminApp() {
   });
 
   /** Save one settings group on the server; resolves to an error message or null. */
-  const saveSettings = async (key: 'brand' | 'bank' | 'courier' | 'sms' | 'catalog' | 'store' | 'theme' | 'email' | 'assistant' | 'delivery' | 'payments', settings: unknown): Promise<string | null> => {
-    const { ok, data } = await sendJson<{ message?: string }>('PUT', `/api/admin/settings/${key}`, { settings });
+  const saveSettings = async (key: 'brand' | 'bank' | 'courier' | 'sms' | 'catalog' | 'store' | 'theme' | 'email' | 'assistant' | 'delivery' | 'payments', settings: unknown, onWarning?: (warning: string) => void): Promise<string | null> => {
+    const { ok, data } = await sendJson<{ message?: string; warning?: string }>('PUT', `/api/admin/settings/${key}`, { settings });
     if (!ok) return data.message || 'Could not save. Please try again.';
+    if (data.warning) onWarning?.(data.warning);
     await reloadAll();
     return null;
   };
@@ -505,7 +506,7 @@ export function AdminApp() {
                       key={`payments-${adminSettingsLoaded}-${settingsEpoch}-${undone['payments'] ?? 0}`}
                       value={adminSettings.payments.value}
                       secretsSet={adminSettings.payments.secretsSet}
-                      onSave={(v) => saveSettings('payments', v)}
+                      onSave={(v, onWarning) => saveSettings('payments', v, onWarning)}
                       auto={autoSaveHooks}
                     />
                   ),

@@ -53,8 +53,21 @@ export interface StartedCardOrder {
   paid?: boolean;
 }
 
+/**
+ * How a payment try ended. errorType is Stripe.js's error type: only card_error (declined) and
+ * validation_error (details refused) mean for sure that nothing was charged; anything else (a lost
+ * connection, an API error) leaves it unknown until the server has asked Stripe.
+ */
+export interface CardResult {
+  ok: boolean;
+  message?: string;
+  orderId?: string;
+  clientSecret?: string;
+  errorType?: string;
+}
+
 /** Pay with what is in the fields: checkout creates the order (on the server) when asked. */
-export type CardPay = (createOrder: () => Promise<StartedCardOrder>) => Promise<{ ok: boolean; message?: string; orderId?: string; clientSecret?: string }>;
+export type CardPay = (createOrder: () => Promise<StartedCardOrder>) => Promise<CardResult>;
 
 const appearance: StripeElementsOptions['appearance'] = {
   theme: 'stripe',
@@ -74,15 +87,21 @@ function options(amountFils: number): StripeElementsOptions {
 }
 
 /** After Stripe has the payment: confirm it in the browser (3-D Secure in a frame, no redirect for cards). */
-async function confirm(stripe: Stripe, elements: StripeElements, clientSecret: string, orderId: string): Promise<string | null> {
-  const { error } = await stripe.confirmPayment({
-    elements,
-    clientSecret,
-    // Only used by payment types that must leave the page (not cards or wallets).
-    confirmParams: { return_url: `${window.location.origin}/?order=${encodeURIComponent(orderId)}` },
-    redirect: 'if_required',
-  });
-  return error ? error.message || 'The payment did not go through. Nothing was charged.' : null;
+async function confirm(stripe: Stripe, elements: StripeElements, clientSecret: string, orderId: string): Promise<{ message: string; type?: string } | null> {
+  try {
+    const { error } = await stripe.confirmPayment({
+      elements,
+      clientSecret,
+      // Only used by payment types that must leave the page (not cards or wallets).
+      confirmParams: { return_url: `${window.location.origin}/?order=${encodeURIComponent(orderId)}` },
+      redirect: 'if_required',
+    });
+    if (!error) return null;
+    return { message: error.message || 'The payment did not go through.', type: error.type };
+  } catch {
+    // Stripe.js itself failed (no connection): whether the card was charged is not known here.
+    return { message: 'The payment could not be confirmed.', type: 'api_connection_error' };
+  }
 }
 
 // ── Card typed in ───────────────────────────────────────────────────────────
@@ -114,7 +133,7 @@ function CardFieldsInner({ onReady }: { onReady: (pay: CardPay | null) => void }
       const started = await createOrder();
       if (!started.ok || !started.clientSecret || !started.orderId) return { ok: started.paid === true, orderId: started.orderId, message: started.message };
       const problem = await confirm(stripe, elements, started.clientSecret, started.orderId);
-      return { ok: !problem, message: problem ?? undefined, orderId: started.orderId, clientSecret: started.clientSecret };
+      return { ok: !problem, message: problem?.message, errorType: problem?.type, orderId: started.orderId, clientSecret: started.clientSecret };
     });
     return () => onReady(null);
   }, [stripe, elements, loaded, onReady]);
@@ -152,7 +171,7 @@ export function ExpressCheckout({
   servesEmirate: (state: string, city: string) => boolean;
   /** Turn the wallet's details into an order on the server, or say what to ask for. */
   onWallet: (p: WalletPayment) => Promise<StartedCardOrder & { reason?: 'invalid_shipping_address' | 'address_unserviceable' | 'fail' }>;
-  onDone: (result: { ok: boolean; message?: string; orderId?: string; clientSecret?: string }) => void;
+  onDone: (result: CardResult) => void;
 }) {
   if (useStripeFailed(publishableKey)) return null;
   return (
@@ -188,7 +207,7 @@ function ExpressInner({ shippingRate, servesEmirate, onWallet, onDone }: Omit<Re
       }
       const problem = await confirm(stripe, elements, started.clientSecret, started.orderId);
       if (problem) event.paymentFailed({ reason: 'fail' });
-      onDone({ ok: !problem, message: problem ?? undefined, orderId: started.orderId, clientSecret: started.clientSecret });
+      onDone({ ok: !problem, message: problem?.message, errorType: problem?.type, orderId: started.orderId, clientSecret: started.clientSecret });
     } finally {
       busy.current = false;
     }

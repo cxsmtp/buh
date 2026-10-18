@@ -11,7 +11,7 @@ import { postJson } from '@/lib/apiClient';
 import { formatAccuracy, suggestAreaFromGps, UAE_KEY_LOCATIONS } from '@/lib/uaeLocations';
 import { deliveryCheck } from '@/lib/delivery';
 import { emirateFrom, walletAddress } from '@/lib/walletAddress';
-import type { CardPay, StartedCardOrder, WalletPayment } from './StripeCheckout';
+import type { CardPay, CardResult, StartedCardOrder, WalletPayment } from './StripeCheckout';
 import { AreaCombobox } from './AreaCombobox';
 import { WhatsAppConfirm } from './WhatsAppConfirm';
 import { 
@@ -61,9 +61,15 @@ interface CheckoutModalProps {
   landing?: { source: string; campaign?: string } | null;
   /** How phones are verified: the shop's own SMS (default) or Firebase. */
   phoneVerification?: PhoneVerificationConfig;
-  /** Card payments through the shop's Stripe account (Settings → Payments), when switched on. */
-  card?: { publishableKey: string } | null;
+  /**
+   * Card payments through the shop's Stripe account (Settings → Payments), when switched on.
+   * phoneCheck: an SMS gateway is on, so a card order proves the phone with a code like any order.
+   */
+  card?: { publishableKey: string; phoneCheck?: boolean } | null;
 }
+
+/** Stripe.js's error types that mean the payment was refused, so nothing was charged (anything else: not known). */
+const surelyNotCharged = (errorType?: string) => errorType === 'card_error' || errorType === 'validation_error';
 
 /** A card order on the confirmation screen: paid only once the server has Stripe's word. */
 type CardShown = { state: string; label?: string };
@@ -207,6 +213,10 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
   const [cardSecret, setCardSecret] = useState('');
   const [cardShown, setCardShown] = useState<CardShown | null>(null);
   const [walletNotice, setWalletNotice] = useState('');
+  // A card try whose outcome is unknown (the connection dropped): kept, so "Check again" can ask the
+  // server (which asks Stripe), and paying again continues the same order (never a second charge).
+  const [cardCheck, setCardCheck] = useState<{ order: Order; secret: string } | null>(null);
+  const [checkingCard, setCheckingCard] = useState(false);
 
   // Financial Calculations
   // In fils, like the server. Standard delivery and COD are free (same day adds Settings → Delivery's charge); the server is the source of truth and
@@ -219,6 +229,8 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
   const bankReady = Boolean(bank.iban && bank.accountName && bank.bankName);
   const shopWhatsApp = useShop().store.whatsappNumber.replace(/\D/g, '');
   const byCard = paymentMethod === 'online_card' && Boolean(card);
+  // With an SMS gateway on, a card order needs the phone code too (once per checkout).
+  const cardNeedsCode = byCard && Boolean(card?.phoneCheck);
   const phoneOk = classifyPhone(phone).kind === 'uae';
 
   // The confirmation screen of a card order: ask the server until Stripe has confirmed (or not).
@@ -364,8 +376,8 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
   /** The order body as checkout has it now, with any details the wallet gave instead. */
   const orderBody = (method: PaymentMethod, over: { customer?: Partial<Record<'fullName' | 'phone' | 'email' | 'emirate' | 'area' | 'streetAddress' | 'buildingVilla' | 'flatVillaNo', string>>; deliveryOption?: 'standard' | 'same_day' } = {}) => ({
     idempotencyKey,
-    // Card: no SMS code needed (a verified number is still sent when there is one).
-    verificationToken: method === 'online_card' && !(isPhoneVerified && phoneToken) ? undefined : phoneToken,
+    // Card without an SMS gateway: no code needed (a verified number is still sent when there is one).
+    verificationToken: method === 'online_card' && !card?.phoneCheck && !(isPhoneVerified && phoneToken) ? undefined : phoneToken,
     customer: {
       fullName,
       email: email || undefined,
@@ -417,19 +429,41 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
       return { ok: false, message };
     }
     placed.current = data.order;
+    setCardCheck(null);
     if (data.order.card?.state === 'paid') return { ok: false, paid: true, orderId: data.order.id };
+    if (data.order.card?.state === 'canceled' || data.order.status === 'cancelled') {
+      // That attempt timed out and was closed (never paid): the next tap is a new one.
+      setIdempotencyKey(crypto.randomUUID());
+      return { ok: false, message: 'That payment attempt was closed and nothing was charged. Please tap Pay again.' };
+    }
     return { ok: true, orderId: data.order.id, clientSecret: data.payment?.clientSecret };
   };
 
   /** Stripe has the payment (or it didn't go through): show the confirmation, or close that attempt. */
-  const cardFinished = async (result: { ok: boolean; message?: string; orderId?: string; clientSecret?: string }) => {
+  const cardFinished = async (result: CardResult) => {
     const order = placed.current && placed.current.id === result.orderId ? placed.current : null;
     if (!result.ok && order && result.clientSecret) {
-      // Declined, or the customer closed 3-D Secure: stop that payment so its pieces go back on sale
-      // (if Stripe says it was paid after all, it counts as paid).
-      const { data } = await postJson<{ card?: CardShown }>('/api/orders/payment', { orderId: order.id, clientSecret: result.clientSecret, action: 'abandon' });
-      if (data.card?.state === 'paid') return showConfirmed(order, result.clientSecret, data.card);
-      setIdempotencyKey(crypto.randomUUID());
+      // Declined, the customer closed 3-D Secure, or the connection dropped: stop that payment so its
+      // pieces go back on sale (if Stripe says it was paid after all, it counts as paid).
+      const declined = surelyNotCharged(result.errorType);
+      const { ok, data } = await postJson<{ card?: CardShown; status?: string }>('/api/orders/payment', { orderId: order.id, clientSecret: result.clientSecret, action: 'abandon' });
+      if (ok && data.card?.state === 'paid') return showConfirmed(order, result.clientSecret, data.card);
+      if (ok && (data.card?.state === 'canceled' || data.status === 'cancelled')) {
+        // Stopped at Stripe: this attempt is over, the next one is new.
+        setIdempotencyKey(crypto.randomUUID());
+        setCardCheck(null);
+        setSubmitError(declined ? `${result.message || 'The payment did not go through.'} Nothing was charged.` : `${result.message || 'The payment did not go through.'} It was stopped, so you can try again.`);
+        return;
+      }
+      // Not known whether it went through (offline, or Stripe still busy with it): keep this attempt,
+      // so paying again continues the same order and the same payment, never a second one.
+      setCardCheck({ order, secret: result.clientSecret });
+      setSubmitError(
+        declined
+          ? `${result.message || 'The payment did not go through.'} Nothing was charged.`
+          : 'We couldn’t confirm the payment. Please check your connection; if your card was charged, your order is safe.'
+      );
+      return;
     }
     if (!result.ok && order && order.card?.state === 'paid') return showConfirmed(order, '', order.card);
     if (!result.ok || !order) {
@@ -439,7 +473,24 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
     showConfirmed(order, result.clientSecret || '', order.card ?? { state: 'pending' });
   };
 
+  /** "Check again": the server asks Stripe what happened to the payment that could not be confirmed. */
+  const checkCardAgain = async () => {
+    if (!cardCheck || checkingCard) return;
+    setCheckingCard(true);
+    const { ok, data } = await postJson<{ card?: CardShown; status?: string }>('/api/orders/payment', { orderId: cardCheck.order.id, clientSecret: cardCheck.secret, action: 'check' });
+    setCheckingCard(false);
+    if (!ok || !data.card) return setSubmitError('We still couldn’t reach the shop. Please check your connection, then tap Check again.');
+    if (data.card.state === 'paid') return showConfirmed(cardCheck.order, cardCheck.secret, data.card);
+    if (data.card.state === 'canceled' || data.status === 'cancelled') {
+      setIdempotencyKey(crypto.randomUUID());
+      setCardCheck(null);
+      return setSubmitError('That payment was not taken: nothing was charged. Please try again.');
+    }
+    setSubmitError('Stripe has not confirmed a payment for this order yet. You can tap Pay again: it continues the same order, so you are never charged twice.');
+  };
+
   const showConfirmed = (order: Order, secret: string, shown: CardShown | null) => {
+    setCardCheck(null);
     setSubmitError('');
     setConfirmedOrder(order);
     setCardSecret(secret);
@@ -482,11 +533,19 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
     if (!deliveryCheck({ emirate: walletEmirate, area: chosenArea }, deliverySettings).serviceable) {
       return { ok: false, reason: 'address_unserviceable', message: 'Sorry, we don’t deliver to that address yet.' };
     }
+    // With an SMS gateway on, the phone is proved with a code first (once: a number already verified
+    // in this checkout is used as it is).
+    const verified = card?.phoneCheck ? (isPhoneVerified && phoneToken ? classifyPhone(phone).e164 : '') : mobile;
+    if (!verified) {
+      setWalletNotice('Please verify your UAE mobile number below (we send a code), then tap the button again.');
+      setTimeout(() => document.getElementById('checkout-phone')?.focus(), 50);
+      return { ok: false, reason: 'fail', message: 'Please verify your mobile number in checkout, then try again.' };
+    }
     return startCardOrder({
       customer: {
         fullName: w.fullName || fullName,
         email: w.email || email || '',
-        phone: mobile,
+        phone: verified,
         emirate: walletEmirate,
         area: chosenArea,
         streetAddress: w.streetAddress || streetAddress,
@@ -533,6 +592,11 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
       if (!phoneOk) {
         document.getElementById('checkout-phone')?.focus();
         alert('Please enter your UAE mobile number for the courier.');
+        return;
+      }
+      if (cardNeedsCode && !(isPhoneVerified && phoneToken)) {
+        document.getElementById('checkout-phone')?.focus();
+        alert('Please verify your UAE mobile number with the SMS code before paying.');
         return;
       }
       if (!cardPay.current) return;
@@ -748,7 +812,7 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
               <h3 className="label-caps text-ink flex items-center gap-1.5">
                 <span>1. Your details</span>
               </h3>
-              {byCard && !isPhoneVerified ? (
+              {byCard && !cardNeedsCode && !isPhoneVerified ? (
                 <span className="text-[10px] text-ink-soft bg-sand px-2 py-0.5 rounded-full border border-line">Card: no SMS code needed</span>
               ) : isPhoneVerified ? (
                 <span className="text-[10px] font-semibold text-success bg-success-soft px-2.5 py-0.5 rounded-full flex items-center gap-1 border border-success-line">
@@ -788,7 +852,7 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
               <PhoneVerification
                 supportEmail={supportEmail}
                 verification={phoneVerification}
-                codeOptional={byCard}
+                codeOptional={byCard && !cardNeedsCode}
                 phone={phone}
                 onPhoneChange={setPhone}
                 verified={isPhoneVerified}
@@ -1125,7 +1189,7 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
                   {paymentMethod === 'online_card' && <Check className="w-4 h-4 shrink-0 text-ink" />}
                 </span>
                 <span className="block text-[11px] leading-relaxed text-ink-soft">
-                  Visa, Mastercard and more, paid securely through Stripe. No SMS code needed.
+                  Visa, Mastercard and more, paid securely through Stripe.{card.phoneCheck ? '' : ' No SMS code needed.'}
                 </span>
               </button>}
             </div>
@@ -1234,9 +1298,19 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
                 {submitError}
               </p>
             )}
+            {cardCheck && (
+              <button
+                type="button"
+                onClick={() => void checkCardAgain()}
+                disabled={checkingCard}
+                className="w-full text-xs font-semibold text-ink border border-line-strong bg-surface hover:bg-sand rounded-xl py-2 disabled:opacity-60"
+              >
+                {checkingCard ? 'Checking with Stripe…' : 'Check again'}
+              </button>
+            )}
             <button
               type="submit"
-              disabled={isSubmitting || !delivery.serviceable || (byCard ? !cardReady : !isPhoneVerified)}
+              disabled={isSubmitting || !delivery.serviceable || (byCard ? !cardReady || (cardNeedsCode && !isPhoneVerified) : !isPhoneVerified)}
               className="w-full bg-ink hover:bg-ink-2 text-ivory font-medium tracking-[0.03em] text-sm py-3.5 px-3 rounded-xl flex items-center justify-center gap-2 transition-colors disabled:opacity-50 text-center"
             >
               {isSubmitting ? (
