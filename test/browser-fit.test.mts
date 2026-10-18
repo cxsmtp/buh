@@ -278,13 +278,28 @@ for (const shape of SHAPES) {
     await page.getByPlaceholder('Street name, road, or community number').fill('Marina Walk');
     await page.getByPlaceholder('e.g. Marina Gate 1 or Villa 24').fill('Marina Gate 1');
     await page.getByPlaceholder('e.g. Apt 1402 or Villa 24').fill('1402');
+    // Bank transfer: the account is never shown at checkout (it comes privately, on the order's own page).
     await page.getByText(/bank transfer/i).last().click();
-    await page.getByText(/IBAN/).first().waitFor();
-    await page.getByText(/IBAN/).first().scrollIntoViewIfNeeded();
+    await page.getByTestId('bank-transfer-note').waitFor();
+    await page.getByTestId('bank-transfer-note').scrollIntoViewIfNeeded();
+    assert.equal(await page.getByText(/AE07 0331/).count(), 0, 'no IBAN at checkout');
     await fit(page, problems, at('checkout: bank transfer'), [submit]);
     await submit.click();
     await page.getByRole('button', { name: 'Done' }).waitFor({ timeout: 15000 });
+    const payLink = page.getByRole('link', { name: 'Upload your transfer screenshot' });
     await fit(page, problems, at('checkout: confirmation'), [page.getByRole('button', { name: 'Done' })]);
+    await payLink.scrollIntoViewIfNeeded();
+    await fit(page, problems, at('checkout: confirmation, transfer link'), [payLink]);
+    // The order's private page, with the long account name and IBAN.
+    const payPage = await page.context().newPage();
+    await payPage.goto(`${server.base}${await payLink.getAttribute('href')}`, { waitUntil: 'domcontentloaded' });
+    await payPage.getByText('AE07 0331 2345 6789 0123 456').waitFor();
+    await payPage.getByRole('button', { name: 'Copy IBAN' }).scrollIntoViewIfNeeded();
+    await fit(payPage, problems, at('private bank-transfer page'), [payPage.getByRole('button', { name: 'Copy IBAN' })]);
+    // Below the details (pay first, then upload): scrolled to, it fits too.
+    await payPage.getByText('Choose screenshot or PDF').scrollIntoViewIfNeeded();
+    await fit(payPage, problems, at('private bank-transfer page: upload'), [payPage.getByText('Choose screenshot or PDF')]);
+    await payPage.close();
     await page.getByRole('button', { name: 'Done' }).click();
 
     // Order tracking.
