@@ -1,5 +1,19 @@
 # Changelog
 
+## BUH-02.10.00 — 2026-10-18 22:17 UTC · [#27](https://github.com/cxsmtp/buh/pull/27)
+
+- **Customers confirm on WhatsApp, free: no SMS code.** Checkout asks only for the mobile number; the customer confirms by sending you one WhatsApp message. Settings → Phone check keeps the SMS-code options for later (off).
+- **Unconfirmed orders sort themselves out.** They show "Awaiting WhatsApp — auto-cancels in 13 h" in the hub and are cancelled (stock back) after 24 h, or after 6 h if the customer never opened WhatsApp; both times are yours to change. Bank transfers are never cancelled: they're flagged for you to check your bank.
+- **One tap for every case.** "Ask to confirm" opens WhatsApp to the customer; "Confirmed by phone call" for customers without WhatsApp; "Use the number it came from" and "Correct the phone number" when the number differs. Shipping an unconfirmed order asks you first and is recorded.
+- **Fake orders can't hold your stock.** Unconfirmed orders take at most 2 of each piece and 5 lines, hold at most half of any size's stock, and are limited per number and per connection; you're alerted if they pile up.
+- **Measurements are your own.** Each size shows only what you filled in (flat or fitted sheet, pillowcases, duvet cover, other pieces) — no more duvet cover on sets that don't have one. A "Fitted sheet (elastic corners)" tick; "Use standard sizes" fills the fields in one tap; existing products get a "Check measurements" badge to review once.
+- **Colours only when you add them.** No colours means no colour choice; one colour shows as a label.
+- **Status.**
+  - **Benchmark:** BENCH
+  - **Tests:** TESTS
+  - **Dependency audit:** production 0 vulnerabilities; no new packages.
+  - **Security scan:** an independent review (1 high, 4 medium, 5 low findings in the phone check and measurements carry-over), all fixed with tests that fail before and pass after.
+
 ## BUH-02.09.01 — 2026-10-18 20:17 UTC · [#26](https://github.com/cxsmtp/buh/pull/26)
 
 - **Chats open again in the Admin Hub.** Reported: tapping a chat showed "Something went wrong… i is not a function". Newer Chrome on phones answers a scroll request in a way the chat screen didn't expect; the screen now ignores that answer, and a test plays that newer Chrome to keep it fixed.
