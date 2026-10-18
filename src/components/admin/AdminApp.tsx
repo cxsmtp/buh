@@ -18,6 +18,7 @@ import { AdminCouriersTab } from './AdminCouriersTab';
 import { AdminBrandingTab, type BrandDraft } from './AdminBrandingTab';
 import { AdminSmsTab } from './AdminSmsTab';
 import { AdminChatsTab } from './AdminChatsTab';
+import { AdminMoneyTab } from './money/AdminMoneyTab';
 import { AdminLoginModal } from './AdminLoginModal';
 import { BackupStatus } from './BackupStatus';
 import { RestoreNotice } from './RestoreNotice';
@@ -58,7 +59,7 @@ interface AdminSettings {
 
 const NO_PAYMENTS: PaymentSettings = { cardEnabled: false, stripePublishableKey: '', stripeSecretKey: '', stripeWebhookSecret: '' };
 
-type AdminTab = 'orders' | 'add-product' | 'inventory' | 'crm' | 'settings' | 'chats';
+type AdminTab = 'orders' | 'add-product' | 'inventory' | 'crm' | 'money' | 'settings' | 'chats';
 export type HubView = 'phone' | 'laptop';
 
 const VIEW_KEY = 'buh_hub_view';
@@ -317,6 +318,7 @@ export function AdminApp() {
     { id: 'add-product', label: 'Add product' },
     { id: 'inventory', label: 'Inventory', badge: stockAlertCount, badgeLabel: `${stockAlertCount} sold out or low` },
     { id: 'crm', label: 'Customers' },
+    { id: 'money', label: 'Money' },
     { id: 'settings', label: 'Settings' },
   ];
 
@@ -458,6 +460,8 @@ export function AdminApp() {
           {adminTab === 'chats' && <AdminChatsTab refreshKey={chatsKey} />}
 
           {adminTab === 'crm' && <AdminCrmTab customers={customers} orders={orders} />}
+
+          {adminTab === 'money' && <AdminMoneyTab phone={phone} />}
 
           {adminTab === 'settings' && (
             <SettingsConsole

@@ -2,7 +2,7 @@ import { sweepChats } from './chat';
 import { startChatMail } from './chatMail';
 import { ensureAdminAccount } from './adminAuth';
 import { ensureAdminLink } from './adminLinkSetup';
-import { MIN_PASSPHRASE_LENGTH, emailConfigured, startBackupSchedule } from './backup';
+import { MIN_PASSPHRASE_LENGTH, auditRestoreOnce, emailConfigured, startBackupSchedule } from './backup';
 import { refreshPayHashes } from './bankPay';
 import { getDb } from './db';
 import { normalizeBankStates, startUnconfirmedSweep } from './orders';
@@ -23,6 +23,8 @@ export async function onStartup() {
   // Each step on its own: one that fails (the database busy during an update, a full disk) is
   // logged and never stops the others (backups and monitoring above all).
   step('database_open', () => getDb()); // open (and migrate) the database now, not on the first customer's request
+  // Restored from a backup since the last start: in the audit log, once.
+  step('restore_audit', auditRestoreOnce);
   step('backup_schedule', startBackupSchedule);
   step('festival_refresh', startFestivalRefresh);
   step('monitor', startMonitor);

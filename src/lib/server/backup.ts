@@ -13,6 +13,9 @@ import { allOrders, listCustomers } from './orders';
 import { blankSecretsIn } from './settings';
 import { listProducts } from './products';
 import { readTar, writeTar, type TarEntry } from './tar';
+import { kvGet, kvSet } from './kv';
+import { expenseCsvFiles } from './expenses';
+import { toCsv } from './csv';
 
 /**
  * Backups, every 12 hours (BACKUP_INTERVAL_HOURS), taken by the running shop:
@@ -25,6 +28,9 @@ import { readTar, writeTar, type TarEntry } from './tar';
  *  - product drafts and the stock ledger are tables in the database copy;
  *  - the bank-transfer receipts (every screenshot a customer uploaded, the earlier ones
  *    too), the product photos and the audit log;
+ *  - the expenses (tables in the database copy, every earlier version and removed ones too),
+ *    expenses.csv and expense_bills.csv, and every bill photo or PDF (expenses/, replaced and
+ *    removed ones too);
  *  - the owner's passkeys (public keys only) and recovery codes (hashes
  *    only), in the database; a restore switches them off until reviewed,
  *    since the backup may predate a revocation.
@@ -83,17 +89,8 @@ function writeBackupState(patch: BackupState) {
 
 // ── CSV (safe to open in Excel) ─────────────────────────────────────────────
 
-function cell(v: unknown): string {
-  let s = v === undefined || v === null ? '' : String(v);
-  // A cell starting with = + - @ (or tab/CR) would run as a formula in Excel.
-  if (/^[=+\-@\t\r]/.test(s) && !/^-?\d+(\.\d+)?$/.test(s)) s = `'${s}`;
-  return /[",\n\r]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
-}
-
-export function toCsv(headers: string[], rows: unknown[][]): string {
-  // BOM so Excel reads Arabic names as UTF-8.
-  return '﻿' + [headers, ...rows].map((r) => r.map(cell).join(',')).join('\r\n') + '\r\n';
-}
+// toCsv lives in ./csv (shared with the accountant's export); kept importable from here.
+export { toCsv } from './csv';
 
 function csvFiles(): TarEntry[] {
   const orders = allOrders();
@@ -157,6 +154,7 @@ function csvFiles(): TarEntry[] {
         ])
       )),
     },
+    ...expenseCsvFiles(),
     {
       name: 'products.csv',
       data: Buffer.from(toCsv(
@@ -269,6 +267,7 @@ export async function createBackup(now = new Date()): Promise<BackupResult> {
       ...csv,
       ...folderEntries('receipts', 'receipts'),
       ...folderEntries('images', 'images'),
+      ...folderEntries('expenses', 'expenses'),
       ...fs
         .readdirSync(dataDir())
         .filter((f) => /^audit-\d{4}-\d{2}\.jsonl$/.test(f))
@@ -287,7 +286,8 @@ export async function createBackup(now = new Date()): Promise<BackupResult> {
     fs.writeFileSync(file, payload, { mode: 0o600 });
 
     const counts = (getDb().prepare('SELECT COUNT(*) AS n FROM orders').get() as { n: number }).n;
-    const summary = `${counts} orders, ${listProducts({ includeHidden: true }).length} products, ${entries.filter((e) => e.name.startsWith('receipts/')).length} receipts`;
+    const expenses = (getDb().prepare('SELECT COUNT(*) AS n FROM expenses').get() as { n: number }).n;
+    const summary = `${counts} orders, ${listProducts({ includeHidden: true }).length} products, ${entries.filter((e) => e.name.startsWith('receipts/')).length} receipts, ${expenses} expenses, ${entries.filter((e) => e.name.startsWith('expenses/')).length} bills`;
 
     // Keep the newest KEEP backups.
     const all = fs.readdirSync(dir).filter((f) => f.startsWith('buh-backup-')).sort();
@@ -300,6 +300,18 @@ export async function createBackup(now = new Date()): Promise<BackupResult> {
     fs.rmSync(`${tmpDb}-shm`, { force: true });
     fs.rmSync(`${tmpDb}-journal`, { force: true });
   }
+}
+
+/**
+ * A restore (scripts/restore-backup.mjs, run while the shop is stopped) leaves a note in the
+ * database; the first start after it writes "backup.restored" to the audit log, once.
+ */
+export function auditRestoreOnce(): boolean {
+  const restored = kvGet<{ at: string; backup: string }>('admin:restored')?.data;
+  if (!restored?.at || kvGet<string>('audit:restore-noted')?.data === restored.at) return false;
+  if (!audit('backup.restored', { restoredAt: restored.at, backup: String(restored.backup ?? '').slice(0, 120) })) return false;
+  kvSet('audit:restore-noted', restored.at);
+  return true;
 }
 
 /** Read a backup back: the archive's files, after checking every file against the manifest. */

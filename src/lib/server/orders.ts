@@ -5,6 +5,7 @@ import path from 'node:path';
 import type { BankState, CardPayment, CardState, Customer, Emirate, Order, OrderAttention, OrderStatus } from '@/types';
 import { deliveryCheck, uaeDate } from '@/lib/delivery';
 import { dataDir } from './dataDir';
+import { folderRoomProblem } from './diskRoom';
 import { customerLink } from './runtimeConfig';
 import { getDb, inTransaction } from './db';
 import { HttpError } from './http';
@@ -13,7 +14,7 @@ import { verifyPhoneToken } from './phoneToken';
 import { getProduct, invalidateProducts, listProducts } from './products';
 import { bump } from './live';
 import { bankTransferReady, cardPaymentsReady, getSettings, phoneCheckMode, phoneCodesOn } from './settings';
-import { audit } from './audit';
+import { audit, auditedTransaction, auditOrThrow } from './audit';
 import { kvGet, kvSet } from './kv';
 import { logEvent as logEvent_ } from './log';
 import { issuePayLink, payPathOf } from './bankPay';
@@ -773,24 +774,7 @@ const NO_ROOM = 'We can’t take the upload right now, sorry. Please send the sc
 
 /** Why a new receipt can't be stored now (the folder is full, or the disk nearly is), or null. */
 function receiptRoomProblem(incoming: number): string | null {
-  const dir = receiptsDir();
-  try {
-    const st = fs.statfsSync(dir);
-    const free = Number(st.bavail) * Number(st.bsize);
-    if (free - incoming < RECEIPT_LIMITS.minFreeBytes) return `the disk has only ${Math.round(free / 1024 ** 2)} MB free`;
-  } catch {
-    // statfs unavailable: the folder cap below still applies
-  }
-  let used = 0;
-  for (const f of fs.readdirSync(dir)) {
-    try {
-      used += fs.statSync(path.join(dir, f)).size;
-    } catch {
-      // removed meanwhile
-    }
-  }
-  if (used + incoming > RECEIPT_LIMITS.folderBytes) return `the receipts folder holds ${Math.round(used / 1024 ** 2)} MB (the cap is ${Math.round(RECEIPT_LIMITS.folderBytes / 1024 ** 2)} MB)`;
-  return null;
+  return folderRoomProblem(receiptsDir(), incoming, RECEIPT_LIMITS, 'receipts');
 }
 
 /** An upload refused for room: logged, shown in Settings → System, and emailed to the owner (at most every 6 hours). */
@@ -916,34 +900,6 @@ export function checkBankTransfer(id: string, result: BankResult, actor: string)
   });
 }
 
-/**
- * A transaction whose changes are audited before they count: each auditOrThrow() writes its entry
- * (or throws 503, and nothing is saved). The entry is written before COMMIT, so if the commit
- * itself then fails (the disk is full, the database is busy), a "rolled_back" entry follows it at
- * once: the audit log never claims a change the database doesn't have.
- */
-function auditedTransaction<T>(fn: (auditOrThrow: (action: string, details: Record<string, unknown>) => void) => T): T {
-  const written: Array<{ action: string; details: Record<string, unknown> }> = [];
-  const record = (action: string, details: Record<string, unknown>) => {
-    auditOrThrow(action, details);
-    written.push({ action, details });
-  };
-  try {
-    return inTransaction(() => fn(record));
-  } catch (err) {
-    for (const w of written) {
-      const ok = audit('audit.rolled_back', {
-        action: w.action,
-        ...(typeof w.details.orderId === 'string' ? { orderId: w.details.orderId } : {}),
-        ...(typeof w.details.by === 'string' ? { by: w.details.by } : {}),
-        error: err instanceof Error ? err.message.slice(0, 200) : String(err).slice(0, 200),
-      });
-      if (!ok) logEvent_('error', 'audit_rollback_note_failed', { action: w.action });
-    }
-    throw err;
-  }
-}
-
 const OPEN_TRANSFER = "status <> 'cancelled' AND payment_status NOT IN ('verified', 'paid')";
 
 /** Bank transfers with a screenshot waiting for the owner's check. */
@@ -1013,11 +969,14 @@ const NEXT: Record<OrderStatus, OrderStatus[]> = {
 export function updateOrderByAdmin(id: string, patch: unknown, actor: string): Order {
   if (!patch || typeof patch !== 'object' || Array.isArray(patch)) throw new HttpError(400, 'Changes must be an object.');
   const p = patch as Obj;
-  // Audited inside the transaction (the owner's "ship anyway"), so a rollback can't leave its entry behind unnoted.
+  // Audited inside the transaction with what changed (before → after), and the owner's "ship
+  // anyway": if the log can't be written, nothing is saved (503), so a status or payment change is
+  // never done unrecorded, and a rollback can't leave an entry behind unnoted.
   const updated = auditedTransaction((auditFn) => {
     const order = getOrder(id);
     if (!order) throw new HttpError(404, 'Order not found.');
     const changes: Obj = {};
+    const notesBefore = order.adminNotes ?? '';
 
     if (p.status !== undefined && p.status !== order.status) {
       const status = p.status as OrderStatus;
@@ -1065,6 +1024,15 @@ export function updateOrderByAdmin(id: string, patch: unknown, actor: string): O
     if (Object.keys(changes).length) {
       writeOrder(order);
       logEvent(id, actor, 'updated', changes);
+      const { adminNotes: notesChanged, ...rest } = changes;
+      auditFn('order.updated', {
+        by: actor,
+        orderId: id,
+        amountFils: fils(order.total),
+        paymentMethod: order.paymentMethod,
+        ...rest,
+        ...(notesChanged ? { adminNotes: { from: notesBefore.slice(0, 300), to: (order.adminNotes ?? '').slice(0, 300) } } : {}),
+      });
     }
     return getOrder(id)!;
   });
@@ -1432,9 +1400,6 @@ export function ordersNeedingAttention(): number {
 
 const sha256 = (v: string) => crypto.createHash('sha256').update(v).digest('hex');
 
-function auditOrThrow(action: string, details: Record<string, unknown>): void {
-  if (!audit(action, details)) throw new HttpError(503, 'The audit log could not be written, so nothing was changed. Please try again.');
-}
 
 /** What Stripe says about a PaymentIntent (amount in fils; never what a browser says). */
 export interface IntentFacts {
@@ -1475,6 +1440,8 @@ export function recordCardIntent(id: string, ref: string, clientSecret: string, 
     .run(ref, sha256(clientSecret), livemode === undefined ? null : livemode ? 1 : 0, id, ref);
   if (r.changes !== 1) throw new HttpError(409, 'This card payment can no longer be started. Please start checkout again.', {}, { code: 'card_closed' });
   logEvent(id, 'stripe', 'card_intent', { ref });
+  // Best effort: nothing is paid yet (payment.paid is audited before it counts).
+  audit('payment.card_started', { orderId: id, ref, ...(livemode === undefined ? {} : { mode: livemode ? 'live' : 'test' }) });
 }
 
 /** Does this client secret belong to this order (the browser paying for it holds it)? */
@@ -1542,6 +1509,7 @@ export function markCardFailed(orderId: string, pi: { id: string; declineCode?: 
     if (order.card.state !== 'pending' && order.card.state !== 'failed') return 'ignored';
     const changed = getDb().prepare("UPDATE orders SET card_state = 'failed' WHERE id = ? AND card_state = 'pending'").run(orderId).changes;
     logEvent(orderId, actor, 'card_declined', pi.declineCode ? { reason: pi.declineCode.slice(0, 40) } : undefined);
+    auditOrThrow('payment.card_declined', { orderId, ref: pi.id, via: actor, ...(pi.declineCode ? { declineCode: pi.declineCode.slice(0, 40) } : {}), ...(event ? { event: event.id } : {}) });
     if (changed) bump('orders');
     return 'failed';
   });
@@ -1582,7 +1550,14 @@ export function refundableFils(order: Order): number {
 
 /** Stripe says how much of the charge is refunded so far (e.g. a partial refund in its dashboard): noted. */
 export function noteRefundedSoFar(orderId: string, refundedFils: number): void {
-  if (getDb().prepare('UPDATE orders SET refunded_fils = ? WHERE id = ? AND COALESCE(refunded_fils, 0) <> ?').run(refundedFils, orderId, refundedFils).changes) bump('orders');
+  // Money back to a customer is in the audit log before it is on the order (or neither is).
+  const changed = inTransaction(() => {
+    const before = getDb().prepare('SELECT refunded_fils FROM orders WHERE id = ?').pluck().get(orderId) as number | null | undefined;
+    if (getDb().prepare('UPDATE orders SET refunded_fils = ? WHERE id = ? AND COALESCE(refunded_fils, 0) <> ?').run(refundedFils, orderId, refundedFils).changes !== 1) return false;
+    auditOrThrow('payment.refunded_so_far', { orderId, fromFils: before ?? 0, toFils: refundedFils, via: 'stripe' });
+    return true;
+  });
+  if (changed) bump('orders');
 }
 
 /**

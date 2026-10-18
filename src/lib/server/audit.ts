@@ -1,6 +1,8 @@
 import crypto from 'node:crypto';
 import fs from 'node:fs';
-import { dataFile } from './dataDir';
+import { dataDir, dataFile } from './dataDir';
+import { inTransaction } from './db';
+import { HttpError } from './http';
 import { logEvent, redact } from './log';
 
 /**
@@ -116,34 +118,110 @@ export function audit(action: string, details: Record<string, unknown> = {}): bo
   }
 }
 
-export function verifyAuditLog(file = monthFile()): { ok: boolean; entries: number; problems: string[] } {
+export interface AuditVerification {
+  ok: boolean;
+  entries: number;
+  problems: string[];
+  /**
+   * Every entry's links (sequence, previous MAC) are intact but no MAC matches this server's key:
+   * the log was signed by another server (a backup restored onto a new one). Not tampering, but it
+   * can't be proven here either.
+   */
+  otherKey?: boolean;
+}
+
+export function verifyAuditLog(file = monthFile()): AuditVerification {
   const problems: string[] = [];
   let prev = 'genesis';
   let expectedSeq = 1;
   let entries = 0;
+  let linkProblems = 0;
+  let macProblems = 0;
   let text = '';
   try {
     text = fs.readFileSync(file, 'utf8');
   } catch {
     return { ok: true, entries: 0, problems };
   }
+  const note = (p: string) => {
+    if (problems.length < 50) problems.push(p);
+  };
   for (const [i, line] of text.split('\n').filter(Boolean).entries()) {
     let entry: Record<string, unknown>;
     try {
       entry = JSON.parse(line);
     } catch {
-      problems.push(`line ${i + 1}: unreadable`);
+      note(`line ${i + 1}: unreadable`);
+      linkProblems++;
       continue;
     }
     const { mac, ...body } = entry;
-    if (body.seq !== expectedSeq) problems.push(`line ${i + 1}: sequence gap`);
-    if (body.prev !== prev) problems.push(`line ${i + 1}: chain broken`);
-    if (macOf(body, String(body.prev)) !== mac) problems.push(`line ${i + 1}: MAC mismatch`);
+    if (body.seq !== expectedSeq) {
+      note(`line ${i + 1}: sequence gap`);
+      linkProblems++;
+    }
+    if (body.prev !== prev) {
+      note(`line ${i + 1}: chain broken`);
+      linkProblems++;
+    }
+    if (macOf(body, String(body.prev)) !== mac) {
+      note(`line ${i + 1}: MAC mismatch`);
+      macProblems++;
+    }
     prev = String(mac);
     expectedSeq = Number(body.seq) + 1;
     entries++;
   }
-  return { ok: problems.length === 0, entries, problems };
+  const otherKey = entries > 0 && linkProblems === 0 && macProblems === entries;
+  return { ok: problems.length === 0, entries, problems, ...(otherKey ? { otherKey } : {}) };
+}
+
+/** The monthly audit files (audit-YYYY-MM.jsonl), oldest first. */
+export function auditFiles(): string[] {
+  return fs
+    .readdirSync(dataDir())
+    .filter((f) => /^audit-\d{4}-\d{2}\.jsonl$/.test(f))
+    .sort();
+}
+
+/** Every month's file checked: the whole log is intact only if each one is. */
+export function verifyAllAuditLogs(): { ok: boolean; entries: number; months: Array<AuditVerification & { file: string }> } {
+  const months = auditFiles().map((file) => ({ file, ...verifyAuditLog(dataFile(file)) }));
+  return { ok: months.every((m) => m.ok), entries: months.reduce((n, m) => n + m.entries, 0), months };
+}
+
+/** Write an audit entry or refuse the change: 503, and the caller saves nothing. */
+export function auditOrThrow(action: string, details: Record<string, unknown>): void {
+  if (!audit(action, details)) throw new HttpError(503, 'The audit log could not be written, so nothing was changed. Please try again.');
+}
+
+/**
+ * A transaction whose changes are audited before they count: each auditOrThrow() writes its entry
+ * (or throws 503, and nothing is saved). The entry is written before COMMIT, so if the commit
+ * itself then fails (the disk is full, the database is busy), a "rolled_back" entry follows it at
+ * once: the audit log never claims a change the database doesn't have.
+ */
+export function auditedTransaction<T>(fn: (auditOrThrow: (action: string, details: Record<string, unknown>) => void) => T): T {
+  const written: Array<{ action: string; details: Record<string, unknown> }> = [];
+  const record = (action: string, details: Record<string, unknown>) => {
+    auditOrThrow(action, details);
+    written.push({ action, details });
+  };
+  try {
+    return inTransaction(() => fn(record));
+  } catch (err) {
+    for (const w of written) {
+      const ok = audit('audit.rolled_back', {
+        action: w.action,
+        ...(typeof w.details.orderId === 'string' ? { orderId: w.details.orderId } : {}),
+        ...(typeof w.details.expenseId === 'string' ? { expenseId: w.details.expenseId } : {}),
+        ...(typeof w.details.by === 'string' ? { by: w.details.by } : {}),
+        error: err instanceof Error ? err.message.slice(0, 200) : String(err).slice(0, 200),
+      });
+      if (!ok) logEvent('error', 'audit_rollback_note_failed', { action: w.action });
+    }
+    throw err;
+  }
 }
 
 /** Test hook: forget cached state so a new DATA_DIR is picked up. */

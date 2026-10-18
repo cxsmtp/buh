@@ -1,3 +1,4 @@
+import { audit } from '@/lib/server/audit';
 import { requireAdmin } from '@/lib/server/guard';
 import { allowFields, handleRouteError, json, readJsonBody } from '@/lib/server/http';
 import { deleteDraft, getDraft, saveDraft } from '@/lib/server/productDrafts';
@@ -30,9 +31,10 @@ export async function PUT(req: Request, { params }: { params: Promise<{ id: stri
 /** Throw the draft away (after publishing, or "Start over"). */
 export async function DELETE(req: Request, { params }: { params: Promise<{ id: string }> }) {
   try {
-    await requireAdmin(req);
+    const session = await requireAdmin(req);
     const { id } = await params;
     deleteDraft(id);
+    audit('product.draft_discarded', { by: session.email, productId: id.slice(0, 40) });
     return json({ success: true });
   } catch (err) {
     return handleRouteError(err, 'admin/products/drafts/delete');

@@ -8,6 +8,7 @@ import { kvGet, kvSet } from './kv';
 import { logEvent } from './log';
 import { awaitingWhatsAppCount, cardTakings, ordersNeedingAttention, receiptsNoRoom, transfersAwaitedCount, transfersToCheckCount, unconfirmedPressure } from './orders';
 import { listProducts } from './products';
+import { vatStatus } from './reports';
 import { getSettings, phoneCheckMode } from './settings';
 
 /**
@@ -92,6 +93,13 @@ export function currentProblems(now = Date.now()): Problem[] {
   // A refund that failed, a booking after a cancel, a card order to refund in Stripe's dashboard.
   const attention = ordersNeedingAttention();
   if (attention) problems.push({ id: 'orders', level: 'warning', text: `${attention} order${attention === 1 ? ' needs' : 's need'} your attention (Orders: the red notes). Mark each as handled once done.` });
+  // Not VAT-registered: 12 months of sales near (80%) or over the AED 375,000 mandatory threshold.
+  try {
+    const vat = vatStatus(now);
+    if (vat.level !== 'ok') problems.push({ id: 'vat', level: 'warning', text: vat.text });
+  } catch (err) {
+    logEvent('warn', 'vat_check_failed', { error: err instanceof Error ? err.message : String(err) });
+  }
   return problems;
 }
 

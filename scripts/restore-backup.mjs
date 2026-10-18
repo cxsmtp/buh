@@ -17,7 +17,10 @@
 // re-enter the keys in the Admin Hub after a restore. The owner's passkeys and
 // recovery codes are in the database, but the backup may predate a revocation:
 // restored recovery codes are voided and restored passkeys are switched off
-// until the owner confirms them in the Admin Hub (see below).
+// until the owner confirms them in the Admin Hub (see below). Expenses come back with every
+// earlier version and every bill (expenses/). With --replace the server's audit key stays, so
+// the restored audit log still checks out on this server (a new server can't check its
+// signatures: the key never leaves the server; the hub says so).
 import crypto from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
@@ -90,7 +93,7 @@ for (const line of manifest.toString().trim().split('\n')) {
     process.exit(1);
   }
   // Only these names: never the shop's keys or admin account, never . or ..
-  if (!/^(shop\.db|[a-z_]+\.csv|(receipts|images)\/[A-Za-z0-9_-][A-Za-z0-9._-]*|audit\/audit-\d{4}-\d{2}\.jsonl)$/.test(name) || /\.\./.test(name)) {
+  if (!/^(shop\.db|[a-z_]+\.csv|(receipts|images|expenses)\/[A-Za-z0-9_-][A-Za-z0-9._-]*|audit\/audit-\d{4}-\d{2}\.jsonl)$/.test(name) || /\.\./.test(name)) {
     console.error(`Unexpected file in backup: ${name}`);
     process.exit(1);
   }
@@ -115,6 +118,12 @@ const products = db.prepare('SELECT COUNT(*) AS n FROM products').get().n;
 const tableExists = (name) => Boolean(db.prepare("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ?").get(name));
 const stockMoves = tableExists('stock_moves') ? db.prepare('SELECT COUNT(*) AS n FROM stock_moves').get().n : 0;
 const drafts = tableExists('product_drafts') ? db.prepare('SELECT COUNT(*) AS n FROM product_drafts').get().n : 0;
+// Expenses and their bills (backups from before BUH-02.10 have none).
+const expenses = tableExists('expenses') ? db.prepare('SELECT COUNT(*) AS n FROM expenses').get().n : 0;
+const bills = tableExists('expense_bills') ? db.prepare('SELECT COUNT(*) AS n FROM expense_bills').get().n : 0;
+const missingBills = tableExists('expense_bills')
+  ? db.prepare('SELECT id, ext FROM expense_bills').all().filter((b) => !fs.existsSync(path.join(target, 'expenses', `${b.id}.${b.ext}`))).length
+  : 0;
 if (ok !== 'ok') {
   db.close();
   console.error(`The restored database failed its integrity check: ${ok}`);
@@ -153,13 +162,16 @@ if (replace) {
   }
   for (const name of fs.readdirSync(target)) fs.renameSync(path.join(target, name), path.join(finalTarget, name));
   fs.rmdirSync(target);
-  console.log(`Restored into ${finalTarget}: ${orders} orders, ${products} products, ${stockMoves} stock moves, ${drafts} product drafts. Integrity check: ok.`);
+  // The same server: its audit key stays, so the restored audit log is still checked against it.
+  if (fs.existsSync(path.join(aside, 'audit.key'))) fs.copyFileSync(path.join(aside, 'audit.key'), path.join(finalTarget, 'audit.key'));
+  console.log(`Restored into ${finalTarget}: ${orders} orders, ${products} products, ${stockMoves} stock moves, ${drafts} product drafts, ${expenses} expenses, ${bills} bills. Integrity check: ok.`);
   console.log(`The previous data was moved to ${aside} (delete it once you are happy).`);
   console.log('Start the shop again. Admin sign-in: a new one-time password is printed in the log.');
 } else {
-  console.log(`Restored to ${target}: ${orders} orders, ${products} products, ${stockMoves} stock moves, ${drafts} product drafts. Integrity check: ok.`);
+  console.log(`Restored to ${target}: ${orders} orders, ${products} products, ${stockMoves} stock moves, ${drafts} product drafts, ${expenses} expenses, ${bills} bills. Integrity check: ok.`);
   console.log('Next: stop the shop, set DATA_DIR to this folder (or swap folders), start it, and sign in with the new one-time password from the log.');
 }
+if (missingBills) console.log(`Warning: ${missingBills} bill file${missingBills === 1 ? ' is' : 's are'} missing from this backup (the expense rows are there).`);
 console.log('');
 console.log(
   hasAdminLink
