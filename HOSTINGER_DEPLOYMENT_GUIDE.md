@@ -251,6 +251,8 @@ Without automatic updates, use `docker compose run --rm updater rollback` the sa
 
 **Bank transfer and versions before BUH-02.09.00.** Rolling back below BUH-02.09.00 republishes the bank account through the old public settings (the IBAN shows at checkout again): clear the IBAN in Settings → Branding & bank first if it must stay private.
 
+**Measurements, colours and versions before BUH-02.10.00.** A product edited in an older version loses its **Fitted sheet** tick and **Other pieces** (that version doesn't know them): after updating again, open the product and tick or type them again. During the update minute (both versions running), a product with no colours ordered through the older one answers 409 "that colour is no longer offered"; the customer simply tries again. The older version never auto-cancels orders waiting for WhatsApp; the newer one does once it is back.
+
 Without the updater at all: start the copy that is not running from the last good image, wait until `docker compose ps` shows it `healthy`, then stop the other one (here green was running):
 
 ```bash
@@ -353,7 +355,7 @@ It changes nothing, and says why, when:
   ```bat
   podman exec beautifuluaehome-updater update-now
   ```
-- Roll back to the version before (it was kept as the stopped container `beautifuluaehome-previous`); below BUH-02.09.00, switch card payments off first (Settings → Payments), and know that the bank account is shown publicly again (clear the IBAN first to keep it private):
+- Roll back to the version before (it was kept as the stopped container `beautifuluaehome-previous`); below BUH-02.09.00, switch card payments off first (Settings → Payments), and know that the bank account is shown publicly again (clear the IBAN first to keep it private); below BUH-02.10.00, a product edited there loses its Fitted sheet tick and Other pieces (re-tick them after the update), and during the update minute a product with no colours ordered through the older version gets 409 (the customer tries again):
   ```bat
   podman exec beautifuluaehome-updater rollback
   ```

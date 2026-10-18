@@ -147,12 +147,12 @@ for (const width of [375, 1280]) {
     await ctx.close();
   });
 
-  test(`editor at ${width}px: "Check measurements", the Fitted checkbox by keyboard, "Use standard sizes"; saving clears the mark`, { skip }, async () => {
+  test(`editor at ${width}px: "Check measurements", the Fitted checkbox by keyboard, "Use standard sizes", "Put it back" (what the update kept aside); saving clears the mark`, { skip }, async () => {
     await products();
     const title = `Review Set ${width}`;
     const p = await make(title, { colors: [], profiles: [king({ pillowcases: 'Own: 2 pcs' })] });
     // As the update marks the products already in the shop.
-    assert.equal((await api('PATCH', `/api/admin/products/${p.id}`, { product: { measurementsReview: true } })).status, 200);
+    assert.equal((await api('PATCH', `/api/admin/products/${p.id}`, { product: { measurementsReview: true, legacyMeasurements: { king: { duvetCover: '240 x 260 cm' } } } })).status, 200);
 
     const ctx = await browser.newContext({ viewport: { width, height: 860 }, hasTouch: width < 800 });
     const [name, value] = cookie.split('=');
@@ -176,6 +176,8 @@ for (const width of [375, 1280]) {
     await editor.getByRole('button', { name: /^Next: Details/ }).click();
     await editor.getByRole('button', { name: /^Next: Sizes/ }).click();
     await editor.getByTestId('measurements-review').waitFor();
+    const keptAside = editor.getByTestId('measurements-legacy');
+    await keptAside.getByText(/Taken off the shop by the update:.*King.* duvet cover 240 x 260 cm/).waitFor();
     await shot(page, `measure-editor-top-${width}.png`);
 
     // The Fitted checkbox, by keyboard.
@@ -198,6 +200,11 @@ for (const width of [375, 1280]) {
     assert.equal(await editor.getByLabel('Pillowcases', { exact: true }).inputValue(), 'Own: 2 pcs', 'what was typed is kept');
     assert.equal(await editor.getByLabel('Duvet cover', { exact: true }).inputValue(), '', 'no duvet cover for a sheet set');
     await editor.getByLabel('Other pieces (e.g. cushion covers)').fill('2 cushion covers 45 x 45 cm');
+    // "Put it back", by keyboard: the duvet cover the update took off returns to the size.
+    await keptAside.getByRole('button', { name: 'Put it back' }).focus();
+    await page.keyboard.press('Enter');
+    assert.equal(await editor.getByLabel('Duvet cover', { exact: true }).inputValue(), '240 x 260 cm');
+    await waitGone(editor.getByTestId('measurements-legacy'));
     assert.equal(await overflow(page), 0);
     await shot(page, `measure-editor-${width}.png`);
 
@@ -208,7 +215,8 @@ for (const width of [375, 1280]) {
     assert.equal(saved.fitted, true);
     assert.equal(saved.measurementsReview, undefined, 'reviewed');
     assert.match(String(saved.profiles[0].fittedSheet), /^180 x 200/);
-    assert.equal(saved.profiles[0].duvetCover, undefined);
+    assert.equal(saved.profiles[0].duvetCover, '240 x 260 cm', 'put back by the owner');
+    assert.equal((saved as { legacyMeasurements?: unknown }).legacyMeasurements, undefined, 'nothing left aside');
     assert.equal(saved.profiles[0].otherPieces, '2 cushion covers 45 x 45 cm');
     await page.getByRole('searchbox', { name: 'Search name or SKU' }).fill(title);
     await page.getByRole('button', { name: `Stock and actions for ${title}` }).waitFor();
