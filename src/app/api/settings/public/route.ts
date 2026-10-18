@@ -1,10 +1,11 @@
 import { handleRouteError, json } from '@/lib/server/http';
-import { cardPaymentsReady, contactEmail, getSettings, phoneVerificationConfig } from '@/lib/server/settings';
+import { bankTransferReady, cardPaymentsReady, contactEmail, getSettings, phoneVerificationConfig } from '@/lib/server/settings';
 import { storefrontTheme } from '@/lib/server/theme';
 
 /**
- * What every visitor sees: branding, bank details for transfers, the store's
- * contact details (WhatsApp, Instagram…), the catalogue's categories and the
+ * What every visitor sees: branding, whether checkout offers bank transfer (never
+ * the account itself: that is only sent privately, see src/lib/server/bankPay.ts),
+ * the store's contact details (WhatsApp, Instagram…), the catalogue's categories and the
  * low-stock threshold, the support email, today's festival look, and how
  * checkout verifies phones (the Firebase web config only when Firebase is the
  * switched-on SMS option), and whether checkout takes cards (with the Stripe
@@ -16,7 +17,10 @@ export function GET() {
     const catalog = getSettings('catalog');
     return json({
       brand: getSettings('brand'),
-      bank: getSettings('bank'),
+      bankTransfer: bankTransferReady(getSettings('bank')),
+      // Pages from before this version read bank.iban: an empty object keeps them working
+      // (they simply don't offer bank transfer) until they reload.
+      bank: {},
       store,
       catalog: { categories: catalog.categories, lowStockThreshold: catalog.lowStockThreshold },
       supportEmail: contactEmail(),

@@ -1,8 +1,8 @@
 'use client';
 
 import React, { useState } from 'react';
-import type { Order, WhatsAppCheck } from '@/types';
-import { X, Search, Truck, ExternalLink, MapPin } from 'lucide-react';
+import type { BankTransferCheck, Order, WhatsAppCheck } from '@/types';
+import { X, Search, Truck, ExternalLink, MapPin, Upload, CheckCircle2 } from 'lucide-react';
 import { postJson, safeHref } from '@/lib/apiClient';
 import { WhatsAppConfirm } from './WhatsAppConfirm';
 
@@ -25,6 +25,8 @@ interface TrackedOrder {
   items: Array<{ title: string; profileName: string; quantity: number; totalPrice: number }>;
   courier: { awbNumber: string; trackingUrl: string; status: string };
   whatsappCheck?: Pick<WhatsAppCheck, 'status' | 'code' | 'hold'>;
+  /** A bank transfer: where it stands, and the customer's own private page while it is open. */
+  bankTransfer?: Pick<BankTransferCheck, 'state' | 'uploads' | 'payPath'>;
 }
 
 export const OrderTrackerModal: React.FC<OrderTrackerModalProps> = ({
@@ -140,8 +142,32 @@ export const OrderTrackerModal: React.FC<OrderTrackerModalProps> = ({
                 </div>
 
                 {searchResult.whatsappCheck && searchResult.status !== 'cancelled' && (
-                  <WhatsAppConfirm orderId={searchResult.id} phone={foundPhone} check={searchResult.whatsappCheck} />
+                  <WhatsAppConfirm orderId={searchResult.id} phone={foundPhone} check={searchResult.whatsappCheck} bankDetails={Boolean(searchResult.bankTransfer && searchResult.bankTransfer.state !== 'paid')} />
                 )}
+
+                {/* Bank transfer: the details and the screenshot upload are on the order's private page. */}
+                {searchResult.bankTransfer?.state === 'paid' ? (
+                  <p role="status" className="flex items-center gap-1.5 font-semibold text-success bg-success-soft border border-success-line rounded-xl px-3 py-2">
+                    <CheckCircle2 className="w-4 h-4 shrink-0" aria-hidden="true" /> Your bank transfer has arrived. Thank you.
+                  </p>
+                ) : searchResult.bankTransfer?.payPath ? (
+                  <div className="bg-surface p-3 rounded-xl border border-line space-y-2">
+                    <p className="text-ink-soft leading-relaxed">
+                      {searchResult.bankTransfer.state === 'uploaded'
+                        ? 'We have your transfer screenshot and will confirm your order once we see the transfer.'
+                        : 'Paying by bank transfer: our bank details and the upload for your transfer screenshot are on your order’s private page.'}
+                    </p>
+                    <a
+                      href={searchResult.bankTransfer.payPath}
+                      target="_blank"
+                      rel="noopener"
+                      className="w-full min-h-11 bg-ink hover:bg-ink-2 text-ivory font-semibold text-xs py-2.5 px-4 rounded-xl flex items-center justify-center gap-2 focus:outline-none focus-visible:ring-2 focus-visible:ring-gold focus-visible:ring-offset-2"
+                    >
+                      <Upload className="w-4 h-4 shrink-0" aria-hidden="true" />
+                      <span>{searchResult.bankTransfer.uploads > 0 ? 'Upload a different screenshot' : 'Upload your transfer screenshot'}</span>
+                    </a>
+                  </div>
+                ) : null}
 
                 {/* Courier Details */}
                 <div className="bg-surface p-3 rounded-xl border border-line space-y-2">

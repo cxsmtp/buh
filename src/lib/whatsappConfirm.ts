@@ -13,14 +13,17 @@ export function waMeLink(number: string, message: string): string | null {
   return `https://wa.me/${digits}?text=${encodeURIComponent(message)}`;
 }
 
-/** What the customer sends: short, and readable by the owner at a glance. */
-export function confirmMessage(orderId: string, code: string): string {
-  return `Confirm my order ${orderId} · code ${code}`;
+/**
+ * What the customer sends: short, and readable by the owner at a glance. A bank-transfer order
+ * also asks for the bank details (they are never on the website), so the owner's reply is one tap.
+ */
+export function confirmMessage(orderId: string, code: string, { bankDetails = false } = {}): string {
+  return `Confirm my order ${orderId} · code ${code}${bankDetails ? ', and please send me the bank details' : ''}`;
 }
 
 /** The customer's "Confirm on WhatsApp" link to the shop's number. */
-export function confirmLink(shopNumber: string, orderId: string, code: string): string | null {
-  return waMeLink(shopNumber, confirmMessage(orderId, code));
+export function confirmLink(shopNumber: string, orderId: string, code: string, opts: { bankDetails?: boolean } = {}): string | null {
+  return waMeLink(shopNumber, confirmMessage(orderId, code, opts));
 }
 
 /** The owner's one-tap reply after confirming. */

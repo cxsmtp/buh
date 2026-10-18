@@ -1,7 +1,7 @@
 import crypto from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
-import type { CardPayment, CardState, Customer, Emirate, Order, OrderStatus } from '@/types';
+import type { BankState, CardPayment, CardState, Customer, Emirate, Order, OrderStatus } from '@/types';
 import { deliveryCheck, uaeDate } from '@/lib/delivery';
 import { dataDir } from './dataDir';
 import { getDb, inTransaction } from './db';
@@ -12,6 +12,7 @@ import { getProduct, invalidateProducts, listProducts } from './products';
 import { bump } from './live';
 import { bankTransferReady, cardPaymentsReady, getSettings } from './settings';
 import { audit } from './audit';
+import { issuePayLink, payPathOf } from './bankPay';
 import { waMeLink } from '@/lib/whatsappConfirm';
 import { validatePhone } from '@/lib/otpService';
 
@@ -24,6 +25,8 @@ import { validatePhone } from '@/lib/otpService';
  *    card order, the one the card holder gave (paying is the proof; the order waits
  *    for Stripe's word before it counts, and "Confirm on WhatsApp" still applies);
  *  - one checkout attempt (idempotency key) creates at most one order.
+ * A bank-transfer order gets a private page (src/lib/server/bankPay.ts) where the customer sees
+ * the bank details and uploads the transfer screenshot; the account is never on the website.
  */
 
 export const DELIVERY_FEE = 0; // free delivery across the UAE
@@ -87,15 +90,46 @@ interface Row {
   card_label: string | null;
   refund_ref: string | null;
   refunded_at: string | null;
+  id: string;
+  status: string;
+  payment_status: string;
+  pay_nonce: string | null;
+  pay_expires_at: string | null;
+  bank_state: string;
+  transfer_uploads: number;
+  transfer_uploaded_at: string | null;
+  bank_emailed_at: string | null;
+  bank_checked_at: string | null;
+  bank_checked_by: string | null;
 }
-/** The order's JSON, the WhatsApp confirmation (migration 8) and the card payment (migration 9), in their own columns. */
-const COLUMNS = 'data, wa_code, phone_check, wa_hold, wa_opened_at, phone_checked_at, phone_checked_by, card_state, payment_ref, paid_fils, paid_at, card_label, refund_ref, refunded_at';
+/**
+ * The order's JSON, the WhatsApp confirmation (migration 8), the card payment (migration 9) and the
+ * bank transfer (migration 10), in their own columns.
+ */
+const COLUMNS =
+  'data, wa_code, phone_check, wa_hold, wa_opened_at, phone_checked_at, phone_checked_by, card_state, payment_ref, paid_fils, paid_at, card_label, refund_ref, refunded_at, ' +
+  'id, status, payment_status, pay_nonce, pay_expires_at, bank_state, transfer_uploads, transfer_uploaded_at, bank_emailed_at, bank_checked_at, bank_checked_by';
 const CARD_STATES: CardState[] = ['pending', 'failed', 'paid', 'refund_pending', 'refunded', 'canceled'];
+const BANK_STATES: BankState[] = ['awaiting', 'uploaded', 'not_received', 'paid'];
 
 function fromRow(r: Row): Order {
   const order = JSON.parse(r.data) as Order;
   delete order.whatsappCheck;
   delete order.card;
+  delete order.bankTransfer;
+  if (order.paymentMethod === 'bank_transfer' && BANK_STATES.includes(r.bank_state as BankState)) {
+    const paid = r.bank_state === 'paid' || r.payment_status === 'verified' || r.payment_status === 'paid';
+    const payPath = payPathOf(r);
+    order.bankTransfer = {
+      state: paid ? 'paid' : (r.bank_state as BankState),
+      uploads: r.transfer_uploads,
+      ...(r.transfer_uploaded_at ? { uploadedAt: r.transfer_uploaded_at } : {}),
+      ...(r.bank_emailed_at ? { emailedAt: r.bank_emailed_at } : {}),
+      ...(r.bank_checked_at ? { checkedAt: r.bank_checked_at } : {}),
+      ...(r.bank_checked_by ? { checkedBy: r.bank_checked_by } : {}),
+      ...(payPath ? { payPath } : {}),
+    };
+  }
   if (CARD_STATES.includes(r.card_state as CardState)) {
     order.card = {
       state: r.card_state as CardState,
@@ -143,10 +177,11 @@ export function allOrders(): Order[] {
 }
 
 function writeOrder(order: Order, idempotencyKey?: string) {
-  // The WhatsApp confirmation and the card payment live in their own columns, never in the JSON.
-  const { whatsappCheck: _check, card: _card, ...stored } = order;
+  // The WhatsApp confirmation, the card payment and the bank transfer live in their own columns, never in the JSON.
+  const { whatsappCheck: _check, card: _card, bankTransfer: _bank, ...stored } = order;
   void _check;
   void _card;
+  void _bank;
   getDb()
     .prepare(
       `INSERT INTO orders (id, created_at, updated_at, phone, status, payment_method, payment_status, total_fils, idempotency_key, data)
@@ -399,11 +434,20 @@ export function placeOrder(input: unknown): PlaceOrderResult {
       created.whatsappCheck = { status: 'awaiting', code, hold };
       logEvent(id, 'shop', 'whatsapp_asked', { hold });
     }
+    if (paymentMethod === 'bank_transfer') {
+      // The private page with the bank details and the screenshot upload (the account is never on the website).
+      issuePayLink(id, now);
+      getDb()
+        .prepare('UPDATE orders SET bank_state = ?, transfer_uploads = ?, transfer_uploaded_at = ? WHERE id = ?')
+        .run(receipt ? 'uploaded' : 'awaiting', receipt ? 1 : 0, receipt ? now : null, id);
+      logEvent(id, 'shop', 'bank_link_made');
+    }
     if (receipt) {
+      // A screenshot sent with the order (a checkout page from before this version): the first upload.
       // Written inside the transaction: if this fails, the order (and its stock) is rolled back.
       fs.writeFileSync(path.join(receiptsDir(), `${id}.${receipt.ext}`), receipt.bytes, { mode: 0o600 });
     }
-    return created;
+    return getOrder(id)!;
   });
   invalidateProducts();
   return { order, created: true };
@@ -411,16 +455,116 @@ export function placeOrder(input: unknown): PlaceOrderResult {
 
 // ── Receipts (admin) ────────────────────────────────────────────────────────
 
-export function readReceipt(orderId: string): { bytes: Buffer; mime: string } | null {
+const RECEIPT_TYPES = [['png', 'image/png'], ['jpg', 'image/jpeg'], ['webp', 'image/webp'], ['pdf', 'application/pdf']] as const;
+
+/**
+ * A transfer screenshot (or PDF): the latest, or an earlier one (version 1 is the first). The
+ * latest is receipts/<order>.<ext>; each earlier one is kept as receipts/<order>.v<n>.<ext>.
+ */
+export function readReceipt(orderId: string, version?: number): { bytes: Buffer; mime: string } | null {
   if (!/^BUH-[A-Z0-9-]{4,40}$/.test(orderId)) return null;
-  for (const [ext, mime] of [['png', 'image/png'], ['jpg', 'image/jpeg'], ['webp', 'image/webp'], ['pdf', 'application/pdf']] as const) {
+  if (version !== undefined && !(Number.isInteger(version) && version >= 1 && version <= 1000)) return null;
+  for (const [ext, mime] of RECEIPT_TYPES) {
     try {
-      return { bytes: fs.readFileSync(path.join(receiptsDir(), `${orderId}.${ext}`)), mime };
+      return { bytes: fs.readFileSync(path.join(receiptsDir(), version === undefined ? `${orderId}.${ext}` : `${orderId}.v${version}.${ext}`)), mime };
     } catch {
       // try the next type
     }
   }
   return null;
+}
+
+// ── Bank transfer: the customer's private page, the owner's check ───────────
+
+/**
+ * The customer uploads the transfer screenshot (image or PDF) on the order's private page. The
+ * file is checked like a checkout receipt always was (its first bytes, 5 MB at most). Uploading
+ * again replaces it on screen; the earlier ones are kept for the owner. The caller has checked the
+ * private link; this checks the order still takes one (not paid, not cancelled).
+ */
+export function uploadTransfer(orderId: string, file: unknown): Order {
+  const receipt = parseReceiptDataUrl(file);
+  return inTransaction(() => {
+    const order = getOrder(orderId);
+    if (!order || order.paymentMethod !== 'bank_transfer' || !order.bankTransfer) throw new HttpError(404, 'Not found.');
+    if (order.status === 'cancelled' || order.bankTransfer.state === 'paid') throw new HttpError(409, 'This order is already paid or closed: nothing more to upload.');
+    const n = order.bankTransfer.uploads + 1;
+    const at = new Date().toISOString();
+    getDb().prepare("UPDATE orders SET bank_state = 'uploaded', transfer_uploads = ?, transfer_uploaded_at = ? WHERE id = ?").run(n, at, orderId);
+    order.paymentStatus = 'receipt_uploaded';
+    order.paymentReceiptUrl = `/api/admin/orders/${orderId}/receipt`;
+    writeOrder(order);
+    logEvent(orderId, 'customer', 'transfer_uploaded', { n, type: receipt.ext });
+    // Inside the transaction: if the file can't be written, nothing above is saved.
+    const dir = receiptsDir();
+    const fresh = path.join(dir, `${orderId}.upload-${process.pid}.tmp`);
+    fs.writeFileSync(fresh, receipt.bytes, { mode: 0o600 });
+    for (const [ext] of RECEIPT_TYPES) {
+      const current = path.join(dir, `${orderId}.${ext}`);
+      if (fs.existsSync(current)) fs.renameSync(current, path.join(dir, `${orderId}.v${n - 1}.${ext}`));
+    }
+    fs.renameSync(fresh, path.join(dir, `${orderId}.${receipt.ext}`));
+    return getOrder(orderId)!;
+  });
+}
+
+export type BankResult = 'received' | 'not_received';
+
+/**
+ * The owner's tap on a bank-transfer order: "Payment received" (the money is in the account: the
+ * order is paid, and its private page closes) or "Not received yet" (looked, not there; the
+ * customer may upload again). Checked against the order here, idempotent (the same answer again
+ * changes nothing), and written to the audit log inside the same transaction, so it is never
+ * reported done (or saved) without its audit entry. A paid order is never un-paid.
+ */
+export function checkBankTransfer(id: string, result: BankResult, actor: string): { order: Order; changed: boolean } {
+  return inTransaction(() => {
+    const order = getOrder(id);
+    if (!order) throw new HttpError(404, 'Order not found.');
+    const bank = order.bankTransfer;
+    if (order.paymentMethod !== 'bank_transfer' || !bank) throw new HttpError(409, 'This order is not paid by bank transfer.');
+    if (result === 'received' && bank.state === 'paid') return { order, changed: false };
+    if (result === 'not_received' && bank.state === 'not_received') return { order, changed: false };
+    if (result === 'not_received' && bank.state === 'paid') throw new HttpError(409, `${order.id} is already marked as paid.`);
+    if (order.status === 'cancelled') throw new HttpError(409, `${order.id} is cancelled.`);
+    const at = new Date().toISOString();
+    getDb()
+      .prepare('UPDATE orders SET bank_state = ?, bank_checked_at = ?, bank_checked_by = ? WHERE id = ?')
+      .run(result === 'received' ? 'paid' : 'not_received', at, actor, id);
+    if (result === 'received') {
+      // Paid the way every version knows (the JSON's payment status), so an older one shows it too.
+      order.paymentStatus = 'verified';
+      writeOrder(order);
+    }
+    logEvent(id, actor, result === 'received' ? 'bank_paid' : 'bank_not_received', { from: bank.state, uploads: bank.uploads });
+    auditOrThrow(result === 'received' ? 'payment.bank_received' : 'payment.bank_not_received', { by: actor, orderId: id, amountFils: fils(order.total), from: bank.state, uploads: bank.uploads });
+    bump('orders');
+    return { order: getOrder(id)!, changed: true };
+  });
+}
+
+const OPEN_TRANSFER = "status <> 'cancelled' AND payment_status NOT IN ('verified', 'paid')";
+
+/** Bank transfers with a screenshot waiting for the owner's check. */
+export function transfersToCheckCount(): number {
+  return getDb().prepare(`SELECT COUNT(*) FROM orders WHERE bank_state = 'uploaded' AND ${OPEN_TRANSFER}`).pluck().get() as number;
+}
+
+/** Bank transfers still waiting for the customer (no screenshot yet, or not received). */
+export function transfersAwaitedCount(): number {
+  return getDb().prepare(`SELECT COUNT(*) FROM orders WHERE bank_state IN ('awaiting', 'not_received') AND ${OPEN_TRANSFER}`).pluck().get() as number;
+}
+
+/** Claim an order's one bank-details email (two copies of the shop may try at once during an update). */
+export function claimBankEmail(id: string): boolean {
+  return getDb().prepare('UPDATE orders SET bank_emailed_at = ? WHERE id = ? AND bank_emailed_at IS NULL').run(new Date().toISOString(), id).changes === 1;
+}
+
+/** The bank-details email was sent (noted on the order's history), or failed (noted; the owner sends it on WhatsApp). */
+export function bankEmailDone(id: string, ok: boolean): void {
+  if (!ok) getDb().prepare('UPDATE orders SET bank_emailed_at = NULL WHERE id = ?').run(id);
+  logEvent(id, 'shop', ok ? 'bank_emailed' : 'bank_email_failed');
+  bump('orders');
 }
 
 // ── Admin changes ───────────────────────────────────────────────────────────
@@ -461,8 +605,13 @@ export function updateOrderByAdmin(id: string, patch: unknown, actor: string): O
       // Only Stripe's word (the webhook, or asking Stripe) marks a card order paid.
       if (order.paymentMethod === 'online_card') throw new HttpError(409, 'Card payments are recorded by Stripe, not by hand.', {}, { code: 'card_payment' });
       if (!PAYMENT_STATUSES.includes(p.paymentStatus as Order['paymentStatus'])) throw new HttpError(400, 'Unknown payment status.');
+      if (order.bankTransfer?.state === 'paid') throw new HttpError(409, `${order.id} is already marked as paid.`);
       changes.paymentStatus = { from: order.paymentStatus, to: p.paymentStatus };
       order.paymentStatus = p.paymentStatus as Order['paymentStatus'];
+      // A bank transfer marked paid this way closes its private page too.
+      if (order.bankTransfer && (order.paymentStatus === 'verified' || order.paymentStatus === 'paid')) {
+        getDb().prepare("UPDATE orders SET bank_state = 'paid', bank_checked_at = ?, bank_checked_by = ? WHERE id = ?").run(new Date().toISOString(), actor, id);
+      }
     }
     if (p.adminNotes !== undefined) {
       order.adminNotes = text(p.adminNotes, 'Notes', 1000) || undefined;
@@ -810,12 +959,24 @@ export function cardTakings(from: string, to: string): { paid: number; paidFils:
 
 /** A placed order as shown to the customer who placed it (no internal notes). */
 export function customerView(order: Order) {
-  const { adminNotes: _notes, paymentReceiptUrl: _receipt, whatsappCheck: _check, card: _card, ...rest } = order;
+  const { adminNotes: _notes, paymentReceiptUrl: _receipt, whatsappCheck: _check, card: _card, bankTransfer: _bank, ...rest } = order;
   void _notes;
   void _receipt;
   void _check;
   void _card;
-  return { ...rest, courier: trackingView(order), ...(order.whatsappCheck ? { whatsappCheck: whatsAppView(order.whatsappCheck) } : {}), ...(order.card ? { card: cardView(order.card) } : {}) };
+  void _bank;
+  return {
+    ...rest,
+    courier: trackingView(order),
+    ...(order.whatsappCheck ? { whatsappCheck: whatsAppView(order.whatsappCheck) } : {}),
+    ...(order.card ? { card: cardView(order.card) } : {}),
+    ...(order.bankTransfer ? { bankTransfer: bankView(order.bankTransfer) } : {}),
+  };
+}
+
+/** The customer's side of a bank transfer: where it stands, and their own private page while it is open. */
+export function bankView(bank: NonNullable<Order['bankTransfer']>): Pick<NonNullable<Order['bankTransfer']>, 'state' | 'uploads' | 'payPath'> {
+  return { state: bank.state, uploads: bank.uploads, ...(bank.payPath ? { payPath: bank.payPath } : {}) };
 }
 
 /** The customer's side of a card payment: paid or not, and how (no Stripe references). */
@@ -860,6 +1021,7 @@ export function lookupOrder(id: string, phone: string) {
     courier: trackingView(order),
     ...(order.whatsappCheck ? { whatsappCheck: whatsAppView(order.whatsappCheck) } : {}),
     ...(order.card ? { card: cardView(order.card) } : {}),
+    ...(order.bankTransfer ? { bankTransfer: bankView(order.bankTransfer) } : {}),
   };
 }
 

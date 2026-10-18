@@ -108,6 +108,18 @@ function describe(e: OrderEvent): string {
       return `Confirmed on WhatsApp by ${e.actor}`;
     case 'whatsapp_mismatch':
       return `Number didn't match (${e.actor})`;
+    case 'bank_link_made':
+      return 'Private payment page made (bank details only there)';
+    case 'bank_emailed':
+      return 'Bank details emailed to the customer';
+    case 'bank_email_failed':
+      return 'Bank details email failed: send them on WhatsApp';
+    case 'transfer_uploaded':
+      return `Transfer screenshot uploaded${Number(e.detail?.n) > 1 ? ` (#${Number(e.detail?.n)})` : ''}`;
+    case 'bank_paid':
+      return `Payment received (${e.actor})`;
+    case 'bank_not_received':
+      return `Transfer not received yet (${e.actor})`;
     case 'courier':
       return `Courier: ${String(e.detail?.provider ?? '')} ${String(e.detail?.awb ?? '')}`.trim();
     case 'updated': {

@@ -297,6 +297,33 @@ const MIGRATIONS: Array<(db: DB) => void> = [
       );
     `);
   },
+  // 10: bank transfer without the bank account on the website. Each bank-transfer order has a
+  //     private page (/pay/<token>) with the details and an upload for the transfer screenshot.
+  //     The token is never stored: it is made from the server's key and pay_nonce, and only its
+  //     hash is kept (to find the order). Own columns, like migrations 8 and 9, so an older version
+  //     rewriting the order's JSON leaves them alone. Orders from before carry on as they were:
+  //     a transfer already uploaded at checkout is "to check", the others wait for the transfer.
+  (db) => {
+    db.exec(`
+      ALTER TABLE orders ADD COLUMN pay_nonce TEXT;
+      ALTER TABLE orders ADD COLUMN pay_token_hash TEXT;
+      ALTER TABLE orders ADD COLUMN pay_expires_at TEXT;
+      ALTER TABLE orders ADD COLUMN bank_state TEXT NOT NULL DEFAULT 'none';   -- none | awaiting | uploaded | not_received | paid
+      ALTER TABLE orders ADD COLUMN transfer_uploads INTEGER NOT NULL DEFAULT 0;
+      ALTER TABLE orders ADD COLUMN transfer_uploaded_at TEXT;
+      ALTER TABLE orders ADD COLUMN bank_emailed_at TEXT;
+      ALTER TABLE orders ADD COLUMN bank_checked_at TEXT;
+      ALTER TABLE orders ADD COLUMN bank_checked_by TEXT;
+      CREATE UNIQUE INDEX orders_by_pay_token ON orders(pay_token_hash) WHERE pay_token_hash IS NOT NULL;
+      CREATE INDEX orders_transfer_to_check ON orders(created_at) WHERE bank_state = 'uploaded';
+      UPDATE orders SET bank_state = CASE
+          WHEN payment_status IN ('verified', 'paid') THEN 'paid'
+          WHEN payment_status = 'receipt_uploaded' THEN 'uploaded'
+          ELSE 'awaiting' END,
+        transfer_uploads = CASE WHEN json_extract(data, '$.paymentReceiptUrl') IS NOT NULL THEN 1 ELSE 0 END
+        WHERE payment_method = 'bank_transfer';
+    `);
+  },
 ];
 
 let db: DB | null = null;

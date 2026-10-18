@@ -1,7 +1,7 @@
 'use client';
 
 import React, { useState } from 'react';
-import { Order, CourierProvider, CourierSettings } from '@/types';
+import { BankTransferDetails, Order, CourierProvider, CourierSettings } from '@/types';
 import { ShippingLabelModal } from './ShippingLabelModal';
 import { 
   CheckCircle2, 
@@ -23,12 +23,16 @@ import {
 } from 'lucide-react';
 import { postJson, sendJson } from '@/lib/apiClient';
 import { awaitingWhatsApp, heldForWhatsApp, OrderTimeline, OrderWhatsAppCheck } from './OrderWhatsAppCheck';
+import { OrderBankTransfer, transferToCheck } from './OrderBankTransfer';
 
 interface AdminOrdersTabProps {
   orders: Order[];
   /** An order changed on the server (status, payment, courier): replace it in the list. */
   onOrderChanged: (order: Order) => void;
   courierSettings: CourierSettings;
+  /** The shop's bank account (Settings), for the "Send bank details on WhatsApp" message. */
+  bank?: BankTransferDetails;
+  shopName?: string;
 }
 
 /** A card order's payment, as the hub shows it (only Stripe's word moves it: src/lib/server/payments.ts). */
@@ -64,6 +68,8 @@ export const AdminOrdersTab: React.FC<AdminOrdersTabProps> = ({
   orders,
   onOrderChanged,
   courierSettings,
+  bank,
+  shopName,
 }) => {
   const [busyOrderId, setBusyOrderId] = useState('');
 
@@ -95,8 +101,8 @@ export const AdminOrdersTab: React.FC<AdminOrdersTabProps> = ({
     else alert(data.message || 'The refund could not be made.');
   };
 
-  const [filter, setFilter] = useState<'all' | 'pending' | 'whatsapp' | 'card' | 'confirmed' | 'dispatched'>('all');
-  // Orders the owner has just answered stay in "Awaiting WhatsApp" for now, so the reply link is right there.
+  const [filter, setFilter] = useState<'all' | 'pending' | 'whatsapp' | 'transfer' | 'card' | 'confirmed' | 'dispatched'>('all');
+  // Orders the owner has just answered stay in "Awaiting WhatsApp" (or "Transfer to check") for now, so the reply link is right there.
   const [justChecked, setJustChecked] = useState<string[]>([]);
   const whatsappChecked = (o: Order) => {
     setJustChecked((ids) => (ids.includes(o.id) ? ids : [...ids, o.id]));
@@ -116,6 +122,7 @@ export const AdminOrdersTab: React.FC<AdminOrdersTabProps> = ({
   const filteredOrders = orders.filter((o) => {
     if (filter === 'pending') return o.status === 'pending_confirmation';
     if (filter === 'whatsapp') return awaitingWhatsApp(o) || justChecked.includes(o.id);
+    if (filter === 'transfer') return transferToCheck(o) || justChecked.includes(o.id);
     if (filter === 'card') return o.paymentMethod === 'online_card';
     if (filter === 'confirmed') return o.status === 'confirmed';
     if (filter === 'dispatched') return o.status === 'dispatched';
@@ -202,13 +209,15 @@ export const AdminOrdersTab: React.FC<AdminOrdersTabProps> = ({
           { id: 'all', label: 'All Orders' },
           { id: 'pending', label: 'Needs Confirmation' },
           { id: 'whatsapp', label: 'Awaiting WhatsApp' },
+          { id: 'transfer', label: 'Transfer to check' },
           { id: 'card', label: 'Card payments' },
           { id: 'confirmed', label: 'Confirmed & AWB Ready' },
           { id: 'dispatched', label: 'Dispatched / In Transit' },
-        ].filter((tab) => (tab.id !== 'whatsapp' || orders.some((o) => o.whatsappCheck)) && (tab.id !== 'card' || orders.some((o) => o.paymentMethod === 'online_card'))).map((tab) => {
+        ].filter((tab) => (tab.id !== 'whatsapp' || orders.some((o) => o.whatsappCheck)) && (tab.id !== 'transfer' || orders.some((o) => o.bankTransfer)) && (tab.id !== 'card' || orders.some((o) => o.paymentMethod === 'online_card'))).map((tab) => {
           const count = orders.filter((o) => {
             if (tab.id === 'pending') return o.status === 'pending_confirmation';
             if (tab.id === 'whatsapp') return awaitingWhatsApp(o);
+            if (tab.id === 'transfer') return transferToCheck(o);
             if (tab.id === 'card') return o.paymentMethod === 'online_card';
             if (tab.id === 'confirmed') return o.status === 'confirmed';
             if (tab.id === 'dispatched') return o.status === 'dispatched';
@@ -308,8 +317,9 @@ export const AdminOrdersTab: React.FC<AdminOrdersTabProps> = ({
                   </div>
                 </div>
 
-                {/* Confirm on WhatsApp: first, so the owner sees it on the phone */}
+                {/* Confirm on WhatsApp, and the bank transfer: first, so the owner sees them on the phone */}
                 <OrderWhatsAppCheck order={order} onOrderChanged={whatsappChecked} />
+                {bank && <OrderBankTransfer order={order} bank={bank} shopName={shopName} onOrderChanged={whatsappChecked} />}
 
                 {/* Items & Delivery Info */}
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 text-xs">
@@ -371,7 +381,7 @@ export const AdminOrdersTab: React.FC<AdminOrdersTabProps> = ({
                       {card.text}
                     </span>
                   )}
-                  {!isCod && !isCard && (
+                  {!isCod && !isCard && !(bank && order.bankTransfer) && (
                     <>
                       <span
                         className={`px-2 py-1 rounded-lg font-semibold border ${
