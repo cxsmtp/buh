@@ -167,6 +167,9 @@ Carrier endpoints are fixed in code.
 
 `DATA_DIR/audit-YYYY-MM.jsonl` records sign-ins, refusals, password changes, admin link changes (never the link), courier dispatches and tests, SMS tests, and stock moves (who, reason, old → new). Each line carries an HMAC over the previous line, so editing, deleting or reordering a line is detected (`verifyAuditLog`).
 
+- Who acted (`by`: the admin's sign-in email, or `stripe`, `customer`…) and the order number (`orderId`) are kept exactly: the file is the owner's own record (0600, and only in encrypted backups). Everything else is redacted as in the server log: secrets by field name, customers' phones and emails in free text masked. Order numbers and dates are never mistaken for phone numbers (digits inside an identifier are left alone), in the audit or the server log.
+- A change audited inside its transaction whose save then fails (a full disk, a busy database) gets an `audit.rolled_back` line straight after, so the log never claims a change the database doesn't have.
+
 ## Headers
 
 Every page sends:
@@ -271,9 +274,9 @@ Tested by `test/sw-source.test.mts` (every rule above, the 404 and reset kill sw
 | **Lifetime** | It opens the page until the order is paid or cancelled, or for 14 days. Anything else (unknown, altered, expired, paid, cancelled) is handed on by the front gate as an unknown address: the shop's ordinary 404, byte for byte, and counted by the scanner slow-down. |
 | **Headers** | `Referrer-Policy: no-referrer`, `X-Robots-Tag: noindex, nofollow`, `Cache-Control: no-store`, and the page's own noindex and no-referrer meta tags; never in the sitemap. |
 | **Limits** | Page views: 60 per address and 60 per order in 15 minutes (429 after). Uploads (`POST /api/pay/<token>`): same site only, a 7 MB body cap, one allow-listed field, 20 per address and 10 per order an hour. |
-| **Upload** | Checked like a receipt (its first bytes: PNG, JPEG, WebP or PDF; at most 5 MB), stored where only the hub can open it (`/api/admin/orders/<id>/receipt`, sandboxed). |
-| **Owner's check** | `POST /api/admin/orders/<id>/bank` (`received` or `not_received`): door, session and same site, a 1 KB body with one allow-listed field, the order looked up on the server, idempotent (the same answer twice changes nothing), and written to the audit log (`payment.bank_received`, `payment.bank_not_received`) in the same transaction, so it is never saved or reported done without it. A paid order is never un-paid. |
-| **Email** | Sent once per order (claimed on the order first, so two copies of the shop never both send it), only to the address on the order. |
+| **Upload** | Checked like a receipt (its first bytes: PNG, JPEG, WebP or PDF; at most 5 MB), stored where only the hub can open it (`/api/admin/orders/<id>/receipt`, sandboxed). Only while the order is open for payment (not paid, not cancelled), audited before it is saved, and the files moved only once it is. The latest 5 per order are kept; none are taken while the disk has under 1 GB free or the receipts folder holds 2 GB (the customer is asked to use WhatsApp; the owner is emailed, at most every 6 hours). Backups skip files still being written (`*.tmp`). |
+| **Owner's check** | `POST /api/admin/orders/<id>/bank` (`received` or `not_received`): door, session and same site, a 1 KB body with one allow-listed field, the order looked up on the server, idempotent (the same answer twice changes nothing), and written to the audit log (`payment.bank_received`, `payment.bank_not_received`) in the same transaction, so it is never saved or reported done without it. A paid order is never un-paid, and a cancelled one can't be marked paid. The general order update (`PATCH`) refuses to change a bank transfer's payment status (409, "use Payment received"). |
+| **Email** | Sent once per order (claimed on the order first, so two copies of the shop never both send it), only to the address on the order, which must be one plain address (no `,` `;`, spaces or control characters). The link in it, and in the hub's WhatsApp messages, is built from `NEXT_PUBLIC_APP_URL` only, never the request's `Host` header; without it the link is left out. The customer's name in it keeps only letters, spaces, apostrophes, hyphens and dots, and drops anything that looks like a link or an address. |
 | **Logs** | `logEvent` masks the token like the admin link (first 4 characters); the proxies' access logs (Caddy and nginx) mask `/pay/…` and `/api/pay/…` the same way. The audit log never has the link. |
 
 ## Settings and keys
