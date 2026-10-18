@@ -346,6 +346,8 @@ const overflow = (page: Page) =>
 for (const width of [375, 1280]) {
   test(`at ${width}px: Card shows Stripe’s field (no sideways scroll, keyboard reaches it); the Pay button needs no SMS code`, { skip: skip || skipBrowser }, async () => {
     const { ctx, page, errors, stripeRequests } = await openCheckout(width);
+    // Checkout fetches Stripe.js on its own after it opens: give it up to 10 s on a busy machine.
+    for (let i = 0; i < 100 && !stripeRequests.some((u) => u.startsWith('https://js.stripe.com/')); i++) await page.waitForTimeout(100);
     assert.ok(stripeRequests.some((u) => u.startsWith('https://js.stripe.com/')), 'checkout loads Stripe.js');
     const cardOption = page.getByRole('radio', { name: /^Card/ });
     await cardOption.waitFor();
