@@ -4,6 +4,7 @@ import path from 'node:path';
 import type { BankState, CardPayment, CardState, Customer, Emirate, Order, OrderAttention, OrderStatus } from '@/types';
 import { deliveryCheck, uaeDate } from '@/lib/delivery';
 import { dataDir } from './dataDir';
+import { customerLink } from './runtimeConfig';
 import { getDb, inTransaction } from './db';
 import { HttpError } from './http';
 import { parseReceiptDataUrl } from './imageInput';
@@ -12,6 +13,8 @@ import { getProduct, invalidateProducts, listProducts } from './products';
 import { bump } from './live';
 import { bankTransferReady, cardPaymentsReady, getSettings, phoneCodesOn } from './settings';
 import { audit } from './audit';
+import { kvGet, kvSet } from './kv';
+import { logEvent as logEvent_ } from './log';
 import { issuePayLink, payPathOf } from './bankPay';
 import { waMeLink } from '@/lib/whatsappConfirm';
 import { validatePhone } from '@/lib/otpService';
@@ -68,6 +71,14 @@ function text(v: unknown, field: string, max: number, { required = false } = {})
 const fils = (aed: number) => Math.round(aed * 100);
 const aed = (f: number) => f / 100;
 
+/**
+ * One plain address (name@domain.tld): no spaces or control characters, and no ',' or ';' (which a
+ * mail server would read as a second recipient), quotes, brackets or backslashes.
+ */
+export function isCustomerEmail(email: string): boolean {
+  return /^(?=[^]{3,254}$)[^\s\p{C}@<>",;()[\]\\]+@[^\s\p{C}@<>",;()[\]\\]+\.[^\s\p{C}@<>",;()[\]\\]+$/u.test(email);
+}
+
 function newOrderId(): string {
   const alphabet = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
   const random = Array.from(crypto.randomBytes(6), (b) => alphabet[b % alphabet.length]).join('');
@@ -122,23 +133,53 @@ const ATTENTION_KINDS: OrderAttention['kind'][] = ['refund_failed', 'booked_afte
 const CARD_STATES: CardState[] = ['pending', 'failed', 'paid', 'refund_pending', 'refunded', 'canceled'];
 const BANK_STATES: BankState[] = ['awaiting', 'uploaded', 'not_received', 'paid'];
 
+/** Migration 10's rule for a bank-transfer order from before it: paid, a screenshot to check, or waiting. */
+function legacyBankState(paymentStatus: string): BankState {
+  return paymentStatus === 'verified' || paymentStatus === 'paid' ? 'paid' : paymentStatus === 'receipt_uploaded' ? 'uploaded' : 'awaiting';
+}
+
+/**
+ * Bank-transfer orders an older version wrote after migration 10 ran (during an update's overlap,
+ * or after a rollback) still say bank_state 'none': give them their state, as migration 10 did.
+ * Data only and idempotent (it only touches rows still at 'none'); run at start-up and every minute.
+ */
+export function normalizeBankStates(): number {
+  return getDb()
+    .prepare(
+      `UPDATE orders SET bank_state = CASE
+          WHEN payment_status IN ('verified', 'paid') THEN 'paid'
+          WHEN payment_status = 'receipt_uploaded' THEN 'uploaded'
+          ELSE 'awaiting' END,
+        transfer_uploads = CASE WHEN json_extract(data, '$.paymentReceiptUrl') IS NOT NULL THEN 1 ELSE 0 END
+        WHERE payment_method = 'bank_transfer' AND bank_state = 'none'`
+    )
+    .run().changes;
+}
+
 function fromRow(r: Row): Order {
   const order = JSON.parse(r.data) as Order;
   delete order.whatsappCheck;
   delete order.card;
   delete order.bankTransfer;
   delete order.attention;
-  if (order.paymentMethod === 'bank_transfer' && BANK_STATES.includes(r.bank_state as BankState)) {
-    const paid = r.bank_state === 'paid' || r.payment_status === 'verified' || r.payment_status === 'paid';
+  // Written by an older version (during an update, or after a rollback) after migration 10 ran:
+  // bank_state is still 'none', so it is worked out like migration 10 did (normalizeBankStates()
+  // then saves it).
+  const legacy = order.paymentMethod === 'bank_transfer' && r.bank_state === 'none';
+  const bankState = legacy ? legacyBankState(r.payment_status) : r.bank_state;
+  if (order.paymentMethod === 'bank_transfer' && BANK_STATES.includes(bankState as BankState)) {
+    const paid = bankState === 'paid' || r.payment_status === 'verified' || r.payment_status === 'paid';
     const payPath = payPathOf(r);
+    const payUrl = payPath ? customerLink(payPath) : undefined;
     order.bankTransfer = {
-      state: paid ? 'paid' : (r.bank_state as BankState),
-      uploads: r.transfer_uploads,
+      state: paid ? 'paid' : (bankState as BankState),
+      uploads: legacy ? (order.paymentReceiptUrl ? 1 : 0) : r.transfer_uploads,
       ...(r.transfer_uploaded_at ? { uploadedAt: r.transfer_uploaded_at } : {}),
       ...(r.bank_emailed_at ? { emailedAt: r.bank_emailed_at } : {}),
       ...(r.bank_checked_at ? { checkedAt: r.bank_checked_at } : {}),
       ...(r.bank_checked_by ? { checkedBy: r.bank_checked_by } : {}),
       ...(payPath ? { payPath } : {}),
+      ...(payUrl ? { payUrl } : {}),
     };
   }
   if (CARD_STATES.includes(r.card_state as CardState)) {
@@ -280,7 +321,7 @@ export function placeOrder(input: unknown, context: PlaceOrderContext = {}): Pla
   const emirate = text(c.emirate, 'Emirate', 40, { required: true });
   if (!EMIRATES.includes(emirate as Emirate)) throw new HttpError(400, 'Please choose one of the seven Emirates.');
   const email = text(c.email, 'Email', 254);
-  if (email && !/^(?=[^]{3,254}$)[^\s@<>"]+@[^\s@<>"]+\.[^\s@<>"]+$/.test(email)) throw new HttpError(400, 'Please check the email address.');
+  if (email && !isCustomerEmail(email)) throw new HttpError(400, 'Please check the email address.');
   const gps = c.gpsCoordinates && typeof c.gpsCoordinates === 'object' ? (c.gpsCoordinates as Obj) : null;
   const lat = gps && typeof gps.lat === 'number' && Number.isFinite(gps.lat) && Math.abs(gps.lat) <= 90 ? gps.lat : undefined;
   const lng = gps && typeof gps.lng === 'number' && Number.isFinite(gps.lng) && Math.abs(gps.lng) <= 180 ? gps.lng : undefined;
@@ -321,7 +362,15 @@ export function placeOrder(input: unknown, context: PlaceOrderContext = {}): Pla
       : undefined;
   const expectedTotalFils =
     body.expectedTotal === undefined ? null : typeof body.expectedTotal === 'number' && Number.isFinite(body.expectedTotal) ? fils(body.expectedTotal) : -1;
-  const receipt = body.receipt && paymentMethod === 'bank_transfer' ? parseReceiptDataUrl(body.receipt) : null;
+  let receipt = body.receipt && paymentMethod === 'bank_transfer' ? parseReceiptDataUrl(body.receipt) : null;
+  if (receipt) {
+    // No room for it: the order still goes through, and the customer uploads (or sends) it later.
+    const room = receiptRoomProblem(receipt.bytes.length);
+    if (room) {
+      noteNoRoom('(checkout)', room);
+      receipt = null;
+    }
+  }
 
   if (!Array.isArray(body.items) || body.items.length === 0) throw new HttpError(400, 'Your bag is empty.');
   if (body.items.length > MAX_LINES) throw new HttpError(400, `At most ${MAX_LINES} lines per order.`);
@@ -363,137 +412,152 @@ export function placeOrder(input: unknown, context: PlaceOrderContext = {}): Pla
   // "Confirm on WhatsApp" (Settings → Store & contact): only with the shop's number set.
   const askWhatsApp = Boolean(store.confirmOrdersOnWhatsApp && waMeLink(store.whatsappNumber, ''));
   listProducts({ includeHidden: true }); // load (and seed) the catalogue before the transaction
-  const order = inTransaction(() => {
-    // One verified phone can't tie up the stock with a pile of unconfirmed orders.
-    const open = (getDb().prepare("SELECT COUNT(*) AS n FROM orders WHERE phone = ? AND status = 'pending_confirmation'").get(phone) as { n: number }).n;
-    if (open >= MAX_OPEN_PER_PHONE) {
-      throw new HttpError(429, `You already have ${open} orders waiting for confirmation. We'll call you shortly, or contact us to add to them.`);
-    }
-    if (card) {
-      // Unpaid card orders hold pieces, so they can't pile up: per phone, per connection, and overall.
-      const count = (where: string, ...args: unknown[]) => getDb().prepare(`SELECT COUNT(*) AS n FROM orders WHERE card_state IN ('pending', 'failed')${where}`).pluck().get(...args) as number;
-      if (count(' AND phone = ?', phone) >= MAX_UNPAID_CARD_PER_PHONE || (ipHash && count(' AND card_ip = ?', ipHash) >= MAX_UNPAID_CARD_PER_IP)) {
-        throw new HttpError(429, 'Too many card payments are waiting to be finished. Please finish or close the other checkout, or choose Cash on Delivery.', {}, { code: 'card_unpaid_limit' });
+  // A screenshot sent with the order (a checkout page from before this version) is the first upload:
+  // written beside its place first (if that fails, no order), moved there once the order is saved.
+  const freshReceipt = path.join(receiptsDir(), `checkout-${process.pid}-${crypto.randomBytes(6).toString('hex')}.upload.tmp`);
+  if (receipt) fs.writeFileSync(freshReceipt, receipt.bytes, { mode: 0o600 });
+  let order: Order;
+  try {
+    order = placeInTransaction();
+  } catch (err) {
+    if (receipt) fs.rmSync(freshReceipt, { force: true });
+    throw err;
+  }
+  function placeInTransaction(): Order {
+    return inTransaction(() => {
+      // One verified phone can't tie up the stock with a pile of unconfirmed orders.
+      const open = (getDb().prepare("SELECT COUNT(*) AS n FROM orders WHERE phone = ? AND status = 'pending_confirmation'").get(phone) as { n: number }).n;
+      if (open >= MAX_OPEN_PER_PHONE) {
+        throw new HttpError(429, `You already have ${open} orders waiting for confirmation. We'll call you shortly, or contact us to add to them.`);
       }
-      if (count('') >= MAX_UNPAID_CARD_TOTAL) {
-        throw new HttpError(429, 'Card checkout is very busy right now, sorry. Please try again in a few minutes, or choose Cash on Delivery.', {}, { code: 'card_busy' });
+      if (card) {
+        // Unpaid card orders hold pieces, so they can't pile up: per phone, per connection, and overall.
+        const count = (where: string, ...args: unknown[]) => getDb().prepare(`SELECT COUNT(*) AS n FROM orders WHERE card_state IN ('pending', 'failed')${where}`).pluck().get(...args) as number;
+        if (count(' AND phone = ?', phone) >= MAX_UNPAID_CARD_PER_PHONE || (ipHash && count(' AND card_ip = ?', ipHash) >= MAX_UNPAID_CARD_PER_IP)) {
+          throw new HttpError(429, 'Too many card payments are waiting to be finished. Please finish or close the other checkout, or choose Cash on Delivery.', {}, { code: 'card_unpaid_limit' });
+        }
+        if (count('') >= MAX_UNPAID_CARD_TOTAL) {
+          throw new HttpError(429, 'Card checkout is very busy right now, sorry. Please try again in a few minutes, or choose Cash on Delivery.', {}, { code: 'card_busy' });
+        }
       }
-    }
-    const items: Order['items'] = [];
-    for (const line of lines) {
-      const product = getProduct(line.productId);
-      if (!product || !product.active) throw new HttpError(409, 'An item in your bag is no longer available. Please remove it and try again.');
-      const profile = product.profiles.find((p) => p.id === line.profileId);
-      if (!profile) throw new HttpError(409, `${product.title}: that bed size is no longer offered.`);
-      const color = line.color && product.colors.some((c2) => c2.name === line.color) ? line.color : product.colors[0]?.name;
-      if (line.color && color !== line.color) throw new HttpError(409, `${product.title}: that colour is no longer offered.`);
-      // Reserve this size's pieces atomically: fails if another order took the last one.
-      const reserved = getDb()
-        .prepare('UPDATE product_stock SET qty = qty - ? WHERE product_id = ? AND size_id = ? AND qty >= ? AND EXISTS (SELECT 1 FROM products WHERE id = ? AND active = 1 AND archived = 0)')
-        .run(line.quantity, product.id, profile.id, line.quantity, product.id);
-      if (reserved.changes !== 1) {
-        const left = (getDb().prepare('SELECT qty FROM product_stock WHERE product_id = ? AND size_id = ?').get(product.id, profile.id) as { qty: number } | undefined)?.qty ?? 0;
-        throw new HttpError(409, left > 0 ? `${product.title} (${profile.name}): only ${left} left.` : `${product.title} (${profile.name}) has just sold out.`);
+      const items: Order['items'] = [];
+      for (const line of lines) {
+        const product = getProduct(line.productId);
+        if (!product || !product.active) throw new HttpError(409, 'An item in your bag is no longer available. Please remove it and try again.');
+        const profile = product.profiles.find((p) => p.id === line.profileId);
+        if (!profile) throw new HttpError(409, `${product.title}: that bed size is no longer offered.`);
+        const color = line.color && product.colors.some((c2) => c2.name === line.color) ? line.color : product.colors[0]?.name;
+        if (line.color && color !== line.color) throw new HttpError(409, `${product.title}: that colour is no longer offered.`);
+        // Reserve this size's pieces atomically: fails if another order took the last one.
+        const reserved = getDb()
+          .prepare('UPDATE product_stock SET qty = qty - ? WHERE product_id = ? AND size_id = ? AND qty >= ? AND EXISTS (SELECT 1 FROM products WHERE id = ? AND active = 1 AND archived = 0)')
+          .run(line.quantity, product.id, profile.id, line.quantity, product.id);
+        if (reserved.changes !== 1) {
+          const left = (getDb().prepare('SELECT qty FROM product_stock WHERE product_id = ? AND size_id = ?').get(product.id, profile.id) as { qty: number } | undefined)?.qty ?? 0;
+          throw new HttpError(409, left > 0 ? `${product.title} (${profile.name}): only ${left} left.` : `${product.title} (${profile.name}) has just sold out.`);
+        }
+        const unitFils = fils(product.price) + fils(profile.priceDelta || 0);
+        items.push({
+          productId: product.id,
+          title: product.title,
+          image: product.aiTransformedImage || product.featuredImage,
+          profileId: profile.id,
+          profileName: profile.name,
+          mattressSize: profile.mattressSize,
+          fittedSheet: profile.fittedSheet,
+          flatSheet: profile.flatSheet,
+          pillowcases: profile.pillowcases,
+          color,
+          unitPrice: aed(unitFils),
+          quantity: line.quantity,
+          totalPrice: aed(unitFils * line.quantity),
+        });
       }
-      const unitFils = fils(product.price) + fils(profile.priceDelta || 0);
-      items.push({
-        productId: product.id,
-        title: product.title,
-        image: product.aiTransformedImage || product.featuredImage,
-        profileId: profile.id,
-        profileName: profile.name,
-        mattressSize: profile.mattressSize,
-        fittedSheet: profile.fittedSheet,
-        flatSheet: profile.flatSheet,
-        pillowcases: profile.pillowcases,
-        color,
-        unitPrice: aed(unitFils),
-        quantity: line.quantity,
-        totalPrice: aed(unitFils * line.quantity),
-      });
-    }
 
-    const subtotalFils = items.reduce((s, i) => s + fils(i.totalPrice), 0);
-    const codFils = paymentMethod === 'cod' ? fils(COD_FEE) : 0;
-    const totalFils = subtotalFils + deliveryFils + codFils;
-    // Never charge a total the customer was not shown (a price changed while they were at checkout).
-    if (expectedTotalFils !== null && expectedTotalFils !== totalFils) {
-      throw new HttpError(409, `Prices have changed since you opened checkout: your total is now AED ${aed(totalFils)}. Please check your bag and confirm again.`, {}, { code: 'price_changed', total: aed(totalFils) });
-    }
-    const provider = paymentMethod === 'cod' ? courierSettings.autoAssignRules.codCourier : courierSettings.autoAssignRules.prepaidCourier;
+      const subtotalFils = items.reduce((s, i) => s + fils(i.totalPrice), 0);
+      const codFils = paymentMethod === 'cod' ? fils(COD_FEE) : 0;
+      const totalFils = subtotalFils + deliveryFils + codFils;
+      // Never charge a total the customer was not shown (a price changed while they were at checkout).
+      if (expectedTotalFils !== null && expectedTotalFils !== totalFils) {
+        throw new HttpError(409, `Prices have changed since you opened checkout: your total is now AED ${aed(totalFils)}. Please check your bag and confirm again.`, {}, { code: 'price_changed', total: aed(totalFils) });
+      }
+      const provider = paymentMethod === 'cod' ? courierSettings.autoAssignRules.codCourier : courierSettings.autoAssignRules.prepaidCourier;
 
-    let id = newOrderId();
-    while (getOrder(id)) id = newOrderId();
-    const now = new Date().toISOString();
-    const created: Order = {
-      id,
-      createdAt: now,
-      customer,
-      items,
-      subtotal: aed(subtotalFils),
-      deliveryFee: aed(deliveryFils),
-      deliveryOption,
-      codFee: aed(codFils),
-      discount: 0,
-      total: aed(totalFils),
-      paymentMethod: paymentMethod as Order['paymentMethod'],
-      paymentStatus: paymentMethod === 'cod' ? 'cod_pending' : receipt ? 'receipt_uploaded' : 'pending',
-      paymentReceiptUrl: receipt ? `/api/admin/orders/${id}/receipt` : undefined,
-      bankTransferRef: bankRef || undefined,
-      // A card order counts once Stripe says it is paid (status values every version knows).
-      status: card ? 'pending_payment' : 'pending_confirmation',
-      courier: {
-        provider: provider === 'manual' ? 'jeebly' : provider,
-        serviceType: deliveryOption === 'same_day' ? 'Express' : 'Scheduled',
-        awbNumber: '',
-        trackingUrl: '',
-        status: 'Order placed – awaiting confirmation',
-        // Same day: collected today (UAE date); otherwise tomorrow.
-        pickupDate: uaeDate(Date.now(), deliveryOption === 'same_day' ? 0 : 1),
-        weightKg: Math.min(500, 2.5 * items.reduce((s, i) => s + i.quantity, 0)),
-        pieces: items.reduce((s, i) => s + i.quantity, 0),
-        labelGenerated: false,
-        codAmountCollected: paymentMethod === 'cod' ? aed(totalFils) : 0,
-        serviceability: {
-          verified: delivery.serviceable,
-          hub: '',
-          deliverySpeed: deliveryOption === 'same_day' ? 'Same day' : delivery.days,
-          zone: emirate,
-          checkedAt: now,
-        },
-      } as Order['courier'],
-      adminNotes: undefined,
-      ...(source ? { source } : {}),
-    };
-    writeOrder(created, idempotencyKey);
-    logEvent(id, 'customer', 'created', { total: created.total, paymentMethod });
-    if (card) {
-      getDb().prepare("UPDATE orders SET card_state = 'pending', card_ip = ? WHERE id = ?").run(ipHash, id);
-      created.card = { state: 'pending' };
+      let id = newOrderId();
+      while (getOrder(id)) id = newOrderId();
+      const now = new Date().toISOString();
+      const created: Order = {
+        id,
+        createdAt: now,
+        customer,
+        items,
+        subtotal: aed(subtotalFils),
+        deliveryFee: aed(deliveryFils),
+        deliveryOption,
+        codFee: aed(codFils),
+        discount: 0,
+        total: aed(totalFils),
+        paymentMethod: paymentMethod as Order['paymentMethod'],
+        paymentStatus: paymentMethod === 'cod' ? 'cod_pending' : receipt ? 'receipt_uploaded' : 'pending',
+        paymentReceiptUrl: receipt ? `/api/admin/orders/${id}/receipt` : undefined,
+        bankTransferRef: bankRef || undefined,
+        // A card order counts once Stripe says it is paid (status values every version knows).
+        status: card ? 'pending_payment' : 'pending_confirmation',
+        courier: {
+          provider: provider === 'manual' ? 'jeebly' : provider,
+          serviceType: deliveryOption === 'same_day' ? 'Express' : 'Scheduled',
+          awbNumber: '',
+          trackingUrl: '',
+          status: 'Order placed – awaiting confirmation',
+          // Same day: collected today (UAE date); otherwise tomorrow.
+          pickupDate: uaeDate(Date.now(), deliveryOption === 'same_day' ? 0 : 1),
+          weightKg: Math.min(500, 2.5 * items.reduce((s, i) => s + i.quantity, 0)),
+          pieces: items.reduce((s, i) => s + i.quantity, 0),
+          labelGenerated: false,
+          codAmountCollected: paymentMethod === 'cod' ? aed(totalFils) : 0,
+          serviceability: {
+            verified: delivery.serviceable,
+            hub: '',
+            deliverySpeed: deliveryOption === 'same_day' ? 'Same day' : delivery.days,
+            zone: emirate,
+            checkedAt: now,
+          },
+        } as Order['courier'],
+        adminNotes: undefined,
+        ...(source ? { source } : {}),
+      };
+      writeOrder(created, idempotencyKey);
+      logEvent(id, 'customer', 'created', { total: created.total, paymentMethod });
+      if (card) {
+        getDb().prepare("UPDATE orders SET card_state = 'pending', card_ip = ? WHERE id = ?").run(ipHash, id);
+        created.card = { state: 'pending' };
+      }
+      if (askWhatsApp) {
+        // 4 random digits, made here (never by the browser); not a secret from the customer.
+        const code = String(crypto.randomInt(0, 10_000)).padStart(4, '0');
+        const hold = store.holdUntilWhatsAppConfirmed;
+        getDb().prepare("UPDATE orders SET wa_code = ?, phone_check = 'awaiting', wa_hold = ? WHERE id = ?").run(code, hold ? 1 : 0, id);
+        created.whatsappCheck = { status: 'awaiting', code, hold };
+        logEvent(id, 'shop', 'whatsapp_asked', { hold });
+      }
+      if (paymentMethod === 'bank_transfer') {
+        // The private page with the bank details and the screenshot upload (the account is never on the website).
+        issuePayLink(id, now);
+        getDb()
+          .prepare('UPDATE orders SET bank_state = ?, transfer_uploads = ?, transfer_uploaded_at = ? WHERE id = ?')
+          .run(receipt ? 'uploaded' : 'awaiting', receipt ? 1 : 0, receipt ? now : null, id);
+        logEvent(id, 'shop', 'bank_link_made');
+      }
+      return getOrder(id)!;
+    });
+  }
+  if (receipt) {
+    try {
+      fs.renameSync(freshReceipt, path.join(receiptsDir(), `${order.id}.${receipt.ext}`));
+    } catch (err) {
+      logEvent_('error', 'receipt_write_failed', { orderId: order.id, error: err instanceof Error ? err.message : String(err) });
     }
-    if (askWhatsApp) {
-      // 4 random digits, made here (never by the browser); not a secret from the customer.
-      const code = String(crypto.randomInt(0, 10_000)).padStart(4, '0');
-      const hold = store.holdUntilWhatsAppConfirmed;
-      getDb().prepare("UPDATE orders SET wa_code = ?, phone_check = 'awaiting', wa_hold = ? WHERE id = ?").run(code, hold ? 1 : 0, id);
-      created.whatsappCheck = { status: 'awaiting', code, hold };
-      logEvent(id, 'shop', 'whatsapp_asked', { hold });
-    }
-    if (paymentMethod === 'bank_transfer') {
-      // The private page with the bank details and the screenshot upload (the account is never on the website).
-      issuePayLink(id, now);
-      getDb()
-        .prepare('UPDATE orders SET bank_state = ?, transfer_uploads = ?, transfer_uploaded_at = ? WHERE id = ?')
-        .run(receipt ? 'uploaded' : 'awaiting', receipt ? 1 : 0, receipt ? now : null, id);
-      logEvent(id, 'shop', 'bank_link_made');
-    }
-    if (receipt) {
-      // A screenshot sent with the order (a checkout page from before this version): the first upload.
-      // Written inside the transaction: if this fails, the order (and its stock) is rolled back.
-      fs.writeFileSync(path.join(receiptsDir(), `${id}.${receipt.ext}`), receipt.bytes, { mode: 0o600 });
-    }
-    return getOrder(id)!;
-  });
+  }
   invalidateProducts();
   return { order, created: true };
 }
@@ -522,35 +586,122 @@ export function readReceipt(orderId: string, version?: number): { bytes: Buffer;
 // ── Bank transfer: the customer's private page, the owner's check ───────────
 
 /**
+ * Limits on transfer screenshots, so uploads can't fill the disk (or make backups too big to make):
+ * the latest 5 per order are kept (older ones are deleted), the receipts folder stops taking new
+ * ones at 2 GB, and nothing is taken while the disk has less than 1 GB free. Then the customer is
+ * asked to send the screenshot on WhatsApp, and the owner is told. (Changeable by tests only.)
+ */
+export const RECEIPT_LIMITS = { versions: 5, folderBytes: 2 * 1024 ** 3, minFreeBytes: 1024 ** 3 };
+const NO_ROOM = 'We can’t take the upload right now, sorry. Please send the screenshot on WhatsApp instead.';
+
+/** Why a new receipt can't be stored now (the folder is full, or the disk nearly is), or null. */
+function receiptRoomProblem(incoming: number): string | null {
+  const dir = receiptsDir();
+  try {
+    const st = fs.statfsSync(dir);
+    const free = Number(st.bavail) * Number(st.bsize);
+    if (free - incoming < RECEIPT_LIMITS.minFreeBytes) return `the disk has only ${Math.round(free / 1024 ** 2)} MB free`;
+  } catch {
+    // statfs unavailable: the folder cap below still applies
+  }
+  let used = 0;
+  for (const f of fs.readdirSync(dir)) {
+    try {
+      used += fs.statSync(path.join(dir, f)).size;
+    } catch {
+      // removed meanwhile
+    }
+  }
+  if (used + incoming > RECEIPT_LIMITS.folderBytes) return `the receipts folder holds ${Math.round(used / 1024 ** 2)} MB (the cap is ${Math.round(RECEIPT_LIMITS.folderBytes / 1024 ** 2)} MB)`;
+  return null;
+}
+
+/** An upload refused for room: logged, shown in Settings → System, and emailed to the owner (at most every 6 hours). */
+function noteNoRoom(orderId: string, why: string): void {
+  logEvent_('warn', 'receipt_refused_no_room', { orderId, why });
+  const last = kvGet<{ at: string }>('receipts:no-room');
+  kvSet('receipts:no-room', { at: new Date().toISOString(), why });
+  if (last && Date.now() - Date.parse(last.data.at) < 6 * 3600_000) return;
+  void import('./adminAlerts')
+    .then(({ alertOwner }) =>
+      alertOwner(
+        'Transfer screenshots can’t be uploaded',
+        `A customer could not upload a transfer screenshot (order ${orderId}) because ${why}. They were asked to send it on WhatsApp.\n\nFree some space on the server (old backups, logs), then check Settings → System & backups.`
+      )
+    )
+    .catch(() => undefined);
+}
+
+/** The last time an upload was refused for room (Settings → System shows it for a day). */
+export function receiptsNoRoom(): { at: string; why: string } | null {
+  const v = kvGet<{ at: string; why: string }>('receipts:no-room')?.data;
+  return v && Date.now() - Date.parse(v.at) < 24 * 3600_000 ? v : null;
+}
+
+/** Keep the latest RECEIPT_LIMITS.versions of an order's screenshots (the latest is version n). */
+function pruneReceiptVersions(dir: string, orderId: string, n: number): void {
+  const oldest = n - RECEIPT_LIMITS.versions + 1;
+  for (const f of fs.readdirSync(dir)) {
+    if (!f.startsWith(`${orderId}.v`)) continue;
+    const m = /^(.+)\.v(\d+)\.[a-z]+$/.exec(f);
+    if (m && m[1] === orderId && Number(m[2]) < oldest) fs.rmSync(path.join(dir, f), { force: true });
+  }
+}
+
+/**
  * The customer uploads the transfer screenshot (image or PDF) on the order's private page. The
  * file is checked like a checkout receipt always was (its first bytes, 5 MB at most). Uploading
- * again replaces it on screen; the earlier ones are kept for the owner. The caller has checked the
- * private link; this checks the order still takes one (not paid, not cancelled).
+ * again replaces it on screen; the 4 before it are kept for the owner. The caller has checked the
+ * private link; this checks the order still takes one (not paid, not cancelled), that there is
+ * room for it, and audits it before the change is saved. The files are only swapped once the
+ * change is saved, so a failed save leaves the screenshots as they were. Synchronous throughout,
+ * so two uploads in this process can't interleave.
  */
-export function uploadTransfer(orderId: string, file: unknown): Order {
+export function uploadTransfer(orderId: string, file: unknown, context: { ip?: string | null } = {}): Order {
   const receipt = parseReceiptDataUrl(file);
-  return inTransaction(() => {
-    const order = getOrder(orderId);
-    if (!order || order.paymentMethod !== 'bank_transfer' || !order.bankTransfer) throw new HttpError(404, 'Not found.');
-    if (order.status === 'cancelled' || order.bankTransfer.state === 'paid') throw new HttpError(409, 'This order is already paid or closed: nothing more to upload.');
-    const n = order.bankTransfer.uploads + 1;
-    const at = new Date().toISOString();
-    getDb().prepare("UPDATE orders SET bank_state = 'uploaded', transfer_uploads = ?, transfer_uploaded_at = ? WHERE id = ?").run(n, at, orderId);
-    order.paymentStatus = 'receipt_uploaded';
-    order.paymentReceiptUrl = `/api/admin/orders/${orderId}/receipt`;
-    writeOrder(order);
-    logEvent(orderId, 'customer', 'transfer_uploaded', { n, type: receipt.ext });
-    // Inside the transaction: if the file can't be written, nothing above is saved.
-    const dir = receiptsDir();
-    const fresh = path.join(dir, `${orderId}.upload-${process.pid}.tmp`);
-    fs.writeFileSync(fresh, receipt.bytes, { mode: 0o600 });
+  const before = getOrder(orderId);
+  if (!before || before.paymentMethod !== 'bank_transfer' || !before.bankTransfer) throw new HttpError(404, 'Not found.');
+  if (before.status === 'cancelled' || before.bankTransfer.state === 'paid') throw new HttpError(409, 'This order is already paid or closed: nothing more to upload.');
+  const room = receiptRoomProblem(receipt.bytes.length);
+  if (room) {
+    noteNoRoom(orderId, room);
+    throw new HttpError(507, NO_ROOM, {}, { code: 'no_room' });
+  }
+  const dir = receiptsDir();
+  const fresh = path.join(dir, `${orderId}.upload-${process.pid}-${crypto.randomBytes(6).toString('hex')}.tmp`);
+  fs.writeFileSync(fresh, receipt.bytes, { mode: 0o600 });
+  let n = 0;
+  try {
+    auditedTransaction((auditOrThrow) => {
+      const order = getOrder(orderId);
+      if (!order || order.paymentMethod !== 'bank_transfer' || !order.bankTransfer) throw new HttpError(404, 'Not found.');
+      if (order.status === 'cancelled' || order.bankTransfer.state === 'paid') throw new HttpError(409, 'This order is already paid or closed: nothing more to upload.');
+      n = order.bankTransfer.uploads + 1;
+      const at = new Date().toISOString();
+      getDb().prepare("UPDATE orders SET bank_state = 'uploaded', transfer_uploads = ?, transfer_uploaded_at = ? WHERE id = ?").run(n, at, orderId);
+      order.paymentStatus = 'receipt_uploaded';
+      order.paymentReceiptUrl = `/api/admin/orders/${orderId}/receipt`;
+      writeOrder(order);
+      logEvent(orderId, 'customer', 'transfer_uploaded', { n, type: receipt.ext });
+      auditOrThrow('order.transfer_uploaded', { orderId, uploads: n, type: receipt.ext, ...(context.ip ? { ip: context.ip } : {}) });
+    });
+  } catch (err) {
+    fs.rmSync(fresh, { force: true });
+    throw err;
+  }
+  // Saved: now the files (the latest becomes version n − 1; the new one is the latest).
+  try {
     for (const [ext] of RECEIPT_TYPES) {
       const current = path.join(dir, `${orderId}.${ext}`);
       if (fs.existsSync(current)) fs.renameSync(current, path.join(dir, `${orderId}.v${n - 1}.${ext}`));
     }
     fs.renameSync(fresh, path.join(dir, `${orderId}.${receipt.ext}`));
-    return getOrder(orderId)!;
-  });
+    pruneReceiptVersions(dir, orderId, n);
+  } catch (err) {
+    logEvent_('error', 'receipt_swap_failed', { orderId, n, error: err instanceof Error ? err.message : String(err) });
+  }
+  bump('orders');
+  return getOrder(orderId)!;
 }
 
 export type BankResult = 'received' | 'not_received';
@@ -563,7 +714,7 @@ export type BankResult = 'received' | 'not_received';
  * reported done (or saved) without its audit entry. A paid order is never un-paid.
  */
 export function checkBankTransfer(id: string, result: BankResult, actor: string): { order: Order; changed: boolean } {
-  return inTransaction(() => {
+  return auditedTransaction((auditOrThrow) => {
     const order = getOrder(id);
     if (!order) throw new HttpError(404, 'Order not found.');
     const bank = order.bankTransfer;
@@ -586,6 +737,34 @@ export function checkBankTransfer(id: string, result: BankResult, actor: string)
     bump('orders');
     return { order: getOrder(id)!, changed: true };
   });
+}
+
+/**
+ * A transaction whose changes are audited before they count: each auditOrThrow() writes its entry
+ * (or throws 503, and nothing is saved). The entry is written before COMMIT, so if the commit
+ * itself then fails (the disk is full, the database is busy), a "rolled_back" entry follows it at
+ * once: the audit log never claims a change the database doesn't have.
+ */
+function auditedTransaction<T>(fn: (auditOrThrow: (action: string, details: Record<string, unknown>) => void) => T): T {
+  const written: Array<{ action: string; details: Record<string, unknown> }> = [];
+  const record = (action: string, details: Record<string, unknown>) => {
+    auditOrThrow(action, details);
+    written.push({ action, details });
+  };
+  try {
+    return inTransaction(() => fn(record));
+  } catch (err) {
+    for (const w of written) {
+      const ok = audit('audit.rolled_back', {
+        action: w.action,
+        ...(typeof w.details.orderId === 'string' ? { orderId: w.details.orderId } : {}),
+        ...(typeof w.details.by === 'string' ? { by: w.details.by } : {}),
+        error: err instanceof Error ? err.message.slice(0, 200) : String(err).slice(0, 200),
+      });
+      if (!ok) logEvent_('error', 'audit_rollback_note_failed', { action: w.action });
+    }
+    throw err;
+  }
 }
 
 const OPEN_TRANSFER = "status <> 'cancelled' AND payment_status NOT IN ('verified', 'paid')";
@@ -650,13 +829,13 @@ export function updateOrderByAdmin(id: string, patch: unknown, actor: string): O
       // Only Stripe's word (the webhook, or asking Stripe) marks a card order paid.
       if (order.paymentMethod === 'online_card') throw new HttpError(409, 'Card payments are recorded by Stripe, not by hand.', {}, { code: 'card_payment' });
       if (!PAYMENT_STATUSES.includes(p.paymentStatus as Order['paymentStatus'])) throw new HttpError(400, 'Unknown payment status.');
-      if (order.bankTransfer?.state === 'paid') throw new HttpError(409, `${order.id} is already marked as paid.`);
+      // A bank transfer is marked paid only with "Payment received" (checkBankTransfer: it refuses a
+      // cancelled order, closes the private page and is audited before it counts), never by hand here.
+      if (order.paymentMethod === 'bank_transfer') {
+        throw new HttpError(409, order.bankTransfer?.state === 'paid' ? `${order.id} is already marked as paid.` : 'Use "Payment received" on the order to mark a bank transfer paid.', {}, { code: 'use_bank_check' });
+      }
       changes.paymentStatus = { from: order.paymentStatus, to: p.paymentStatus };
       order.paymentStatus = p.paymentStatus as Order['paymentStatus'];
-      // A bank transfer marked paid this way closes its private page too.
-      if (order.bankTransfer && (order.paymentStatus === 'verified' || order.paymentStatus === 'paid')) {
-        getDb().prepare("UPDATE orders SET bank_state = 'paid', bank_checked_at = ?, bank_checked_by = ? WHERE id = ?").run(new Date().toISOString(), actor, id);
-      }
     }
     if (p.adminNotes !== undefined) {
       order.adminNotes = text(p.adminNotes, 'Notes', 1000) || undefined;

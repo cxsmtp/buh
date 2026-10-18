@@ -5,6 +5,7 @@ import { ensureAdminLink } from './adminLinkSetup';
 import { MIN_PASSPHRASE_LENGTH, emailConfigured, startBackupSchedule } from './backup';
 import { refreshPayHashes } from './bankPay';
 import { getDb } from './db';
+import { normalizeBankStates } from './orders';
 import { startMonitor } from './monitor';
 import { startCardSweep } from './payments';
 import { startFestivalRefresh } from './theme';
@@ -19,20 +20,19 @@ export async function onStartup() {
     logEvent('error', 'admin_account_init_failed', { error: err instanceof Error ? err.message : String(err) });
   }
 
-  try {
-    getDb(); // open (and migrate) the database now, not on the first customer's request
-    // Restored onto a server with another key: the bank-transfer orders' private links follow it.
-    const rehashed = refreshPayHashes();
-    if (rehashed) logEvent('info', 'pay_links_rehashed', { orders: rehashed });
-    startBackupSchedule();
-    startFestivalRefresh();
-    startMonitor();
-    startChat();
-    // Card orders not paid within 10 minutes: stopped at Stripe, cancelled, pieces back on sale.
-    startCardSweep();
-  } catch (err) {
-    logEvent('error', 'startup_failed', { error: err instanceof Error ? err.message : String(err) });
-  }
+  // Each step on its own: one that fails (the database busy during an update, a full disk) is
+  // logged and never stops the others (backups and monitoring above all).
+  step('database_open', () => getDb()); // open (and migrate) the database now, not on the first customer's request
+  step('backup_schedule', startBackupSchedule);
+  step('festival_refresh', startFestivalRefresh);
+  step('monitor', startMonitor);
+  step('chat', startChat);
+  // Card orders not paid within 10 minutes: stopped at Stripe, cancelled, pieces back on sale.
+  step('card_sweep', startCardSweep);
+  // Restored onto a server with another key: the bank-transfer orders' private links follow it.
+  // Bank orders an older version wrote after migration 10 (an update's overlap, a rollback) get
+  // their state. Both retried every minute until they work, and then kept up (both are cheap).
+  startBankUpkeep();
   try {
     // The Admin Hub's private link: made (and printed once) on the first start, or by the update that brought it.
     ensureAdminLink();
@@ -72,6 +72,43 @@ export async function onStartup() {
       ].join('\n')
     );
   }
+}
+
+function step(name: string, fn: () => unknown): void {
+  try {
+    fn();
+  } catch (err) {
+    logEvent('error', 'startup_step_failed', { step: name, error: err instanceof Error ? err.message : String(err) });
+  }
+}
+
+let bankUpkeep: ReturnType<typeof setInterval> | null = null;
+
+/** One round of the bank-transfer upkeep; true when both parts worked. Exported for tests. */
+export function bankUpkeepOnce(): boolean {
+  let ok = true;
+  try {
+    const rehashed = refreshPayHashes();
+    if (rehashed) logEvent('info', 'pay_links_rehashed', { orders: rehashed });
+  } catch (err) {
+    ok = false;
+    logEvent('warn', 'pay_links_rehash_failed', { error: err instanceof Error ? err.message : String(err) });
+  }
+  try {
+    const fixed = normalizeBankStates();
+    if (fixed) logEvent('info', 'bank_states_filled_in', { orders: fixed });
+  } catch (err) {
+    ok = false;
+    logEvent('warn', 'bank_states_fill_failed', { error: err instanceof Error ? err.message : String(err) });
+  }
+  return ok;
+}
+
+function startBankUpkeep() {
+  bankUpkeepOnce();
+  if (bankUpkeep) return;
+  bankUpkeep = setInterval(() => void bankUpkeepOnce(), 60_000);
+  bankUpkeep.unref();
 }
 
 /** Chat: email the owner and read emailed replies; every 30 s, reassure customers left waiting. */

@@ -15,7 +15,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { after, before, test } from 'node:test';
 import { SMTPServer } from 'smtp-server';
-import { hasBuild, rawFetch, startServer, type RunningServer } from './server.mjs';
+import { freePort, hasBuild, rawFetch, startServer, type RunningServer } from './server.mjs';
 import { openAdminSection } from './helpers.mjs';
 
 type PW = typeof import('playwright');
@@ -51,7 +51,12 @@ before(async () => {
   });
   await new Promise<void>((r) => smtp.listen(0, '127.0.0.1', r));
   const port = String((smtp.server.address() as { port: number }).port);
-  server = await startServer({ SMTP_HOST: '127.0.0.1', SMTP_PORT: port, SMTP_SECURE: 'false', SMTP_REQUIRE_TLS: 'false', SMTP_FROM: 'shop@test', BACKUP_EMAIL: 'owner@test' });
+  // The shop's address is configured (links to customers are built from it, never the Host header).
+  const shopPort = await freePort();
+  server = await startServer(
+    { SMTP_HOST: '127.0.0.1', SMTP_PORT: port, SMTP_SECURE: 'false', SMTP_REQUIRE_TLS: 'false', SMTP_FROM: 'shop@test', BACKUP_EMAIL: 'owner@test', NEXT_PUBLIC_APP_URL: `http://127.0.0.1:${shopPort}` },
+    { port: shopPort }
+  );
   const h = { 'content-type': 'application/json', origin: server.base };
   await fetch(`${server.base}/api/admin/login`, { method: 'POST', headers: h, body: JSON.stringify({ email: 'x@y.z', password: 'x' }) });
   let once: string | undefined;

@@ -17,7 +17,8 @@ export async function GET(req: Request, { params }: { params: Promise<{ id: stri
 }
 
 /**
- * Change status, payment status or notes. Cancelling returns the stock. An unpaid card order is
+ * Change status, payment status or notes (a bank transfer is marked paid only through
+ * ./bank, "Payment received"; a card payment only by Stripe). Cancelling returns the stock. An unpaid card order is
  * cancelled by stopping its payment at Stripe first (so it can't be paid afterwards).
  */
 export async function PATCH(req: Request, { params }: { params: Promise<{ id: string }> }) {

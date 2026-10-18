@@ -408,7 +408,7 @@ async function paidCard(over: Record<string, unknown> = {}) {
   assert.equal(orders.getOrder(id)!.card!.state, 'paid');
   return { id, pi, data };
 }
-/** Audit entries of this action (the log may mask an order number's digits as if a phone, so by action). */
+/** Audit entries of this action (as raw lines). */
 const auditLinesWith = (action: string) =>
   fs
     .readdirSync(dir)
@@ -494,6 +494,7 @@ test('a paid card order the saved keys can’t reach: Cancel & refund says why (
   assert.equal(again.status, 'cancelled');
   assert.equal(stockOf(p.id, size), before + 1, 'released once');
   assert.equal(auditLinesWith('payment.cancelled_without_refund').length, 1);
+  assert.equal(JSON.parse(auditLinesWith('payment.cancelled_without_refund')[0]).details.orderId, id, 'the exact order number');
   // Mark as handled clears the note (and the problem in Settings → System).
   const { currentProblems } = await import('@/lib/server/monitor');
   assert.ok(currentProblems().some((x) => x.id === 'orders'));
@@ -663,6 +664,7 @@ test('a refund that fails later goes back to paid, audited, flagged for the owne
     assert.equal(o.attention?.kind, 'refund_failed');
     assert.match(o.attention!.text, /expired or canceled card/);
     assert.equal(auditLinesWith('payment.refund_failed').length, 1);
+    assert.equal(JSON.parse(auditLinesWith('payment.refund_failed')[0]).details.orderId, id, 'the exact order number');
     for (let i = 0; i < 50 && !printed.some((l) => l.includes('"owner_alert"')); i++) await new Promise((r) => setTimeout(r, 20));
     assert.ok(printed.some((l) => l.includes('"owner_alert"')), 'the owner is alerted');
     // An update that is not a failure is ignored.

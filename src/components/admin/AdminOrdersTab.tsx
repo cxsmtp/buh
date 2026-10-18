@@ -122,6 +122,16 @@ export const AdminOrdersTab: React.FC<AdminOrdersTabProps> = ({
     alert(data.message || 'The refund could not be made.');
   };
 
+  /** "Mark payment received" on a bank transfer: the server's checked, audited "Payment received". */
+  const bankReceived = async (order: Order) => {
+    if (!window.confirm(`Confirm that AED ${order.total} for ${order.id} has arrived in the bank account?`)) return;
+    setBusyOrderId(order.id);
+    const { ok, data } = await postJson<{ order?: Order; message?: string }>(`/api/admin/orders/${encodeURIComponent(order.id)}/bank`, { result: 'received' });
+    setBusyOrderId('');
+    if (ok && data.order) onOrderChanged(data.order);
+    else alert(data.message || 'Not saved. Please try again.');
+  };
+
   /** "Mark as handled" on a note that needed the owner (a failed refund, a booking after a cancel…). */
   const handled = (order: Order) => patchOrder(order, { clearAttention: true });
 
@@ -447,7 +457,7 @@ export const AdminOrdersTab: React.FC<AdminOrdersTabProps> = ({
                         <button
                           type="button"
                           disabled={busyOrderId === order.id}
-                          onClick={() => patchOrder(order, { paymentStatus: 'verified' }, `Confirm that AED ${order.total} for ${order.id} has arrived in the bank account?`)}
+                          onClick={() => void bankReceived(order)}
                           className="px-2 py-1 rounded-lg font-semibold border border-success-line bg-success-soft text-success hover:bg-success-soft disabled:opacity-50"
                         >
                           Mark payment received

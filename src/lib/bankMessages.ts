@@ -19,6 +19,20 @@ export interface BankMessageInput {
   shopName?: string;
 }
 
+/**
+ * The customer's first name as it may appear in a message to them: letters, spaces, apostrophes,
+ * hyphens and dots only, and never a word that looks like a link or an address ("evil.com",
+ * "http://…", "a@b"), so a name typed at checkout can't put a link into the shop's email.
+ */
+export function safeFirstName(fullName?: string): string {
+  for (const word of (fullName ?? '').normalize('NFC').split(/\s+/)) {
+    if (!word || /[/:@\\]|\p{L}\.\p{L}{2,}|^www\b/iu.test(word)) continue;
+    const clean = word.replace(/[^\p{L}\p{M}'’.-]/gu, '').replace(/^[.'’-]+|[.'’-]+$/g, '').slice(0, 40);
+    if (/\p{L}/u.test(clean)) return clean;
+  }
+  return '';
+}
+
 const aed = (total: number) => `AED ${formatAed(toFils(total))}`;
 
 /** The account, one detail per line (only the ones the owner filled in). */
@@ -36,7 +50,8 @@ export function bankDetailLines(bank: BankTransferDetails): string[] {
 }
 
 /** The owner's WhatsApp message to the customer: details, amount, reference and the private link. */
-export function bankDetailsWhatsApp({ orderId, total, bank, link, firstName, shopName }: BankMessageInput): string {
+export function bankDetailsWhatsApp({ orderId, total, bank, link, firstName: name, shopName }: BankMessageInput): string {
+  const firstName = safeFirstName(name);
   return [
     `Hello${firstName ? ` ${firstName}` : ''}, thank you for your order ${orderId} with ${shopName || 'Beautiful UAE Home'}.`,
     '',
@@ -50,7 +65,8 @@ export function bankDetailsWhatsApp({ orderId, total, bank, link, firstName, sho
 }
 
 /** The automatic email to the customer. */
-export function bankDetailsEmail({ orderId, total, bank, link, firstName, shopName }: BankMessageInput): { subject: string; text: string } {
+export function bankDetailsEmail({ orderId, total, bank, link, firstName: name, shopName }: BankMessageInput): { subject: string; text: string } {
+  const firstName = safeFirstName(name);
   const shop = shopName || 'Beautiful UAE Home';
   return {
     subject: `Bank details for your order ${orderId}`,

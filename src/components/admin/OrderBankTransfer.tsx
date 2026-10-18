@@ -38,7 +38,8 @@ export function OrderBankTransfer({ order, bank, shopName, onOrderChanged }: { o
   const cancelled = order.status === 'cancelled';
   const badge = BADGES[bt.state];
   const Icon = badge.icon;
-  const link = bt.payPath && typeof window !== 'undefined' ? `${window.location.origin}${bt.payPath}` : '';
+  // The full link comes from the shop's configured address (NEXT_PUBLIC_APP_URL), never this browser's.
+  const link = bt.payUrl ?? '';
 
   const answer = async (result: 'received' | 'not_received') => {
     if (result === 'received' && !window.confirm(`Confirm that AED ${order.total} for ${order.id} has arrived in the bank account?`)) return;
@@ -60,7 +61,7 @@ export function OrderBankTransfer({ order, bank, shopName, onOrderChanged }: { o
     }
   };
 
-  const details = waMeLink(order.customer.phone, bankDetailsWhatsApp({ orderId: order.id, total: order.total, bank, link: link || undefined, firstName: order.customer.fullName.split(/\s+/)[0], shopName }));
+  const details = waMeLink(order.customer.phone, bankDetailsWhatsApp({ orderId: order.id, total: order.total, bank, link: link || undefined, firstName: order.customer.fullName, shopName }));
   const reply = bt.state === 'paid' ? waMeLink(order.customer.phone, paymentReceivedReply(order.id)) : bt.state === 'not_received' ? waMeLink(order.customer.phone, notReceivedReply(order.id, order.total, link || undefined)) : null;
   const button = 'min-h-11 px-3 py-2 rounded-xl text-xs font-bold flex items-center justify-center gap-1.5 disabled:opacity-50 focus:outline-none focus-visible:ring-2 focus-visible:ring-gold';
   const receipt = order.paymentReceiptUrl || `/api/admin/orders/${encodeURIComponent(order.id)}/receipt`;
@@ -84,9 +85,10 @@ export function OrderBankTransfer({ order, bank, shopName, onOrderChanged }: { o
           {bt.uploads > 1 && (
             <span className="flex flex-wrap gap-x-2 text-ink-muted">
               Earlier:
-              {Array.from({ length: bt.uploads - 1 }, (_, i) => (
-                <a key={i} href={`${receipt}?v=${i + 1}`} target="_blank" rel="noopener noreferrer" className="underline text-ink-soft">
-                  #{i + 1}
+              {/* The server keeps the latest 5 (src/lib/server/orders.ts: RECEIPT_LIMITS.versions): the 4 before this one. */}
+              {Array.from({ length: Math.min(bt.uploads - 1, 4) }, (_, i) => bt.uploads - Math.min(bt.uploads - 1, 4) + i).map((v) => (
+                <a key={v} href={`${receipt}?v=${v}`} target="_blank" rel="noopener noreferrer" className="underline text-ink-soft">
+                  #{v}
                 </a>
               ))}
             </span>
@@ -125,6 +127,11 @@ export function OrderBankTransfer({ order, bank, shopName, onOrderChanged }: { o
             {copied ? <Check className="w-3.5 h-3.5 text-success" aria-hidden="true" /> : <Copy className="w-3.5 h-3.5" aria-hidden="true" />} {copied ? 'Copied' : 'Copy'}
           </button>
         </div>
+      )}
+      {!link && bt.payPath && (
+        <p data-testid="bank-no-shop-url" className="text-ink-muted">
+          The private link is left out of messages until the shop&apos;s address is set (NEXT_PUBLIC_APP_URL in the shop&apos;s settings file, see the deployment guide).
+        </p>
       )}
       {bt.state !== 'paid' && !cancelled && (
         <p className="text-ink-muted">

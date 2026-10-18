@@ -81,7 +81,7 @@ test('a tap moves one piece, is recorded with who, why and old → new, and is i
   assert.ok(entry, 'in the audit log');
   assert.equal(entry.details.reason, 'sold_offline');
   assert.deepEqual(entry.details.changes, ['king: 2 → 1']);
-  assert.match(entry.details.by, /^o\*\*\*@shop\.test$/, 'who (masked in the log)');
+  assert.equal(entry.details.by, 'owner@shop.test', 'who (exact in the audit log: the owner’s own record)');
 });
 
 test('the same idempotency key twice moves stock once and answers the same', () => {

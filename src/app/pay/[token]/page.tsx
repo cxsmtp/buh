@@ -1,6 +1,7 @@
 import type { Metadata } from 'next';
 import { notFound } from 'next/navigation';
 import { PayTransfer } from '@/components/store/PayTransfer';
+import { safeFirstName } from '@/lib/bankMessages';
 import { openPayOrderId } from '@/lib/server/bankPay';
 import { getOrder } from '@/lib/server/orders';
 import { getSettings } from '@/lib/server/settings';
@@ -32,7 +33,7 @@ export default async function PayPage({ params }: { params: Promise<{ token: str
     <PayTransfer
       token={token}
       shopName={getSettings('brand').storeName || 'Beautiful UAE Home'}
-      order={{ id: order.id, total: order.total, firstName: order.customer.fullName.split(/\s+/)[0], state: order.bankTransfer.state, uploads: order.bankTransfer.uploads }}
+      order={{ id: order.id, total: order.total, firstName: safeFirstName(order.customer.fullName), state: order.bankTransfer.state, uploads: order.bankTransfer.uploads }}
       bank={{ bankName: bank.bankName, accountName: bank.accountName, iban: bank.iban, accountNumber: bank.accountNumber, swiftCode: bank.swiftCode, branch: bank.branch, instructions: bank.instructions }}
     />
   );

@@ -20,3 +20,26 @@ export function supportEmail(): string {
 export function appUrl(): string | undefined {
   return runtimeEnv('NEXT_PUBLIC_APP_URL');
 }
+
+/**
+ * The address put in links sent to customers (the bank-details email, WhatsApp texts, the order's
+ * private payment page): NEXT_PUBLIC_APP_URL only, and only a plain http(s) address. Never the
+ * request's Host header (anyone can send any Host), so without it these links are left out.
+ */
+export function shopUrl(): string | undefined {
+  const v = appUrl();
+  if (!v) return undefined;
+  try {
+    const u = new URL(v);
+    if ((u.protocol !== 'https:' && u.protocol !== 'http:') || u.username || u.password || u.search || u.hash) return undefined;
+    return `${u.origin}${u.pathname.replace(/\/+$/, '')}`;
+  } catch {
+    return undefined;
+  }
+}
+
+/** A full link for a customer to a path of the shop (absent when the shop's address is not set). */
+export function customerLink(pathname: string): string | undefined {
+  const base = shopUrl();
+  return base && pathname.startsWith('/') ? `${base}${pathname}` : undefined;
+}

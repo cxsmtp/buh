@@ -175,10 +175,17 @@ function csvFiles(): TarEntry[] {
 function folderEntries(folder: string, prefix: string): TarEntry[] {
   const dir = path.join(dataDir(), folder);
   if (!fs.existsSync(dir)) return [];
-  return fs
-    .readdirSync(dir)
-    .filter((f) => fs.statSync(path.join(dir, f)).isFile())
-    .map((f) => ({ name: `${prefix}/${f}`, data: fs.readFileSync(path.join(dir, f)) }));
+  const out: TarEntry[] = [];
+  for (const f of fs.readdirSync(dir)) {
+    // A file still being written (an upload in progress) is not part of the shop's data yet.
+    if (f.endsWith('.tmp')) continue;
+    try {
+      if (fs.statSync(path.join(dir, f)).isFile()) out.push({ name: `${prefix}/${f}`, data: fs.readFileSync(path.join(dir, f)) });
+    } catch {
+      // removed meanwhile (an older screenshot pruned, a photo replaced)
+    }
+  }
+  return out;
 }
 
 // ── Encryption ──────────────────────────────────────────────────────────────

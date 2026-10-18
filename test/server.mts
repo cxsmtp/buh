@@ -95,7 +95,7 @@ export async function startServer(env: Record<string, string> = {}, opts: { port
   throw new Error(`server did not start:\n${log}`);
 }
 
-function freePort(): Promise<number> {
+export function freePort(): Promise<number> {
   return new Promise((resolve, reject) => {
     const probe = net.createServer();
     probe.unref();

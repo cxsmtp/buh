@@ -241,6 +241,8 @@ export interface BankTransferCheck {
   checkedBy?: string;
   /** The order's private page, /pay/<token>, while it is open (not paid or cancelled, under 14 days). */
   payPath?: string;
+  /** The same page as a full link for the customer, from the shop's configured address only (admin only). */
+  payUrl?: string;
 }
 
 export interface WhatsAppCheck {

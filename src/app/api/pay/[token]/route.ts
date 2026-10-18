@@ -1,4 +1,3 @@
-import { audit } from '@/lib/server/audit';
 import { openPayOrderId } from '@/lib/server/bankPay';
 import { enforceIpLimit, enforceLimit } from '@/lib/server/guard';
 import { allowFields, assertSameOrigin, clientIp, handleRouteError, HttpError, json, readJsonBody } from '@/lib/server/http';
@@ -11,7 +10,8 @@ const UPLOAD_LIMITS = { perAddress: 20, perOrder: 10, windowMs: 60 * 60 * 1000 }
  * The transfer screenshot (or PDF) from an order's private page. The token in the address is the
  * proof (the front gate already answers one that opens no order as an unknown address); the file
  * is checked like a checkout receipt (its first bytes, 5 MB at most) and stored where only the
- * owner can open it. Uploading again replaces it; earlier ones are kept.
+ * owner can open it. Uploading again replaces it; the 4 before it are kept. When the disk or the
+ * receipts folder is too full, the customer is asked to send it on WhatsApp (507) and the owner told.
  */
 export async function POST(req: Request, { params }: { params: Promise<{ token: string }> }) {
   try {
@@ -23,8 +23,8 @@ export async function POST(req: Request, { params }: { params: Promise<{ token: 
     // A 5 MB file arrives base64-encoded, so allow ~7 MB.
     const body = await readJsonBody(req, 7 * 1024 * 1024);
     allowFields(body, ['file']);
-    const order = uploadTransfer(orderId, body.file);
-    audit('order.transfer_uploaded', { orderId, uploads: order.bankTransfer?.uploads, ip: clientIp(req) });
+    // Checked again inside (paid or cancelled meanwhile), room for it, and audited before it is saved.
+    const order = uploadTransfer(orderId, body.file, { ip: clientIp(req) });
     return json({ ok: true, uploads: order.bankTransfer?.uploads ?? 0 });
   } catch (err) {
     return handleRouteError(err, 'pay/upload', { ok: false });

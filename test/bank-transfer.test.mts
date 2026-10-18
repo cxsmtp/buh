@@ -126,9 +126,9 @@ test('the link expires after 14 days, and dies when the order is paid or cancell
   orders.updateOrderByAdmin(cancelled.id, { status: 'cancelled' }, 'owner@shop.test');
   assert.equal(pay.openPayOrderId(tokenOf(cancelled)), null, 'cancelled');
 
-  // Marked paid the old way (the payment status): the page closes too.
+  // Marked paid by an older version (only the payment status it knows): the page closes too.
   const old = place();
-  orders.updateOrderByAdmin(old.id, { paymentStatus: 'verified' }, 'owner@shop.test');
+  getDb().prepare("UPDATE orders SET payment_status = 'verified', data = json_set(data, '$.paymentStatus', 'verified') WHERE id = ?").run(old.id);
   assert.equal(pay.openPayOrderId(tokenOf(old)), null);
   assert.equal(orders.getOrder(old.id)!.bankTransfer!.state, 'paid');
 });
@@ -252,11 +252,13 @@ test('"Payment received": paid once (idempotent), audited first, history shows e
   assert.equal(await status(() => orders.checkBankTransfer(o.id, 'not_received', 'owner@shop.test')), 409, 'never un-paid');
   assert.equal(await status(() => orders.updateOrderByAdmin(o.id, { paymentStatus: 'pending' }, 'owner@shop.test')), 409, 'not by the old route either');
   const added = auditEntries().slice(before);
-  assert.deepEqual(added.map((e) => e.action), ['payment.bank_not_received', 'payment.bank_received']);
-  // (The audit log masks anything that looks like a phone number, which an order number can.)
-  assert.ok(String(added[1].details.orderId).endsWith(o.id.slice(-4)));
-  assert.equal(added[1].details.amountFils, Math.round(o.total * 100));
-  assert.ok(String(added[1].details.by).endsWith('@shop.test'));
+  assert.deepEqual(added.map((e) => e.action), ['payment.bank_not_received', 'order.transfer_uploaded', 'payment.bank_received']);
+  const received = added[2];
+  // The order number and who acted are kept exactly (never masked as if a phone number or a customer's email).
+  assert.equal(received.details.orderId, o.id);
+  assert.equal(added[1].details.orderId, o.id);
+  assert.equal(received.details.amountFils, Math.round(o.total * 100));
+  assert.equal(received.details.by, 'owner@shop.test');
   assert.deepEqual(orders.orderEvents(o.id).map((e) => e.event), ['created', 'bank_link_made', 'transfer_uploaded', 'bank_not_received', 'transfer_uploaded', 'bank_paid']);
 
   assert.equal(await status(() => orders.checkBankTransfer('BUH-000000-NOSUCH', 'received', 'x')), 404);
@@ -303,14 +305,14 @@ test('the bank details email: once per order, with the details, amount, referenc
   });
   await new Promise<void>((r) => server.listen(0, '127.0.0.1', r));
   const port = (server.server.address() as { port: number }).port;
-  Object.assign(process.env, { SMTP_HOST: '127.0.0.1', SMTP_PORT: String(port), SMTP_SECURE: 'false', SMTP_REQUIRE_TLS: 'false', SMTP_FROM: 'shop@shop.test', BACKUP_EMAIL: 'owner@shop.test' });
+  Object.assign(process.env, { SMTP_HOST: '127.0.0.1', SMTP_PORT: String(port), SMTP_SECURE: 'false', SMTP_REQUIRE_TLS: 'false', SMTP_FROM: 'shop@shop.test', BACKUP_EMAIL: 'owner@shop.test', NEXT_PUBLIC_APP_URL: 'https://beautifuluaehome.com' });
   try {
     const o = place();
     const link = `https://beautifuluaehome.com${o.bankTransfer!.payPath}`;
-    const { value, lines } = await captured(() => emailBankDetails(o.id, 'https://beautifuluaehome.com'));
+    const { value, lines } = await captured(() => emailBankDetails(o.id));
     assert.equal(value, 'sent');
-    assert.equal(await emailBankDetails(o.id, 'https://beautifuluaehome.com'), 'skipped', 'once per order');
-    await Promise.all([emailBankDetails(o.id, 'x'), emailBankDetails(o.id, 'x')]);
+    assert.equal(await emailBankDetails(o.id), 'skipped', 'once per order');
+    await Promise.all([emailBankDetails(o.id), emailBankDetails(o.id)]);
     assert.equal(mails.length, 1);
     const mail = mails[0];
     assert.equal(mail.to, 'aisha@example.com');
@@ -330,17 +332,17 @@ test('the bank details email: once per order, with the details, amount, referenc
 
     // No email on the order: nothing sent.
     const noEmail = place({ customer: { fullName: 'No Mail', emirate: 'Dubai', area: 'Marina', streetAddress: 'Walk 1', buildingVilla: 'Tower', flatVillaNo: '7' } });
-    assert.equal(await emailBankDetails(noEmail.id, 'https://x'), 'skipped');
+    assert.equal(await emailBankDetails(noEmail.id), 'skipped');
     // Cash on delivery: nothing sent.
-    assert.equal(await emailBankDetails(place({ paymentMethod: 'cod' }).id, 'https://x'), 'skipped');
+    assert.equal(await emailBankDetails(place({ paymentMethod: 'cod' }).id), 'skipped');
     assert.equal(mails.length, 1);
   } finally {
     server.close();
-    for (const k of ['SMTP_HOST', 'SMTP_PORT', 'SMTP_SECURE', 'SMTP_REQUIRE_TLS', 'SMTP_FROM', 'BACKUP_EMAIL']) delete process.env[k];
+    for (const k of ['SMTP_HOST', 'SMTP_PORT', 'SMTP_SECURE', 'SMTP_REQUIRE_TLS', 'SMTP_FROM', 'BACKUP_EMAIL', 'NEXT_PUBLIC_APP_URL']) delete process.env[k];
   }
   // Email not set up: nothing sent, nothing claimed.
   const o = place();
-  assert.equal(await emailBankDetails(o.id, 'https://x'), 'skipped');
+  assert.equal(await emailBankDetails(o.id), 'skipped');
   assert.equal(orders.getOrder(o.id)!.bankTransfer!.emailedAt, undefined);
 });
 
@@ -348,7 +350,7 @@ test('a failed email is noted on the order, and the claim is given back', async 
   Object.assign(process.env, { SMTP_HOST: '127.0.0.1', SMTP_PORT: '1', SMTP_SECURE: 'false', SMTP_REQUIRE_TLS: 'false' });
   try {
     const o = place();
-    const { value } = await captured(() => emailBankDetails(o.id, 'https://x'));
+    const { value } = await captured(() => emailBankDetails(o.id));
     assert.equal(value, 'failed');
     assert.ok(orders.orderEvents(o.id).some((e) => e.event === 'bank_email_failed'));
     assert.equal(orders.getOrder(o.id)!.bankTransfer!.emailedAt, undefined);
