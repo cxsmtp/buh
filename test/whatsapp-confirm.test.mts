@@ -214,7 +214,8 @@ test('migration 8 only adds (columns and an index); an older shop’s orders upg
   const seven = run(`const m = await import('@/lib/server/db'); const db = (m.getDb ?? m.default.getDb)(); console.log(db.pragma('user_version', { simple: true }));`);
   assert.equal(seven.status, 0, seven.stderr);
   const db = new Database(path.join(old, 'shop.db'));
-  // Recreate the version-7 orders table (drop migration 12's tables, then the columns of migrations 11, 10, 9 and 8) and put an old order in.
+  // Recreate the version-7 orders table (drop migration 13's rows and 12's tables, then the columns of migrations 11, 10, 9 and 8) and put an old order in.
+  db.exec("DELETE FROM settings_history WHERE key = 'look'; DELETE FROM settings WHERE key = 'look'"); // migration 13
   db.exec('DROP TABLE card_refunds; DROP TABLE expense_bills; DROP TABLE expense_versions; DROP TABLE expenses; DROP TABLE expense_categories;'); // migration 12
   db.exec('DROP INDEX orders_unconfirmed_due; DROP INDEX orders_unopened_due; ALTER TABLE orders DROP COLUMN phone_check_method; ALTER TABLE orders DROP COLUMN wa_cancel_at; ALTER TABLE orders DROP COLUMN wa_unopened_cancel_at;'); // migration 11
   db.exec(`DROP INDEX orders_by_pay_token; DROP INDEX orders_transfer_to_check; ${['pay_nonce', 'pay_token_hash', 'pay_expires_at', 'bank_state', 'transfer_uploads', 'transfer_uploaded_at', 'bank_emailed_at', 'bank_checked_at', 'bank_checked_by'].map((c) => `ALTER TABLE orders DROP COLUMN ${c};`).join(' ')}`);
@@ -226,7 +227,7 @@ test('migration 8 only adds (columns and an index); an older shop’s orders upg
   const up = run(`const m = await import('@/lib/server/db'); const db = (m.getDb ?? m.default.getDb)(); console.log(JSON.stringify({ v: db.pragma('user_version', { simple: true }), row: db.prepare("SELECT id, status, data, phone_check, wa_code, wa_hold FROM orders WHERE id = 'BUH-OLD-1'").get() }));`);
   assert.equal(up.status, 0, up.stderr);
   const out = JSON.parse(up.stdout.trim().split('\n').pop()!);
-  assert.equal(out.v, 12, 'migrations 8 to 12 all ran');
+  assert.equal(out.v, 13, 'migrations 8 to 13 all ran');
   assert.deepEqual(out.row, { id: 'BUH-OLD-1', status: 'delivered', data: '{"id":"BUH-OLD-1"}', phone_check: 'none', wa_code: null, wa_hold: 0 });
 });
 

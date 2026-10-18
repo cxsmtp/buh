@@ -47,6 +47,7 @@
   --color-danger-line: #e7c3bc;
   --color-whatsapp: #1f7a47;
   --color-paper: #ffffff;
+  --color-scrim: #2b2127;
 
   /* An elegant serif for headings, a clean sans for everything else (both self-hosted). */
   --font-serif: var(--font-display), "Cormorant Garamond", Georgia, "Times New Roman", serif;

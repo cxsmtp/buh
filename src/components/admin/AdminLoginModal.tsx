@@ -230,7 +230,7 @@ export const AdminLoginModal: React.FC<AdminLoginModalProps> = ({
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-ink/45 p-3 sm:p-4 overscroll-contain" role="dialog" aria-modal="true" aria-labelledby="admin-login-title">
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-scrim/45 p-3 sm:p-4 overscroll-contain" role="dialog" aria-modal="true" aria-labelledby="admin-login-title">
       <div className="bg-surface rounded-3xl max-w-md w-full min-w-0 max-h-[calc(100dvh-1.5rem)] overflow-y-auto overflow-x-hidden overscroll-contain p-6 space-y-5 border border-line">
         {/* Header (stays in view, with its close button) */}
         <div className="sticky top-0 z-10 -mx-6 -mt-6 px-6 pt-6 pb-2 bg-surface text-center space-y-1.5">

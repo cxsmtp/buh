@@ -48,6 +48,8 @@ export const PALETTE = {
    * (src/lib/design/themes.ts) it is the deepest shade, since those buttons turn light.
    */
   paper: '#ffffff',
+  /** The dimming behind a sheet or dialog (bg-scrim/45): the ink here; near-black in a dark look. */
+  scrim: '#2b2127',
 } as const;
 
 export type Token = keyof typeof PALETTE;

@@ -21,7 +21,7 @@ export const ShippingLabelModal: React.FC<ShippingLabelModalProps> = ({ order, o
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-ink/45 p-3 sm:p-4 overscroll-contain" role="dialog" aria-modal="true" aria-labelledby="label-title">
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-scrim/45 p-3 sm:p-4 overscroll-contain" role="dialog" aria-modal="true" aria-labelledby="label-title">
       <div className="bg-surface rounded-3xl max-w-xl w-full min-w-0 max-h-[calc(100dvh-1.5rem)] overflow-y-auto overflow-x-hidden overscroll-contain p-4 sm:p-6 border border-line space-y-4">
         {/* Header Actions (stay in view) */}
         <div className="sticky top-0 z-10 -mx-4 -mt-4 px-4 pt-4 sm:-mx-6 sm:-mt-6 sm:px-6 sm:pt-6 pb-3 bg-surface flex items-start justify-between gap-2 border-b border-line">

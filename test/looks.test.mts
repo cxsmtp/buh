@@ -94,7 +94,7 @@ test('Ivory & Gold in light is exactly the palette from before looks existed', (
     ink: '#2b2127', 'ink-2': '#43353d', 'ink-soft': '#5a4c53', 'ink-muted': '#6a5c62', gold: '#c2a36b', 'gold-light': '#e6d5b0',
     'gold-deep': '#82612c', rose: '#c49a98', 'rose-soft': '#f4e8e5', 'rose-deep': '#8a5659', success: '#3d6a4e', 'success-soft': '#eaf1ea',
     'success-line': '#c8dacb', warning: '#85601c', 'warning-soft': '#f7eedb', 'warning-line': '#e8d3a6', danger: '#9a3e39',
-    'danger-soft': '#f7e6e2', 'danger-line': '#e7c3bc', whatsapp: '#1f7a47', paper: '#ffffff',
+    'danger-soft': '#f7e6e2', 'danger-line': '#e7c3bc', whatsapp: '#1f7a47', paper: '#ffffff', scrim: '#2b2127',
   };
   assert.deepEqual(LOOK_PRESETS['ivory-gold'].light.colors, before);
   assert.deepEqual({ ...PALETTE }, before);
@@ -185,9 +185,10 @@ test('looks: the default for an existing shop, history with timestamps, switch b
   assert.ok(earlierLooks().length <= 31);
 
   // Settings → System → History restores a look too, as a new change by whoever restored it.
-  const anyOld = earlierLooks().find((e) => e.preset === 'pearl-emerald')!;
-  await restoreSettingsVersion(anyOld.id, 'second@shop.ae');
   assert.equal(currentLook().preset, 'pearl-emerald');
+  const anyOld = earlierLooks().find((e) => e.preset === 'sand-rose')!;
+  await restoreSettingsVersion(anyOld.id, 'second@shop.ae');
+  assert.equal(currentLook().preset, 'sand-rose');
   assert.equal(currentLook().changedBy, 'second@shop.ae');
 
   // Only known looks and modes; nothing else is stored.
@@ -196,4 +197,32 @@ test('looks: the default for an existing shop, history with timestamps, switch b
   await assert.rejects(switchBackLook(999999, 'a@b.c'), /no longer kept/);
   const stored = getSettings('look') as unknown as Record<string, unknown>;
   assert.deepEqual(Object.keys(stored).sort(), ['changedAt', 'changedBy', 'label', 'mode', 'preset']);
+});
+
+test('migration 11 only adds rows: an existing shop (database version 10) keeps everything and gains its starting look', async () => {
+  const { spawnSync } = await import('node:child_process');
+  const os = await import('node:os');
+  const path = await import('node:path');
+  const Database = (await import('better-sqlite3')).default;
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'buh-v10-'));
+  const run = (code: string) => spawnSync(process.execPath, ['--import', 'tsx', '-e', `process.env.DATA_DIR=${JSON.stringify(dir)}; ${code}`], { encoding: 'utf8' });
+  assert.equal(run(`const m = await import('@/lib/server/db'); (m.getDb ?? m.default.getDb)();`).status, 0);
+  // Back to version 10, as a shop running BUH-02.09 has it, with a branding setting saved.
+  const db = new Database(path.join(dir, 'shop.db'));
+  db.exec("DELETE FROM settings_history WHERE key = 'look'; DELETE FROM settings WHERE key = 'look'");
+  db.prepare("INSERT INTO settings (key, data, updated_at) VALUES ('brand', '{\"storeName\":\"Kept\"}', '2026-01-01T00:00:00.000Z')").run();
+  db.pragma('user_version = 10');
+  db.close();
+  const up = run(`const m = await import('@/lib/server/db'); const db = (m.getDb ?? m.default.getDb)(); console.log(JSON.stringify({ v: db.pragma('user_version', { simple: true }), settings: db.prepare("SELECT key, data FROM settings ORDER BY key").all(), history: db.prepare("SELECT key, data, saved_at FROM settings_history").all() }));`);
+  assert.equal(up.status, 0, up.stderr);
+  const out = JSON.parse(up.stdout.trim().split('\n').pop()!);
+  assert.equal(out.v, 11);
+  assert.deepEqual(out.settings.find((s: { key: string }) => s.key === 'brand'), { key: 'brand', data: '{"storeName":"Kept"}' });
+  const look = JSON.parse(out.settings.find((s: { key: string }) => s.key === 'look').data);
+  assert.deepEqual([look.preset, look.mode], ['ivory-gold', 'system']);
+  assert.equal(out.history.length, 1);
+  const before = JSON.parse(out.history[0].data);
+  assert.deepEqual([before.preset, before.mode, before.label, before.pinned], ['ivory-gold', 'light', 'Ivory & Gold — the look before themes', true]);
+  assert.equal(before.changedAt, out.history[0].saved_at);
+  assert.equal(before.changedAt, look.changedAt, 'both timestamped at migration time');
 });

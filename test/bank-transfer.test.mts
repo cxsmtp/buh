@@ -413,6 +413,7 @@ test('migration 10 only adds (columns, indexes) and fills its own columns; older
   assert.equal(run(`const m = await import('@/lib/server/db'); (m.getDb ?? m.default.getDb)();`).status, 0);
   const db = new Database(path.join(old, 'shop.db'));
   // Migrations 11 and 12 go too (they run again after 10): newest first.
+  db.exec("DELETE FROM settings_history WHERE key = 'look'; DELETE FROM settings WHERE key = 'look'"); // migration 13
   db.exec('DROP TABLE card_refunds; DROP TABLE expense_bills; DROP TABLE expense_versions; DROP TABLE expenses; DROP TABLE expense_categories;'); // migration 12
   db.exec('DROP INDEX orders_unconfirmed_due; DROP INDEX orders_unopened_due; ALTER TABLE orders DROP COLUMN phone_check_method; ALTER TABLE orders DROP COLUMN wa_cancel_at; ALTER TABLE orders DROP COLUMN wa_unopened_cancel_at;'); // migration 11
   db.exec(`DROP INDEX orders_by_pay_token; DROP INDEX orders_transfer_to_check; ${['pay_nonce', 'pay_token_hash', 'pay_expires_at', 'bank_state', 'transfer_uploads', 'transfer_uploaded_at', 'bank_emailed_at', 'bank_checked_at', 'bank_checked_by'].map((c) => `ALTER TABLE orders DROP COLUMN ${c};`).join(' ')}`);
@@ -426,7 +427,7 @@ test('migration 10 only adds (columns, indexes) and fills its own columns; older
   const up = run(`const m = await import('@/lib/server/db'); const db = (m.getDb ?? m.default.getDb)(); console.log(JSON.stringify({ v: db.pragma('user_version', { simple: true }), rows: db.prepare("SELECT id, data, bank_state, transfer_uploads, pay_token_hash FROM orders WHERE id LIKE 'BUH-OLD-%' ORDER BY id").all() }));`);
   assert.equal(up.status, 0, up.stderr);
   const out = JSON.parse(up.stdout.trim().split('\n').pop()!);
-  assert.equal(out.v, 12);
+  assert.equal(out.v, 13);
   assert.deepEqual(
     out.rows.map((r: Record<string, unknown>) => [r.id, r.bank_state, r.transfer_uploads, r.pay_token_hash]),
     [
