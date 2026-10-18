@@ -9,8 +9,8 @@
 - **Measurements are your own.** Each size shows only what you filled in (flat or fitted sheet, pillowcases, duvet cover, other pieces) — no more duvet cover on sets that don't have one. A "Fitted sheet (elastic corners)" tick; "Use standard sizes" fills the fields in one tap; existing products get a "Check measurements" badge to review once.
 - **Colours only when you add them.** No colours means no colour choice; one colour shows as a label.
 - **Status.**
-  - **Benchmark:** BENCH
-  - **Tests:** TESTS
+  - **Benchmark:** same host, main (BUH-02.09.01) vs this branch, 3 alternating rounds, nothing else running, 0 failed requests. Storefront main 921 / 899 / 894 req/s, branch 931 / 959 / 966 (p95 85–98 vs 78–95 ms); courier check main 748 / 768 / 720, branch 762 / 713 / 685; catalogue main 843 / 835 / 840, branch 920 / 873 / 850 (p95 134–144 vs 131–137 ms). Level; the storefront slightly faster.
+  - **Tests:** 630 of 631 passed in the full run; the one failure was a page that took over 30 s to load while every browser test ran at once, and its file passed 6 of 6 on its own.
   - **Dependency audit:** production 0 vulnerabilities; no new packages.
   - **Security scan:** an independent review (1 high, 4 medium, 5 low findings in the phone check and measurements carry-over), all fixed with tests that fail before and pass after.
 
