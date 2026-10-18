@@ -75,6 +75,29 @@ export async function readJsonBody(req: Request, maxBytes = 16 * 1024): Promise<
 }
 
 /**
+ * Read a body as raw bytes (for a signature over exactly what was sent), with a hard size cap.
+ * Throws `tooLarge` (or a 413) beyond it, without reading the rest.
+ */
+export async function readRawBody(req: Request, maxBytes: number, tooLarge: HttpError = new HttpError(413, 'Request body is too large.')): Promise<Buffer> {
+  if (Number(req.headers.get('content-length') || '0') > maxBytes) throw tooLarge;
+  if (!req.body) return Buffer.alloc(0);
+  const reader = req.body.getReader();
+  const chunks: Uint8Array[] = [];
+  let size = 0;
+  for (;;) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    size += value.byteLength;
+    if (size > maxBytes) {
+      await reader.cancel().catch(() => {});
+      throw tooLarge;
+    }
+    chunks.push(value);
+  }
+  return Buffer.concat(chunks);
+}
+
+/**
  * The caller's IP for rate limiting, or null when it cannot be known. Forwarded headers are only honoured when
  * TRUST_PROXY=1, because without a proxy in front anyone can set them. Behind
  * nginx we read X-Real-IP (set from $remote_addr), not the first

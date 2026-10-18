@@ -270,6 +270,33 @@ const MIGRATIONS: Array<(db: DB) => void> = [
       CREATE INDEX orders_awaiting_whatsapp ON orders(created_at) WHERE phone_check = 'awaiting';
     `);
   },
+  // 9: card payments through the owner's Stripe account. Own columns, like migration 8, so an
+  //    older version rewriting the order's JSON leaves them alone; the order itself uses values
+  //    every version knows (payment method 'online_card', status 'pending_payment', JSON payment
+  //    status 'pending' → 'paid'). payment_ref is the PaymentIntent id Stripe gave (never made
+  //    up here); card_secret_hash lets the paying browser (which holds the client secret) ask
+  //    about its own order. stripe_events: each webhook event is applied once (Stripe resends).
+  (db) => {
+    db.exec(`
+      ALTER TABLE orders ADD COLUMN card_state TEXT NOT NULL DEFAULT 'none';   -- none | pending | failed | paid | refund_pending | refunded | canceled
+      ALTER TABLE orders ADD COLUMN payment_ref TEXT;
+      ALTER TABLE orders ADD COLUMN card_secret_hash TEXT;
+      ALTER TABLE orders ADD COLUMN paid_fils INTEGER;
+      ALTER TABLE orders ADD COLUMN paid_at TEXT;
+      ALTER TABLE orders ADD COLUMN card_label TEXT;
+      ALTER TABLE orders ADD COLUMN refund_ref TEXT;
+      ALTER TABLE orders ADD COLUMN refunded_at TEXT;
+      CREATE UNIQUE INDEX orders_by_payment_ref ON orders(payment_ref) WHERE payment_ref IS NOT NULL;
+      CREATE INDEX orders_card_open ON orders(created_at) WHERE card_state IN ('pending', 'failed');
+      CREATE TABLE stripe_events (
+        id        TEXT PRIMARY KEY,          -- Stripe's event id (evt_…)
+        type      TEXT NOT NULL,
+        order_id  TEXT,
+        at        TEXT NOT NULL,
+        outcome   TEXT NOT NULL
+      );
+    `);
+  },
 ];
 
 let db: DB | null = null;

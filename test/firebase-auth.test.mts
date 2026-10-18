@@ -297,13 +297,13 @@ test('POST /api/otp/firebase: same-origin only, size-capped, and closed while Fi
   assert.equal(((await off.json()) as { valid: boolean }).valid, false);
 });
 
-test('CSP: only the Firebase phone-auth hosts are added, nothing else is loosened', async () => {
+test('CSP: only the Firebase phone-auth hosts (and Stripe’s, for card payments) are added, nothing else is loosened', async () => {
   const { contentSecurityPolicy } = await import('@/lib/csp');
   const csp = contentSecurityPolicy();
   const directive = (name: string) => csp.split('; ').find((d) => d.startsWith(name + ' ')) ?? '';
-  assert.match(directive('script-src'), /https:\/\/www\.google\.com\/recaptcha\/ https:\/\/www\.gstatic\.com\/recaptcha\/ https:\/\/apis\.google\.com$/);
-  assert.match(directive('connect-src'), /^connect-src 'self'.* https:\/\/identitytoolkit\.googleapis\.com https:\/\/securetoken\.googleapis\.com/);
-  assert.match(directive('frame-src'), /^frame-src 'self' https:\/\/www\.google\.com\/recaptcha\/ .*https:\/\/\*\.firebaseapp\.com$/);
+  assert.match(directive('script-src'), /https:\/\/www\.google\.com\/recaptcha\/ https:\/\/www\.gstatic\.com\/recaptcha\/ https:\/\/apis\.google\.com https:\/\/js\.stripe\.com https:\/\/\*\.js\.stripe\.com$/);
+  assert.match(directive('connect-src'), /^connect-src 'self'.* https:\/\/identitytoolkit\.googleapis\.com https:\/\/securetoken\.googleapis\.com .* https:\/\/api\.stripe\.com$/);
+  assert.match(directive('frame-src'), /^frame-src 'self' https:\/\/www\.google\.com\/recaptcha\/ .*https:\/\/\*\.firebaseapp\.com https:\/\/js\.stripe\.com https:\/\/\*\.js\.stripe\.com https:\/\/hooks\.stripe\.com$/);
   for (const d of csp.split('; ')) assert.ok(!/\s(\*|https:)(\s|$)/.test(d) || d.startsWith('img-src'), `no wildcard source in ${d}`);
   for (const d of ["default-src 'self'", "object-src 'none'", "base-uri 'none'", "form-action 'self'", "frame-ancestors 'none'"]) assert.ok(csp.includes(d), d);
 });

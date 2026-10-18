@@ -9,7 +9,7 @@ const appVersion = `BUH-${pkg.version.split(".").map((n) => n.padStart(2, "0")).
 const nextConfig: NextConfig = {
   output: "standalone",
   // Loaded at runtime from node_modules (native SQLite driver; mailer with dynamic requires).
-  serverExternalPackages: ["better-sqlite3", "nodemailer", "imapflow", "mailparser"],
+  serverExternalPackages: ["better-sqlite3", "nodemailer", "imapflow", "mailparser", "stripe"],
   env: { NEXT_PUBLIC_APP_VERSION: appVersion },
   // Settings → Versions shows the changelog of the running build.
   outputFileTracingIncludes: { "/api/admin/versions": ["./CHANGELOG.md"] },
@@ -26,8 +26,9 @@ const nextConfig: NextConfig = {
           { key: "X-Content-Type-Options", value: "nosniff" },
           { key: "Referrer-Policy", value: "strict-origin-when-cross-origin" },
           { key: "Cross-Origin-Opener-Policy", value: "same-origin" },
-          // Checkout uses the browser's location to fill the address; nothing else is needed.
-          { key: "Permissions-Policy", value: "camera=(), microphone=(), geolocation=(self), payment=(), usb=()" },
+          // Checkout uses the browser's location to fill the address, and Stripe's frame (only) may
+          // use the Payment Request API for Apple Pay and Google Pay; nothing else is needed.
+          { key: "Permissions-Policy", value: 'camera=(), microphone=(), geolocation=(self), payment=(self "https://js.stripe.com" "https://pay.google.com"), usb=()' },
           // Only meaningful over HTTPS; browsers ignore it on plain http. No `preload`:
           // that is a one-way commitment the site owner should opt into deliberately.
           { key: "Strict-Transport-Security", value: "max-age=31536000; includeSubDomains" },

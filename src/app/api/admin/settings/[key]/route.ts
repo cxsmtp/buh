@@ -4,7 +4,7 @@ import { handleRouteError, HttpError, json, readJsonBody } from '@/lib/server/ht
 import { adminView, undoVersionId, type SettingsKey } from '@/lib/server/settings';
 import { saveGuarded } from '@/lib/server/settingsGuard';
 
-const KEYS: SettingsKey[] = ['brand', 'bank', 'courier', 'sms', 'catalog', 'store', 'theme', 'email', 'assistant', 'delivery'];
+const KEYS: SettingsKey[] = ['brand', 'bank', 'courier', 'sms', 'catalog', 'store', 'theme', 'email', 'assistant', 'delivery', 'payments'];
 
 export async function PUT(req: Request, { params }: { params: Promise<{ key: string }> }) {
   try {

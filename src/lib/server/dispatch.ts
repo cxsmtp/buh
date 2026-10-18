@@ -39,6 +39,10 @@ export async function dispatchOrder(input: {
   }
   // Held until the customer confirms on WhatsApp (Settings → Store & contact): nothing goes to a carrier.
   assertNotHeld(order);
+  // A card order goes to a carrier only once Stripe has said it is paid.
+  if (order.paymentMethod === 'online_card' && order.card?.state !== 'paid') {
+    throw new HttpError(409, `${order.id} is not paid by card yet, so it cannot be booked.`, {}, { code: 'card_unpaid' });
+  }
   // Eco Express books next-day only: a same-day order (the customer paid for it) goes with Jeebly Express.
   if (order.deliveryOption === 'same_day' && provider === 'echo') {
     throw new HttpError(400, 'This is a same-day order: Eco Express books next-day only. Book it with Jeebly (Express).');

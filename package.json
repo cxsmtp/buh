@@ -16,6 +16,8 @@
   "dependencies": {
     "@simplewebauthn/browser": "14.0.0",
     "@simplewebauthn/server": "14.0.3",
+    "@stripe/react-stripe-js": "3.10.0",
+    "@stripe/stripe-js": "7.9.0",
     "@tailwindcss/postcss": "^4.3.3",
     "@types/canvas-confetti": "^1.9.0",
     "better-sqlite3": "^12.11.1",
@@ -28,7 +30,8 @@
     "nodemailer": "^10.1.1",
     "postcss": "^8.5.30",
     "react": "19.3.0",
-    "react-dom": "19.3.0"
+    "react-dom": "19.3.0",
+    "stripe": "18.5.0"
   },
   "devDependencies": {
     "@tailwindcss/turbopack": "^4",

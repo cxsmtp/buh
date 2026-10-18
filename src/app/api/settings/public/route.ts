@@ -1,5 +1,5 @@
 import { handleRouteError, json } from '@/lib/server/http';
-import { contactEmail, getSettings, phoneVerificationConfig } from '@/lib/server/settings';
+import { cardPaymentsReady, contactEmail, getSettings, phoneVerificationConfig } from '@/lib/server/settings';
 import { storefrontTheme } from '@/lib/server/theme';
 
 /**
@@ -7,7 +7,8 @@ import { storefrontTheme } from '@/lib/server/theme';
  * contact details (WhatsApp, Instagram…), the catalogue's categories and the
  * low-stock threshold, the support email, today's festival look, and how
  * checkout verifies phones (the Firebase web config only when Firebase is the
- * switched-on SMS option). Nothing here is secret.
+ * switched-on SMS option), and whether checkout takes cards (with the Stripe
+ * publishable key, which is public by design). Nothing here is secret.
  */
 export function GET() {
   try {
@@ -23,10 +24,17 @@ export function GET() {
       phoneVerification: phoneVerificationConfig(),
       chat: chatView(),
       delivery: getSettings('delivery'),
+      payments: paymentsView(),
     });
   } catch (err) {
     return handleRouteError(err, 'settings/public');
   }
+}
+
+/** Card payments: only switched on with every key; the publishable key only (never the secret ones). */
+function paymentsView() {
+  const p = getSettings('payments');
+  return cardPaymentsReady(p) ? { card: true, publishableKey: p.stripePublishableKey } : { card: false };
 }
 
 function chatView() {

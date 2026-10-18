@@ -166,6 +166,44 @@ export interface Order {
    * table's own columns, not in the order's JSON.
    */
   whatsappCheck?: WhatsAppCheck;
+  /**
+   * Card payment through the owner's Stripe account (paymentMethod 'online_card'). Kept in the
+   * orders table's own columns, not in the order's JSON. Customers see only state and label.
+   */
+  card?: CardPayment;
+}
+
+/**
+ * A card order's payment. Only Stripe's word moves it: the signed webhook, or the server asking
+ * Stripe directly. pending: waiting for the customer; failed: the last try was declined (they may
+ * try again until the order times out); paid; refund_pending / refunded; canceled: never paid,
+ * the order was cancelled and its stock released.
+ */
+export type CardState = 'pending' | 'failed' | 'paid' | 'refund_pending' | 'refunded' | 'canceled';
+
+export interface CardPayment {
+  state: CardState;
+  /** "Apple Pay · Visa •••• 4242", from Stripe once paid. */
+  label?: string;
+  /** The PaymentIntent id (pi_…), from Stripe. Admin only. */
+  ref?: string;
+  paidAt?: string;
+  /** What Stripe confirmed it took, in AED. Admin only. */
+  paidAmount?: number;
+  refundRef?: string;
+  refundedAt?: string;
+}
+
+/** Settings → Payments: card payments (with Apple Pay and Google Pay) through the owner's Stripe account. */
+export interface PaymentSettings {
+  /** Offer "Card" (and Apple Pay / Google Pay) at checkout. Off until the keys are in. */
+  cardEnabled: boolean;
+  /** pk_test_… or pk_live_… (public: it goes to the browser). */
+  stripePublishableKey: string;
+  /** sk_… or rk_… (secret: never leaves the server). */
+  stripeSecretKey: string;
+  /** whsec_… (secret: proves a webhook came from Stripe). */
+  stripeWebhookSecret: string;
 }
 
 export interface WhatsAppCheck {

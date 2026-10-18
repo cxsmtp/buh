@@ -14,7 +14,7 @@ import { applyUpdate, checkForUpdate, registerServiceWorker, useUpdateWaiting } 
 async function fetchCatalog() {
   const [products, settings] = await Promise.all([
     getJson<{ products: Product[] }>('/api/products'),
-    getJson<{ brand: BrandSettings; bank: BankTransferDetails; supportEmail?: string; store?: StoreSettings; catalog?: { categories: CatalogSettings['categories']; lowStockThreshold: number }; festival?: FestivalView | null; phoneVerification?: PhoneVerificationConfig; chat?: { name: string; greeting: string } | null; delivery?: DeliverySettings }>('/api/settings/public'),
+    getJson<{ brand: BrandSettings; bank: BankTransferDetails; supportEmail?: string; store?: StoreSettings; catalog?: { categories: CatalogSettings['categories']; lowStockThreshold: number }; festival?: FestivalView | null; phoneVerification?: PhoneVerificationConfig; chat?: { name: string; greeting: string } | null; delivery?: DeliverySettings; payments?: { card: boolean; publishableKey?: string } }>('/api/settings/public'),
   ]);
   return { products, settings };
 }
@@ -114,6 +114,8 @@ export function ShopApp({ initialProductId }: { initialProductId?: string } = {}
   const [festival, setFestival] = useState<FestivalView | null>(null);
   const [chatInfo, setChatInfo] = useState<{ name: string; greeting: string } | null>(null);
   const [delivery, setDelivery] = useState<DeliverySettings>(DEFAULT_DELIVERY);
+  // Card payments (Settings → Payments): Stripe's publishable key when switched on.
+  const [cardPayments, setCardPayments] = useState<{ publishableKey: string } | null>(null);
   // Where this visitor first came from (Instagram, WhatsApp…), sent with the order.
   const [landing] = useState<Landing | null>(() => (typeof window === 'undefined' ? null : captureLanding()));
   // Pre-fills Track Order (only rendered once opened, so no server/client mismatch).
@@ -153,6 +155,8 @@ export function ShopApp({ initialProductId }: { initialProductId?: string } = {}
       setFestival(settings.data.festival ?? null);
       setChatInfo(settings.data.chat ?? null);
       if (settings.data.delivery) setDelivery(settings.data.delivery);
+      const pay = settings.data.payments;
+      setCardPayments(pay?.card && pay.publishableKey ? { publishableKey: pay.publishableKey } : null);
       if (settings.data.catalog) {
         setLowStockThreshold(settings.data.catalog.lowStockThreshold);
         setCategories(settings.data.catalog.categories);
@@ -577,6 +581,7 @@ export function ShopApp({ initialProductId }: { initialProductId?: string } = {}
         bank={bankDetails}
         supportEmail={supportEmail}
         phoneVerification={phoneVerification}
+        card={cardPayments}
         landing={landing}
         onOrderPlaced={handleOrderPlaced}
         onPricesChanged={async () => {

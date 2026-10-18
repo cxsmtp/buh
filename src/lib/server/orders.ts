@@ -1,7 +1,7 @@
 import crypto from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
-import type { Customer, Emirate, Order, OrderStatus } from '@/types';
+import type { CardPayment, CardState, Customer, Emirate, Order, OrderStatus } from '@/types';
 import { deliveryCheck, uaeDate } from '@/lib/delivery';
 import { dataDir } from './dataDir';
 import { getDb, inTransaction } from './db';
@@ -10,16 +10,19 @@ import { parseReceiptDataUrl } from './imageInput';
 import { verifyPhoneToken } from './phoneToken';
 import { getProduct, invalidateProducts, listProducts } from './products';
 import { bump } from './live';
-import { bankTransferReady, getSettings } from './settings';
+import { bankTransferReady, cardPaymentsReady, getSettings } from './settings';
 import { audit } from './audit';
 import { waMeLink } from '@/lib/whatsappConfirm';
+import { validatePhone } from '@/lib/otpService';
 
 /**
  * Orders, stored on the server. Everything that decides what a customer pays
  * is computed here from the catalogue, never taken from the browser:
  *  - prices come from the product and the chosen bed size;
  *  - stock is reserved in the same transaction (no overselling the last set);
- *  - the phone number is the one proven by an SMS code (a signed token);
+ *  - the phone number is the one proven by an SMS code (a signed token), or, for a
+ *    card order, the one the card holder gave (paying is the proof; the order waits
+ *    for Stripe's word before it counts, and "Confirm on WhatsApp" still applies);
  *  - one checkout attempt (idempotency key) creates at most one order.
  */
 
@@ -29,6 +32,11 @@ const MAX_LINES = 20;
 const MAX_QTY = 20;
 /** Orders still waiting for confirmation, per phone. */
 export const MAX_OPEN_PER_PHONE = 3;
+/** Unpaid card orders hold their pieces until paid or timed out: a few per phone, a cap overall. */
+export const MAX_UNPAID_CARD_PER_PHONE = 2;
+export const MAX_UNPAID_CARD_TOTAL = 30;
+/** An unpaid card order is cancelled (its pieces back on sale) after this long. */
+export const CARD_PAYMENT_TTL_MS = 30 * 60 * 1000;
 
 const ORDER_SOURCES = ['instagram', 'whatsapp', 'facebook', 'tiktok', 'google', 'email', 'direct', 'other'];
 const EMIRATES: Emirate[] = ['Dubai', 'Abu Dhabi', 'Sharjah', 'Ajman', 'Ras Al Khaimah', 'Fujairah', 'Umm Al Quwain'];
@@ -72,13 +80,33 @@ interface Row {
   wa_opened_at: string | null;
   phone_checked_at: string | null;
   phone_checked_by: string | null;
+  card_state: string;
+  payment_ref: string | null;
+  paid_fils: number | null;
+  paid_at: string | null;
+  card_label: string | null;
+  refund_ref: string | null;
+  refunded_at: string | null;
 }
-/** The order's JSON and the WhatsApp confirmation, kept in its own columns (migration 8). */
-const COLUMNS = 'data, wa_code, phone_check, wa_hold, wa_opened_at, phone_checked_at, phone_checked_by';
+/** The order's JSON, the WhatsApp confirmation (migration 8) and the card payment (migration 9), in their own columns. */
+const COLUMNS = 'data, wa_code, phone_check, wa_hold, wa_opened_at, phone_checked_at, phone_checked_by, card_state, payment_ref, paid_fils, paid_at, card_label, refund_ref, refunded_at';
+const CARD_STATES: CardState[] = ['pending', 'failed', 'paid', 'refund_pending', 'refunded', 'canceled'];
 
 function fromRow(r: Row): Order {
   const order = JSON.parse(r.data) as Order;
   delete order.whatsappCheck;
+  delete order.card;
+  if (CARD_STATES.includes(r.card_state as CardState)) {
+    order.card = {
+      state: r.card_state as CardState,
+      ...(r.payment_ref ? { ref: r.payment_ref } : {}),
+      ...(r.card_label ? { label: r.card_label } : {}),
+      ...(r.paid_at ? { paidAt: r.paid_at } : {}),
+      ...(r.paid_fils !== null ? { paidAmount: aed(r.paid_fils) } : {}),
+      ...(r.refund_ref ? { refundRef: r.refund_ref } : {}),
+      ...(r.refunded_at ? { refundedAt: r.refunded_at } : {}),
+    };
+  }
   if (r.wa_code && (r.phone_check === 'awaiting' || r.phone_check === 'confirmed' || r.phone_check === 'mismatch')) {
     order.whatsappCheck = {
       status: r.phone_check,
@@ -115,9 +143,10 @@ export function allOrders(): Order[] {
 }
 
 function writeOrder(order: Order, idempotencyKey?: string) {
-  // The WhatsApp confirmation lives in its own columns (see confirmOnWhatsApp below), never in the JSON.
-  const { whatsappCheck: _check, ...stored } = order;
+  // The WhatsApp confirmation and the card payment live in their own columns, never in the JSON.
+  const { whatsappCheck: _check, card: _card, ...stored } = order;
   void _check;
+  void _card;
   getDb()
     .prepare(
       `INSERT INTO orders (id, created_at, updated_at, phone, status, payment_method, payment_status, total_fils, idempotency_key, data)
@@ -166,7 +195,11 @@ export function placeOrder(input: unknown): PlaceOrderResult {
   if (!input || typeof input !== 'object' || Array.isArray(input)) throw new HttpError(400, 'Order must be an object.');
   const body = input as Obj;
 
-  const phone = verifyPhoneToken(body.verificationToken);
+  const paymentMethod = text(body.paymentMethod, 'Payment method', 20, { required: true });
+  const card = paymentMethod === 'online_card';
+  if (card && !cardPaymentsReady()) throw new HttpError(400, 'Card payment is not available right now. Please choose Cash on Delivery.', {}, { code: 'card_unavailable' });
+  // A card order needs no SMS code: the card holder pays before it counts (a code, if given, still wins).
+  const phone = verifyPhoneToken(body.verificationToken) ?? (card && body.verificationToken === undefined ? validatePhone((body.customer as Obj | undefined)?.phone) : null);
   if (!phone) throw new HttpError(401, 'Please verify your UAE mobile number again (the code check has expired).');
 
   const idempotencyKey = text(body.idempotencyKey, 'Checkout reference', 64, { required: true });
@@ -209,8 +242,7 @@ export function placeOrder(input: unknown): PlaceOrderResult {
   }
   const deliveryFils = deliveryOption === 'same_day' ? fils(delivery.sameDay.fee) : fils(DELIVERY_FEE);
 
-  const paymentMethod = text(body.paymentMethod, 'Payment method', 20, { required: true });
-  if (paymentMethod !== 'cod' && paymentMethod !== 'bank_transfer') throw new HttpError(400, 'Choose Cash on Delivery or Bank Transfer.');
+  if (paymentMethod !== 'cod' && paymentMethod !== 'bank_transfer' && !card) throw new HttpError(400, 'Choose Cash on Delivery, Bank Transfer or Card.');
   if (paymentMethod === 'bank_transfer' && !bankTransferReady(getSettings('bank'))) {
     throw new HttpError(400, 'Bank transfer is not available right now. Please choose Cash on Delivery.');
   }
@@ -223,7 +255,7 @@ export function placeOrder(input: unknown): PlaceOrderResult {
       : undefined;
   const expectedTotalFils =
     body.expectedTotal === undefined ? null : typeof body.expectedTotal === 'number' && Number.isFinite(body.expectedTotal) ? fils(body.expectedTotal) : -1;
-  const receipt = body.receipt ? parseReceiptDataUrl(body.receipt) : null;
+  const receipt = body.receipt && paymentMethod === 'bank_transfer' ? parseReceiptDataUrl(body.receipt) : null;
 
   if (!Array.isArray(body.items) || body.items.length === 0) throw new HttpError(400, 'Your bag is empty.');
   if (body.items.length > MAX_LINES) throw new HttpError(400, `At most ${MAX_LINES} lines per order.`);
@@ -256,6 +288,14 @@ export function placeOrder(input: unknown): PlaceOrderResult {
     const open = (getDb().prepare("SELECT COUNT(*) AS n FROM orders WHERE phone = ? AND status = 'pending_confirmation'").get(phone) as { n: number }).n;
     if (open >= MAX_OPEN_PER_PHONE) {
       throw new HttpError(429, `You already have ${open} orders waiting for confirmation. We'll call you shortly, or contact us to add to them.`);
+    }
+    if (card) {
+      // Nobody proved this phone by SMS, so unpaid card orders can't pile up and hold the stock.
+      const unpaid = getDb().prepare("SELECT COUNT(*) AS n FROM orders WHERE card_state IN ('pending', 'failed') AND phone = ?").pluck();
+      const all = getDb().prepare("SELECT COUNT(*) AS n FROM orders WHERE card_state IN ('pending', 'failed')").pluck();
+      if ((unpaid.get(phone) as number) >= MAX_UNPAID_CARD_PER_PHONE || (all.get() as number) >= MAX_UNPAID_CARD_TOTAL) {
+        throw new HttpError(429, 'Too many card payments are waiting to be finished. Please finish or close the other checkout, or choose Cash on Delivery.');
+      }
     }
     const items: Order['items'] = [];
     for (const line of lines) {
@@ -318,7 +358,8 @@ export function placeOrder(input: unknown): PlaceOrderResult {
       paymentStatus: paymentMethod === 'cod' ? 'cod_pending' : receipt ? 'receipt_uploaded' : 'pending',
       paymentReceiptUrl: receipt ? `/api/admin/orders/${id}/receipt` : undefined,
       bankTransferRef: bankRef || undefined,
-      status: 'pending_confirmation',
+      // A card order counts once Stripe says it is paid (status values every version knows).
+      status: card ? 'pending_payment' : 'pending_confirmation',
       courier: {
         provider: provider === 'manual' ? 'jeebly' : provider,
         serviceType: deliveryOption === 'same_day' ? 'Express' : 'Scheduled',
@@ -344,6 +385,10 @@ export function placeOrder(input: unknown): PlaceOrderResult {
     };
     writeOrder(created, idempotencyKey);
     logEvent(id, 'customer', 'created', { total: created.total, paymentMethod });
+    if (card) {
+      getDb().prepare("UPDATE orders SET card_state = 'pending' WHERE id = ?").run(id);
+      created.card = { state: 'pending' };
+    }
     if (askWhatsApp) {
       // 4 random digits, made here (never by the browser); not a secret from the customer.
       const code = String(crypto.randomInt(0, 10_000)).padStart(4, '0');
@@ -404,21 +449,15 @@ export function updateOrderByAdmin(id: string, patch: unknown, actor: string): O
         throw new HttpError(409, `An order that is ${order.status.replace(/_/g, ' ')} cannot become ${status.replace(/_/g, ' ')}.`);
       }
       if (status !== 'cancelled') assertNotHeld(order);
-      // Pieces go back on sale only if they never left: once dispatched, the piece is with the
-      // courier (most designs are one of a kind), so the owner adds it back with + when it returns.
-      if (status === 'cancelled' && (order.status === 'pending_confirmation' || order.status === 'pending_payment' || order.status === 'confirmed')) {
-        // Put the reserved pieces back, size by size (the row is recreated if the size was removed meanwhile).
-        for (const item of order.items) {
-          getDb()
-            .prepare('INSERT INTO product_stock (product_id, size_id, qty) SELECT ?, ?, ? WHERE EXISTS (SELECT 1 FROM products WHERE id = ?) ON CONFLICT(product_id, size_id) DO UPDATE SET qty = qty + excluded.qty')
-            .run(item.productId, item.profileId, item.quantity, item.productId);
-        }
-      }
+      assertCardAllows(order, status);
+      releaseStock(order, status);
       if (status === 'delivered') order.courier.deliveredAt = new Date().toISOString();
       changes.status = { from: order.status, to: status };
       order.status = status;
     }
     if (p.paymentStatus !== undefined && p.paymentStatus !== order.paymentStatus) {
+      // Only Stripe's word (the webhook, or asking Stripe) marks a card order paid.
+      if (order.paymentMethod === 'online_card') throw new HttpError(409, 'Card payments are recorded by Stripe, not by hand.', {}, { code: 'card_payment' });
       if (!PAYMENT_STATUSES.includes(p.paymentStatus as Order['paymentStatus'])) throw new HttpError(400, 'Unknown payment status.');
       changes.paymentStatus = { from: order.paymentStatus, to: p.paymentStatus };
       order.paymentStatus = p.paymentStatus as Order['paymentStatus'];
@@ -435,6 +474,37 @@ export function updateOrderByAdmin(id: string, patch: unknown, actor: string): O
   });
   invalidateProducts();
   return updated;
+}
+
+/**
+ * Put a cancelled order's reserved pieces back, size by size (the row is recreated if the size
+ * was removed meanwhile). Only if they never left: once dispatched, the piece is with the courier
+ * (most designs are one of a kind), so the owner adds it back with + when it returns. Called inside
+ * the transaction that moves the order to cancelled, once (a cancelled order can't be cancelled again).
+ */
+function releaseStock(order: Order, to: OrderStatus): void {
+  if (to !== 'cancelled' || !(order.status === 'pending_confirmation' || order.status === 'pending_payment' || order.status === 'confirmed')) return;
+  for (const item of order.items) {
+    getDb()
+      .prepare('INSERT INTO product_stock (product_id, size_id, qty) SELECT ?, ?, ? WHERE EXISTS (SELECT 1 FROM products WHERE id = ?) ON CONFLICT(product_id, size_id) DO UPDATE SET qty = qty + excluded.qty')
+      .run(item.productId, item.profileId, item.quantity, item.productId);
+  }
+}
+
+/**
+ * A card order moves only with its payment: not confirmed or booked before Stripe says paid,
+ * and a paid one is cancelled through "Cancel & refund" (so the money goes back with it).
+ * An unpaid one is cancelled through cancelCardOrder (the payment is stopped at Stripe first).
+ */
+function assertCardAllows(order: Order, to: OrderStatus): void {
+  const state = order.card?.state;
+  if (order.paymentMethod !== 'online_card' || !state) return;
+  if (state === 'pending' || state === 'failed') {
+    throw new HttpError(409, to === 'cancelled' ? 'This card payment is still open: cancel it from the order (it is stopped at Stripe first).' : `${order.id} is waiting for the customer's card payment.`, {}, { code: 'card_unpaid' });
+  }
+  if (to === 'cancelled' && (state === 'paid' || state === 'refund_pending') && order.status !== 'cancelled') {
+    throw new HttpError(409, `${order.id} was paid by card: use “Cancel & refund AED ${order.total}” so the money goes back to the card.`, {}, { code: 'refund_first' });
+  }
 }
 
 /**
@@ -514,15 +584,241 @@ export function recordBooking(id: string, actor: string, booking: Partial<Order[
   });
 }
 
+// ── Card payments (Stripe) ──────────────────────────────────────────────────
+//
+// Only Stripe's word moves a card order: its signed webhook (src/app/api/stripe/webhook), or this
+// server asking Stripe (src/lib/server/payments.ts). Each change below is one transaction with its
+// conditions in the UPDATE (so it happens once, even with two copies of the shop running), and is
+// written to the audit log before it counts: if the log can't be written, nothing is saved and
+// Stripe (or the next check) tries again.
+
+const sha256 = (v: string) => crypto.createHash('sha256').update(v).digest('hex');
+
+function auditOrThrow(action: string, details: Record<string, unknown>): void {
+  if (!audit(action, details)) throw new HttpError(503, 'The audit log could not be written, so nothing was changed. Please try again.');
+}
+
+/** What Stripe says about a PaymentIntent (amount in fils; never what a browser says). */
+export interface IntentFacts {
+  id: string;
+  amount: number;
+  currency: string;
+  /** metadata.orderId, set by this server when it made the intent. */
+  orderId?: string;
+  /** "Apple Pay · Visa •••• 4242", when known. */
+  label?: string;
+}
+
+/** A Stripe event, applied once: its id is recorded in the same transaction as its effect. */
+export interface StripeEventRef {
+  id: string;
+  type: string;
+}
+
+export type CardOutcome = 'paid' | 'paid_after_cancel' | 'already' | 'mismatch' | 'unknown' | 'failed' | 'cancelled' | 'refunded' | 'refund_pending' | 'partial' | 'ignored' | 'duplicate';
+
+function applyOnce(event: StripeEventRef | undefined, orderId: string | null, fn: () => CardOutcome): CardOutcome {
+  return inTransaction(() => {
+    const db = getDb();
+    if (event) {
+      const fresh = db.prepare('INSERT INTO stripe_events (id, type, order_id, at, outcome) VALUES (?, ?, ?, ?, ?) ON CONFLICT(id) DO NOTHING').run(event.id, event.type, orderId, new Date().toISOString(), 'applying').changes === 1;
+      if (!fresh) return 'duplicate';
+    }
+    const outcome = fn();
+    if (event) db.prepare('UPDATE stripe_events SET outcome = ? WHERE id = ?').run(outcome, event.id);
+    return outcome;
+  });
+}
+
+/** The PaymentIntent Stripe made for this order, and a hash of its client secret (the paying browser's proof). */
+export function recordCardIntent(id: string, ref: string, clientSecret: string): void {
+  const r = getDb()
+    .prepare("UPDATE orders SET payment_ref = ?, card_secret_hash = ? WHERE id = ? AND card_state IN ('pending', 'failed') AND (payment_ref IS NULL OR payment_ref = ?)")
+    .run(ref, sha256(clientSecret), id, ref);
+  if (r.changes !== 1) throw new HttpError(409, 'This card payment can no longer be started. Please start checkout again.', {}, { code: 'card_closed' });
+  logEvent(id, 'stripe', 'card_intent', { ref });
+}
+
+/** Does this client secret belong to this order (the browser paying for it holds it)? */
+export function cardSecretMatches(id: string, clientSecret: unknown): boolean {
+  if (typeof clientSecret !== 'string' || !clientSecret || clientSecret.length > 300) return false;
+  const row = getDb().prepare('SELECT card_secret_hash FROM orders WHERE id = ?').get(id) as { card_secret_hash: string | null } | undefined;
+  if (!row?.card_secret_hash) return false;
+  return crypto.timingSafeEqual(Buffer.from(row.card_secret_hash, 'hex'), Buffer.from(sha256(clientSecret), 'hex'));
+}
+
+export function orderByPaymentRef(ref: string): Order | undefined {
+  return parse(getDb().prepare(`SELECT ${COLUMNS} FROM orders WHERE payment_ref = ?`).get(ref) as Row | undefined);
+}
+
+/** Card orders still unpaid, made before `before` (ISO): the sweep cancels them. */
+export function unpaidCardOrders(before: string): Array<{ id: string; ref: string | null }> {
+  return (
+    getDb().prepare("SELECT id, payment_ref FROM orders WHERE card_state IN ('pending', 'failed') AND created_at < ? ORDER BY created_at LIMIT 100").all(before) as Array<{ id: string; payment_ref: string | null }>
+  ).map((r) => ({ id: r.id, ref: r.payment_ref }));
+}
+
+/** Did Stripe take exactly this order's total, in AED, on the intent this server made for it? */
+export function intentMatches(order: Order, pi: IntentFacts): boolean {
+  return order.paymentMethod === 'online_card' && order.card?.ref === pi.id && pi.orderId === order.id && pi.currency === 'aed' && pi.amount === fils(order.total);
+}
+
+/**
+ * Stripe says the payment succeeded. Idempotent: an order already paid (or refunded) stays as it is,
+ * and an event seen before changes nothing. A mismatch (another amount, currency or intent) is
+ * recorded and audited, never counted as paid. Paid after the order was cancelled (only possible
+ * around a rollback): recorded as paid, so the owner refunds it from the hub.
+ */
+export function markCardPaid(orderId: string, pi: IntentFacts, actor: string, event?: StripeEventRef): CardOutcome {
+  const outcome = applyOnce(event, orderId, () => {
+    const order = getOrder(orderId);
+    if (!order || !order.card) return 'unknown';
+    if (!intentMatches(order, pi)) {
+      logEvent(orderId, actor, 'card_mismatch', { ref: pi.id, amount: aed(pi.amount), currency: pi.currency });
+      auditOrThrow('payment.mismatch', { orderId, ref: pi.id, amountFils: pi.amount, currency: pi.currency, expectedFils: fils(order.total), via: actor });
+      return 'mismatch';
+    }
+    if (order.card.state === 'paid' || order.card.state === 'refund_pending' || order.card.state === 'refunded') return 'already';
+    const at = new Date().toISOString();
+    const changed = getDb()
+      .prepare("UPDATE orders SET card_state = 'paid', paid_fils = ?, paid_at = ?, card_label = ? WHERE id = ? AND card_state IN ('pending', 'failed', 'canceled')")
+      .run(pi.amount, at, pi.label?.slice(0, 80) || null, orderId).changes;
+    if (changed !== 1) return 'already';
+    const late = order.status === 'cancelled';
+    order.paymentStatus = 'paid';
+    if (order.status === 'pending_payment') order.status = 'pending_confirmation';
+    writeOrder(order);
+    logEvent(orderId, actor, late ? 'card_paid_after_cancel' : 'card_paid', { ref: pi.id, amount: aed(pi.amount), label: pi.label });
+    auditOrThrow(late ? 'payment.paid_after_cancel' : 'payment.paid', { orderId, ref: pi.id, amountFils: pi.amount, via: actor, ...(event ? { event: event.id } : {}) });
+    return late ? 'paid_after_cancel' : 'paid';
+  });
+  if (outcome === 'paid' || outcome === 'paid_after_cancel') bump('orders');
+  return outcome;
+}
+
+/** A try was declined: noted, and the customer may try again until the order times out. Never un-pays. */
+export function markCardFailed(orderId: string, pi: { id: string; declineCode?: string }, actor: string, event?: StripeEventRef): CardOutcome {
+  return applyOnce(event, orderId, () => {
+    const order = getOrder(orderId);
+    if (!order?.card || order.card.ref !== pi.id) return 'unknown';
+    if (order.card.state !== 'pending' && order.card.state !== 'failed') return 'ignored';
+    const changed = getDb().prepare("UPDATE orders SET card_state = 'failed' WHERE id = ? AND card_state = 'pending'").run(orderId).changes;
+    logEvent(orderId, actor, 'card_declined', pi.declineCode ? { reason: pi.declineCode.slice(0, 40) } : undefined);
+    if (changed) bump('orders');
+    return 'failed';
+  });
+}
+
+/**
+ * An unpaid card order is over (Stripe cancelled the payment, the customer left checkout, it timed
+ * out, or the owner cancelled it): cancelled, and its pieces back on sale, exactly once (the UPDATE
+ * only matches an open payment). The caller has stopped the payment at Stripe first, so it can't
+ * be paid later.
+ */
+export function cancelCardOrder(orderId: string, actor: string, reason: string, event?: StripeEventRef): CardOutcome {
+  const outcome = applyOnce(event, orderId, () => {
+    const changed = getDb().prepare("UPDATE orders SET card_state = 'canceled' WHERE id = ? AND card_state IN ('pending', 'failed')").run(orderId).changes;
+    if (changed !== 1) return 'ignored';
+    const order = getOrder(orderId)!;
+    if (order.status !== 'cancelled') {
+      releaseStock(order, 'cancelled');
+      order.status = 'cancelled';
+      writeOrder(order);
+    }
+    logEvent(orderId, actor, 'card_cancelled', { reason });
+    auditOrThrow('payment.card_cancelled', { orderId, reason, by: actor, ...(event ? { event: event.id } : {}) });
+    return 'cancelled';
+  });
+  if (outcome === 'cancelled') invalidateProducts();
+  return outcome;
+}
+
+/**
+ * "Cancel & refund" from the hub, with Stripe's answer to the refund: refunded (Stripe says
+ * succeeded) or refund pending (its webhook says when), and the order is cancelled (pieces back on
+ * sale if they never left). Full refunds only. The same refund again changes nothing.
+ */
+export function recordCardRefund(orderId: string, refund: { id: string; status: string; amount: number }, actor: string): { order: Order; outcome: CardOutcome } {
+  const result = inTransaction(() => {
+    const order = getOrder(orderId);
+    if (!order?.card) throw new HttpError(404, 'Order not found.');
+    if (order.card.state === 'refunded' || (order.card.state === 'refund_pending' && order.card.refundRef === refund.id)) return { order, outcome: 'already' as CardOutcome };
+    if (order.card.state !== 'paid' && order.card.state !== 'refund_pending') throw new HttpError(409, 'Only a paid card order can be refunded.');
+    if (refund.amount !== fils(order.card.paidAmount ?? -1)) {
+      throw new HttpError(502, 'Stripe answered with a different refund amount. Check the payment in your Stripe dashboard.');
+    }
+    const done = refund.status === 'succeeded';
+    getDb()
+      .prepare("UPDATE orders SET card_state = ?, refund_ref = ?, refunded_at = ? WHERE id = ? AND card_state IN ('paid', 'refund_pending')")
+      .run(done ? 'refunded' : 'refund_pending', refund.id, done ? new Date().toISOString() : null, orderId);
+    if (order.status !== 'cancelled' && order.status !== 'delivered') {
+      releaseStock(order, 'cancelled');
+      order.status = 'cancelled';
+      writeOrder(order);
+    }
+    logEvent(orderId, actor, done ? 'card_refunded' : 'card_refund_pending', { ref: refund.id, amount: aed(refund.amount) });
+    auditOrThrow(done ? 'payment.refunded' : 'payment.refund_pending', { orderId, refund: refund.id, amountFils: refund.amount, by: actor });
+    return { order: getOrder(orderId)!, outcome: (done ? 'refunded' : 'refund_pending') as CardOutcome };
+  });
+  invalidateProducts();
+  bump('orders');
+  return result;
+}
+
+/**
+ * Stripe says a charge was refunded (its webhook; also refunds made in the Stripe dashboard).
+ * A full refund marks the order refunded, once; a partial one is only noted (the shop refunds in full).
+ */
+export function markCardRefunded(ref: string, charge: { amount: number; amountRefunded: number; refundId?: string }, actor: string, event?: StripeEventRef): CardOutcome {
+  const found = orderByPaymentRef(ref);
+  const outcome = applyOnce(event, found?.id ?? null, () => {
+    const order = found && getOrder(found.id);
+    if (!order?.card) return 'unknown';
+    if (order.card.state === 'refunded') return 'already';
+    if (order.card.state !== 'paid' && order.card.state !== 'refund_pending') return 'ignored';
+    if (charge.amountRefunded < (order.card.paidAmount !== undefined ? fils(order.card.paidAmount) : charge.amount)) {
+      logEvent(order.id, actor, 'card_partly_refunded', { amount: aed(charge.amountRefunded) });
+      return 'partial';
+    }
+    getDb()
+      .prepare("UPDATE orders SET card_state = 'refunded', refunded_at = ?, refund_ref = COALESCE(refund_ref, ?) WHERE id = ? AND card_state IN ('paid', 'refund_pending')")
+      .run(new Date().toISOString(), charge.refundId ?? null, order.id);
+    logEvent(order.id, actor, 'card_refunded', { amount: aed(charge.amountRefunded) });
+    auditOrThrow('payment.refunded', { orderId: order.id, ref, amountFils: charge.amountRefunded, via: actor, ...(event ? { event: event.id } : {}) });
+    return 'refunded';
+  });
+  if (outcome === 'refunded') bump('orders');
+  return outcome;
+}
+
+/** How it was paid ("Apple Pay · Visa •••• 4242"), from Stripe, once known. */
+export function setCardLabel(orderId: string, label: string): void {
+  if (getDb().prepare('UPDATE orders SET card_label = ? WHERE id = ? AND card_label IS NULL').run(label.slice(0, 80), orderId).changes) bump('orders');
+}
+
+/** Card takings between two times (ISO), for the daily summary: paid, and refunded. */
+export function cardTakings(from: string, to: string): { paid: number; paidFils: number; refunded: number; refundedFils: number } {
+  const db = getDb();
+  const paid = db.prepare("SELECT COUNT(*) AS n, COALESCE(SUM(paid_fils), 0) AS f FROM orders WHERE paid_at >= ? AND paid_at < ? AND card_state IN ('paid', 'refund_pending', 'refunded')").get(from, to) as { n: number; f: number };
+  const refunded = db.prepare("SELECT COUNT(*) AS n, COALESCE(SUM(paid_fils), 0) AS f FROM orders WHERE refunded_at >= ? AND refunded_at < ? AND card_state = 'refunded'").get(from, to) as { n: number; f: number };
+  return { paid: paid.n, paidFils: paid.f, refunded: refunded.n, refundedFils: refunded.f };
+}
+
 // ── What customers may see ──────────────────────────────────────────────────
 
 /** A placed order as shown to the customer who placed it (no internal notes). */
 export function customerView(order: Order) {
-  const { adminNotes: _notes, paymentReceiptUrl: _receipt, whatsappCheck: _check, ...rest } = order;
+  const { adminNotes: _notes, paymentReceiptUrl: _receipt, whatsappCheck: _check, card: _card, ...rest } = order;
   void _notes;
   void _receipt;
   void _check;
-  return { ...rest, courier: trackingView(order), ...(order.whatsappCheck ? { whatsappCheck: whatsAppView(order.whatsappCheck) } : {}) };
+  void _card;
+  return { ...rest, courier: trackingView(order), ...(order.whatsappCheck ? { whatsappCheck: whatsAppView(order.whatsappCheck) } : {}), ...(order.card ? { card: cardView(order.card) } : {}) };
+}
+
+/** The customer's side of a card payment: paid or not, and how (no Stripe references). */
+export function cardView(card: CardPayment): Pick<CardPayment, 'state' | 'label'> {
+  return { state: card.state, ...(card.label ? { label: card.label } : {}) };
 }
 
 /** The customer's side of the WhatsApp confirmation (not who confirmed it). */
@@ -561,6 +857,7 @@ export function lookupOrder(id: string, phone: string) {
     items: order.items.map((i) => ({ title: i.title, image: i.image, profileName: i.profileName, color: i.color, quantity: i.quantity, totalPrice: i.totalPrice })),
     courier: trackingView(order),
     ...(order.whatsappCheck ? { whatsappCheck: whatsAppView(order.whatsappCheck) } : {}),
+    ...(order.card ? { card: cardView(order.card) } : {}),
   };
 }
 

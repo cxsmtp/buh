@@ -18,6 +18,7 @@ import {
   ShieldCheck,
   Building2,
   Banknote,
+  CreditCard,
   X,
 } from 'lucide-react';
 import { postJson, sendJson } from '@/lib/apiClient';
@@ -29,6 +30,25 @@ interface AdminOrdersTabProps {
   onOrderChanged: (order: Order) => void;
   courierSettings: CourierSettings;
 }
+
+/** A card order's payment, as the hub shows it (only Stripe's word moves it: src/lib/server/payments.ts). */
+export function cardBadge(order: Order): { text: string; tone: 'success' | 'warning' | 'danger' | 'muted' } | null {
+  const c = order.card;
+  if (order.paymentMethod !== 'online_card' || !c) return null;
+  if (c.state === 'paid') return { text: `Paid by card${c.label ? ` · ${c.label}` : ''}`, tone: 'success' };
+  if (c.state === 'pending') return { text: 'Waiting for the card payment', tone: 'warning' };
+  if (c.state === 'failed') return { text: 'Card declined: the customer may try again', tone: 'warning' };
+  if (c.state === 'refund_pending') return { text: `Refund of AED ${c.paidAmount ?? order.total} on its way to the card`, tone: 'warning' };
+  if (c.state === 'refunded') return { text: `Refunded AED ${c.paidAmount ?? order.total} to the card`, tone: 'muted' };
+  return { text: 'Card payment not taken (cancelled)', tone: 'muted' };
+}
+
+const TONES = {
+  success: 'bg-success-soft text-success border-success-line',
+  warning: 'bg-warning-soft text-warning border-warning-line',
+  danger: 'bg-danger-soft text-danger border-danger-line',
+  muted: 'bg-sand text-ink-soft border-line',
+};
 
 /** Status moves the server allows (src/lib/server/orders.ts), with their button labels. */
 const NEXT_ACTIONS: Partial<Record<Order['status'], Array<{ to: Order['status']; label: string }>>> = {
@@ -56,7 +76,26 @@ export const AdminOrdersTab: React.FC<AdminOrdersTabProps> = ({
     else alert(data.message || 'The order could not be updated.');
   };
 
-  const [filter, setFilter] = useState<'all' | 'pending' | 'whatsapp' | 'confirmed' | 'dispatched'>('all');
+  /** "Cancel & refund AED X": a full refund through Stripe, recorded from Stripe's answer; the order is cancelled. */
+  const refundOrder = async (order: Order) => {
+    const amount = order.card?.paidAmount ?? order.total;
+    const left = ['dispatched', 'out_for_delivery'].includes(order.status);
+    if (
+      !window.confirm(
+        `Refund AED ${amount} to the customer's card and cancel ${order.id}?` +
+          (order.status === 'cancelled' ? '' : left ? ' It has left with the courier, so its pieces are NOT put back on sale.' : ' Its items go back into stock.') +
+          ' This cannot be undone.'
+      )
+    )
+      return;
+    setBusyOrderId(order.id);
+    const { ok, data } = await postJson<{ order?: Order; message?: string }>(`/api/admin/orders/${encodeURIComponent(order.id)}/refund`, { amount });
+    setBusyOrderId('');
+    if (ok && data.order) onOrderChanged(data.order);
+    else alert(data.message || 'The refund could not be made.');
+  };
+
+  const [filter, setFilter] = useState<'all' | 'pending' | 'whatsapp' | 'card' | 'confirmed' | 'dispatched'>('all');
   // Orders the owner has just answered stay in "Awaiting WhatsApp" for now, so the reply link is right there.
   const [justChecked, setJustChecked] = useState<string[]>([]);
   const whatsappChecked = (o: Order) => {
@@ -77,6 +116,7 @@ export const AdminOrdersTab: React.FC<AdminOrdersTabProps> = ({
   const filteredOrders = orders.filter((o) => {
     if (filter === 'pending') return o.status === 'pending_confirmation';
     if (filter === 'whatsapp') return awaitingWhatsApp(o) || justChecked.includes(o.id);
+    if (filter === 'card') return o.paymentMethod === 'online_card';
     if (filter === 'confirmed') return o.status === 'confirmed';
     if (filter === 'dispatched') return o.status === 'dispatched';
     return true;
@@ -162,12 +202,14 @@ export const AdminOrdersTab: React.FC<AdminOrdersTabProps> = ({
           { id: 'all', label: 'All Orders' },
           { id: 'pending', label: 'Needs Confirmation' },
           { id: 'whatsapp', label: 'Awaiting WhatsApp' },
+          { id: 'card', label: 'Card payments' },
           { id: 'confirmed', label: 'Confirmed & AWB Ready' },
           { id: 'dispatched', label: 'Dispatched / In Transit' },
-        ].filter((tab) => tab.id !== 'whatsapp' || orders.some((o) => o.whatsappCheck)).map((tab) => {
+        ].filter((tab) => (tab.id !== 'whatsapp' || orders.some((o) => o.whatsappCheck)) && (tab.id !== 'card' || orders.some((o) => o.paymentMethod === 'online_card'))).map((tab) => {
           const count = orders.filter((o) => {
             if (tab.id === 'pending') return o.status === 'pending_confirmation';
             if (tab.id === 'whatsapp') return awaitingWhatsApp(o);
+            if (tab.id === 'card') return o.paymentMethod === 'online_card';
             if (tab.id === 'confirmed') return o.status === 'confirmed';
             if (tab.id === 'dispatched') return o.status === 'dispatched';
             return true;
@@ -204,6 +246,10 @@ export const AdminOrdersTab: React.FC<AdminOrdersTabProps> = ({
           filteredOrders.map((order) => {
             const isPending = order.status === 'pending_confirmation';
             const isCod = order.paymentMethod === 'cod';
+            const isCard = order.paymentMethod === 'online_card';
+            const card = cardBadge(order);
+            const cardPaid = order.card?.state === 'paid';
+            const cardUnpaid = order.card?.state === 'pending' || order.card?.state === 'failed';
 
             return (
               <div
@@ -256,8 +302,8 @@ export const AdminOrdersTab: React.FC<AdminOrdersTabProps> = ({
                           : 'bg-success-soft text-success border border-success-line'
                       }`}
                     >
-                      {isCod ? <Banknote className="w-3 h-3" /> : <Building2 className="w-3 h-3" />}
-                      <span>{isCod ? 'Cash on Delivery' : 'Bank Transfer'}</span>
+                      {isCod ? <Banknote className="w-3 h-3" /> : isCard ? <CreditCard className="w-3 h-3" /> : <Building2 className="w-3 h-3" />}
+                      <span>{isCod ? 'Cash on Delivery' : isCard ? 'Card (Stripe)' : 'Bank Transfer'}</span>
                     </span>
                   </div>
                 </div>
@@ -320,7 +366,12 @@ export const AdminOrdersTab: React.FC<AdminOrdersTabProps> = ({
 
                 {/* Payment & progress */}
                 <div className="flex flex-wrap items-center gap-2 text-[11px]">
-                  {!isCod && (
+                  {card && (
+                    <span data-testid="card-badge" className={`px-2 py-1 rounded-lg font-semibold border break-anywhere ${TONES[card.tone]}`}>
+                      {card.text}
+                    </span>
+                  )}
+                  {!isCod && !isCard && (
                     <>
                       <span
                         className={`px-2 py-1 rounded-lg font-semibold border ${
@@ -365,7 +416,16 @@ export const AdminOrdersTab: React.FC<AdminOrdersTabProps> = ({
                       {action.label}
                     </button>
                   ))}
-                  {order.status !== 'cancelled' && order.status !== 'delivered' && (
+                  {isCard && cardPaid && order.status !== 'delivered' ? (
+                    <button
+                      type="button"
+                      disabled={busyOrderId === order.id}
+                      onClick={() => void refundOrder(order)}
+                      className="px-2 py-1 rounded-lg font-semibold border border-danger-line bg-surface text-danger hover:bg-danger-soft disabled:opacity-50 ml-auto"
+                    >
+                      {order.status === 'cancelled' ? `Refund AED ${order.card?.paidAmount ?? order.total} to the card` : `Cancel & refund AED ${order.card?.paidAmount ?? order.total} to the card`}
+                    </button>
+                  ) : order.status !== 'cancelled' && order.status !== 'delivered' && order.card?.state !== 'refund_pending' && (
                     <button
                       type="button"
                       disabled={busyOrderId === order.id}
@@ -375,6 +435,8 @@ export const AdminOrdersTab: React.FC<AdminOrdersTabProps> = ({
                           { status: 'cancelled' },
                           (['dispatched', 'out_for_delivery'].includes(order.status)
                             ? `Cancel order ${order.id}? It has left with the courier, so its pieces are NOT put back on sale: add them back in Inventory (+) when the parcel returns. This cannot be undone.`
+                            : cardUnpaid
+                            ? `Cancel order ${order.id}? Its card payment is stopped at Stripe (nothing was charged) and its items go back into stock. This cannot be undone.`
                             : `Cancel order ${order.id}? Its items go back into stock. This cannot be undone.`) +
                             (order.courier.awbNumber && !order.courier.simulated
                               ? `\n\nIt is booked with the courier (AWB ${order.courier.awbNumber}): cancel that booking in the carrier's portal too.`
@@ -417,7 +479,9 @@ export const AdminOrdersTab: React.FC<AdminOrdersTabProps> = ({
                   </div>
 
                   {/* Confirm Order Action (Primary) */}
-                  {isPending && heldForWhatsApp(order) ? (
+                  {isCard && cardUnpaid ? (
+                    <span className="text-[11px] text-warning font-semibold text-right">Not paid yet: nothing to confirm until Stripe says paid</span>
+                  ) : isPending && heldForWhatsApp(order) ? (
                     <span className="text-[11px] text-warning font-semibold text-right">Held until confirmed on WhatsApp</span>
                   ) : isPending ? (
                     <button
@@ -476,6 +540,8 @@ export const AdminOrdersTab: React.FC<AdminOrdersTabProps> = ({
                   <span>
                     {selectedOrderForConfirm.paymentMethod === 'cod'
                       ? 'Payment: Cash on Delivery (COD)'
+                      : selectedOrderForConfirm.paymentMethod === 'online_card'
+                      ? 'Payment: Paid by card (Prepaid)'
                       : 'Payment: Direct Bank Transfer (Prepaid)'}
                   </span>
                 </span>

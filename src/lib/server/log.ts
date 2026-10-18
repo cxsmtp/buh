@@ -10,6 +10,8 @@ const EMAIL = /([A-Za-z0-9._%+-])[A-Za-z0-9._%+-]*@([A-Za-z0-9.-]+\.[A-Za-z]{2,}
 // A long random path segment: the private admin link (32 characters) or a password-reset
 // email's single-reset path (43). Only its first 4 characters are ever logged.
 const SECRET_PATH = /\/([A-Za-z0-9_-]{4})[A-Za-z0-9_-]{28,}/g;
+// Stripe keys, webhook signing secrets and payment client secrets, wherever they appear in a message.
+const STRIPE_SECRET = /\b((?:sk|rk)_(?:test|live)_|whsec_)[A-Za-z0-9+/=_-]{6,}|\b(pi|seti)_[A-Za-z0-9]+_secret_[A-Za-z0-9]+/g;
 
 export function maskPhone(phone: string): string {
   const digits = phone.replace(/\D/g, '');
@@ -23,7 +25,11 @@ export function maskSecretPaths(s: string): string {
 }
 
 function scrubString(s: string): string {
-  return maskSecretPaths(s).replace(EMAIL, '$1***@$2').replace(PHONE, (m) => maskPhone(m)).slice(0, 500);
+  return maskSecretPaths(s)
+    .replace(STRIPE_SECRET, (_m, key: string | undefined, intent: string | undefined) => (key ? `${key}[redacted]` : `${intent}_[redacted]`))
+    .replace(EMAIL, '$1***@$2')
+    .replace(PHONE, (m) => maskPhone(m))
+    .slice(0, 500);
 }
 
 export function redact(value: unknown, depth = 0): unknown {

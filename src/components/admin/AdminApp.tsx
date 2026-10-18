@@ -1,8 +1,8 @@
 'use client';
 
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Archive, Box, Copy, Feather, KeyRound, LayoutGrid, Laptop, Link2, Mail, MessageSquare, Palette, ShieldCheck, Smartphone, Store, Truck } from 'lucide-react';
-import type { AssistantSettings, BankTransferDetails, BrandSettings, CatalogSettings, CourierSettings, Customer, DeliverySettings, EmailSettings, Order, Product, SmsGatewaySettings, StoreSettings, ThemeSettings } from '@/types';
+import { Archive, Box, Copy, CreditCard, Feather, KeyRound, LayoutGrid, Laptop, Link2, Mail, MessageSquare, Palette, ShieldCheck, Smartphone, Store, Truck } from 'lucide-react';
+import type { AssistantSettings, BankTransferDetails, BrandSettings, CatalogSettings, CourierSettings, Customer, DeliverySettings, EmailSettings, Order, PaymentSettings, Product, SmsGatewaySettings, StoreSettings, ThemeSettings } from '@/types';
 import { DEFAULT_ASSISTANT, DEFAULT_CATALOG, DEFAULT_DELIVERY, DEFAULT_EMAIL_SETTINGS, DEFAULT_STORE, DEFAULT_THEME_SETTINGS } from '@/data/catalogDefaults';
 import { INITIAL_BANK_DETAILS, INITIAL_BRAND_SETTINGS, INITIAL_COURIER_SETTINGS, INITIAL_SMS_SETTINGS } from '@/data/initialData';
 import { getJson, postJson, sendJson, UNAUTHORIZED_EVENT, UNKNOWN_ADDRESS_EVENT } from '@/lib/apiClient';
@@ -27,6 +27,7 @@ import { CatalogSettingsCard } from './settings/CatalogSettingsCard';
 import { DeliverySettingsCard } from './settings/DeliverySettingsCard';
 import { EmailSettingsCard } from './settings/EmailSettingsCard';
 import { MarqueeSettingsCard } from './settings/MarqueeSettingsCard';
+import { PaymentsSettingsCard } from './settings/PaymentsSettingsCard';
 import { SettingsConsole } from './settings/SettingsConsole';
 import { SettingsHistoryCard } from './settings/SettingsHistoryCard';
 import { SignInRecoveryCard } from './settings/SignInRecoveryCard';
@@ -49,7 +50,10 @@ interface AdminSettings {
   email: AdminSetting<EmailSettings>;
   assistant: AdminSetting<AssistantSettings>;
   delivery: AdminSetting<DeliverySettings>;
+  payments: AdminSetting<PaymentSettings>;
 }
+
+const NO_PAYMENTS: PaymentSettings = { cardEnabled: false, stripePublishableKey: '', stripeSecretKey: '', stripeWebhookSecret: '' };
 
 type AdminTab = 'orders' | 'add-product' | 'inventory' | 'crm' | 'settings' | 'chats';
 export type HubView = 'phone' | 'laptop';
@@ -120,6 +124,7 @@ export function AdminApp() {
     email: { value: DEFAULT_EMAIL_SETTINGS, secretsSet: {} },
     assistant: { value: DEFAULT_ASSISTANT, secretsSet: {} },
     delivery: { value: DEFAULT_DELIVERY, secretsSet: {} },
+    payments: { value: NO_PAYMENTS, secretsSet: {} },
   });
   const [adminLoadError, setAdminLoadError] = useState('');
   const [adminSettingsLoaded, setAdminSettingsLoaded] = useState(false);
@@ -183,7 +188,7 @@ export function AdminApp() {
     if (c.ok) setCustomers(c.data.customers);
     if (p.ok) setAdminProducts(p.data.products);
     if (st.ok) {
-      setAdminSettings({ courier: st.data.courier, sms: st.data.sms, catalog: st.data.catalog, store: st.data.store, theme: st.data.theme, email: st.data.email, assistant: st.data.assistant, delivery: st.data.delivery });
+      setAdminSettings({ courier: st.data.courier, sms: st.data.sms, catalog: st.data.catalog, store: st.data.store, theme: st.data.theme, email: st.data.email, assistant: st.data.assistant, delivery: st.data.delivery, payments: st.data.payments ?? { value: NO_PAYMENTS, secretsSet: {} } });
       setAdminSettingsLoaded(true);
     }
     setAdminLoadError(o.ok && c.ok && p.ok && st.ok ? '' : 'Some admin data could not be loaded. Check your connection and refresh.');
@@ -229,7 +234,7 @@ export function AdminApp() {
   });
 
   /** Save one settings group on the server; resolves to an error message or null. */
-  const saveSettings = async (key: 'brand' | 'bank' | 'courier' | 'sms' | 'catalog' | 'store' | 'theme' | 'email' | 'assistant' | 'delivery', settings: unknown): Promise<string | null> => {
+  const saveSettings = async (key: 'brand' | 'bank' | 'courier' | 'sms' | 'catalog' | 'store' | 'theme' | 'email' | 'assistant' | 'delivery' | 'payments', settings: unknown): Promise<string | null> => {
     const { ok, data } = await sendJson<{ message?: string }>('PUT', `/api/admin/settings/${key}`, { settings });
     if (!ok) return data.message || 'Could not save. Please try again.';
     await reloadAll();
@@ -486,6 +491,21 @@ export function AdminApp() {
                       settings={adminSettings.courier.value}
                       secretsSet={adminSettings.courier.secretsSet}
                       onUpdateSettings={(s: CourierSettings) => saveSettings('courier', s)}
+                      auto={autoSaveHooks}
+                    />
+                  ),
+                },
+                {
+                  id: 'payments',
+                  label: 'Payments',
+                  icon: <CreditCard />,
+                  hint: 'Card, Apple Pay and Google Pay through your Stripe account (off until you add the keys).',
+                  content: (
+                    <PaymentsSettingsCard
+                      key={`payments-${adminSettingsLoaded}-${settingsEpoch}-${undone['payments'] ?? 0}`}
+                      value={adminSettings.payments.value}
+                      secretsSet={adminSettings.payments.secretsSet}
+                      onSave={(v) => saveSettings('payments', v)}
                       auto={autoSaveHooks}
                     />
                   ),
