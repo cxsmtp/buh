@@ -248,6 +248,8 @@ Automatic: a new version that does not become healthy is never switched to (abov
 
 Without automatic updates, use `docker compose run --rm updater rollback` the same way. A rolled-back version is not re-installed automatically; the next published one is.
 
+**Card payments and versions before BUH-02.09.00.** Those versions don't know card orders, so nothing checks or times them out there: switch card payments off in Settings → Payments before rolling back below BUH-02.09.00. Stripe keeps resending its webhooks (for up to 3 days) until a version that knows them is back.
+
 Without the updater at all: start the copy that is not running from the last good image, wait until `docker compose ps` shows it `healthy`, then stop the other one (here green was running):
 
 ```bash
@@ -350,7 +352,7 @@ It changes nothing, and says why, when:
   ```bat
   podman exec beautifuluaehome-updater update-now
   ```
-- Roll back to the version before (it was kept as the stopped container `beautifuluaehome-previous`):
+- Roll back to the version before (it was kept as the stopped container `beautifuluaehome-previous`); below BUH-02.09.00, switch card payments off first (Settings → Payments):
   ```bat
   podman exec beautifuluaehome-updater rollback
   ```
