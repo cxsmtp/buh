@@ -858,7 +858,7 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
                   setPhoneToken(verified ? token || '' : '');
                 }}
                 orderSummary={items
-                  .map((i) => `- ${i.quantity} x ${i.product.title} (${i.selectedProfile.name}, ${i.selectedColor})`)
+                  .map((i) => `- ${i.quantity} x ${i.product.title} (${[i.selectedProfile.name, i.selectedColor].filter(Boolean).join(', ')})`)
                   .join('\n')}
               />
 

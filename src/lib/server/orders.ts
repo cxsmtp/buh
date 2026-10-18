@@ -446,8 +446,9 @@ export function placeOrder(input: unknown, context: PlaceOrderContext = {}): Pla
         if (!product || !product.active) throw new HttpError(409, 'An item in your bag is no longer available. Please remove it and try again.');
         const profile = product.profiles.find((p) => p.id === line.profileId);
         if (!profile) throw new HttpError(409, `${product.title}: that bed size is no longer offered.`);
-        const color = line.color && product.colors.some((c2) => c2.name === line.color) ? line.color : product.colors[0]?.name;
-        if (line.color && color !== line.color) throw new HttpError(409, `${product.title}: that colour is no longer offered.`);
+        // No colours on the product: none is chosen (a colour sent from an older bag is ignored).
+        const color = !product.colors.length ? undefined : line.color && product.colors.some((c2) => c2.name === line.color) ? line.color : product.colors[0]?.name;
+        if (product.colors.length && line.color && color !== line.color) throw new HttpError(409, `${product.title}: that colour is no longer offered.`);
         // Reserve this size's pieces atomically: fails if another order took the last one.
         const reserved = getDb()
           .prepare('UPDATE product_stock SET qty = qty - ? WHERE product_id = ? AND size_id = ? AND qty >= ? AND EXISTS (SELECT 1 FROM products WHERE id = ? AND active = 1 AND archived = 0)')

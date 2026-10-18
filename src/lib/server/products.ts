@@ -7,6 +7,8 @@ import { HttpError } from './http';
 import { acceptImageRef } from './images';
 import { bump, changedElsewhere } from './live';
 import { getSettings } from './settings';
+import { logEvent } from './log';
+import { isDuvetProduct } from '@/lib/measurements';
 import { auditBacklog, auditMove, insertMove, type SizeChange, type StockMove } from './stockLedger';
 
 /**
@@ -61,11 +63,91 @@ function seedIfEmpty() {
     INITIAL_PRODUCTS.forEach((p, i) => {
       const { stockCount, stockBySize, ...rest } = p;
       void stockCount;
-      insert.run(p.id, JSON.stringify(rest), i, new Date().toISOString());
+      // The starter catalogue says only what each set includes (no review needed: nothing was carried over).
+      insert.run(p.id, JSON.stringify(carryOverMeasurements(rest as Product, [])), i, new Date().toISOString());
       void stockBySize;
       writeStock(p.id, seedStock(p));
     });
+    db.prepare('INSERT OR IGNORE INTO kv (key, data, updated_at) VALUES (?, ?, ?)').run(MEASUREMENTS_STEP, JSON.stringify({ seeded: true, audited: true }), new Date().toISOString());
   });
+}
+
+// ── measurements per product (BUH-02.10) ────────────────────────────────────
+
+/**
+ * Until BUH-02.10 every size of every product carried the standard measurements (fitted sheet,
+ * flat sheet, pillowcases, duvet cover), so each set claimed a duvet cover. From now on the shop
+ * shows only what the owner filled in on the product. The products already in the shop keep their
+ * sheet and pillowcase sizes (a standard size fills one only where it was empty), keep a duvet cover
+ * only when they are a duvet product, are fitted when they are fitted sheets, and are marked
+ * "Check measurements" for the owner to look at once. Runs once (a kv row marks it done, in the same
+ * transaction), audited as one entry.
+ */
+const MEASUREMENTS_STEP = 'step:measurements-per-product';
+
+export function carryOverMeasurements(p: Product, presets: BedProfileMeasurement[]): Product {
+  const duvet = isDuvetProduct(p);
+  const fitted = typeof p.fitted === 'boolean' ? p.fitted : p.category === 'fitted-sheets' || /\bfitted sheets?\b/i.test(p.title);
+  const pick = (own: unknown, std: unknown) => (typeof own === 'string' && own.trim() ? own : typeof std === 'string' ? std : '');
+  return {
+    ...p,
+    fitted,
+    profiles: (p.profiles ?? []).map((s) => {
+      const std = presets.find((x) => x.id === s.id);
+      const { duvetCover, ...rest } = s;
+      const keptDuvet = duvet ? pick(duvetCover, std?.duvetCover) : '';
+      return {
+        ...rest,
+        flatSheet: pick(s.flatSheet, std?.flatSheet),
+        fittedSheet: pick(s.fittedSheet, std?.fittedSheet),
+        pillowcases: pick(s.pillowcases, std?.pillowcases),
+        ...(keptDuvet ? { duvetCover: keptDuvet } : {}),
+      };
+    }),
+  };
+}
+
+/** The once-only step above. Safe to call often: after the first time it is one indexed read. */
+export function carryOverMeasurementsOnce(): void {
+  const db = getDb();
+  const done = db.prepare('SELECT data FROM kv WHERE key = ?');
+  const markAudited = (data: Record<string, unknown>) =>
+    db.prepare('UPDATE kv SET data = ?, updated_at = ? WHERE key = ?').run(JSON.stringify({ ...data, audited: true }), new Date().toISOString(), MEASUREMENTS_STEP);
+  const before = done.get(MEASUREMENTS_STEP) as { data: string } | undefined;
+  if (before) {
+    // Done, but the audit log could not be written then: write it now.
+    const data = JSON.parse(before.data) as Record<string, unknown>;
+    if (data.audited !== true && audit('product.measurements_carried_over', data)) markAudited(data);
+    return;
+  }
+  let summary: Record<string, unknown> | null = null;
+  inTransaction(() => {
+    if (done.get(MEASUREMENTS_STEP)) return; // another copy of the shop did it meanwhile
+    const presets = getSettings('catalog').sizes;
+    const rows = db.prepare('SELECT id, data FROM products ORDER BY position, rowid').all() as Array<{ id: string; data: string }>;
+    const update = db.prepare('UPDATE products SET data = ?, updated_at = ? WHERE id = ?');
+    let fitted = 0;
+    let duvet = 0;
+    for (const r of rows) {
+      let p: Product;
+      try {
+        p = JSON.parse(r.data) as Product;
+      } catch {
+        continue; // unreadable product JSON: left as it is
+      }
+      const next = { ...carryOverMeasurements(p, presets), measurementsReview: true };
+      if (next.fitted) fitted++;
+      if (next.profiles.some((s) => s.duvetCover)) duvet++;
+      update.run(JSON.stringify(next), new Date().toISOString(), r.id);
+    }
+    summary = { by: 'update', products: rows.length, fitted, withDuvetCover: duvet, audited: false };
+    db.prepare('INSERT INTO kv (key, data, updated_at) VALUES (?, ?, ?)').run(MEASUREMENTS_STEP, JSON.stringify(summary), new Date().toISOString());
+  });
+  if (!summary) return;
+  bump('catalog');
+  const s = summary as Record<string, unknown>;
+  if (audit('product.measurements_carried_over', { ...s, audited: undefined })) markAudited(s);
+  logEvent('info', 'measurements_carried_over', { products: s.products, fitted: s.fitted, withDuvetCover: s.withDuvetCover });
 }
 
 function stockMap(): Map<string, Record<string, number>> {
@@ -91,6 +173,7 @@ export function listProducts({ includeHidden = false, includeArchived = false } 
   if (cache && changedElsewhere('catalog')) cache = null;
   if (!cache) {
     seedIfEmpty();
+    carryOverMeasurementsOnce();
     const stock = stockMap();
     cache = (getDb().prepare('SELECT id, data, active, archived FROM products ORDER BY position, rowid').all() as Row[]).map((r) => fromRow(r, stock.get(r.id) ?? {}));
   }
@@ -346,6 +429,7 @@ function validateProfile(v: unknown, i: number): BedProfileMeasurement {
     pillowcases: text(p.pillowcases, `Size ${i + 1} pillowcases`, 80),
     duvetCover: text(p.duvetCover, `Size ${i + 1} duvet cover`, 80) || undefined,
     cushionCovers: text(p.cushionCovers, `Size ${i + 1} cushion covers`, 80) || undefined,
+    otherPieces: text(p.otherPieces, `Size ${i + 1} other pieces`, 80) || undefined,
     piecesIncluded: num(p.piecesIncluded ?? 1, `Size ${i + 1} pieces`, 1, 20, { integer: true }),
     priceDelta: num(p.priceDelta ?? 0, `Size ${i + 1} price difference`, -10_000, 10_000),
   };
@@ -398,7 +482,8 @@ export function validateProduct(input: unknown): StoredProduct {
     material: text(p.material, 'Material', 120),
     threadCount: num(p.threadCount ?? 0, 'Thread count', 0, 3000, { integer: true }),
     weave: weave as Product['weave'],
-    colors: colors.length ? colors : [{ name: 'Standard', hex: '#ffffff' }],
+    // Colours are optional: none means the shop shows no colour choice.
+    colors,
     featuredImage: acceptImageRef(p.featuredImage, 'Main photo', { required: true }),
     galleryImages: gallery.map((g, i) => acceptImageRef(g, `Gallery photo ${i + 1}`)).filter(Boolean),
     // The raw phone snap is not kept: only the photos shown in the shop.
@@ -411,6 +496,8 @@ export function validateProduct(input: unknown): StoredProduct {
     isNewArrival: p.isNewArrival === true,
     rating: num(p.rating ?? 5, 'Rating', 0, 5),
     reviewsCount: num(p.reviewsCount ?? 0, 'Reviews', 0, 1_000_000, { integer: true }),
+    fitted: p.fitted === true,
+    measurementsReview: p.measurementsReview === true ? true : undefined,
     profiles,
     defaultProfileId,
     createdAt: typeof p.createdAt === 'string' ? p.createdAt.slice(0, 40) : new Date().toISOString(),

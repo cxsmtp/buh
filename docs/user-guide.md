@@ -177,6 +177,7 @@ Customers confirm their number with one WhatsApp message they send you; nothing 
 - **Show:** All, **Low** (a few pieces left in all), **Sold out** (none left in any size), **Hidden**, **Removed**; and a **Category** list. The two cards at the top (sold out, running low) open those lists, and the number on **Inventory** in the bottom bar is the same count.
 - Tap a product to open it: the sizes with **− / +**, then the quick actions below.
 - **Edit** opens the step-by-step editor; **+ Add product** starts a new one (see below).
+- **Check measurements** (a small ochre badge): the update that brought measurements per product filled in the products already in the shop from the standard sizes (their sheet and pillowcases as shown before; a duvet cover only on duvet products; fitted sheets ticked as fitted). Open **Edit → Sizes** once, keep only what each set includes, and save: the badge goes.
 - **Hide / Show in shop**, **Sold out** (every size to 0, with Undo), **Duplicate** (a hidden copy with no stock, for another colour: change its photos and colour, then show it), **Share** (the product's link, through your phone's share sheet or copied), **History**, the arrows (its place in the shop) and **Remove** (out of the shop for good but kept for past orders; restore it, hidden, under **Removed**).
 
 ### Managing stock from your phone
@@ -194,8 +195,10 @@ On a phone the bottom bar is **Orders**, **Inventory**, **Chats** and **More** (
 **Adding a product from the phone** goes in four steps; **Next** moves on, and the step names at the top go back:
 
 1. **Photos:** **Take photo** opens the camera; **From gallery** picks several at once. Each is made smaller on the phone (at most 1600 px) and uploaded straight away. The first photo is the **cover**: tap the star to make another one the cover, or the arrows (or drag, on a computer) to change the order.
-2. **Details:** name, category and price; **More details** has the SKU, the "was" price, descriptions, fabric and colours.
+2. **Details:** name, category and price; **More details** has the SKU, the "was" price, descriptions, fabric and colours. **Colours are optional:** with none, the shop shows no colour; with one, it shows it as a label; with several, shoppers choose one.
 3. **Sizes:** tap a size (from your presets in Settings → Catalogue) to add it, then set its pieces with **− / +** or type them.
+   - **Fitted sheet (elastic corners):** tick it when the set's sheet is fitted; left unticked (the default), the set has a flat sheet. The shop shows "Fitted sheet" or "Flat sheet" with its size.
+   - **Measurements & price** under each size: the sheet, **Pillowcases**, **Duvet cover** and **Other pieces** (e.g. cushion covers) of this product. They start empty: fill in only what the set includes. **Use standard sizes** fills the empty ones from the size preset (sheet and pillowcases; the duvet cover only for a duvet product), shown greyed as a hint until then. The shop shows only the lines you filled in, and no Measurements at all when there are none.
 4. **Publish:** shown in the shop (or **Save hidden**), new arrival, featured.
 
 The draft saves itself as you go ("Draft saved" at the top), so a phone call or a closed tab loses nothing; open **Add product** again (on any device) to continue, or **Start over**. Editing a product works the same way; if a customer buys while you edit its stock, **Save** shows the new figures to check.

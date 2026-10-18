@@ -6,6 +6,7 @@ import { cartFils, formatAed, lineFils } from '@/lib/money';
 import { piecesLeft, useShop } from '@/lib/client/shop';
 import { LocalPrice } from '@/lib/client/currency';
 import { encodeBag, inAppBrowser } from '@/lib/client/landing';
+import { sheetRow } from '@/lib/measurements';
 import { X, Trash2, ArrowRight, ShoppingBag, Truck, ShieldCheck } from 'lucide-react';
 
 interface CartDrawerProps {
@@ -92,6 +93,8 @@ export const CartDrawer: React.FC<CartDrawerProps> = ({
               items.map((item, idx) => {
                 const itemTotalPrice = formatAed(lineFils(item));
                 const left = piecesLeft(item.product, item.selectedProfile.id);
+                // The set's sheet, only when the owner gave its size.
+                const sheet = sheetRow(item.product, item.selectedProfile);
                 return (
                   <div
                     key={`${item.product.id}-${item.selectedProfile.id}-${idx}`}
@@ -122,9 +125,11 @@ export const CartDrawer: React.FC<CartDrawerProps> = ({
                             </>
                           )}
                         </div>
-                        <div className="text-[10px] text-ink-soft truncate mt-0.5">
-                          {item.selectedProfile.fittedSheet}
-                        </div>
+                        {sheet && (
+                          <div className="text-[10px] text-ink-soft truncate mt-0.5">
+                            {sheet.label}: {sheet.value}
+                          </div>
+                        )}
                         {left === 0 ? (
                           <div className="text-[10px] font-semibold text-danger mt-0.5" role="status">Just sold out: please remove it to check out.</div>
                         ) : left <= lowStockThreshold ? (

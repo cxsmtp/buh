@@ -19,7 +19,10 @@ export interface BedProfileMeasurement {
   flatSheet: string;    // e.g. "260 x 270 cm"
   pillowcases: string;  // e.g. "2 pcs (50 x 80 cm)"
   duvetCover?: string;  // e.g. "240 x 260 cm"
+  /** Older size presets only (not shown in the shop): use otherPieces on a product. */
   cushionCovers?: string; // e.g. "2 pcs (45 x 45 cm)"
+  /** Anything else in the set, free text (e.g. "2 cushion covers 45 x 45 cm"). */
+  otherPieces?: string;
   piecesIncluded: number;
   priceDelta: number;   // e.g. +0 for Single, +40 for King, +60 for Super King
 }
@@ -56,6 +59,14 @@ export interface Product {
   isNewArrival?: boolean;
   rating: number;
   reviewsCount: number;
+  /**
+   * Measurements per size (on profiles) are the ones the owner filled in on this product; the
+   * shop shows only those. fitted: the set's sheet is a fitted sheet (elastic corners), so the
+   * shop shows "Fitted sheet" with fittedSheet; otherwise (the default) "Flat sheet" with flatSheet.
+   */
+  fitted?: boolean;
+  /** Measurements carried over from the standard sizes by an update: the owner checks them once (Admin Hub only). */
+  measurementsReview?: boolean;
   profiles: BedProfileMeasurement[];
   defaultProfileId: BedSizeProfileId;
   createdAt: string;

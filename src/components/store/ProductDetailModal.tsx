@@ -9,6 +9,7 @@ import { InstagramIcon } from '@/components/common/InstagramIcon';
 import { Sheet } from '@/components/common/Sheet';
 import { LocalPrice } from '@/lib/client/currency';
 import { PhotoCarousel } from './PhotoCarousel';
+import { measurementRows } from '@/lib/measurements';
 import { X, Check, Truck, ShieldCheck, Ruler, MessageCircle, MessagesSquare, Share2, Minus, Plus } from 'lucide-react';
 
 interface ProductDetailModalProps {
@@ -39,7 +40,8 @@ const ProductDetailContent: React.FC<ProductDetailModalProps & { product: Produc
     product.profiles.find((p) => p.id === product.defaultProfileId) ||
     product.profiles[0];
   const [selectedProfile, setSelectedProfile] = useState<BedProfileMeasurement>(initialProfile);
-  const [selectedColor, setSelectedColor] = useState<string>(product.colors[0]?.name || 'Standard');
+  // Colours only when the owner gave some: none means no choice (and no colour on the order).
+  const [selectedColor, setSelectedColor] = useState<string>(product.colors[0]?.name ?? '');
   const [quantity, setQuantity] = useState<number>(1);
 
   const images = [product.aiTransformedImage || product.featuredImage, ...(product.galleryImages || [])].filter((x, i, all): x is string => Boolean(x) && all.indexOf(x) === i);
@@ -54,6 +56,8 @@ const ProductDetailContent: React.FC<ProductDetailModalProps & { product: Produc
   const sale = isOnSale(product);
   const wasFils = sale ? toFils(product.compareAtPrice!) + toFils(selectedProfile.priceDelta || 0) : 0;
   const sizeShort = shortSize(selectedProfile.name);
+  // Only what the owner filled in on this product for this size.
+  const measurements = measurementRows(product, selectedProfile);
 
   const handleAddToCart = () => {
     if (soldOut) return;
@@ -174,23 +178,33 @@ const ProductDetailContent: React.FC<ProductDetailModalProps & { product: Produc
                 );
               })}
             </div>
-            <details className="rounded-xl border border-line bg-ivory text-xs">
-              <summary className="cursor-pointer px-3 py-2.5 font-semibold text-ink">Measurements for {sizeShort} ({selectedProfile.piecesIncluded} pieces)</summary>
-              <dl className="grid grid-cols-1 sm:grid-cols-2 gap-x-4 gap-y-2 px-3 pb-3 text-ink">
-                <div><dt className="text-[11px] text-ink-soft">Mattress</dt><dd className="font-medium">{selectedProfile.mattressSize}</dd></div>
-                <div><dt className="text-[11px] text-ink-soft">Fitted sheet</dt><dd className="font-medium">{selectedProfile.fittedSheet}</dd></div>
-                <div><dt className="text-[11px] text-ink-soft">Flat sheet</dt><dd className="font-medium">{selectedProfile.flatSheet}</dd></div>
-                <div><dt className="text-[11px] text-ink-soft">Pillowcases</dt><dd className="font-medium">{selectedProfile.pillowcases}</dd></div>
-                {selectedProfile.duvetCover && (
-                  <div className="sm:col-span-2"><dt className="text-[11px] text-ink-soft">Duvet cover</dt><dd className="font-medium">{selectedProfile.duvetCover}</dd></div>
-                )}
-              </dl>
-            </details>
+            {measurements.length > 0 && (
+              <details className="rounded-xl border border-line bg-ivory text-xs" data-testid="measurements">
+                <summary className="cursor-pointer px-3 py-2.5 font-semibold text-ink">Measurements for {sizeShort}</summary>
+                <dl className="grid grid-cols-1 sm:grid-cols-2 gap-x-4 gap-y-2 px-3 pb-3 text-ink">
+                  {measurements.map((m) => (
+                    <div key={m.key} className="min-w-0">
+                      <dt className="text-[11px] text-ink-soft">{m.label}</dt>
+                      <dd className="font-medium break-words">{m.value}</dd>
+                    </div>
+                  ))}
+                </dl>
+              </details>
+            )}
           </fieldset>
 
-          {/* Colour */}
-          {product.colors.length > 0 && (
-            <fieldset className="space-y-2">
+          {/* Colour: a choice when there are several, a plain label for one, nothing for none */}
+          {product.colors.length === 1 && (
+            <p className="label-caps text-ink flex items-center gap-2" data-testid="colour-label">
+              Colour:
+              <span className="flex items-center gap-1.5 font-medium normal-case tracking-normal text-ink-soft">
+                <span className="w-4 h-4 rounded-full border border-line-strong" style={{ backgroundColor: product.colors[0].hex }} aria-hidden="true" />
+                {product.colors[0].name}
+              </span>
+            </p>
+          )}
+          {product.colors.length > 1 && (
+            <fieldset className="space-y-2" data-testid="colour-picker">
               <legend className="label-caps text-ink mb-2">
                 Colour: <span className="font-medium normal-case tracking-normal text-ink-soft">{selectedColor}</span>
               </legend>

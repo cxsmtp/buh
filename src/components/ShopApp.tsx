@@ -42,7 +42,8 @@ function loadCart(products: Product[], lines?: BagLine[]): CartItem[] {
       const profile = product?.profiles.find((p) => p.id === s.profileId);
       if (!product || !profile || !Number.isInteger(s.quantity) || s.quantity < 1) return [];
       const left = piecesLeft(product, profile.id);
-      return [{ product, selectedProfile: profile, selectedColor: s.color, quantity: Math.max(1, Math.min(s.quantity, 20, left || 1)) }];
+      // A product without colours has no colour choice (an older bag may still name one).
+      return [{ product, selectedProfile: profile, selectedColor: product.colors.length ? s.color : undefined, quantity: Math.max(1, Math.min(s.quantity, 20, left || 1)) }];
     });
   } catch {
     return [];
@@ -268,7 +269,8 @@ export function ShopApp({ initialProductId }: { initialProductId?: string } = {}
   }, [festival]);
 
   // Cart Handlers
-  const handleAddToCart = (product: Product, profile: BedProfileMeasurement, color: string, quantity: number) => {
+  const handleAddToCart = (product: Product, profile: BedProfileMeasurement, colorName: string, quantity: number) => {
+    const color = colorName || undefined; // no colour choice on this product
     setCart((prev) => {
       // Never more in the bag than there are pieces of this size (across colours).
       const left = piecesLeft(product, profile.id);
