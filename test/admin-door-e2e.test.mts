@@ -517,3 +517,17 @@ test('scanner slow-down (TRUST_PROXY=1): many 404s from one address are slowed, 
   for (let i = 0; i < 40; i++) await (await rawFetch(`${server.base}/wp-admin/${i}`, { headers: { 'x-real-ip': '198.51.100.70' } })).arrayBuffer();
   assert.equal((await rawFetch(`${server.base}/`, { headers: { 'x-real-ip': '198.51.100.70' } })).status, 200);
 });
+
+test('the hub’s error screen reports what broke to the server log (with the door only; fields checked; never the link)', { skip }, async () => {
+  const h = { 'content-type': 'application/json', origin: server.base };
+  const ok = await fetch(`${server.base}/api/admin/client-error`, { method: 'POST', headers: h, body: JSON.stringify({ message: `TypeError: x is undefined at ${adminPath}`, stack: 'at Conversation', where: 'hub' }) });
+  assert.equal(ok.status, 200);
+  await new Promise((r) => setTimeout(r, 100));
+  const line = server.log().split('\n').find((l) => l.includes('"hub_client_error"'))!;
+  assert.ok(line && line.includes('TypeError: x is undefined'), 'logged');
+  assert.ok(!line.includes(adminPath.slice(1)), 'the link is masked in the log');
+  const extra = await fetch(`${server.base}/api/admin/client-error`, { method: 'POST', headers: h, body: JSON.stringify({ message: 'x', url: 'y' }) });
+  assert.equal(extra.status, 400);
+  const noDoor = await rawFetch(`${server.base}/api/admin/client-error`, { method: 'POST', headers: h, body: JSON.stringify({ message: 'x' }) });
+  assert.equal(noDoor.status, 404);
+});

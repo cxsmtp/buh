@@ -349,9 +349,11 @@ for (const width of [375, 1280]) {
         const covered = await page.evaluate((barTop) => {
           const out: string[] = [];
           let n = 0;
+          // The announcement bar and the header stay on top together: their bottom edge.
+          const top = document.querySelector('header')!.getBoundingClientRect().bottom;
           for (const el of document.querySelectorAll('main article h3, main article p, main button')) {
             const r = el.getBoundingClientRect();
-            if (r.height === 0 || r.top < 60 || r.bottom > barTop) continue; // under the sticky header or the bar
+            if (r.height === 0 || r.top < top || r.bottom > barTop) continue; // under the sticky header or the bar
             n++;
             for (const [x, yy] of [[r.left + 2, r.top + 2], [r.right - 2, r.bottom - 2], [r.left + r.width / 2, r.top + r.height / 2]]) {
               const hit = document.elementFromPoint(x, yy);
@@ -395,3 +397,25 @@ test('reduced motion: no ticker, no sliding sheets', { skip }, async () => {
   assert.equal(sheet, 'none');
   await ctx.close();
 });
+
+// Reported: the top of the shop (festival banner, a second big logo and name) filled a whole laptop
+// screen before any product, and the announcement bar scrolled away.
+for (const [width, height] of [[1280, 800], [375, 812]] as const) {
+  test(`the top of the shop at ${width}px is short: products start in the upper half of the first screen; the announcement bar and header stay on top while scrolling`, { skip }, async () => {
+    const { ctx, page, errors } = await shop(width);
+    await page.setViewportSize({ width, height });
+    await page.waitForTimeout(300);
+    assert.match((await page.locator('h1').textContent()) || '', /Beautiful UAE Home/i, 'the name stays the page heading');
+    const first = (await page.locator('main article').first().boundingBox())!;
+    assert.ok(first.y < height * 0.6, `first product starts at ${Math.round(first.y)} px of ${height}`);
+    await page.mouse.wheel(0, 2500);
+    await page.waitForTimeout(400);
+    const bar = (await page.locator('.marquee').boundingBox())!;
+    const header = (await page.locator('header').boundingBox())!;
+    assert.ok(Math.abs(bar.y) <= 1, `announcement bar at ${bar.y}`);
+    assert.ok(Math.abs(header.y - (bar.y + bar.height)) <= 1, 'the header right below it');
+    assert.deepEqual(await overflow(page), []);
+    assert.deepEqual(errors, []);
+    await ctx.close();
+  });
+}

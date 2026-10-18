@@ -381,6 +381,10 @@ test('regression: every admin tab and settings section fits a 375 px phone, SMS 
   await page.goto(server.adminUrl, { waitUntil: 'domcontentloaded' });
   await sessionChecked;
   await page.getByRole('status').filter({ hasText: /Backup/ }).waitFor(); // admin data loaded
+  // Reported: on a phone the backup card squeezed its explanation into a narrow column beside the button.
+  const card = (await page.getByRole('status').filter({ hasText: /Backup/ }).boundingBox())!;
+  const detail = (await page.getByTestId('backup-detail').boundingBox())!;
+  assert.ok(detail.width >= card.width * 0.8, `backup explanation ${Math.round(detail.width)} px of a ${Math.round(card.width)} px card`);
   const nav = page.getByRole('navigation', { name: 'Admin sections' });
   // On a phone the bar holds Orders, Inventory, Chats and More; Customers and Settings are under More.
   for (const tab of ['Orders', 'Inventory', 'Chats', 'More']) {

@@ -393,7 +393,8 @@ export function ShopApp({ initialProductId }: { initialProductId?: string } = {}
           <span className="opacity-60 hidden sm:inline">(your bag is kept)</span>
         </div>
       )}
-      {/* Header */}
+      {/* The announcement bar and the header stay at the top together while the page scrolls. */}
+      <div className="sticky top-0 z-40 pt-safe bg-ink">
         <MarqueeBar brandSettings={brandSettings} />
         <Header
           cartCount={totalCartCount}
@@ -403,10 +404,11 @@ export function ShopApp({ initialProductId }: { initialProductId?: string } = {}
           onOpenTrack={() => setIsTrackerOpen(true)}
           brandSettings={brandSettings}
         />
+      </div>
 
       {/* Main Content Area (on phones, room at the bottom for the tab bar and the Help button) */}
       <main className="flex-1 max-w-7xl mx-auto w-full pb-[calc(5rem+env(safe-area-inset-bottom,0px))] md:pb-16 px-4 sm:px-6">
-        <div className="pt-4 sm:pt-6 space-y-5">
+        <div className="pt-3 sm:pt-4 space-y-4">
           <HeroBanner brand={brandSettings} pieces={catalogLoaded ? products.length : null} />
 
           <StoryChips
@@ -417,7 +419,7 @@ export function ShopApp({ initialProductId }: { initialProductId?: string } = {}
             motif={festival?.festivalId && festival.showBanner ? festival.theme.motif : null}
           />
 
-          <div ref={resultsRef} className="scroll-mt-16 space-y-3">
+          <div ref={resultsRef} className="scroll-mt-28 space-y-3">
             {/* Count, and Filter (a bottom sheet) only when wanted */}
             <div className="flex flex-wrap items-center justify-between gap-3 border-t border-line pt-4">
               <p className="label-caps text-ink-muted" aria-live="polite">
