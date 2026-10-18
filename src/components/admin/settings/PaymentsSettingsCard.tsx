@@ -163,9 +163,9 @@ export function PaymentsSettingsCard({
             {copied ? <Check className="w-3.5 h-3.5 text-success" /> : <Copy className="w-3.5 h-3.5" />} {copied ? 'Copied' : 'Copy'}
           </button>
         </div>
-        <ul className="text-[11px] text-ink-soft font-mono flex flex-wrap gap-x-3 gap-y-0.5">
+        <ul className="text-[11px] text-ink-soft font-mono flex flex-wrap gap-x-3 gap-y-0.5 min-w-0">
           {(info?.events ?? []).map((e) => (
-            <li key={e}>{e}</li>
+            <li key={e} className="min-w-0 max-w-full break-all">{e}</li>
           ))}
         </ul>
       </section>

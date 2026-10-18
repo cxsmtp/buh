@@ -523,6 +523,11 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
       return;
     }
 
+    // Card switched off while checkout was open: say so (never quietly another way to pay).
+    if (paymentMethod === 'online_card' && !card) {
+      setSubmitError('Card payment is not available right now. Please choose another way to pay.');
+      return;
+    }
     // Card: the courier still needs a UAE mobile, but no SMS code (paying is the proof).
     if (byCard) {
       if (!phoneOk) {
@@ -548,7 +553,7 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
 
     setSubmitError('');
     setIsSubmitting(true);
-    const { ok, status, data } = await postJson<{ order?: Order; message?: string; code?: string }>('/api/orders', orderBody(paymentMethod === 'online_card' ? 'cod' : paymentMethod));
+    const { ok, status, data } = await postJson<{ order?: Order; message?: string; code?: string }>('/api/orders', orderBody(paymentMethod));
     setIsSubmitting(false);
 
     if (!ok || !data.order) {
