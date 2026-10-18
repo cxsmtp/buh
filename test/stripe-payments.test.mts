@@ -27,7 +27,6 @@ const orders = await import('@/lib/server/orders');
 const payments = await import('@/lib/server/payments');
 const settings = await import('@/lib/server/settings');
 const { listProducts } = await import('@/lib/server/products');
-const { issuePhoneToken } = await import('@/lib/server/phoneToken');
 const { getDb } = await import('@/lib/server/db');
 const { dispatchOrder } = await import('@/lib/server/dispatch');
 const ordersRoute = await import('@/app/api/orders/route');

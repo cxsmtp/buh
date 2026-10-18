@@ -68,6 +68,9 @@ The shop can sit on the home screen of a phone or tablet and open full screen, w
    - **Outside the UAE?** As soon as a non-UAE number is typed, checkout shows **Email orders@…**, which opens an email with the bag already listed.
    - **SMS not arriving?** If the shop's SMS service is down, checkout says so and offers the shop's email.
 3. Fill in the delivery address (or **Use My GPS**), choose Cash on Delivery or bank transfer (with an optional receipt screenshot or PDF), and **Confirm & Raise Order**. The button stays locked until the phone is verified.
+   - **Paying by card** (when the shop has switched it on): choose **Card**, type the card in Stripe's secure field and tap **Pay AED …**. No SMS code is needed (paying is the proof), but the UAE mobile is still asked for the courier. A bank's own check (3-D Secure) opens on the same page.
+   - **Apple Pay / Google Pay** (top of checkout, on an iPhone or Mac with Safari, or Chrome on Android or a computer): one tap pays and fills in your name, email, phone and delivery address. If the shop can't tell your area from the wallet's address, checkout fills in the rest, asks you to choose the area and tap the button again; nothing is charged until then. The phone must be a UAE mobile (if the wallet's isn't, type one in checkout).
+   - The confirmation says **Payment is being confirmed…** until Stripe has told the shop, then **Paid by card · Apple Pay · Visa •••• 4242** (usually within seconds). A declined card is not charged and nothing is kept: try another card or choose cash on delivery.
 4. **One last step: Confirm on WhatsApp** (when the shop has switched it on). The confirmation screen shows a large green **Confirm on WhatsApp** button. Tap it: WhatsApp opens with "Confirm my order BUH-… · code 1234" to the shop already typed; tap **Send**. That message, from your own WhatsApp, shows the shop the number is yours. Your order is placed either way (unless the shop holds orders until the message comes: then the screen says "We'll start your order once we get your message"). The same button is in **Track Order** until the shop has confirmed it.
 5. **Track Order:** enter the order number (shown on the confirmation and pre-filled on the same phone) and the mobile number used for the order.
 - **Picking up where you left off.** The bag and your delivery details are kept on your phone (**Not you? Clear them** at checkout forgets the details). **Save or send this bag as a link** carries it to another browser, e.g. from Instagram's built-in browser to Safari or Chrome.
@@ -132,6 +135,9 @@ New orders appear under **Orders & Dispatches** within seconds, with a notice at
 - **Bank transfers:**
   - **View receipt** opens what the customer uploaded.
   - **Mark payment received** once the money is in the account.
+- **Card payments** (filter **Card payments**) show how they were paid: **Paid by card · Apple Pay · Visa •••• 4242**, or **Waiting for the card payment** (not confirmed or booked until Stripe says paid; an order left unpaid for 30 minutes cancels itself and its items go back on sale). Only Stripe marks a card order paid: there is no "payment received" button for it.
+  - **Cancel & refund AED … to the card** cancels a paid card order and refunds the full amount through Stripe (it reaches the customer's card in 5–10 working days). It happens once, even if tapped twice; it shows **Refund … on its way** until Stripe confirms, then **Refunded**.
+  - A full refund you make in the Stripe dashboard instead also shows here.
 - **Cancel order** returns the items to stock. It cannot be undone.
 - **History** shows the order's timeline: placed, WhatsApp confirmation asked, customer opened WhatsApp, confirmed (by whom, when), status changes.
 
@@ -213,6 +219,7 @@ On each product, customers see **Ask in chat**, **Ask on WhatsApp** and **Ask on
 - **Catalogue:** the size presets offered when adding a product (name, measurements, price difference, pieces in the set), the categories shown in the shop (each category with pieces in it is a round story chip at the top of the shop, in this order, with its first piece's photo; **New in** and **On sale** chips come from each product's **New arrival** tick and its **Was (AED)** price), and the **Only N left** level.
 - **Branding & bank:** the shop's name, tagline and logo (the logo's letters sit on one of the palette's tones: champagne gold, antique gold, ink or dusty rose), and bank-transfer details.
 - **Festival themes:** see below.
+- **Payments:** card, Apple Pay and Google Pay through your Stripe account (see "Card payments" above).
 - **Phone verification:** the SMS gateway (see below).
 - **Couriers:** see below.
 - **System & backups:** health (disk, database, backups, SMS), backups, and **Settings history**: every save keeps the version it replaced (keys excepted); **Restore** puts an earlier one back and can itself be undone.
@@ -253,6 +260,26 @@ The greeting is a short, gracious line (for example *Eid Mubarak* with *Fresh li
 
 Every morning at 8:00 (UAE) an email to the backup address lists yesterday's orders and sales, orders waiting for you (and for the customer's WhatsApp message), what is sold out or low, and anything needing attention. A problem (low disk space, a database or backup failure, no SMS gateway) is emailed when it starts, daily while it lasts, and when it is resolved.
 
+### Card payments, Apple Pay and Google Pay (Stripe)
+
+Customers pay by card, Apple Pay or Google Pay into **your own Stripe account**; cash on delivery and bank transfer stay as they are. Off until you switch it on in **Settings → Payments**. Card numbers go straight to Stripe and never reach the shop.
+
+1. **Stripe account.** Sign up at stripe.com (business in the UAE, currency AED) and finish **Activate payments** so the account can take real payments. Until then use test mode.
+2. **API keys.** Stripe → **Developers → API keys** (test mode first: the toggle at the top right of Stripe). Copy the **Publishable key** (`pk_test_…`) and the **Secret key** (`sk_test_…`; a restricted `rk_…` key with write access to PaymentIntents, Refunds and Payment method domains, and read access to Account, also works) into **Settings → Payments**.
+3. **Webhook.** Stripe → **Developers → Webhooks → Add endpoint**:
+   - **Endpoint URL:** the address shown in Settings → Payments (**Copy**), e.g. `https://beautifuluaehome.com/api/stripe/webhook`;
+   - **Events:** `payment_intent.succeeded`, `payment_intent.payment_failed`, `payment_intent.canceled`, `charge.refunded`;
+   - then open the endpoint, **Signing secret → Reveal**, and paste it (`whsec_…`) into **Webhook signing secret**.
+4. Tick **Take card payments at checkout** and **Save payment settings**. Saving needs all three keys, from the same mode. **Check the connection** shows your Stripe account's name and whether it can take payments. The badge says **Test mode: no real money** or **Live mode: real payments**.
+5. **Apple Pay:** tap **Register this domain for Apple Pay** (once in test mode and once in live mode; Stripe hosts the verification file for you). It shows "Apple Pay ready". Google Pay needs nothing more.
+6. **Try it in test mode:** at checkout choose **Card** and use `4242 4242 4242 4242`, any future date, any CVC; `4000 0000 0000 9995` is declined; `4000 0027 6000 3184` asks for 3-D Secure. The order shows **Paid by card · Visa •••• 4242** in Orders.
+7. **Go live:** in Stripe switch off test mode, add the live webhook endpoint (same address and events) and copy the live keys (`pk_live_…`, `sk_live_…`) and the live signing secret into Settings → Payments, **Save**, then **Register this domain for Apple Pay** again.
+
+- Prices, totals and the same-day charge are worked out by the shop, never by the phone; Stripe is asked for exactly the order's total in AED.
+- An order counts as paid only when Stripe says so (its signed webhook, or the shop asking Stripe). A card order not paid within 30 minutes is cancelled and its pieces go back on sale.
+- The daily summary email counts yesterday's card takings and refunds.
+- **Keys are not in backups:** after restoring a backup, enter the secret key and webhook signing secret again.
+
 ### Bank details
 
 Under **Settings → Branding & bank → Bank transfer details**. Customers paying by transfer see exactly these at checkout, with your instructions.
@@ -268,7 +295,7 @@ The line at the top of the Admin Hub shows when the last backup ran:
 - **amber:** taken but not emailed (check the `SMTP_*` settings), or emailed without a `BACKUP_PASSPHRASE`;
 - **red:** failed or overdue.
 
-**Back up now** runs one immediately. Backups run every 12 hours on their own. Courier and SMS keys are not in backups: after a restore, enter them again. Restoring: see HOSTINGER_DEPLOYMENT_GUIDE.md.
+**Back up now** runs one immediately. Backups run every 12 hours on their own. Courier, SMS and Stripe keys are not in backups: after a restore, enter them again. Restoring: see HOSTINGER_DEPLOYMENT_GUIDE.md.
 
 ### Phone verification (SMS)
 
