@@ -4,6 +4,7 @@ One row per release. Benchmarks run `npm run test:load` on the same 4 vCPU host,
 
 | Version | Date | Storefront req/s (p50 / p95 ms) | Serviceability API req/s (p50 / p95 ms) | Failed requests | Tests | Audit (production) | Security scan |
 | --- | --- | --- | --- | --- | --- | --- | --- |
+| BUH-02.09.00 | 2026-10-18 | branch 904 / 964 / 860; main 914 / 838 / 874 (p95 75–132 vs 102–117 ms) | branch 844 / 762 / 744; main 693 / 639 / 560 | 0 | 534 passed | 0 vulnerabilities | Independent review of payments and WhatsApp confirmation; wallets not tried on a real device |
 | BUH-02.08.00 | 2026-10-17 | branch 836 / 861 / 855 / 891; main 806 / 849 / 803 / 836 (p95 91–134 vs 105–124 ms) | branch 700 / 717 / 704 / 650; main 608 / 709 / 690 / 656 | 0 | 492 passed | 0 vulnerabilities | Independent review of the private admin link: no way in; 2 medium and 6 low findings fixed with tests or documented; no automated scanner here |
 | BUH-02.07.00 | 2026-10-16 | branch 880 / 921 / 946; main 876 / 875 / 903 (p95 104–143 vs 133–160 ms) | branch 749 / 721 / 770; main 812 / 714 / 807 | 0 | 464 passed | 0 vulnerabilities | Design and layout change; fit test at 6 phone widths, sideways and 200% text; not seen on a real device |
 | BUH-02.06.00 | 2026-10-16 | branch 814 / 872 / 893; main 823 / 735 / 857 (p95 102–156 vs 118–180 ms) | branch 746 / 710 / 753; main 697 / 706 / 783 | 0 | 436 passed | 0 vulnerabilities | Review of stock moves and the app, 8 findings fixed with tests; no real-device install tried |

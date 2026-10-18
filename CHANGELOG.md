@@ -1,5 +1,17 @@
 # Changelog
 
+## BUH-02.09.00 — 2026-10-18 18:08 UTC · [#25](https://github.com/cxsmtp/buh/pull/25)
+
+- **Confirm on WhatsApp, free.** After ordering, the customer taps one button to send you a prefilled WhatsApp message with the order number and a short code; you compare the number and tap "Confirmed on WhatsApp" in the hub, then "Reply on WhatsApp". You can also hold orders until they are confirmed (off by default).
+- **Card, Apple Pay and Google Pay through your Stripe account.** Off until you add your Stripe keys in Settings → Payments; the wallet fills in name, phone, email and address; an order counts as paid only when Stripe confirms the exact amount, and a refund is one tap from the hub.
+- **A shorter top of the shop.** The announcement bar and header stay pinned at the top while scrolling, and the shop's name and logo are no longer repeated, so products start on the first screen.
+- **Hub fixes.** The backup card fits a phone, and if anything in the hub ever breaks it now says what went wrong and writes it to the server log.
+- **Status.**
+  - **Benchmark:** same host, main (BUH-02.08.00) vs this branch, 3 alternating rounds, 0 failed requests. Storefront main 914 / 838 / 874 req/s, branch 904 / 964 / 860 (p95 102–117 vs 75–132 ms); courier check main 693 / 639 / 560, branch 844 / 762 / 744; catalogue main 843 / 858 / 815, branch 902 / 846 / 844. Level or faster; the one slower storefront tail (round 3) ran while other work was using the machine.
+  - **Tests:** 534 passed, including the WhatsApp confirmation (unit, routes and browser at 375 and 1280 px), card payments against a stand-in for Stripe (amounts from the server, one payment per order, signed webhooks, replays, refunds, abandoned orders), the pinned bar and the backup card.
+  - **Dependency audit:** production 0 vulnerabilities; new packages stripe, @stripe/stripe-js and @stripe/react-stripe-js (pinned).
+  - **Security scan:** an independent review of the payment and WhatsApp code (see the pull request). Apple Pay and Google Pay are not yet tried on a real iPhone or Android.
+
 ## BUH-02.08.00 — 2026-10-17 19:36 UTC · [#24](https://github.com/cxsmtp/buh/pull/24)
 
 - **The Admin Hub is off the shop.** The public site has no admin button, tab or address: /admin, /login, /wp-admin and every admin address answer exactly like a page that doesn't exist, byte for byte, so nobody can find it by guessing or scanning.
