@@ -2,7 +2,7 @@
 
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import dynamic from 'next/dynamic';
-import { BankTransferDetails, CartItem, Emirate, Order, PaymentMethod, PhoneVerificationConfig } from '@/types';
+import { CartItem, Emirate, Order, PaymentMethod, PhoneVerificationConfig } from '@/types';
 import { UAE_EMIRATES } from '@/data/initialData';
 import { resolveArea, searchAreas, type UAEArea } from '@/data/uaeAreas';
 import { cartFils, formatAed, toFils } from '@/lib/money';
@@ -17,7 +17,6 @@ import { WhatsAppConfirm } from './WhatsAppConfirm';
 import { 
   X, 
   CheckCircle2, 
-  Copy, 
   Check, 
   Upload, 
   MessageCircle, 
@@ -49,8 +48,11 @@ interface CheckoutModalProps {
   isOpen: boolean;
   onClose: () => void;
   items: CartItem[];
-  /** The shop's bank details for transfers (from the server). */
-  bank: BankTransferDetails;
+  /**
+   * Checkout offers bank transfer (the shop's account is saved). The account itself is never on the
+   * website: it is sent to the customer privately after the order (src/lib/server/bankPay.ts).
+   */
+  bankTransfer: boolean;
   /** The server stored the order (it is shown confirmed only after that). */
   onOrderPlaced: (order: Order) => void;
   /** Reload the catalogue and the bag (prices changed on the server). */
@@ -119,7 +121,7 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
   isOpen,
   onClose,
   items,
-  bank,
+  bankTransfer,
   onOrderPlaced,
   onPricesChanged,
   supportEmail,
@@ -183,11 +185,8 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
   const setDeliveryOption = (option: 'standard' | 'same_day') => setDeliveryChoice({ option, key: `${emirate}|${area}` });
   const [locationProblem, setLocationProblem] = useState(false);
 
-  // Payment Method & Bank Transfer
+  // Payment Method
   const [paymentMethod, setPaymentMethod] = useState<PaymentMethod>('cod');
-  const [bankRef, setBankRef] = useState('');
-  const [receiptUrl, setReceiptUrl] = useState<string | null>(null);
-  const [copiedIban, setCopiedIban] = useState(false);
 
   // Submission State
   const [isSubmitting, setIsSubmitting] = useState(false);
@@ -216,7 +215,7 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
   const deliveryFils = sameDayChosen ? toFils(delivery.sameDay.fee) : 0;
   const totalFils = cartFils(items) + deliveryFils;
   const grandTotal = formatAed(totalFils);
-  const bankReady = Boolean(bank.iban && bank.accountName && bank.bankName);
+  const bankReady = bankTransfer;
   const shopWhatsApp = useShop().store.whatsappNumber.replace(/\D/g, '');
   const byCard = paymentMethod === 'online_card' && Boolean(card);
   const phoneOk = classifyPhone(phone).kind === 'uae';
@@ -338,28 +337,6 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
         .filter((l): l is (typeof UAE_KEY_LOCATIONS)[number] => Boolean(l))
     : [...UAE_KEY_LOCATIONS.filter((l) => l.emirate === emirate), ...UAE_KEY_LOCATIONS.filter((l) => l.emirate !== emirate)];
 
-  // Copy IBAN
-  const handleCopyIban = () => {
-    navigator.clipboard.writeText(bank.iban.replace(/\s+/g, ''));
-    setCopiedIban(true);
-    setTimeout(() => setCopiedIban(false), 2500);
-  };
-
-  const handleReceiptUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (file && file.size > 5 * 1024 * 1024) {
-      alert('That file is larger than 5 MB. Please upload a smaller screenshot or PDF.');
-      e.target.value = '';
-      return;
-    }
-    if (file) {
-      const reader = new FileReader();
-      reader.onload = (event) => {
-        setReceiptUrl(event.target?.result as string);
-      };
-      reader.readAsDataURL(file);
-    }
-  };
 
   /** The order body as checkout has it now, with any details the wallet gave instead. */
   const orderBody = (method: PaymentMethod, over: { customer?: Partial<Record<'fullName' | 'phone' | 'email' | 'emirate' | 'area' | 'streetAddress' | 'buildingVilla' | 'flatVillaNo', string>>; deliveryOption?: 'standard' | 'same_day' } = {}) => ({
@@ -389,8 +366,6 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
     deliveryOption: over.deliveryOption ?? (sameDayChosen ? 'same_day' : 'standard'),
     expectedTotal: totalFils / 100,
     source: landing ?? undefined,
-    bankTransferRef: method === 'bank_transfer' ? bankRef || undefined : undefined,
-    receipt: method === 'bank_transfer' ? receiptUrl || undefined : undefined,
   });
 
   /** A refused order: reload prices or delivery if that was why, and say what happened. */
@@ -571,8 +546,10 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
     const paidByCard = confirmedOrder.paymentMethod === 'online_card';
     const cardPaid = paidByCard && cardShown?.state === 'paid';
     const cardOver = paidByCard && (cardShown?.state === 'canceled' || cardShown?.state === 'refunded');
+    const byTransfer = confirmedOrder.paymentMethod === 'bank_transfer';
+    const payPath = confirmedOrder.bankTransfer?.payPath;
     const whatsappMessage = encodeURIComponent(
-      `Hello Beautiful UAE Home! I have placed Order #${confirmedOrder.id} (${confirmedOrder.customer.fullName}) for AED ${confirmedOrder.total}. Payment method: ${confirmedOrder.paymentMethod === 'cod' ? 'Cash on Delivery' : paidByCard ? 'Card' : 'Bank Transfer'}. Please confirm dispatch.`
+      `Hello Beautiful UAE Home! I have placed Order #${confirmedOrder.id} (${confirmedOrder.customer.fullName}) for AED ${confirmedOrder.total}. Payment method: ${confirmedOrder.paymentMethod === 'cod' ? 'Cash on Delivery' : paidByCard ? 'Card' : 'Bank Transfer'}. ${byTransfer ? 'Please send me the bank details.' : 'Please confirm dispatch.'}`
     );
 
     return (
@@ -594,7 +571,27 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
           </div>
 
           {/* Confirm on WhatsApp (Settings → Store & contact): one message from the customer's own WhatsApp. */}
-          {askWhatsApp && <WhatsAppConfirm orderId={confirmedOrder.id} phone={confirmedOrder.customer.phone} check={confirmedOrder.whatsappCheck!} />}
+          {askWhatsApp && <WhatsAppConfirm orderId={confirmedOrder.id} phone={confirmedOrder.customer.phone} check={confirmedOrder.whatsappCheck!} bankDetails={byTransfer} />}
+
+          {/* Bank transfer: the details come privately (email, WhatsApp, the order's own page), never on the website. */}
+          {byTransfer && payPath && (
+            <section aria-labelledby="transfer-next" className="rounded-2xl border border-line bg-ivory p-4 space-y-3 text-left">
+              <h3 id="transfer-next" className="text-sm font-semibold text-ink">Paying by bank transfer</h3>
+              <p className="text-xs text-ink-soft leading-relaxed">
+                {confirmedOrder.customer.email ? 'We’ve sent our bank details to your email' : 'We’ll send you our bank details on WhatsApp'}, with a private link to upload your transfer screenshot. They are also on your order’s private page:
+              </p>
+              <a
+                href={payPath}
+                target="_blank"
+                rel="noopener"
+                className="w-full min-h-12 bg-ink hover:bg-ink-2 text-ivory font-semibold text-sm py-3 px-4 rounded-xl flex items-center justify-center gap-2 transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-gold focus-visible:ring-offset-2"
+              >
+                <Upload className="w-4 h-4 shrink-0" aria-hidden="true" />
+                <span>Upload your transfer screenshot</span>
+              </a>
+              <p className="text-[11px] text-ink-muted text-center">Please use <span className="font-mono">{confirmedOrder.id}</span> as the transfer reference.</p>
+            </section>
+          )}
 
           {/* Order Details Card */}
           <div className="bg-ivory rounded-2xl p-4 text-left border border-line space-y-2 text-xs">
@@ -1101,7 +1098,7 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
                   {paymentMethod === 'bank_transfer' && <Check className="w-4 h-4 shrink-0 text-ink" />}
                 </span>
                 <span className="block text-[11px] leading-relaxed text-ink-soft break-anywhere">
-                  Transfer to our {bank.bankName} account; we dispatch as soon as it arrives.
+                  Transfer to our UAE bank account; we dispatch as soon as it arrives.
                 </span>
               </button>}
 
@@ -1140,88 +1137,17 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
               </div>
             )}
 
-            {/* If Bank Transfer Selected: Show UAE Bank Details & Receipt Uploader */}
+            {/* Bank transfer: the account is never shown on the website; it is sent privately after the order. */}
             {paymentMethod === 'bank_transfer' && bankReady && (
-              <div className="bg-warning-soft/70 rounded-2xl p-4 border border-warning-line/90 space-y-3 animate-in fade-in-50 text-xs">
-                <div className="flex items-center justify-between">
-                  <span className="font-semibold text-ink flex items-center gap-1.5">
-                    <ShieldCheck className="w-4 h-4 text-gold" />
-                    <span>{bank.bankName} Bank Details</span>
-                  </span>
-                  <button
-                    type="button"
-                    onClick={handleCopyIban}
-                    className="flex items-center gap-1 text-[11px] text-ink font-semibold bg-surface border border-line-strong px-2.5 py-1 rounded-lg hover:bg-ivory transition-colors"
-                  >
-                    {copiedIban ? <Check className="w-3.5 h-3.5 text-success" /> : <Copy className="w-3.5 h-3.5" />}
-                    <span>{copiedIban ? 'IBAN Copied!' : 'Copy IBAN'}</span>
-                  </button>
-                </div>
-
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 bg-surface p-3 rounded-xl border border-warning-line text-[11px]">
-                  <div>
-                    <span className="text-ink-muted block">Bank Name</span>
-                    <strong className="text-ink">{bank.bankName}</strong>
-                  </div>
-                  <div>
-                    <span className="text-ink-muted block">Account Name</span>
-                    <strong className="text-ink break-anywhere">{bank.accountName}</strong>
-                  </div>
-                  <div className="sm:col-span-2">
-                    <span className="text-ink-muted block">IBAN Number</span>
-                    <strong className="font-mono text-ink text-xs break-anywhere">{bank.iban}</strong>
-                  </div>
-                  <div>
-                    <span className="text-ink-muted block">Account Number</span>
-                    <strong className="font-mono text-ink">{bank.accountNumber}</strong>
-                  </div>
-                  <div>
-                    <span className="text-ink-muted block">SWIFT Code</span>
-                    <strong className="font-mono text-ink">{bank.swiftCode}</strong>
-                  </div>
-                </div>
-
-                {bank.instructions && <p className="text-[11px] text-ink-soft leading-relaxed">{bank.instructions}</p>}
-
-                {/* Optional Reference or Receipt Upload */}
-                <div className="space-y-2 pt-1">
-                  <div>
-                    <label className="block text-ink font-semibold mb-1">
-                      Bank Transfer Reference / Transaction ID:
-                    </label>
-                    <input
-                      type="text"
-                      placeholder="e.g. ENBD-TX-849201948"
-                      value={bankRef}
-                      onChange={(e) => setBankRef(e.target.value)}
-                      className="w-full px-3.5 py-2.5 rounded-xl border border-line-strong bg-surface text-ink placeholder:text-ink-muted font-medium focus:outline-none focus:ring-1 focus:ring-gold text-xs"
-                    />
-                  </div>
-
-                  <div>
-                    <label className="block text-ink font-semibold mb-1">
-                      Attach Transfer Receipt / Screenshot:
-                    </label>
-                    <div className="flex items-center gap-3">
-                      <label className="flex items-center gap-1.5 px-3 py-2 bg-surface border border-line-strong rounded-xl cursor-pointer hover:bg-ivory text-ink-soft text-xs font-semibold">
-                        <Upload className="w-3.5 h-3.5 text-gold" />
-                        <span>Upload Screenshot</span>
-                        <input
-                          type="file"
-                          accept="image/png,image/jpeg,image/webp,application/pdf"
-                          onChange={handleReceiptUpload}
-                          className="hidden"
-                        />
-                      </label>
-                      {receiptUrl && (
-                        <span className="text-success font-semibold text-xs flex items-center gap-1">
-                          <Check className="w-3.5 h-3.5" />
-                          Receipt Attached
-                        </span>
-                      )}
-                    </div>
-                  </div>
-                </div>
+              <div data-testid="bank-transfer-note" className="bg-ivory rounded-2xl p-4 border border-line space-y-1.5 animate-in fade-in-50 text-xs">
+                <p className="font-semibold text-ink flex items-center gap-1.5">
+                  <ShieldCheck className="w-4 h-4 shrink-0 text-gold" aria-hidden="true" />
+                  <span>How bank transfer works</span>
+                </p>
+                <p className="text-ink-soft leading-relaxed">
+                  After you order, we&apos;ll send our bank details by email and WhatsApp, with a private link to upload your transfer screenshot.
+                </p>
+                {!email && <p className="text-[11px] text-ink-muted leading-relaxed">Add your email above to get them by email too.</p>}
               </div>
             )}
           </div>

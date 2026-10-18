@@ -20,7 +20,7 @@ export const INITIAL_BANK_DETAILS: BankTransferDetails = {
   iban: '',
   swiftCode: '',
   branch: '',
-  instructions: 'Please put your order number in the transfer remarks, and upload the transfer slip here or send it on WhatsApp.',
+  instructions: 'Please put your order number in the transfer remarks.',
 };
 
 export const INITIAL_COURIER_SETTINGS: CourierSettings = {

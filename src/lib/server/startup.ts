@@ -3,6 +3,7 @@ import { startChatMail } from './chatMail';
 import { ensureAdminAccount } from './adminAuth';
 import { ensureAdminLink } from './adminLinkSetup';
 import { MIN_PASSPHRASE_LENGTH, emailConfigured, startBackupSchedule } from './backup';
+import { refreshPayHashes } from './bankPay';
 import { getDb } from './db';
 import { startMonitor } from './monitor';
 import { startCardSweep } from './payments';
@@ -20,6 +21,9 @@ export async function onStartup() {
 
   try {
     getDb(); // open (and migrate) the database now, not on the first customer's request
+    // Restored onto a server with another key: the bank-transfer orders' private links follow it.
+    const rehashed = refreshPayHashes();
+    if (rehashed) logEvent('info', 'pay_links_rehashed', { orders: rehashed });
     startBackupSchedule();
     startFestivalRefresh();
     startMonitor();

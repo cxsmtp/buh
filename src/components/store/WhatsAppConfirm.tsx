@@ -10,9 +10,10 @@ import { confirmLink } from '@/lib/whatsappConfirm';
  * "Confirm on WhatsApp": one large button that opens the customer's WhatsApp with
  * "Confirm my order BUH-… · code 1234" to the shop already typed. Sending it from their own
  * WhatsApp shows the shop the number is theirs. Nothing without the shop's WhatsApp number.
+ * A bank-transfer order's message also asks for the bank details (never on the website).
  */
-export function WhatsAppConfirm({ orderId, phone, check }: { orderId: string; phone: string; check: Pick<WhatsAppCheck, 'status' | 'code' | 'hold'> }) {
-  const link = confirmLink(useShop().store.whatsappNumber, orderId, check.code);
+export function WhatsAppConfirm({ orderId, phone, check, bankDetails = false }: { orderId: string; phone: string; check: Pick<WhatsAppCheck, 'status' | 'code' | 'hold'>; bankDetails?: boolean }) {
+  const link = confirmLink(useShop().store.whatsappNumber, orderId, check.code, { bankDetails });
   if (!link) return null;
 
   if (check.status === 'confirmed') {
@@ -56,7 +57,7 @@ export function WhatsAppConfirm({ orderId, phone, check }: { orderId: string; ph
         <span>Confirm on WhatsApp</span>
       </a>
       <p className="text-[11px] text-ink-muted text-center break-anywhere">
-        It says: &ldquo;Confirm my order <span className="font-mono">{orderId}</span> · code <span className="font-mono">{check.code}</span>&rdquo;. Just tap Send.
+        It says: &ldquo;Confirm my order <span className="font-mono">{orderId}</span> · code <span className="font-mono">{check.code}</span>{bankDetails ? ', and please send me the bank details' : ''}&rdquo;. Just tap Send.
       </p>
     </section>
   );

@@ -42,6 +42,7 @@ interface AdminSetting<T> {
   secretsSet: Record<string, boolean>;
 }
 interface AdminSettings {
+  bank?: AdminSetting<BankTransferDetails>;
   courier: AdminSetting<CourierSettings>;
   sms: AdminSetting<SmsGatewaySettings>;
   catalog: AdminSetting<CatalogSettings>;
@@ -83,9 +84,9 @@ async function fetchAdminData() {
   return { orders, customers, products, settings, chats };
 }
 
-/** The shop's public settings the hub edits in place (brand and bank details). */
+/** The shop's public settings the hub edits in place (the brand; the bank details are never public). */
 async function fetchPublic() {
-  return getJson<{ brand: BrandSettings; bank: BankTransferDetails }>('/api/settings/public');
+  return getJson<{ brand: BrandSettings }>('/api/settings/public');
 }
 
 /** The calls the front gate answers as an unknown address without a door (src/lib/server/frontGate.ts). */
@@ -178,7 +179,6 @@ export function AdminApp() {
     const { ok, data } = await fetchPublic();
     if (!ok) return;
     setBrandSettings(data.brand);
-    setBankDetails(data.bank);
     setPublicSettingsLoaded(true);
   }, []);
 
@@ -188,6 +188,7 @@ export function AdminApp() {
     if (c.ok) setCustomers(c.data.customers);
     if (p.ok) setAdminProducts(p.data.products);
     if (st.ok) {
+      if (st.data.bank) setBankDetails(st.data.bank.value);
       setAdminSettings({ courier: st.data.courier, sms: st.data.sms, catalog: st.data.catalog, store: st.data.store, theme: st.data.theme, email: st.data.email, assistant: st.data.assistant, delivery: st.data.delivery, payments: st.data.payments ?? { value: NO_PAYMENTS, secretsSet: {} } });
       setAdminSettingsLoaded(true);
     }
@@ -401,7 +402,7 @@ export function AdminApp() {
           />
           {adminLoadError && <p role="alert" className="text-xs text-danger bg-danger-soft border border-danger-line rounded-xl px-3 py-2">{adminLoadError}</p>}
 
-          {adminTab === 'orders' && <AdminOrdersTab orders={orders} onOrderChanged={(changed) => { setOrders((prev) => prev.map((o) => (o.id === changed.id ? changed : o))); void loadAdminData(); }} courierSettings={adminSettings.courier.value} />}
+          {adminTab === 'orders' && <AdminOrdersTab orders={orders} onOrderChanged={(changed) => { setOrders((prev) => prev.map((o) => (o.id === changed.id ? changed : o))); void loadAdminData(); }} courierSettings={adminSettings.courier.value} bank={bankDetails} shopName={brandSettings.storeName} />}
 
           {(adminTab === 'add-product' || adminTab === 'inventory') && (
             <AdminInventoryTab
@@ -449,7 +450,7 @@ export function AdminApp() {
                   hint: 'Logo, name, tagline and bank-transfer details.',
                   content: (
                     <AdminBrandingTab
-                      key={`branding-${publicSettingsLoaded}-${settingsEpoch}-${undone['brand'] ?? 0}-${undone['bank'] ?? 0}`}
+                      key={`branding-${publicSettingsLoaded}-${adminSettingsLoaded}-${settingsEpoch}-${undone['brand'] ?? 0}-${undone['bank'] ?? 0}`}
                       brandSettings={brandSettings}
                       onUpdateBrandSettings={(s: BrandDraft) => saveSettings('brand', s)}
                       bank={bankDetails}

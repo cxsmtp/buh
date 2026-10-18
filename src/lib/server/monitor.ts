@@ -6,7 +6,7 @@ import { dataDir } from './dataDir';
 import { getDb } from './db';
 import { kvGet, kvSet } from './kv';
 import { logEvent } from './log';
-import { awaitingWhatsAppCount, cardTakings } from './orders';
+import { awaitingWhatsAppCount, cardTakings, transfersAwaitedCount, transfersToCheckCount } from './orders';
 import { listProducts } from './products';
 import { getSettings } from './settings';
 
@@ -118,6 +118,8 @@ export function dailySummary(now = new Date()): { subject: string; text: string 
   const sales = kept.reduce((n, r) => n + r.total_fils, 0) / 100;
   const pending = (getDb().prepare("SELECT COUNT(*) AS n FROM orders WHERE status = 'pending_confirmation'").get() as { n: number }).n;
   const awaitingWhatsApp = awaitingWhatsAppCount();
+  const transfersToCheck = transfersToCheckCount();
+  const transfersAwaited = transfersAwaitedCount();
   // Card takings: what Stripe confirmed paid yesterday (and what went back to cards).
   const card = cardTakings(from, to);
   const threshold = getSettings('catalog').lowStockThreshold;
@@ -129,6 +131,8 @@ export function dailySummary(now = new Date()): { subject: string; text: string 
     `Yesterday (${day}): ${kept.length} order${kept.length === 1 ? '' : 's'}, AED ${sales.toFixed(2)}${rows.length - kept.length ? ` (${rows.length - kept.length} cancelled)` : ''}.`,
     `Waiting for your confirmation: ${pending}.`,
     ...(awaitingWhatsApp ? [`Waiting for the customer's WhatsApp message: ${awaitingWhatsApp}.`] : []),
+    ...(transfersToCheck ? [`Bank transfers to check (screenshot received): ${transfersToCheck}. Open Orders → Transfer to check.`] : []),
+    ...(transfersAwaited ? [`Bank transfers not received yet: ${transfersAwaited}.`] : []),
     ...(card.paid || card.refunded
       ? [`Paid by card (Stripe): ${card.paid}, AED ${(card.paidFils / 100).toFixed(2)}${card.refunded ? `; refunded to cards: ${card.refunded}, AED ${(card.refundedFils / 100).toFixed(2)}` : ''}.`]
       : []),

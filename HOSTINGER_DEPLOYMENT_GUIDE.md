@@ -79,7 +79,7 @@ The Admin Hub has no button or address on the shop: addresses like `/admin` are 
   - Checkout needs a working SMS gateway: customers cannot order without verifying their number.
   - At start-up, the log warns if none is configured.
 - [ ] **Settings → Store & contact:** your WhatsApp number, support email and Instagram account.
-- [ ] **Settings → Branding & bank → Bank transfer details:** enter the bank name, account name and real IBAN, and check every digit. Bank transfer is hidden at checkout until they are saved.
+- [ ] **Settings → Branding & bank → Bank transfer details:** enter the bank name, account name and real IBAN, and check every digit. Bank transfer is hidden at checkout until they are saved, and the account is never shown on the website: each customer who chooses it gets it privately (email, WhatsApp, their order's private page).
 - [ ] **Settings → Couriers:**
   - enter the keys;
   - press **Test connection**;

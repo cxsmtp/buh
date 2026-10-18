@@ -135,11 +135,21 @@ test('the order is refused, not charged, when the total differs from the one che
   products.updateProduct(p.id, { price: p.price });
 });
 
-test('bank transfer is only offered once the real account is saved, and the demo account is gone', async () => {
-  assert.equal(settings.getSettings('bank').iban, '', 'no sample IBAN shown to customers');
+test('bank transfer is only offered once the real account is saved, the demo account is gone, and the account is never public', async () => {
+  const publicSettings = async () => (await (await import('@/app/api/settings/public/route')).GET().json()) as Record<string, unknown>;
+  assert.equal(settings.getSettings('bank').iban, '', 'no sample IBAN');
+  assert.equal((await publicSettings()).bankTransfer, false, 'checkout does not offer it');
   assert.equal(statusOf(() => order('+971503000011', undefined, { paymentMethod: 'bank_transfer' })), 400);
   await settings.updateSettings('bank', { bankName: 'Test Bank', accountName: 'BUH LLC', iban: 'AE070331234567890123456' });
-  assert.equal(order('+971503000011', undefined, { paymentMethod: 'bank_transfer' }).order.paymentMethod, 'bank_transfer');
+  const pub = await publicSettings();
+  assert.equal(pub.bankTransfer, true, 'offered once saved');
+  const text = JSON.stringify(pub);
+  for (const secret of ['AE07', '0331234567890123456', 'BUH LLC', 'Test Bank']) assert.ok(!text.includes(secret), `the public settings never carry ${secret}`);
+  const placed = order('+971503000011', undefined, { paymentMethod: 'bank_transfer' }).order;
+  assert.equal(placed.paymentMethod, 'bank_transfer');
+  assert.equal(placed.bankTransfer?.state, 'awaiting');
+  assert.match(placed.bankTransfer?.payPath ?? '', /^\/pay\/[A-Za-z0-9_-]{43}$/, 'a private page instead');
+  assert.ok(!JSON.stringify(orders.customerView(placed)).includes('AE07'), 'nor does the order answer');
 });
 
 test('SMS: Unifonic cannot be chosen, only the chosen gateway is used, and an incomplete one cannot be switched on', async () => {

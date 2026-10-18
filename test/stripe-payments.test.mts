@@ -445,13 +445,15 @@ test('migration 9 only adds (columns, indexes, a table); backups carry card paym
   const run = (code: string) => spawnSync(process.execPath, ['--import', 'tsx', '-e', `process.env.DATA_DIR=${JSON.stringify(old)}; ${code}`], { encoding: 'utf8' });
   assert.equal(run(`const m = await import('@/lib/server/db'); (m.getDb ?? m.default.getDb)();`).status, 0);
   const db = new Database(path.join(old, 'shop.db'));
+  // Migration 10's columns go too (it runs again after 9).
+  db.exec(`DROP INDEX orders_by_pay_token; DROP INDEX orders_transfer_to_check; ${['pay_nonce', 'pay_token_hash', 'pay_expires_at', 'bank_state', 'transfer_uploads', 'transfer_uploaded_at', 'bank_emailed_at', 'bank_checked_at', 'bank_checked_by'].map((c) => `ALTER TABLE orders DROP COLUMN ${c};`).join(' ')}`);
   db.exec(`DROP INDEX orders_by_payment_ref; DROP INDEX orders_card_open; DROP TABLE stripe_events; ${['card_state', 'payment_ref', 'card_secret_hash', 'paid_fils', 'paid_at', 'card_label', 'refund_ref', 'refunded_at'].map((c) => `ALTER TABLE orders DROP COLUMN ${c};`).join(' ')}`);
   db.exec("INSERT INTO orders (id, created_at, updated_at, phone, status, payment_method, payment_status, total_fils, data) VALUES ('BUH-OLD-9', '2026-01-01', '2026-01-01', '+971501234567', 'pending_confirmation', 'cod', 'cod_pending', 100, '{\"id\":\"BUH-OLD-9\"}')");
   db.pragma('user_version = 8');
   db.close();
   const up = run(`const m = await import('@/lib/server/db'); const db = (m.getDb ?? m.default.getDb)(); console.log(JSON.stringify({ v: db.pragma('user_version', { simple: true }), row: db.prepare("SELECT status, data, card_state, payment_ref FROM orders WHERE id = 'BUH-OLD-9'").get() }));`);
   assert.equal(up.status, 0, up.stderr);
-  assert.deepEqual(JSON.parse(up.stdout.trim().split('\n').pop()!), { v: 9, row: { status: 'pending_confirmation', data: '{"id":"BUH-OLD-9"}', card_state: 'none', payment_ref: null } });
+  assert.deepEqual(JSON.parse(up.stdout.trim().split('\n').pop()!), { v: 10, row: { status: 'pending_confirmation', data: '{"id":"BUH-OLD-9"}', card_state: 'none', payment_ref: null } });
 });
 
 test('wallet addresses: emirates by any name, areas from the shop’s list, nothing guessed', () => {

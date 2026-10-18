@@ -1,12 +1,12 @@
 'use client';
 
 import React, { useState, useEffect, useMemo, useCallback, useRef } from 'react';
-import { Product, Order, CartItem, BedProfileMeasurement, BrandSettings, BankTransferDetails, CatalogSettings, StoreSettings, DeliverySettings, PhoneVerificationConfig } from '@/types';
+import { Product, Order, CartItem, BedProfileMeasurement, BrandSettings, CatalogSettings, StoreSettings, DeliverySettings, PhoneVerificationConfig } from '@/types';
 import { DEFAULT_CATALOG, DEFAULT_DELIVERY, DEFAULT_STORE } from '@/data/catalogDefaults';
 import { askWhatsAppLink, piecesLeft, refreshCart, ShopProvider, type FestivalView, type ShopInfo } from '@/lib/client/shop';
 import { captureLanding, decodeBag, type BagLine, type Landing } from '@/lib/client/landing';
 import { useLiveUpdates } from '@/lib/client/live';
-import { INITIAL_BANK_DETAILS, INITIAL_BRAND_SETTINGS } from '@/data/initialData';
+import { INITIAL_BRAND_SETTINGS } from '@/data/initialData';
 import { getJson } from '@/lib/apiClient';
 import { applyUpdate, checkForUpdate, registerServiceWorker, useUpdateWaiting } from '@/lib/client/pwa';
 
@@ -14,7 +14,7 @@ import { applyUpdate, checkForUpdate, registerServiceWorker, useUpdateWaiting } 
 async function fetchCatalog() {
   const [products, settings] = await Promise.all([
     getJson<{ products: Product[] }>('/api/products'),
-    getJson<{ brand: BrandSettings; bank: BankTransferDetails; supportEmail?: string; store?: StoreSettings; catalog?: { categories: CatalogSettings['categories']; lowStockThreshold: number }; festival?: FestivalView | null; phoneVerification?: PhoneVerificationConfig; chat?: { name: string; greeting: string } | null; delivery?: DeliverySettings; payments?: { card: boolean; publishableKey?: string } }>('/api/settings/public'),
+    getJson<{ brand: BrandSettings; bankTransfer?: boolean; supportEmail?: string; store?: StoreSettings; catalog?: { categories: CatalogSettings['categories']; lowStockThreshold: number }; festival?: FestivalView | null; phoneVerification?: PhoneVerificationConfig; chat?: { name: string; greeting: string } | null; delivery?: DeliverySettings; payments?: { card: boolean; publishableKey?: string } }>('/api/settings/public'),
   ]);
   return { products, settings };
 }
@@ -104,7 +104,8 @@ export function ShopApp({ initialProductId }: { initialProductId?: string } = {}
   const productsRef = useRef<Product[]>([]);
   const [catalogError, setCatalogError] = useState('');
   const [brandSettings, setBrandSettings] = useState<BrandSettings>(INITIAL_BRAND_SETTINGS);
-  const [bankDetails, setBankDetails] = useState<BankTransferDetails>(INITIAL_BANK_DETAILS);
+  // Checkout offers bank transfer (the account itself is never sent to the website).
+  const [bankTransfer, setBankTransfer] = useState(false);
   const [supportEmail, setSupportEmail] = useState<string | undefined>(undefined);
   // How checkout verifies phones (the shop's own SMS, or Firebase).
   const [phoneVerification, setPhoneVerification] = useState<PhoneVerificationConfig>({ method: 'server' });
@@ -148,7 +149,7 @@ export function ShopApp({ initialProductId }: { initialProductId?: string } = {}
     }
     if (settings.ok) {
       setBrandSettings(settings.data.brand);
-      setBankDetails(settings.data.bank);
+      setBankTransfer(settings.data.bankTransfer === true);
       if (settings.data.supportEmail) setSupportEmail(settings.data.supportEmail);
       if (settings.data.phoneVerification) setPhoneVerification(settings.data.phoneVerification);
       if (settings.data.store) setStoreSettings(settings.data.store);
@@ -578,7 +579,7 @@ export function ShopApp({ initialProductId }: { initialProductId?: string } = {}
         isOpen={isCheckoutOpen}
         onClose={() => setIsCheckoutOpen(false)}
         items={cart}
-        bank={bankDetails}
+        bankTransfer={bankTransfer}
         supportEmail={supportEmail}
         phoneVerification={phoneVerification}
         card={cardPayments}

@@ -257,11 +257,25 @@ Tested by `test/sw-source.test.mts` (every rule above, the 404 and reset kill sw
 - **One checkout attempt = one order.** The browser sends a random checkout reference, and a double tap or network retry gets the same order back.
 - **Status changes follow allowed steps.** For example, a confirmed order cannot jump to delivered, and cancelled or delivered orders are final. Each change is recorded per order and in the audit log.
 - **Track Order needs the order number and the phone number on it**, and shows status and delivery only (no address, email or full name). Lookups are limited per address and per order number.
-- **Bank-transfer receipts** (PNG, JPEG, WebP or PDF, checked by their first bytes, max 5 MB) are stored on the server and shown only to the admin, sandboxed.
+- **Bank-transfer receipts** (PNG, JPEG, WebP or PDF, checked by their first bytes, max 5 MB) are stored on the server and shown only to the admin, sandboxed. A new upload keeps the earlier ones (`receipts/<order>.v<n>.<ext>`).
+
+## Bank transfer without the account on the website (BUH-02.09)
+
+| | |
+| --- | --- |
+| **Never public** | The bank account (name, IBAN, number, SWIFT) is not in any page, script or public API: `/api/settings/public` only says whether checkout offers bank transfer. The account reaches a customer only privately: the bank-details email, the owner's WhatsApp message, and the order's private page. Tests scan the shop's pages, scripts and public APIs for it. |
+| **Private page** | `/pay/<token>`, one per bank-transfer order. The token is 32 random-looking bytes (256 bits, base64url): the server's HMAC (`pay` purpose) of the order number and a random nonce. It is never stored: only its SHA-256 is kept with the order, to find it. So a copy of the database (a backup) holds no working link; a restore onto a server with another key makes the links again at start (old ones stop working). |
+| **Lifetime** | It opens the page until the order is paid or cancelled, or for 14 days. Anything else (unknown, altered, expired, paid, cancelled) is handed on by the front gate as an unknown address: the shop's ordinary 404, byte for byte, and counted by the scanner slow-down. |
+| **Headers** | `Referrer-Policy: no-referrer`, `X-Robots-Tag: noindex, nofollow`, `Cache-Control: no-store`, and the page's own noindex and no-referrer meta tags; never in the sitemap. |
+| **Limits** | Page views: 60 per address and 60 per order in 15 minutes (429 after). Uploads (`POST /api/pay/<token>`): same site only, a 7 MB body cap, one allow-listed field, 20 per address and 10 per order an hour. |
+| **Upload** | Checked like a receipt (its first bytes: PNG, JPEG, WebP or PDF; at most 5 MB), stored where only the hub can open it (`/api/admin/orders/<id>/receipt`, sandboxed). |
+| **Owner's check** | `POST /api/admin/orders/<id>/bank` (`received` or `not_received`): door, session and same site, a 1 KB body with one allow-listed field, the order looked up on the server, idempotent (the same answer twice changes nothing), and written to the audit log (`payment.bank_received`, `payment.bank_not_received`) in the same transaction, so it is never saved or reported done without it. A paid order is never un-paid. |
+| **Email** | Sent once per order (claimed on the order first, so two copies of the shop never both send it), only to the address on the order. |
+| **Logs** | `logEvent` masks the token like the admin link (first 4 characters); the proxies' access logs (Caddy and nginx) mask `/pay/…` and `/api/pay/…` the same way. The audit log never has the link. |
 
 ## Settings and keys
 
-- **Branding, bank details, courier keys and SMS gateway settings** are stored on the server, so every visitor sees the same shop.
+- **Branding, bank details, courier keys and SMS gateway settings** are stored on the server, so every visitor sees the same shop. The bank details are never sent to visitors (see "Bank transfer without the account on the website").
 - **Keys are write-only.** The admin hub gets them back blank, with a "saved" flag. A save with a blank key keeps the stored one, and `null` clears it.
 - **A key follows its host:** changing the Infobip or webhook address without a new key drops the old key.
 - **"Test connection" fills blank keys from the saved ones on the server**, so the keys never travel back to a browser. A saved key is only filled in for the host it was saved for: a test aimed at a new address must bring its own key.
@@ -293,7 +307,7 @@ Every 12 hours (see the deployment guide) the shop backs itself up:
   - **Recorded before it is reported:** the move (who, why, every size's old → new) is written to `stock_moves` in the same transaction as the stock, then to the audit log, before the answer. The product editor's stock changes are recorded the same way. Undo works once, and only if nothing changed those sizes since.
 - **Photos** uploaded from the editor (`POST /api/admin/images`) go through the same checks as every image (PNG, JPEG or WebP by their real bytes, at most 3 MB); the phone shrinks them first. **Drafts** (`/api/admin/products/drafts/<id>`) keep only the editor's own fields, accept only uploaded or https photo links, and are capped at 64 KB; nothing in a draft reaches the shop until it is published through the normal product checks.
 - **Duplicate** makes a hidden copy with no stock; its key makes a retried request return the same copy.
-- **Bank transfer is hidden until the real account is saved.** The IBAN must be a UAE IBAN that passes the mod-97 check.
+- **Bank transfer is hidden until the real account is saved.** The IBAN must be a UAE IBAN that passes the mod-97 check. Even then the account is never on the website, only behind each order's private link.
 
 ## Public data and outbound calls added in BUH-02.00.00
 

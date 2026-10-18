@@ -171,6 +171,12 @@ export interface Order {
    * orders table's own columns, not in the order's JSON. Customers see only state and label.
    */
   card?: CardPayment;
+  /**
+   * Bank transfer (paymentMethod 'bank_transfer'): the customer gets the bank details privately
+   * (email, WhatsApp, the order's private page) and uploads the transfer screenshot there; the
+   * owner marks it received. Kept in the orders table's own columns, not in the order's JSON.
+   */
+  bankTransfer?: BankTransferCheck;
 }
 
 /**
@@ -204,6 +210,22 @@ export interface PaymentSettings {
   stripeSecretKey: string;
   /** whsec_… (secret: proves a webhook came from Stripe). */
   stripeWebhookSecret: string;
+}
+
+export type BankState = 'awaiting' | 'uploaded' | 'not_received' | 'paid';
+
+export interface BankTransferCheck {
+  /** awaiting the transfer → uploaded (a screenshot to check) → paid; or not_received (looked, not there yet). */
+  state: BankState;
+  /** Screenshots uploaded so far (the latest replaces the earlier ones on screen; all are kept). */
+  uploads: number;
+  uploadedAt?: string;
+  /** When the bank details were emailed to the customer (once). */
+  emailedAt?: string;
+  checkedAt?: string;
+  checkedBy?: string;
+  /** The order's private page, /pay/<token>, while it is open (not paid or cancelled, under 14 days). */
+  payPath?: string;
 }
 
 export interface WhatsAppCheck {

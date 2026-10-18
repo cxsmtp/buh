@@ -125,12 +125,18 @@ test('hidden products cannot be ordered', () => {
   updateProduct(p.id, { active: true });
 });
 
-test('bank transfer with a PDF receipt: stored, and only the admin URL is recorded', async () => {
+test('bank transfer: checkout takes no receipt any more (it is uploaded on the private page); one sent by an older checkout page is still kept as the first upload', async () => {
   const { updateSettings } = await import('@/lib/server/settings');
   await updateSettings('bank', { bankName: 'Test Bank', accountName: 'BUH LLC', iban: 'AE070331234567890123456' });
+  const plain = orders.placeOrder(body({ paymentMethod: 'bank_transfer' })).order;
+  assert.equal(plain.paymentStatus, 'pending');
+  assert.deepEqual({ state: plain.bankTransfer?.state, uploads: plain.bankTransfer?.uploads }, { state: 'awaiting', uploads: 0 });
+  assert.equal(orders.readReceipt(plain.id), null);
+  // A checkout page from before this version (still open during the update) sends its PDF with the order.
   const pdf = Buffer.concat([Buffer.from('%PDF-1.4\n'), Buffer.alloc(32)]).toString('base64');
   const { order } = orders.placeOrder(body({ paymentMethod: 'bank_transfer', bankTransferRef: 'ENBD-1', receipt: `data:application/pdf;base64,${pdf}` }));
   assert.equal(order.paymentStatus, 'receipt_uploaded');
+  assert.deepEqual({ state: order.bankTransfer?.state, uploads: order.bankTransfer?.uploads }, { state: 'uploaded', uploads: 1 });
   assert.equal(order.paymentReceiptUrl, `/api/admin/orders/${order.id}/receipt`);
   assert.equal(orders.readReceipt(order.id)!.mime, 'application/pdf');
   assert.equal(orders.readReceipt('../../etc/passwd'), null);

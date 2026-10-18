@@ -23,7 +23,8 @@ import { readTar, writeTar, type TarEntry } from './tar';
  *    customers.csv, products.csv, chats.csv, stock_moves.csv (every stock
  *    change made in the Admin Hub: who, why, old → new);
  *  - product drafts and the stock ledger are tables in the database copy;
- *  - the bank-transfer receipts, the product photos and the audit log;
+ *  - the bank-transfer receipts (every screenshot a customer uploaded, the earlier ones
+ *    too), the product photos and the audit log;
  *  - the owner's passkeys (public keys only) and recovery codes (hashes
  *    only), in the database; a restore switches them off until reviewed,
  *    since the backup may predate a revocation.
@@ -104,6 +105,8 @@ function csvFiles(): TarEntry[] {
     x.source?.source ?? '', x.source?.campaign ?? '', x.deliveryOption ?? 'standard',
     x.whatsappCheck?.status ?? '', x.whatsappCheck?.checkedAt ?? '', x.whatsappCheck?.checkedBy ?? '',
     x.card?.state ?? '', x.card?.ref ?? '', x.card?.label ?? '', x.card?.paidAt ?? '', x.card?.paidAmount ?? '', x.card?.refundRef ?? '', x.card?.refundedAt ?? '',
+    // The bank transfer (never its private link: only the shop can make that again).
+    x.bankTransfer?.state ?? '', x.bankTransfer?.uploads ?? '', x.bankTransfer?.uploadedAt ?? '', x.bankTransfer?.emailedAt ?? '', x.bankTransfer?.checkedAt ?? '', x.bankTransfer?.checkedBy ?? '',
   ];
   return [
     {
@@ -113,7 +116,8 @@ function csvFiles(): TarEntry[] {
           'customer_name', 'phone', 'email', 'emirate', 'area', 'street', 'building_villa', 'flat_villa_no', 'landmark', 'bank_transfer_ref',
           'courier', 'awb', 'awb_simulated', 'courier_status', 'admin_notes', 'source', 'campaign', 'delivery',
           'whatsapp_check', 'whatsapp_checked_at', 'whatsapp_checked_by',
-          'card_payment', 'payment_ref', 'card', 'paid_at', 'paid_aed', 'refund_ref', 'refunded_at'],
+          'card_payment', 'payment_ref', 'card', 'paid_at', 'paid_aed', 'refund_ref', 'refunded_at',
+          'bank_transfer', 'transfer_screenshots', 'transfer_uploaded_at', 'bank_details_emailed_at', 'bank_checked_at', 'bank_checked_by'],
         orders.map(o)
       )),
     },
