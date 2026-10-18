@@ -3,8 +3,9 @@
 ## BUH-02.09.01 — 2026-10-18 20:17 UTC · [#26](https://github.com/cxsmtp/buh/pull/26)
 
 - **Chats open again in the Admin Hub.** Reported: tapping a chat showed "Something went wrong… i is not a function". Newer Chrome on phones answers a scroll request in a way the chat screen didn't expect; the screen now ignores that answer, and a test plays that newer Chrome to keep it fixed.
+- **Track Order fits again.** Reported: the box's title bar covered the order-number field; the fields now start clearly below it, on phones and laptops, before and after a search.
 - **Status.**
-  - **Benchmark:** not run: a one-line change in the hub's chat screen, no server or storefront code changed.
+  - **Benchmark:** not run: two small screen fixes (the hub's chat screen, the Track Order box), no server code changed.
   - **Tests:** 582 passed (4 browser tests timed out while other builds loaded the machine and passed when rerun; one card-payment browser test now waits for the screen to redraw), including the new chat test (fails before the fix, passes after) and a check that no screen in the shop or hub has the same pattern.
   - **Dependency audit:** production 0 vulnerabilities; no package changes.
   - **Security scan:** not applicable (no new input, route or data).
