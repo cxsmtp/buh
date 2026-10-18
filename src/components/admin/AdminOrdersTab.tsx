@@ -57,6 +57,12 @@ export const AdminOrdersTab: React.FC<AdminOrdersTabProps> = ({
   };
 
   const [filter, setFilter] = useState<'all' | 'pending' | 'whatsapp' | 'confirmed' | 'dispatched'>('all');
+  // Orders the owner has just answered stay in "Awaiting WhatsApp" for now, so the reply link is right there.
+  const [justChecked, setJustChecked] = useState<string[]>([]);
+  const whatsappChecked = (o: Order) => {
+    setJustChecked((ids) => (ids.includes(o.id) ? ids : [...ids, o.id]));
+    onOrderChanged(o);
+  };
   const [selectedOrderForConfirm, setSelectedOrderForConfirm] = useState<Order | null>(null);
   const [labelOrder, setLabelOrder] = useState<Order | null>(null);
 
@@ -70,7 +76,7 @@ export const AdminOrdersTab: React.FC<AdminOrdersTabProps> = ({
 
   const filteredOrders = orders.filter((o) => {
     if (filter === 'pending') return o.status === 'pending_confirmation';
-    if (filter === 'whatsapp') return awaitingWhatsApp(o);
+    if (filter === 'whatsapp') return awaitingWhatsApp(o) || justChecked.includes(o.id);
     if (filter === 'confirmed') return o.status === 'confirmed';
     if (filter === 'dispatched') return o.status === 'dispatched';
     return true;
@@ -257,7 +263,7 @@ export const AdminOrdersTab: React.FC<AdminOrdersTabProps> = ({
                 </div>
 
                 {/* Confirm on WhatsApp: first, so the owner sees it on the phone */}
-                <OrderWhatsAppCheck order={order} onOrderChanged={onOrderChanged} />
+                <OrderWhatsAppCheck order={order} onOrderChanged={whatsappChecked} />
 
                 {/* Items & Delivery Info */}
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 text-xs">
