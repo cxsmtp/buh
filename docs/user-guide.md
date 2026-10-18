@@ -68,7 +68,8 @@ The shop can sit on the home screen of a phone or tablet and open full screen, w
    - **Outside the UAE?** As soon as a non-UAE number is typed, checkout shows **Email orders@…**, which opens an email with the bag already listed.
    - **SMS not arriving?** If the shop's SMS service is down, checkout says so and offers the shop's email.
 3. Fill in the delivery address (or **Use My GPS**), choose Cash on Delivery or bank transfer (with an optional receipt screenshot or PDF), and **Confirm & Raise Order**. The button stays locked until the phone is verified.
-4. **Track Order:** enter the order number (shown on the confirmation and pre-filled on the same phone) and the mobile number used for the order.
+4. **One last step: Confirm on WhatsApp** (when the shop has switched it on). The confirmation screen shows a large green **Confirm on WhatsApp** button. Tap it: WhatsApp opens with "Confirm my order BUH-… · code 1234" to the shop already typed; tap **Send**. That message, from your own WhatsApp, shows the shop the number is yours. Your order is placed either way (unless the shop holds orders until the message comes: then the screen says "We'll start your order once we get your message"). The same button is in **Track Order** until the shop has confirmed it.
+5. **Track Order:** enter the order number (shown on the confirmation and pre-filled on the same phone) and the mobile number used for the order.
 - **Picking up where you left off.** The bag and your delivery details are kept on your phone (**Not you? Clear them** at checkout forgets the details). **Save or send this bag as a link** carries it to another browser, e.g. from Instagram's built-in browser to Safari or Chrome.
 - **Most designs are one or two pieces.** A size shows **Only 1 left** or **Sold out**; you can't add more than there are, and a sold-out size offers **Ask us** (WhatsApp or email) instead.
 - Prices are in AED. Visitors outside the UAE also see an approximate price in their own currency; you always pay in AED.
@@ -132,8 +133,22 @@ New orders appear under **Orders & Dispatches** within seconds, with a notice at
   - **View receipt** opens what the customer uploaded.
   - **Mark payment received** once the money is in the account.
 - **Cancel order** returns the items to stock. It cannot be undone.
+- **History** shows the order's timeline: placed, WhatsApp confirmation asked, customer opened WhatsApp, confirmed (by whom, when), status changes.
 
 Every change is recorded with who made it and when.
+
+#### Confirm on WhatsApp (free, no WhatsApp API)
+
+Customers confirm their number with one WhatsApp message they send you; nothing to sign up for or pay.
+
+- **Settings → Store & contact:**
+  - **Ask customers to confirm their order on WhatsApp**: on as soon as the shop's WhatsApp number is set. With no number, nothing changes.
+  - **Hold orders until confirmed on WhatsApp**: off by default. Off, orders go through as usual and simply show "not yet confirmed". On, an order can't be confirmed or booked with a courier until you mark the message received (you can always cancel it).
+- **In Orders** (phone view first), an order shows **Awaiting WhatsApp confirmation · code 1234** with the customer's phone number. When "Confirm my order BUH-… · code 1234" arrives in your WhatsApp, check it comes from that number, then tap:
+  - **Confirmed on WhatsApp**; then **Reply on WhatsApp** opens a thank-you to the customer, ready to send;
+  - or **Number didn't match** (from another number: call the customer or cancel). You can still tap **Confirmed on WhatsApp** later.
+- The **Awaiting WhatsApp** filter lists the ones still waiting, and the daily summary counts them. A second tap changes nothing; each answer is in the audit log with who and when.
+- The shop's own SMS / Firebase code check at checkout is separate and works as before.
 
 ### Inventory
 
@@ -236,7 +251,7 @@ The greeting is a short, gracious line (for example *Eid Mubarak* with *Fresh li
 
 ### Daily summary and alerts
 
-Every morning at 8:00 (UAE) an email to the backup address lists yesterday's orders and sales, orders waiting for you, what is sold out or low, and anything needing attention. A problem (low disk space, a database or backup failure, no SMS gateway) is emailed when it starts, daily while it lasts, and when it is resolved.
+Every morning at 8:00 (UAE) an email to the backup address lists yesterday's orders and sales, orders waiting for you (and for the customer's WhatsApp message), what is sold out or low, and anything needing attention. A problem (low disk space, a database or backup failure, no SMS gateway) is emailed when it starts, daily while it lasts, and when it is resolved.
 
 ### Bank details
 
