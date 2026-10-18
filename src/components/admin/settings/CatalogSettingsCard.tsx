@@ -148,7 +148,7 @@ export function CatalogSettingsCard({ value, onSave, auto }: { value: CatalogSet
       </section>
 
       <div className="flex items-center gap-3">
-        <button type="button" onClick={() => void save()} disabled={saving} className="px-4 py-2 rounded-xl bg-ink text-white font-bold text-xs disabled:opacity-50 flex items-center gap-1.5">
+        <button type="button" onClick={() => void save()} disabled={saving} className="px-4 py-2 rounded-xl bg-ink text-paper font-bold text-xs disabled:opacity-50 flex items-center gap-1.5">
           {saving && <Loader2 className="w-3.5 h-3.5 animate-spin" />} Save catalogue settings
         </button>
         {auto && autosave.bar}

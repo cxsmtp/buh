@@ -281,7 +281,7 @@ export const AdminOrdersTab: React.FC<AdminOrdersTabProps> = ({
               onClick={() => setFilter(tab.id as typeof filter)}
               className={`px-3 py-1.5 rounded-xl text-xs font-semibold whitespace-nowrap transition-all flex items-center gap-1.5 ${
                 filter === tab.id
-                  ? 'bg-ink text-white shadow-sm'
+                  ? 'bg-ink text-paper shadow-sm'
                   : 'bg-surface text-ink-soft hover:bg-sand border border-line'
               }`}
             >
@@ -563,7 +563,7 @@ export const AdminOrdersTab: React.FC<AdminOrdersTabProps> = ({
                   ) : isPending ? (
                     <button
                       onClick={() => openConfirmationModal(order)}
-                      className="flex items-center gap-1.5 bg-ink hover:bg-ink text-white font-bold text-xs px-4 py-2 rounded-xl transition-all shadow active:scale-95"
+                      className="flex items-center gap-1.5 bg-ink hover:bg-ink text-paper font-bold text-xs px-4 py-2 rounded-xl transition-all shadow active:scale-95"
                     >
                       <CheckCircle2 className="w-4 h-4 text-gold-light" />
                       <span>Confirm & Assign Courier</span>
@@ -644,7 +644,7 @@ export const AdminOrdersTab: React.FC<AdminOrdersTabProps> = ({
                   onClick={() => setChosenCourier('jeebly')}
                   className={`p-3 rounded-xl border text-left transition-all ${
                     chosenCourier === 'jeebly'
-                      ? 'border-ink bg-ink text-white shadow-md'
+                      ? 'border-ink bg-ink text-paper shadow-md'
                       : 'border-line bg-surface text-ink-soft hover:border-line-strong'
                   }`}
                 >
@@ -663,7 +663,7 @@ export const AdminOrdersTab: React.FC<AdminOrdersTabProps> = ({
                   onClick={() => setChosenCourier('echo')}
                   className={`p-3 rounded-xl border text-left transition-all ${
                     chosenCourier === 'echo'
-                      ? 'border-ink bg-ink text-white shadow-md'
+                      ? 'border-ink bg-ink text-paper shadow-md'
                       : 'border-line bg-surface text-ink-soft hover:border-line-strong'
                   }`}
                 >
@@ -737,7 +737,7 @@ export const AdminOrdersTab: React.FC<AdminOrdersTabProps> = ({
                 type="button"
                 disabled={isDispatching}
                 onClick={handleConfirmAndDispatch}
-                className="w-full bg-ink hover:bg-ink text-white font-bold text-xs py-3.5 rounded-xl shadow-lg flex items-center justify-center gap-2 transition-all disabled:opacity-50"
+                className="w-full bg-ink hover:bg-ink text-paper font-bold text-xs py-3.5 rounded-xl shadow-lg flex items-center justify-center gap-2 transition-all disabled:opacity-50"
               >
                 {isDispatching ? (
                   <span>Connecting to Courier API & Booking Dispatch...</span>

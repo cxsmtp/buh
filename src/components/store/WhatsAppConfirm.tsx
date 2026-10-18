@@ -77,7 +77,7 @@ export function WhatsAppConfirm({
         target="_blank"
         rel="noopener noreferrer"
         onClick={opened}
-        className="w-full min-h-12 bg-whatsapp hover:brightness-110 text-white font-semibold text-sm py-3 px-4 rounded-xl flex items-center justify-center gap-2 transition-all focus:outline-none focus-visible:ring-2 focus-visible:ring-gold focus-visible:ring-offset-2"
+        className="w-full min-h-12 bg-whatsapp hover:brightness-110 text-paper font-semibold text-sm py-3 px-4 rounded-xl flex items-center justify-center gap-2 transition-all focus:outline-none focus-visible:ring-2 focus-visible:ring-gold focus-visible:ring-offset-2"
       >
         <MessageCircle className="w-5 h-5 shrink-0" aria-hidden="true" />
         <span>Confirm on WhatsApp</span>

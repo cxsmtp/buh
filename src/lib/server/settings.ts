@@ -1,5 +1,6 @@
 import net from 'node:net';
-import type { AssistantSettings, BankTransferDetails, DeliverySettings, Emirate, BedProfileMeasurement, BrandSettings, CatalogSettings, CourierSettings, EmailSettings, FirebaseWebConfig, PaymentSettings, PhoneCheckMode, PhoneCheckSettings, PhoneVerificationConfig, SmsGatewaySettings, StoreSettings, ThemeSettings } from '@/types';
+import type { AssistantSettings, BankTransferDetails, DeliverySettings, Emirate, BedProfileMeasurement, BrandSettings, CatalogSettings, CourierSettings, EmailSettings, FirebaseWebConfig, PaymentSettings, PhoneCheckMode, PhoneCheckSettings, PhoneVerificationConfig, SmsGatewaySettings, StoreSettings, ThemeSettings, LookSettings } from '@/types';
+import { DEFAULT_LOOK_MODE, DEFAULT_LOOK_PRESET, LOOK_PRESETS, MODE_LABELS, isLookMode, isLookPreset } from '@/lib/design/themes';
 import { FESTIVALS } from '@/lib/festivals/catalog';
 import { marqueeItems, marqueeProblem, stripEmoji } from '@/lib/marquee';
 import { DEFAULT_ASSISTANT, DEFAULT_CATALOG, DEFAULT_DELIVERY, DEFAULT_EMAIL_SETTINGS, DEFAULT_STORE, DEFAULT_THEME_SETTINGS } from '@/data/catalogDefaults';
@@ -37,6 +38,7 @@ export interface SettingsMap {
   delivery: DeliverySettings;
   payments: PaymentSettings;
   phoneCheck: PhoneCheckSettings;
+  look: LookSettings;
 }
 export type SettingsKey = keyof SettingsMap;
 
@@ -69,7 +71,14 @@ const DEFAULTS: SettingsMap = {
   payments: { cardEnabled: false, stripePublishableKey: '', stripeSecretKey: '', stripeWebhookSecret: '' },
   // WhatsApp (free) for every shop, new or existing, until the owner chooses SMS codes.
   phoneCheck: { mode: 'whatsapp', unconfirmedCancelHours: 24, unopenedCancelHours: 6 },
+  // Ivory & Gold, light or dark as the device is set (migration 13 records when it started).
+  look: { preset: DEFAULT_LOOK_PRESET, mode: DEFAULT_LOOK_MODE, label: lookLabel(DEFAULT_LOOK_PRESET, DEFAULT_LOOK_MODE), changedAt: '', changedBy: '' },
 };
+
+/** "Noir & Champagne · Always dark". */
+export function lookLabel(preset: LookSettings['preset'], mode: LookSettings['mode']): string {
+  return `${LOOK_PRESETS[preset]?.name ?? preset} · ${MODE_LABELS[mode] ?? mode}`;
+}
 
 /** Where customers are asked to email: Settings → Store first, then NEXT_PUBLIC_SUPPORT_EMAIL. */
 export function contactEmail(): string {
@@ -90,6 +99,7 @@ const SECRETS: Record<SettingsKey, string[]> = {
   delivery: [],
   payments: ['stripeSecretKey', 'stripeWebhookSecret'],
   phoneCheck: [],
+  look: [],
 };
 
 const cache = new Map<SettingsKey, unknown>();
@@ -144,7 +154,10 @@ function save<K extends SettingsKey>(key: K, value: SettingsMap[K], { keepHistor
     Date.now() - Date.parse(before.updated_at) < SESSION_MS;
   if (before && !sameSession) {
     db.prepare('INSERT INTO settings_history (key, data, saved_at) VALUES (?, ?, ?)').run(key, JSON.stringify(withoutSecrets(key, JSON.parse(before.data))), before.updated_at);
-    db.prepare('DELETE FROM settings_history WHERE key = ? AND id NOT IN (SELECT id FROM settings_history WHERE key = ? ORDER BY id DESC LIMIT ?)').run(key, key, HISTORY_KEEP);
+    // The last 30 per group; a version marked "pinned" (the look from before looks existed) stays.
+    db.prepare(
+      "DELETE FROM settings_history WHERE key = ? AND id NOT IN (SELECT id FROM settings_history WHERE key = ? ORDER BY id DESC LIMIT ?) AND json_extract(data, '$.pinned') IS NOT 1"
+    ).run(key, key, HISTORY_KEEP);
   }
   const at = new Date().toISOString();
   getDb()
@@ -181,10 +194,16 @@ export function settingsHistory(limit = 60): SettingsVersion[] {
  * Put an earlier version back. Keys are not in history, so the keys saved now
  * stay. The version replaced by this restore is itself kept, so it can be undone.
  */
-export async function restoreSettingsVersion(id: number): Promise<SettingsKey> {
+export async function restoreSettingsVersion(id: number, by = ''): Promise<SettingsKey> {
   const row = getDb().prepare('SELECT key, data FROM settings_history WHERE id = ?').get(id) as { key: SettingsKey; data: string } | undefined;
   if (!row || !(row.key in DEFAULTS)) throw new HttpError(404, 'That version is no longer kept.');
   const key = row.key;
+  // A look put back is a new change: now, by whoever put it back, named after the one restored.
+  if (key === 'look') {
+    const old = JSON.parse(row.data) as Partial<LookSettings>;
+    await updateSettings('look', { preset: old.preset, mode: old.mode, label: `Switched back to: ${String(old.label || lookLabel(old.preset as LookSettings['preset'], old.mode as LookSettings['mode'])).replace(/^(Switched back to: )+/, '')}`.slice(0, 120), changedBy: by }, { keepHistory: true });
+    return key;
+  }
   // Saved like any other change: validated, and keys follow their host (a key saved for
   // today's address is not sent to an older one). Blank keys mean "keep the saved key".
   const restored = deepMerge(DEFAULTS[key], JSON.parse(row.data)) as Obj;
@@ -311,6 +330,7 @@ const SECRET_HOSTS: Record<SettingsKey, Record<string, string>> = {
   catalog: {},
   store: {},
   theme: {},
+  look: {},
   email: {},
   assistant: {},
   delivery: {},
@@ -691,6 +711,8 @@ const VALIDATORS: { [K in SettingsKey]: (input: Obj, current: SettingsMap[K]) =>
     };
   },
 
+  look: (input, current) => validateLook(input, current),
+
   async theme(input, current) {
     const mode = input.mode === undefined ? current.mode : input.mode;
     if (mode !== 'auto' && mode !== 'manual' && mode !== 'off') throw new HttpError(400, 'Theme mode must be auto, manual or off.');
@@ -710,6 +732,21 @@ const VALIDATORS: { [K in SettingsKey]: (input: Obj, current: SettingsMap[K]) =>
 };
 
 const FESTIVAL_ID_SET = new Set(FESTIVALS.map((f) => f.id));
+
+/** The look: a known preset and mode only; the time is the server's, never the browser's. */
+async function validateLook(input: Obj, current: LookSettings): Promise<LookSettings> {
+  const preset = input.preset === undefined ? current.preset : input.preset;
+  if (!isLookPreset(preset)) throw new HttpError(400, 'Unknown look.');
+  const mode = input.mode === undefined ? current.mode : input.mode;
+  if (!isLookMode(mode)) throw new HttpError(400, 'Mode must be system, light or dark.');
+  return {
+    preset,
+    mode,
+    label: text(input.label, 'Label', 120) || lookLabel(preset, mode),
+    changedAt: new Date().toISOString(),
+    changedBy: text(input.changedBy, 'Changed by', 120),
+  };
+}
 
 function validateSizePreset(v: unknown, i: number): BedProfileMeasurement {
   const o = obj(v);

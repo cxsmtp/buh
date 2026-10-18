@@ -47,7 +47,7 @@ export function RestoreNotice({ onReview }: { onReview: () => void }) {
         </p>
       </div>
       <div className="flex flex-wrap gap-2">
-        <button type="button" onClick={onReview} className="px-3 py-1.5 rounded-lg bg-ink text-white font-bold">Review now</button>
+        <button type="button" onClick={onReview} className="px-3 py-1.5 rounded-lg bg-ink text-paper font-bold">Review now</button>
         <button type="button" onClick={() => void done()} className="px-3 py-1.5 rounded-lg border border-gold bg-surface text-ink font-bold">Done, hide this</button>
       </div>
     </div>

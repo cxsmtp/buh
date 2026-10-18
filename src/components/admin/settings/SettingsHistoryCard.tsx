@@ -19,6 +19,7 @@ const NAMES: Record<string, string> = {
   catalog: 'Catalogue',
   store: 'Store & contact',
   theme: 'Festival themes',
+  look: 'Look',
 };
 
 interface Version {

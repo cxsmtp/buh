@@ -46,6 +46,7 @@
   --color-danger-soft: #f7e6e2;
   --color-danger-line: #e7c3bc;
   --color-whatsapp: #1f7a47;
+  --color-paper: #ffffff;
 
   /* An elegant serif for headings, a clean sans for everything else (both self-hosted). */
   --font-serif: var(--font-display), "Cormorant Garamond", Georgia, "Times New Roman", serif;
@@ -65,19 +66,26 @@
 
 /*
  * A festival may shift only these (src/lib/festivals/catalog.ts: FESTIVE_ACCENTS), set as
- * --festive* on the page while its look is on; everyday they are the shop's gold. "inline" so a
- * page can set them on any element.
+ * --festive* on the element marked data-festive while its look is on (festiveVars); everyday they
+ * are the look's own golds. In a dark look /look.css points them at the lifted dark counterparts
+ * (--festive-dark…, src/lib/design/themes.ts). "inline" so a page can set them on any element.
  */
 @theme inline {
-  --color-festive: var(--festive, #82612c);
-  --color-festive-soft: var(--festive-soft, #f2ebdf);
-  --color-festive-glow: var(--festive-glow, #c2a36b);
+  --color-festive: var(--festive-now, var(--color-gold-deep));
+  --color-festive-soft: var(--festive-soft-now, var(--color-sand));
+  --color-festive-glow: var(--festive-glow-now, var(--color-gold));
+}
+[data-festive] {
+  --festive-now: var(--festive);
+  --festive-soft-now: var(--festive-soft);
+  --festive-glow-now: var(--festive-glow);
 }
 
 /*
- * One look on every device. The shop is designed light (ivory, ink text); a phone or laptop in
- * dark mode used to turn the page text light while the cards stayed white, so labels vanished.
- * color-scheme keeps the browser's own controls (checkboxes, scrollbars) light too.
+ * The look (Settings → Look). These are Ivory & Gold in light, the shop's look before looks
+ * existed; /look.css (linked in the page's head, from the server, before anything paints) sets
+ * the chosen look's tokens, in light, dark, or both with the device deciding. color-scheme keeps
+ * the browser's own controls (checkboxes, scrollbars) in step: /look.css sets it to dark there.
  */
 :root {
   color-scheme: light;
@@ -95,6 +103,28 @@ body {
   transition: background-color 0.3s ease, color 0.3s ease;
   /* Long words, emails, IBANs and links break instead of pushing the page sideways. */
   overflow-wrap: break-word;
+}
+
+/*
+ * Always the light Ivory & Gold, whatever the look: a shipping label is paper, and the full-screen
+ * photo is the photo's own black frame.
+ */
+.look-paper {
+  color-scheme: light;
+  --color-ivory: #faf6ef;
+  --color-surface: #fffdf9;
+  --color-sand: #f2ebdf;
+  --color-sand-deep: #e8decd;
+  --color-line: #e5dac9;
+  --color-line-strong: #cbbba3;
+  --color-ink: #2b2127;
+  --color-ink-2: #43353d;
+  --color-ink-soft: #5a4c53;
+  --color-ink-muted: #6a5c62;
+  --color-gold: #c2a36b;
+  --color-gold-light: #e6d5b0;
+  --color-gold-deep: #82612c;
+  --color-paper: #ffffff;
 }
 
 /* Headings in the serif: lighter weights, a little air, and the serif's small x-height evened out. */

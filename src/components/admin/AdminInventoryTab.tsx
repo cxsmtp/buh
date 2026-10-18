@@ -64,7 +64,7 @@ const LEVEL_WORD: Record<StockLevel, string> = { out: 'sold out', low: 'low', ok
 const actionBtn = 'min-h-11 px-3 rounded-xl border border-line-strong bg-surface text-ink text-xs font-semibold inline-flex items-center justify-center gap-1.5 disabled:opacity-40';
 const actionDanger = 'min-h-11 px-3 rounded-xl border border-danger-line bg-surface text-danger text-xs font-semibold inline-flex items-center justify-center gap-1.5 disabled:opacity-40';
 const actionIcon = 'min-h-11 w-11 rounded-xl border border-line-strong bg-surface text-ink inline-flex items-center justify-center disabled:opacity-40';
-const actionPrimary = 'min-h-11 px-3 rounded-xl border border-ink bg-ink text-white text-xs font-semibold inline-flex items-center justify-center gap-1.5';
+const actionPrimary = 'min-h-11 px-3 rounded-xl border border-ink bg-ink text-paper text-xs font-semibold inline-flex items-center justify-center gap-1.5';
 
 export const AdminInventoryTab: React.FC<AdminInventoryTabProps> = ({ products, catalog, onChanged, onProductUpdated, startAdding = false }) => {
   const [editing, setEditing] = useState<AdminProduct | 'new' | null>(startAdding ? 'new' : null);
@@ -183,7 +183,7 @@ export const AdminInventoryTab: React.FC<AdminInventoryTabProps> = ({ products, 
         <h2 className="font-serif font-bold text-lg text-ink flex items-center gap-2">
           <Package className="w-5 h-5 text-gold-deep" aria-hidden="true" /> Inventory
         </h2>
-        <button type="button" onClick={() => setEditing('new')} className="ml-auto min-h-11 px-4 rounded-xl bg-ink text-white text-sm font-bold flex items-center gap-1.5">
+        <button type="button" onClick={() => setEditing('new')} className="ml-auto min-h-11 px-4 rounded-xl bg-ink text-paper text-sm font-bold flex items-center gap-1.5">
           <Plus className="w-4 h-4" aria-hidden="true" /> Add product
         </button>
       </div>
@@ -221,9 +221,9 @@ export const AdminInventoryTab: React.FC<AdminInventoryTabProps> = ({ products, 
               type="button"
               onClick={() => setFilter(id)}
               aria-pressed={filter === id}
-              className={`shrink-0 min-h-11 px-3.5 rounded-full border text-xs font-semibold ${filter === id ? 'bg-ink text-white border-ink' : 'bg-surface border-line-strong text-ink'}`}
+              className={`shrink-0 min-h-11 px-3.5 rounded-full border text-xs font-semibold ${filter === id ? 'bg-ink text-paper border-ink' : 'bg-surface border-line-strong text-ink'}`}
             >
-              {name} <span className={filter === id ? 'text-white' : 'text-ink-soft'}>{counts[id]}</span>
+              {name} <span className={filter === id ? 'text-paper' : 'text-ink-soft'}>{counts[id]}</span>
             </button>
           ))}
         </div>
@@ -393,7 +393,7 @@ export const AdminInventoryTab: React.FC<AdminInventoryTabProps> = ({ products, 
           <div
             key={stock.toast.id}
             className={`pointer-events-auto w-full max-w-md rounded-2xl shadow-lg px-3 py-2 flex items-center gap-2 text-sm ${
-              stock.toast.kind === 'saved' ? 'bg-ink text-white' : stock.toast.kind === 'conflict' ? 'bg-warning-soft text-warning border border-warning-line' : 'bg-danger-soft text-danger border border-danger-line'
+              stock.toast.kind === 'saved' ? 'bg-ink text-paper' : stock.toast.kind === 'conflict' ? 'bg-warning-soft text-warning border border-warning-line' : 'bg-danger-soft text-danger border border-danger-line'
             }`}
           >
             <span className="flex-1 min-w-0 line-clamp-2">{stock.toast.text}</span>
@@ -581,7 +581,7 @@ function ReceiveSheet({ product, shown, onClose, onReceive }: { product: AdminPr
           type="button"
           disabled={total === 0}
           onClick={() => onReceive(Object.entries(add).map(([sizeId, delta]) => ({ sizeId, delta })), note.trim() || undefined)}
-          className="flex-1 min-h-12 rounded-xl bg-ink text-white text-sm font-bold disabled:opacity-40"
+          className="flex-1 min-h-12 rounded-xl bg-ink text-paper text-sm font-bold disabled:opacity-40"
         >
           Add {total} {total === 1 ? 'piece' : 'pieces'}
         </button>

@@ -54,7 +54,7 @@ export function AdminChatsTab({ refreshKey }: { refreshKey: number }) {
         </h2>
         <div className="ml-auto flex gap-1.5 text-xs">
           {(['open', 'all'] as const).map((f) => (
-            <button key={f} type="button" onClick={() => setFilter(f)} aria-pressed={filter === f} className={`px-2.5 py-1 rounded-full border font-semibold ${filter === f ? 'bg-ink text-white border-ink' : 'bg-surface border-line-strong text-ink-soft'}`}>
+            <button key={f} type="button" onClick={() => setFilter(f)} aria-pressed={filter === f} className={`px-2.5 py-1 rounded-full border font-semibold ${filter === f ? 'bg-ink text-paper border-ink' : 'bg-surface border-line-strong text-ink-soft'}`}>
               {f === 'open' ? 'Open' : 'All'}
             </button>
           ))}
@@ -79,7 +79,7 @@ export function AdminChatsTab({ refreshKey }: { refreshKey: number }) {
               <div className="flex items-center gap-2 text-xs">
                 <strong className="text-ink truncate">{c.customerName || c.contact || 'Customer'}</strong>
                 <span className={`px-1.5 py-0.5 rounded-full text-[10px] font-bold ${STATUS[c.status].cls}`}>{STATUS[c.status].label}</span>
-                {c.unread > 0 && <span className="ml-auto w-5 h-5 rounded-full bg-danger text-white text-[10px] font-bold flex items-center justify-center">{c.unread}</span>}
+                {c.unread > 0 && <span className="ml-auto w-5 h-5 rounded-full bg-danger text-paper text-[10px] font-bold flex items-center justify-center">{c.unread}</span>}
               </div>
               <p className="text-xs text-ink-soft line-clamp-2">{c.lastMessage}</p>
               <p className="text-[10px] text-ink-muted">{time(c.updatedAt)}{c.contact && c.customerName ? ` · ${c.contact}` : ''}</p>
@@ -210,7 +210,7 @@ function Conversation({ thread, refreshKey, onBack, onChanged }: { thread: ChatT
           <div key={m.id} className={`flex ${m.author === 'admin' ? 'justify-end' : 'justify-start'}`}>
             <div
               className={`max-w-[85%] rounded-2xl px-3 py-2 whitespace-pre-wrap break-words ${
-                m.author === 'admin' ? 'bg-ink text-white' : m.author === 'customer' ? 'bg-warning-soft border border-warning-line text-ink' : 'bg-sand text-ink-soft text-xs'
+                m.author === 'admin' ? 'bg-ink text-paper' : m.author === 'customer' ? 'bg-warning-soft border border-warning-line text-ink' : 'bg-sand text-ink-soft text-xs'
               }`}
             >
               <div className="text-[10px] opacity-70 mb-0.5 flex items-center gap-1">
@@ -239,7 +239,7 @@ function Conversation({ thread, refreshKey, onBack, onChanged }: { thread: ChatT
           placeholder="Type your reply…"
           className="flex-1 min-w-0 px-3 py-2 rounded-xl border border-line-strong text-sm focus:outline-none focus:ring-2 focus:ring-gold resize-y"
         />
-        <button type="submit" disabled={busy || !draft.trim()} className="px-3.5 py-2.5 rounded-xl bg-ink text-white text-xs font-bold inline-flex items-center gap-1.5 disabled:opacity-50">
+        <button type="submit" disabled={busy || !draft.trim()} className="px-3.5 py-2.5 rounded-xl bg-ink text-paper text-xs font-bold inline-flex items-center gap-1.5 disabled:opacity-50">
           {busy ? <Loader2 className="w-4 h-4 animate-spin" /> : <Send className="w-4 h-4" />} Send
         </button>
       </form>

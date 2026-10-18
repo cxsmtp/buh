@@ -97,7 +97,7 @@ export function OrderBankTransfer({ order, bank, shopName, onOrderChanged }: { o
       )}
       {bt.state !== 'paid' && !cancelled && (
         <div className="grid grid-cols-1 min-[380px]:grid-cols-2 gap-2">
-          <button type="button" disabled={busy} onClick={() => void answer('received')} className={`${button} bg-success text-white`}>
+          <button type="button" disabled={busy} onClick={() => void answer('received')} className={`${button} bg-success text-paper`}>
             <CheckCircle2 className="w-4 h-4" aria-hidden="true" /> Payment received
           </button>
           {bt.state !== 'not_received' && (
@@ -109,12 +109,12 @@ export function OrderBankTransfer({ order, bank, shopName, onOrderChanged }: { o
       )}
       <div className="flex flex-wrap gap-2">
         {reply && (
-          <a href={reply} target="_blank" rel="noopener noreferrer" className={`${button} bg-whatsapp text-white`}>
+          <a href={reply} target="_blank" rel="noopener noreferrer" className={`${button} bg-whatsapp text-paper`}>
             <MessageCircle className="w-4 h-4" aria-hidden="true" /> Tell the customer on WhatsApp
           </a>
         )}
         {bt.state !== 'paid' && !cancelled && details && (
-          <a href={details} target="_blank" rel="noopener noreferrer" className={`${button} ${reply ? 'bg-surface text-ink border border-line-strong' : 'bg-whatsapp text-white'}`}>
+          <a href={details} target="_blank" rel="noopener noreferrer" className={`${button} ${reply ? 'bg-surface text-ink border border-line-strong' : 'bg-whatsapp text-paper'}`}>
             <MessageCircle className="w-4 h-4" aria-hidden="true" /> Send bank details on WhatsApp
           </a>
         )}

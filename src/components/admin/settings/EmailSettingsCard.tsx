@@ -153,7 +153,7 @@ export function EmailSettingsCard({
           </div>
         </details>
         <div className="flex flex-wrap gap-2">
-          <button type="button" onClick={() => void save()} disabled={saving} className="px-4 py-2 rounded-xl bg-ink text-white text-xs font-bold flex items-center gap-1.5 disabled:opacity-60">
+          <button type="button" onClick={() => void save()} disabled={saving} className="px-4 py-2 rounded-xl bg-ink text-paper text-xs font-bold flex items-center gap-1.5 disabled:opacity-60">
             {saving && <Loader2 className="w-3.5 h-3.5 animate-spin" />} Save email settings
           </button>
         {auto && autosave.bar}
@@ -220,7 +220,7 @@ function AdminAccountCard() {
             <input id="acct-pass" className={field} type="password" required autoComplete="current-password" value={password} maxLength={256} onChange={(e) => setPassword(e.target.value)} />
           </div>
           <div className="sm:col-span-2">
-            <button type="submit" disabled={busy || !info || email.trim().toLowerCase() === info.email} className="px-4 py-2 rounded-xl bg-ink text-white text-xs font-bold flex items-center gap-1.5 disabled:opacity-50">
+            <button type="submit" disabled={busy || !info || email.trim().toLowerCase() === info.email} className="px-4 py-2 rounded-xl bg-ink text-paper text-xs font-bold flex items-center gap-1.5 disabled:opacity-50">
               {busy && <Loader2 className="w-3.5 h-3.5 animate-spin" />} Change sign-in email
             </button>
           </div>

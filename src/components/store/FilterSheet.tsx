@@ -16,7 +16,7 @@ interface FilterSheetProps {
 
 const pill = (on: boolean) =>
   `inline-flex max-w-full min-w-0 items-center gap-1.5 px-3.5 py-2 rounded-full text-sm text-left break-anywhere border transition-colors disabled:opacity-40 ${
-    on ? 'bg-ink border-ink text-white' : 'bg-surface border-line-strong text-ink hover:border-ink-muted'
+    on ? 'bg-ink border-ink text-paper' : 'bg-surface border-line-strong text-ink hover:border-ink-muted'
   }`;
 
 function toggle(list: string[], id: string): string[] {

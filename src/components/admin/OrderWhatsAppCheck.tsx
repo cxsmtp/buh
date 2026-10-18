@@ -103,7 +103,7 @@ export function OrderWhatsAppCheck({ order, onOrderChanged, shopName }: { order:
       {open && (
         <div className="grid grid-cols-1 min-[380px]:grid-cols-2 gap-2">
           {check && (
-            <button type="button" disabled={busy} onClick={() => void answer('confirmed')} className={`${button} bg-success text-white`}>
+            <button type="button" disabled={busy} onClick={() => void answer('confirmed')} className={`${button} bg-success text-paper`}>
               <CheckCircle2 className="w-4 h-4" aria-hidden="true" /> Confirmed on WhatsApp
             </button>
           )}
@@ -116,7 +116,7 @@ export function OrderWhatsAppCheck({ order, onOrderChanged, shopName }: { order:
             <Phone className="w-4 h-4" aria-hidden="true" /> Confirmed by phone call
           </button>
           {ask && (
-            <a href={ask} target="_blank" rel="noopener noreferrer" className={`${button} bg-whatsapp text-white`}>
+            <a href={ask} target="_blank" rel="noopener noreferrer" className={`${button} bg-whatsapp text-paper`}>
               <Send className="w-4 h-4" aria-hidden="true" /> Ask to confirm
             </a>
           )}
@@ -141,7 +141,7 @@ export function OrderWhatsAppCheck({ order, onOrderChanged, shopName }: { order:
             onChange={(e) => setSender(e.target.value)}
             className="flex-1 min-w-0 px-3 py-2 rounded-xl border border-line-strong bg-surface text-ink text-xs focus:outline-none focus:ring-2 focus:ring-gold"
           />
-          <button type="submit" disabled={busy || !sender.trim()} className={`${button} bg-ink text-white`}>
+          <button type="submit" disabled={busy || !sender.trim()} className={`${button} bg-ink text-paper`}>
             Use the number it came from
           </button>
         </form>
@@ -167,14 +167,14 @@ export function OrderWhatsAppCheck({ order, onOrderChanged, shopName }: { order:
               onChange={(e) => setCorrection(e.target.value)}
               className="flex-1 min-w-0 px-3 py-2 rounded-xl border border-line-strong bg-surface text-ink text-xs focus:outline-none focus:ring-2 focus:ring-gold"
             />
-            <button type="submit" disabled={busy || !correction.trim()} className={`${button} bg-ink text-white`}>
+            <button type="submit" disabled={busy || !correction.trim()} className={`${button} bg-ink text-paper`}>
               Save the number
             </button>
           </form>
         </details>
       )}
       {status === 'confirmed' && reply && (
-        <a href={reply} target="_blank" rel="noopener noreferrer" className={`${button} bg-whatsapp text-white w-full min-[380px]:w-auto inline-flex`}>
+        <a href={reply} target="_blank" rel="noopener noreferrer" className={`${button} bg-whatsapp text-paper w-full min-[380px]:w-auto inline-flex`}>
           <MessageCircle className="w-4 h-4" aria-hidden="true" /> Reply on WhatsApp
         </a>
       )}

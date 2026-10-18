@@ -437,6 +437,19 @@ const MIGRATIONS: Array<(db: DB) => void> = [
       ['other', 'Other'],
     ].forEach(([id, name], i) => add.run(id, name, i, now));
   },
+  // 13: looks (Settings → Look). The shop's look until now (Ivory & Gold, always light) is kept as
+  //     the first entry of the look history, timestamped now and pinned (never pruned), so the
+  //     owner can always switch back to it. The look from now on: Ivory & Gold, matching the device.
+  //     Rows only (no schema change): an older version ignores the 'look' settings.
+  (db) => {
+    const at = new Date().toISOString();
+    const before = { preset: 'ivory-gold', mode: 'light', label: 'Ivory & Gold — the look before themes', changedAt: at, changedBy: '', pinned: true };
+    const now = { preset: 'ivory-gold', mode: 'system', label: 'Ivory & Gold · Match the device', changedAt: at, changedBy: '' };
+    if (!db.prepare("SELECT 1 FROM settings WHERE key = 'look'").get()) {
+      db.prepare("INSERT INTO settings_history (key, data, saved_at) VALUES ('look', ?, ?)").run(JSON.stringify(before), at);
+      db.prepare("INSERT INTO settings (key, data, updated_at) VALUES ('look', ?, ?)").run(JSON.stringify(now), at);
+    }
+  },
 ];
 
 let db: DB | null = null;

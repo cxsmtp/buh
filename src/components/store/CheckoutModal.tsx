@@ -743,7 +743,7 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
                 href={`https://wa.me/${shopWhatsApp}?text=${whatsappMessage}`}
                 target="_blank"
                 rel="noopener noreferrer"
-                className="flex-1 bg-whatsapp hover:brightness-110 text-white font-medium text-xs py-3 px-4 rounded-xl flex items-center justify-center gap-2 transition-all"
+                className="flex-1 bg-whatsapp hover:brightness-110 text-paper font-medium text-xs py-3 px-4 rounded-xl flex items-center justify-center gap-2 transition-all"
               >
                 <MessageCircle className="w-4 h-4" />
                 <span>Send WhatsApp Order Update</span>
@@ -971,7 +971,7 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
                         onClick={() => handleSelectMapLocation(loc)}
                         className={`px-2.5 py-1 rounded-lg text-[11px] font-semibold transition-all flex items-center gap-1 ${
                           isSelected
-                            ? 'bg-ink text-white '
+                            ? 'bg-ink text-paper '
                             : 'bg-ivory text-ink-soft hover:bg-warning-soft hover:text-warning border border-line'
                         }`}
                       >
@@ -1102,7 +1102,7 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
             <div className={`p-3.5 rounded-2xl border text-xs space-y-2.5 ${delivery.serviceable ? 'bg-success-soft/80 border-success-line' : 'bg-danger-soft border-danger-line'}`} role="status" aria-live="polite">
               <div className="flex items-center gap-2">
                 {delivery.serviceable ? (
-                  <span className="w-6 h-6 rounded-full bg-success text-white flex items-center justify-center shrink-0"><Check className="w-4 h-4" /></span>
+                  <span className="w-6 h-6 rounded-full bg-success text-paper flex items-center justify-center shrink-0"><Check className="w-4 h-4" /></span>
                 ) : (
                   <AlertCircle className="w-5 h-5 text-danger shrink-0" />
                 )}

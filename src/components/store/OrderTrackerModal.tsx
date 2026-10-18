@@ -108,7 +108,7 @@ export const OrderTrackerModal: React.FC<OrderTrackerModalProps> = ({
           <button
             type="submit"
             disabled={searching}
-            className="bg-ink hover:bg-ink disabled:opacity-60 text-white px-4 py-2.5 rounded-xl text-xs font-semibold flex items-center justify-center gap-1.5 transition-colors"
+            className="bg-ink hover:bg-ink disabled:opacity-60 text-paper px-4 py-2.5 rounded-xl text-xs font-semibold flex items-center justify-center gap-1.5 transition-colors"
           >
             <Search className="w-4 h-4" />
             <span>{searching ? 'Finding…' : 'Track'}</span>

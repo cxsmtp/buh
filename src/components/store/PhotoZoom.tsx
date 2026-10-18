@@ -181,7 +181,7 @@ export function PhotoZoom({ images, start, title, onClose }: PhotoZoomProps) {
       aria-modal="true"
       aria-label={`${title}, photo ${index + 1} of ${count}, zoomed`}
       onKeyDown={onKeyDown}
-      className="fixed inset-0 z-[60] bg-black text-white flex flex-col sheet-fade"
+      className="look-paper fixed inset-0 z-[60] bg-black text-white flex flex-col sheet-fade"
       data-testid="photo-zoom"
     >
       <div className="absolute top-0 inset-x-0 z-10 flex items-center justify-between gap-2 px-3 pt-[calc(0.75rem+env(safe-area-inset-top,0px))]">

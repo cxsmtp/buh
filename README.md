@@ -18,6 +18,7 @@
 | **Made for Instagram and WhatsApp** | Product links that preview with photo and price, Ask on WhatsApp / Instagram (each switchable), a Meta/Google product feed, and orders that show where the customer came from. |
 | **A chat that answers, then hands over** | The Help button answers sizes, delivery, payment, care and discount questions from what you teach it, hands everything else to you (Admin Hub → Chats, and by email: reply to the email to answer), and tells a waiting customer you'll get back to them. |
 | **A quiet, luxurious look on every phone** | One palette (ivory, ink, champagne gold), an elegant serif, one large photo per row, and every screen fits phones from 320 px, sideways and at the largest text ([the look](docs/user-guide.md#the-look)). |
+| **Looks that match the device** | Four looks (Ivory & Gold, Noir & Champagne, Pearl & Emerald, Sand & Rose), each light and dark, following each visitor's device or fixed by you; every change kept with its time and author, with Switch back ([Settings → Look](docs/user-guide.md#look)). |
 | **Festival themes for everyone** | 32 UAE festivals (the Eids, National Day, Diwali, Christmas, Lunar New Year and more) shift the accent and add a fine motif automatically, from 3 weeks before to a week after. |
 | **Runs itself** | Live updates on open pages, updates without downtime and automatic rollback, settings history, problem alerts and a daily summary email. |
 | **Real courier bookings** | Jeebly and Eco Express AWBs come from the carrier. A failed booking says so; it never invents a tracking number. |

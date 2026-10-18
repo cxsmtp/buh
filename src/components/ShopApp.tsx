@@ -392,9 +392,9 @@ export function ShopApp({ initialProductId }: { initialProductId?: string } = {}
 
   return (
     <ShopProvider value={shopInfo}>
-    <div className="min-h-screen flex flex-col font-sans px-safe" style={festival?.festivalId ? festiveVars(festival.theme) : undefined}>
+    <div className="min-h-screen flex flex-col font-sans px-safe" data-festive={festival?.festivalId ? '' : undefined} style={festival?.festivalId ? festiveVars(festival.theme) : undefined}>
       {newVersion && (
-        <div role="status" className="bg-ink text-white text-xs px-3 py-1.5 flex items-center justify-center gap-3">
+        <div role="status" className="bg-ink text-paper text-xs px-3 py-1.5 flex items-center justify-center gap-3">
           <span>New version ready</span>
           <button type="button" className="font-bold underline min-h-8" onClick={() => applyUpdate()}>Refresh</button>
           <span className="opacity-60 hidden sm:inline">(your bag is kept)</span>
@@ -443,7 +443,7 @@ export function ShopApp({ initialProductId }: { initialProductId?: string } = {}
                 <SlidersHorizontal className="w-4 h-4 shrink-0" aria-hidden="true" strokeWidth={1.5} />
                 <span>Filter</span>
                 {filterCount > 0 && (
-                  <span className="min-w-5 h-5 px-1 rounded-full bg-ink text-white text-[11px] font-bold flex items-center justify-center" aria-hidden="true">
+                  <span className="min-w-5 h-5 px-1 rounded-full bg-ink text-paper text-[11px] font-bold flex items-center justify-center" aria-hidden="true">
                     {filterCount}
                   </span>
                 )}
@@ -511,7 +511,7 @@ export function ShopApp({ initialProductId }: { initialProductId?: string } = {}
               <div className="rounded-2xl border border-dashed border-line-strong px-4 py-10 text-center space-y-3">
                 <p className="text-sm text-ink">{products.length ? 'Nothing matches these filters.' : 'New pieces are on their way. Please check back soon.'}</p>
                 {products.length > 0 && (
-                  <button type="button" onClick={() => showFilters(EMPTY_FILTERS)} className="rounded-full bg-ink text-white text-sm font-semibold px-5 py-2.5">
+                  <button type="button" onClick={() => showFilters(EMPTY_FILTERS)} className="rounded-full bg-ink text-paper text-sm font-semibold px-5 py-2.5">
                     Show everything
                   </button>
                 )}

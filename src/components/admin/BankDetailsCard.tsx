@@ -105,7 +105,7 @@ export const BankDetailsCard: React.FC<BankDetailsCardProps> = ({ bank, onSave, 
                 role="radio"
                 aria-checked={preview === p}
                 onClick={() => setPreview(p)}
-                className={`min-h-9 px-3 rounded-lg border font-semibold ${preview === p ? 'bg-ink text-white border-ink' : 'bg-surface text-ink-soft border-line'}`}
+                className={`min-h-9 px-3 rounded-lg border font-semibold ${preview === p ? 'bg-ink text-paper border-ink' : 'bg-surface text-ink-soft border-line'}`}
               >
                 {p === 'email' ? 'Email' : 'WhatsApp'}
               </button>
@@ -132,7 +132,7 @@ export const BankDetailsCard: React.FC<BankDetailsCardProps> = ({ bank, onSave, 
           type="button"
           onClick={save}
           disabled={saving}
-          className="ml-auto bg-ink hover:bg-ink disabled:opacity-60 text-white font-bold px-5 py-2.5 rounded-xl"
+          className="ml-auto bg-ink hover:bg-ink disabled:opacity-60 text-paper font-bold px-5 py-2.5 rounded-xl"
         >
           {saving ? 'Saving…' : 'Save bank details'}
         </button>

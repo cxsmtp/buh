@@ -157,7 +157,7 @@ export function AssistantSettingsCard({ value, sizes, onSave, auto }: { value: A
       </section>
 
       <div className="flex flex-wrap items-center gap-3">
-        <button type="button" onClick={() => void save()} disabled={saving} className="px-4 py-2 rounded-xl bg-ink text-white text-xs font-bold flex items-center gap-1.5 disabled:opacity-60">
+        <button type="button" onClick={() => void save()} disabled={saving} className="px-4 py-2 rounded-xl bg-ink text-paper text-xs font-bold flex items-center gap-1.5 disabled:opacity-60">
           {saving && <Loader2 className="w-3.5 h-3.5 animate-spin" />} Save chat assistant
         </button>
         {auto && autosave.bar}

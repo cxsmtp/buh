@@ -183,7 +183,7 @@ export const AdminSmsTab: React.FC<AdminSmsTabProps> = ({
           <button
             type="button"
             onClick={handleSave}
-            className="flex items-center gap-1.5 px-4 py-2 text-xs font-bold text-white bg-ink hover:bg-ink rounded-xl transition-colors shadow"
+            className="flex items-center gap-1.5 px-4 py-2 text-xs font-bold text-paper bg-ink hover:bg-ink rounded-xl transition-colors shadow"
           >
             <Check className="w-4 h-4 text-gold-light" />
             <span>Save Gateway Credentials</span>
@@ -217,7 +217,7 @@ export const AdminSmsTab: React.FC<AdminSmsTabProps> = ({
       }`}>
         <div className="flex items-center gap-3">
           <div className={`w-10 h-10 rounded-xl flex items-center justify-center shrink-0 ${
-            isConfigured ? 'bg-success text-white' : 'bg-gold text-ink'
+            isConfigured ? 'bg-success text-paper' : 'bg-gold text-ink'
           }`}>
             <Server className="w-5 h-5" />
           </div>
@@ -271,7 +271,7 @@ export const AdminSmsTab: React.FC<AdminSmsTabProps> = ({
                 onClick={() => setProvider(p.id as SmsProvider)}
                 className={`p-2.5 rounded-xl border text-center transition-all ${
                   provider === p.id
-                    ? 'border-ink bg-ink text-white shadow-xs font-bold'
+                    ? 'border-ink bg-ink text-paper shadow-xs font-bold'
                     : 'border-line bg-surface text-ink-soft hover:border-line-strong'
                 }`}
               >
@@ -497,7 +497,7 @@ export const AdminSmsTab: React.FC<AdminSmsTabProps> = ({
           <button
             type="button"
             onClick={handleSave}
-            className="w-full py-3 bg-ink hover:bg-ink text-white font-bold text-xs rounded-xl shadow-md flex items-center justify-center gap-2 transition-all"
+            className="w-full py-3 bg-ink hover:bg-ink text-paper font-bold text-xs rounded-xl shadow-md flex items-center justify-center gap-2 transition-all"
           >
             <Check className="w-4 h-4 text-gold-light" />
             <span>Save SMS Gateway Configuration</span>
@@ -543,7 +543,7 @@ export const AdminSmsTab: React.FC<AdminSmsTabProps> = ({
                   type="button"
                   disabled={isSendingTest}
                   onClick={handleSendTestSms}
-                  className="px-4 py-2.5 bg-success hover:bg-success active:scale-95 text-white font-bold text-xs rounded-xl shadow flex items-center gap-1.5 transition-all disabled:opacity-50 shrink-0"
+                  className="px-4 py-2.5 bg-success hover:bg-success active:scale-95 text-paper font-bold text-xs rounded-xl shadow flex items-center gap-1.5 transition-all disabled:opacity-50 shrink-0"
                 >
                   {isSendingTest ? (
                     <RefreshCw className="w-3.5 h-3.5 animate-spin" />

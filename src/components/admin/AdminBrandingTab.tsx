@@ -163,7 +163,7 @@ export const AdminBrandingTab: React.FC<AdminBrandingTabProps> = ({
           <button
             type="button"
             onClick={handleSave}
-            className="flex items-center gap-1.5 px-4 py-2 text-xs font-bold text-white bg-ink hover:bg-ink rounded-xl transition-colors shadow"
+            className="flex items-center gap-1.5 px-4 py-2 text-xs font-bold text-paper bg-ink hover:bg-ink rounded-xl transition-colors shadow"
           >
             <Check className="w-4 h-4 text-gold-light" />
             <span>Save All Changes</span>
@@ -185,7 +185,7 @@ export const AdminBrandingTab: React.FC<AdminBrandingTabProps> = ({
       )}
 
       {/* LIVE STOREFRONT HEADER PREVIEW */}
-      <div className="bg-ink text-white rounded-3xl p-4 sm:p-5 shadow-lg border border-ink space-y-3">
+      <div className="bg-ink text-paper rounded-3xl p-4 sm:p-5 shadow-lg border border-ink space-y-3">
         <div className="flex items-center justify-between border-b border-ink pb-2">
           <span className="text-xs font-bold text-gold-light uppercase tracking-wider flex items-center gap-1.5">
             <Eye className="w-3.5 h-3.5" />
@@ -258,7 +258,7 @@ export const AdminBrandingTab: React.FC<AdminBrandingTabProps> = ({
                 onClick={() => setLogoType('text')}
                 className={`p-3 rounded-2xl border text-left transition-all flex items-center gap-2.5 ${
                   logoType === 'text'
-                    ? 'border-ink bg-ink text-white shadow-xs'
+                    ? 'border-ink bg-ink text-paper shadow-xs'
                     : 'border-line bg-surface text-ink-soft hover:border-line-strong'
                 }`}
               >
@@ -276,7 +276,7 @@ export const AdminBrandingTab: React.FC<AdminBrandingTabProps> = ({
                 onClick={() => setLogoType('image')}
                 className={`p-3 rounded-2xl border text-left transition-all flex items-center gap-2.5 ${
                   logoType === 'image'
-                    ? 'border-ink bg-ink text-white shadow-xs'
+                    ? 'border-ink bg-ink text-paper shadow-xs'
                     : 'border-line bg-surface text-ink-soft hover:border-line-strong'
                 }`}
               >
@@ -407,7 +407,7 @@ export const AdminBrandingTab: React.FC<AdminBrandingTabProps> = ({
                     onClick={() => setAccentColor(c.hex)}
                     className={`flex items-center gap-1.5 px-2.5 py-1.5 rounded-xl border text-[11px] font-semibold transition-all ${
                       accentColor === c.hex
-                        ? 'border-ink bg-ink text-white shadow-xs'
+                        ? 'border-ink bg-ink text-paper shadow-xs'
                         : 'border-line bg-ivory text-ink-soft hover:border-line-strong'
                     }`}
                   >
@@ -435,7 +435,7 @@ export const AdminBrandingTab: React.FC<AdminBrandingTabProps> = ({
           <button
             type="button"
             onClick={handleSave}
-            className="w-full py-3 bg-ink hover:bg-ink-2 text-white font-semibold text-xs rounded-xl flex items-center justify-center gap-2 transition-colors"
+            className="w-full py-3 bg-ink hover:bg-ink-2 text-paper font-semibold text-xs rounded-xl flex items-center justify-center gap-2 transition-colors"
           >
             <Check className="w-4 h-4 text-gold-light" />
             <span>Save branding</span>

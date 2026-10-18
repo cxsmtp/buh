@@ -36,7 +36,7 @@ export const ShippingLabelModal: React.FC<ShippingLabelModalProps> = ({ order, o
           <div className="flex items-center gap-2 shrink-0">
             <button
               onClick={handlePrint}
-              className="flex items-center gap-1.5 bg-ink hover:bg-ink text-white font-semibold text-xs px-3.5 py-2 rounded-xl shadow transition-all"
+              className="flex items-center gap-1.5 bg-ink hover:bg-ink text-paper font-semibold text-xs px-3.5 py-2 rounded-xl shadow transition-all"
             >
               <Printer className="w-4 h-4 text-gold-light" />
               <span>Print Label</span>
@@ -54,7 +54,7 @@ export const ShippingLabelModal: React.FC<ShippingLabelModalProps> = ({ order, o
         {/* PRINTABLE AWB CONTAINER */}
         <div
           id="printable-shipping-label"
-          className="border-2 border-black p-4 bg-surface text-black font-sans text-xs space-y-3 rounded-xl shadow-sm"
+          className="look-paper border-2 border-black p-4 bg-surface text-black font-sans text-xs space-y-3 rounded-xl shadow-sm"
         >
           {/* Top Carrier Header */}
           <div className="flex items-center justify-between border-b-2 border-black pb-2.5">

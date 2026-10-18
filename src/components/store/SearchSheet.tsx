@@ -86,7 +86,7 @@ export function SearchSheet({ products, categories, initial, onSubmit, onOpenPro
         )}
         {results.length > 0 && (
           <div className="p-3">
-            <button type="button" onClick={() => onSubmit(q.trim())} className="w-full rounded-full bg-ink text-white text-sm font-semibold py-3">
+            <button type="button" onClick={() => onSubmit(q.trim())} className="w-full rounded-full bg-ink text-paper text-sm font-semibold py-3">
               See all {results.length} in the shop
             </button>
           </div>

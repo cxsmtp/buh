@@ -246,8 +246,8 @@ export const PhoneVerification: React.FC<PhoneVerificationProps> = ({
   // ── Verified ───────────────────────────────────────────────────────────
   if (verified && info.kind === 'uae') {
     return (
-      <div className="sm:col-span-2 rounded-2xl border border-success-line bg-gradient-to-br from-success-soft to-white p-3.5 flex items-center gap-3 animate-in fade-in-50">
-        <div className="w-10 h-10 rounded-xl bg-success text-white flex items-center justify-center shrink-0">
+      <div className="sm:col-span-2 rounded-2xl border border-success-line bg-gradient-to-br from-success-soft to-paper p-3.5 flex items-center gap-3 animate-in fade-in-50">
+        <div className="w-10 h-10 rounded-xl bg-success text-paper flex items-center justify-center shrink-0">
           <BadgeCheck className="w-5 h-5" />
         </div>
         <div className="flex-1 min-w-0">
@@ -273,7 +273,7 @@ export const PhoneVerification: React.FC<PhoneVerificationProps> = ({
   return (
     <div className="sm:col-span-2 rounded-2xl border border-line bg-surface overflow-hidden">
       {/* Title strip */}
-      <div className="flex items-center gap-2.5 px-3.5 py-2.5 bg-gradient-to-r from-ink to-ink-2 text-white">
+      <div className="flex items-center gap-2.5 px-3.5 py-2.5 bg-gradient-to-r from-ink to-ink-2 text-paper">
         <ShieldCheck className="w-4 h-4 text-gold" />
         <div className="flex-1">
           <p className="text-[11px] font-semibold tracking-wide">{whatsapp ? 'Your UAE mobile number' : codeOptional ? 'Your UAE mobile, for the courier' : 'Verify your UAE mobile to place your order'}</p>
@@ -330,7 +330,7 @@ export const PhoneVerification: React.FC<PhoneVerificationProps> = ({
                 type="button"
                 onClick={sendCode}
                 disabled={sending || info.kind !== 'uae' || wait > 0}
-                className="px-4 py-2.5 bg-ink hover:bg-ink disabled:bg-line-strong disabled:cursor-not-allowed text-white rounded-xl text-[11px] font-semibold shrink-0 transition-colors flex items-center justify-center gap-1.5"
+                className="px-4 py-2.5 bg-ink hover:bg-ink disabled:bg-line-strong disabled:cursor-not-allowed text-paper rounded-xl text-[11px] font-semibold shrink-0 transition-colors flex items-center justify-center gap-1.5"
               >
                 {sending ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <MessageSquareText className="w-3.5 h-3.5 text-gold-light" />}
                 {sending ? 'Sending…' : wait > 0 ? `Wait ${wait}s` : 'Send code'}
@@ -361,7 +361,7 @@ export const PhoneVerification: React.FC<PhoneVerificationProps> = ({
                 </div>
                 <a
                   href={mailto}
-                  className="flex items-center justify-center gap-2 w-full bg-ink hover:bg-ink text-white font-semibold text-[11px] py-2.5 rounded-xl transition-colors"
+                  className="flex items-center justify-center gap-2 w-full bg-ink hover:bg-ink text-paper font-semibold text-[11px] py-2.5 rounded-xl transition-colors"
                 >
                   <Mail className="w-3.5 h-3.5 text-gold-light" />
                   Email {supportEmail}
