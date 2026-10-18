@@ -96,7 +96,7 @@ export function StoreSettingsCard({ value, onSave, auto }: { value: StoreSetting
           <input type="checkbox" className="mt-0.5" checked={d.confirmOrdersOnWhatsApp} onChange={(e) => set('confirmOrdersOnWhatsApp', e.target.checked)} />
           <span>
             Ask customers to confirm their order on WhatsApp {!d.whatsappNumber && <span className="text-ink-muted">(add the number above)</span>}
-            <span className="block text-ink-muted">After checkout they tap one button and send you &ldquo;Confirm my order BUH-… · code 1234&rdquo; from their own WhatsApp. In Orders, check the sender is the number on the order and tap &ldquo;Confirmed on WhatsApp&rdquo;.</span>
+            <span className="block text-ink-muted">After checkout they tap one button and send you &ldquo;Confirm my order BUH-… · code 1234&rdquo; from their own WhatsApp. In Orders, check the sender is the number on the order and tap &ldquo;Confirmed on WhatsApp&rdquo;. With Settings → Phone check &ldquo;WhatsApp (free)&rdquo; every order is asked, whatever this says.</span>
           </span>
         </label>
         <label className="flex items-start gap-2 pl-5">

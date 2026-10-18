@@ -74,11 +74,10 @@ The Admin Hub has no button or address on the shop: addresses like `/admin` are 
 ## 2. Go-live checklist (in the Admin Hub)
 
 - [ ] **Settings → Passkeys & recovery codes:** add a passkey on your phone, and create recovery codes (Download or Print them, keep them safe). They get you back in if you forget the password, even without email.
-- [ ] **Settings → Phone verification:** enter your Twilio or Infobip keys, **Send test** to your own mobile, then **Save**.
-  - Or choose **Firebase Phone Auth** (Blaze plan, billed per SMS; see docs/user-guide.md) and test with a checkout on your phone.
-  - Checkout needs a working SMS gateway: customers cannot order without verifying their number.
-  - At start-up, the log warns if none is configured.
-- [ ] **Settings → Store & contact:** your WhatsApp number, support email and Instagram account.
+- [ ] **Settings → Store & contact:** your WhatsApp number (needed: customers confirm their orders by WhatsApp), support email and Instagram account.
+- [ ] **Settings → Phone check:** **WhatsApp (free)** is already chosen: no SMS gateway or subscription is needed. Check the hours after which unconfirmed orders cancel themselves (24 by default).
+  - At start-up, the log warns if no WhatsApp number is set (orders then come in marked "call the customer").
+  - Only if you want SMS codes instead: choose **SMS code**, enter your Twilio or Infobip keys (or Firebase Phone Auth, billed per SMS; see docs/user-guide.md), **Send test** to your own mobile, then **Save**.
 - [ ] **Settings → Branding & bank → Bank transfer details:** enter the bank name, account name and real IBAN, and check every digit. Bank transfer is hidden at checkout until they are saved, and the account is never shown on the website: each customer who chooses it gets it privately (email, WhatsApp, their order's private page).
 - [ ] **Settings → Couriers:**
   - enter the keys;
@@ -252,6 +251,8 @@ Without automatic updates, use `docker compose run --rm updater rollback` the sa
 
 **Bank transfer and versions before BUH-02.09.00.** Rolling back below BUH-02.09.00 republishes the bank account through the old public settings (the IBAN shows at checkout again): clear the IBAN in Settings → Branding & bank first if it must stay private.
 
+**Measurements, colours and versions before BUH-02.10.00.** A product edited in an older version loses its **Fitted sheet** tick and **Other pieces** (that version doesn't know them): after updating again, open the product and tick or type them again. During the update minute (both versions running), a product with no colours ordered through the older one answers 409 "that colour is no longer offered"; the customer simply tries again. The older version never auto-cancels orders waiting for WhatsApp; the newer one does once it is back.
+
 Without the updater at all: start the copy that is not running from the last good image, wait until `docker compose ps` shows it `healthy`, then stop the other one (here green was running):
 
 ```bash
@@ -354,7 +355,7 @@ It changes nothing, and says why, when:
   ```bat
   podman exec beautifuluaehome-updater update-now
   ```
-- Roll back to the version before (it was kept as the stopped container `beautifuluaehome-previous`); below BUH-02.09.00, switch card payments off first (Settings → Payments), and know that the bank account is shown publicly again (clear the IBAN first to keep it private):
+- Roll back to the version before (it was kept as the stopped container `beautifuluaehome-previous`); below BUH-02.09.00, switch card payments off first (Settings → Payments), and know that the bank account is shown publicly again (clear the IBAN first to keep it private); below BUH-02.10.00, a product edited there loses its Fitted sheet tick and Other pieces (re-tick them after the update), and during the update minute a product with no colours ordered through the older version gets 409 (the customer tries again):
   ```bat
   podman exec beautifuluaehome-updater rollback
   ```

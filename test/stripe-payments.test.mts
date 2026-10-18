@@ -579,6 +579,12 @@ test('unpaid card orders hold stock for 10 minutes; unverified ones: 2 of each i
 test('with an SMS gateway on, a card order proves its phone with a code like any order (checkout is told)', async () => {
   process.env.SMS_WEBHOOK_URL = 'https://sms.example.com/send';
   try {
+    // Settings → Phone check "WhatsApp (free)" (the default): as if there were no gateway.
+    assert.equal(settings.phoneCodesOn(), false, 'WhatsApp mode sends no codes');
+    const free = await placeCard();
+    assert.equal(free.res.status, 201, 'WhatsApp mode: a card order needs no code');
+    await payments.abandonCardPayment(free.data.order!.id, free.data.payment!.clientSecret);
+    await settings.updateSettings('phoneCheck', { mode: 'sms_code' });
     assert.equal(settings.phoneCodesOn(), true);
     const pub = await (await publicRoute.GET()).json();
     assert.deepEqual(pub.payments, { card: true, publishableKey: TEST_KEYS.publishable, phoneCheck: true });
@@ -594,6 +600,7 @@ test('with an SMS gateway on, a card order proves its phone with a code like any
   }
   assert.equal(settings.phoneCodesOn(), false);
   assert.equal((await placeCard()).res.status, 201, 'no gateway: as before, no code needed');
+  await settings.updateSettings('phoneCheck', { mode: 'whatsapp' });
 });
 
 test('a partial refund in Stripe’s dashboard, then Cancel & refund: only what is left, once; a full dashboard refund cancels the order once', async () => {
@@ -762,6 +769,7 @@ test('migration 9 only adds (columns, indexes, a table); backups carry card paym
   assert.equal(run(`const m = await import('@/lib/server/db'); (m.getDb ?? m.default.getDb)();`).status, 0);
   const db = new Database(path.join(old, 'shop.db'));
   // Migration 10's columns go too (it runs again after 9).
+  db.exec('DROP INDEX orders_unconfirmed_due; DROP INDEX orders_unopened_due; ALTER TABLE orders DROP COLUMN phone_check_method; ALTER TABLE orders DROP COLUMN wa_cancel_at; ALTER TABLE orders DROP COLUMN wa_unopened_cancel_at;'); // migration 11
   db.exec(`DROP INDEX orders_by_pay_token; DROP INDEX orders_transfer_to_check; ${['pay_nonce', 'pay_token_hash', 'pay_expires_at', 'bank_state', 'transfer_uploads', 'transfer_uploaded_at', 'bank_emailed_at', 'bank_checked_at', 'bank_checked_by'].map((c) => `ALTER TABLE orders DROP COLUMN ${c};`).join(' ')}`);
   db.exec(`DROP INDEX orders_by_payment_ref; DROP INDEX orders_card_open; DROP TABLE stripe_events; ${['card_state', 'payment_ref', 'card_secret_hash', 'paid_fils', 'paid_at', 'card_label', 'refund_ref', 'refunded_at', 'card_livemode', 'card_ip', 'refunded_fils', 'refund_outside_at', 'needs_attention'].map((c) => `ALTER TABLE orders DROP COLUMN ${c};`).join(' ')}`);
   db.exec("INSERT INTO orders (id, created_at, updated_at, phone, status, payment_method, payment_status, total_fils, data) VALUES ('BUH-OLD-9', '2026-01-01', '2026-01-01', '+971501234567', 'pending_confirmation', 'cod', 'cod_pending', 100, '{\"id\":\"BUH-OLD-9\"}')");
@@ -769,7 +777,7 @@ test('migration 9 only adds (columns, indexes, a table); backups carry card paym
   db.close();
   const up = run(`const m = await import('@/lib/server/db'); const db = (m.getDb ?? m.default.getDb)(); console.log(JSON.stringify({ v: db.pragma('user_version', { simple: true }), row: db.prepare("SELECT status, data, card_state, payment_ref FROM orders WHERE id = 'BUH-OLD-9'").get() }));`);
   assert.equal(up.status, 0, up.stderr);
-  assert.deepEqual(JSON.parse(up.stdout.trim().split('\n').pop()!), { v: 10, row: { status: 'pending_confirmation', data: '{"id":"BUH-OLD-9"}', card_state: 'none', payment_ref: null } });
+  assert.deepEqual(JSON.parse(up.stdout.trim().split('\n').pop()!), { v: 11, row: { status: 'pending_confirmation', data: '{"id":"BUH-OLD-9"}', card_state: 'none', payment_ref: null } });
 });
 
 test('wallet addresses: emirates by any name, areas from the shop’s list, nothing guessed', () => {

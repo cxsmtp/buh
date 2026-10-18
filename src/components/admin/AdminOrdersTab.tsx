@@ -79,10 +79,17 @@ export const AdminOrdersTab: React.FC<AdminOrdersTabProps> = ({
 }) => {
   const [busyOrderId, setBusyOrderId] = useState('');
 
-  const patchOrder = async (order: Order, changes: Partial<Pick<Order, 'status' | 'paymentStatus' | 'adminNotes'>> & { clearAttention?: true }, confirmText?: string) => {
+  const patchOrder = async (order: Order, changes: Partial<Pick<Order, 'status' | 'paymentStatus' | 'adminNotes'>> & { clearAttention?: true; shipUnconfirmed?: true }, confirmText?: string) => {
     if (confirmText && !window.confirm(confirmText)) return;
     setBusyOrderId(order.id);
-    const { ok, data } = await sendJson<{ order?: Order; message?: string }>('PATCH', `/api/admin/orders/${encodeURIComponent(order.id)}`, changes);
+    let { ok, data } = await sendJson<{ order?: Order; message?: string; code?: string }>('PATCH', `/api/admin/orders/${encodeURIComponent(order.id)}`, changes);
+    // Not confirmed on WhatsApp yet: only on the owner's explicit "ship anyway" (the server records it).
+    if (!ok && data.code === 'whatsapp_unconfirmed' && window.confirm(data.message || "This customer hasn't confirmed on WhatsApp yet — ship anyway?")) {
+      ({ ok, data } = await sendJson<{ order?: Order; message?: string; code?: string }>('PATCH', `/api/admin/orders/${encodeURIComponent(order.id)}`, { ...changes, shipUnconfirmed: true }));
+    } else if (!ok && data.code === 'whatsapp_unconfirmed') {
+      setBusyOrderId('');
+      return;
+    }
     setBusyOrderId('');
     if (ok && data.order) onOrderChanged(data.order);
     else alert(data.message || 'The order could not be updated.');
@@ -204,8 +211,18 @@ export const AdminOrdersTab: React.FC<AdminOrdersTabProps> = ({
       pieces,
       adminNotes,
     };
-    type DispatchReply = { success?: boolean; message?: string; awbNumber?: string; isSimulated?: boolean; needsConfirm?: boolean; alreadyBooked?: boolean; order?: Order };
+    type DispatchReply = { success?: boolean; message?: string; code?: string; awbNumber?: string; isSimulated?: boolean; needsConfirm?: boolean; alreadyBooked?: boolean; order?: Order };
     let { ok, status, data } = await postJson<DispatchReply>('/api/courier/dispatch', request);
+    // The customer hasn't confirmed on WhatsApp (cash on delivery, no code): the owner may have
+    // confirmed by phone, so ask; "ship anyway" is recorded in the order's history and the audit log.
+    if (status === 409 && data.code === 'whatsapp_unconfirmed') {
+      if (!window.confirm(`${data.message || "This customer hasn't confirmed on WhatsApp yet — ship anyway?"}\n\nTip: if you confirmed by phone, tap “Confirmed by phone call” on the order instead.`)) {
+        setIsDispatching(false);
+        return;
+      }
+      Object.assign(request, { shipUnconfirmed: true });
+      ({ ok, status, data } = await postJson<DispatchReply>('/api/courier/dispatch', request));
+    }
     // The last attempt got no answer from the carrier: only re-book once the owner has checked the portal.
     if (status === 409 && data.needsConfirm) {
       if (!window.confirm(`${data.message}\n\nBook again now?`)) {
@@ -352,7 +369,7 @@ export const AdminOrdersTab: React.FC<AdminOrdersTabProps> = ({
                 </div>
 
                 {/* Confirm on WhatsApp, and the bank transfer: first, so the owner sees them on the phone */}
-                <OrderWhatsAppCheck order={order} onOrderChanged={whatsappChecked} />
+                <OrderWhatsAppCheck order={order} onOrderChanged={whatsappChecked} shopName={shopName} />
                 {bank && <OrderBankTransfer order={order} bank={bank} shopName={shopName} onOrderChanged={whatsappChecked} />}
 
                 {/* Items & Delivery Info */}
@@ -409,7 +426,7 @@ export const AdminOrdersTab: React.FC<AdminOrdersTabProps> = ({
                 </div>
 
                 {/* Something the owner must look at (a refund that failed, a booking after a cancel…) */}
-                {order.attention && (
+                {order.attention && order.attention.kind !== 'call_customer' && (
                   <div data-testid="order-attention" role="alert" className="flex flex-wrap items-start gap-2 rounded-xl border border-danger-line bg-danger-soft p-2.5 text-[11px] text-danger">
                     <AlertCircle className="w-4 h-4 shrink-0" aria-hidden="true" />
                     <span className="flex-1 min-w-0 font-semibold break-anywhere">{order.attention.text}</span>

@@ -61,6 +61,7 @@ export function cleanDraft(input: unknown): Record<string, unknown> {
           pillowcases: s(o.pillowcases, 80) ?? '',
           duvetCover: s(o.duvetCover, 80),
           cushionCovers: s(o.cushionCovers, 80),
+          otherPieces: s(o.otherPieces, 80),
           piecesIncluded: n(o.piecesIncluded, 1, 20) ?? 1,
           priceDelta: n(o.priceDelta, -10_000, 10_000) ?? 0,
         };
@@ -98,6 +99,7 @@ export function cleanDraft(input: unknown): Record<string, unknown> {
     stock,
     defaultProfileId: s(d.defaultProfileId, 30),
     active: b(d.active),
+    fitted: b(d.fitted),
     isFeatured: b(d.isFeatured),
     isNewArrival: b(d.isNewArrival),
     // What the stock was when editing started (for the conflict check on publish).

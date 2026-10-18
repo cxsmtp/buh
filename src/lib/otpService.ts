@@ -8,6 +8,7 @@ import { audit } from '@/lib/server/audit';
 import { getDb } from '@/lib/server/db';
 import { mac } from '@/lib/server/secrets';
 import { contactEmail as supportEmail } from '@/lib/server/settings';
+import { normalizePhoneNumber, toAsciiDigits, UAE_MOBILE } from '@/lib/phoneNumber';
 
 /**
  * Phone verification codes.
@@ -79,33 +80,9 @@ function codeHash(phone: string, code: string): string {
  *  "050 123 4567" -> "+971501234567"
  *  "+971 50 123 4567" -> "+971501234567"
  *  "501234567" -> "+971501234567"
+ * One set of rules for the server and the Admin Hub (src/lib/phoneNumber.ts).
  */
-/** Arabic-Indic (٠-٩) and Persian (۰-۹) digits to 0-9. */
-function toAsciiDigits(s: string): string {
-  return s.replace(/[\u0660-\u0669\u06F0-\u06F9]/g, (c) => String(c.charCodeAt(0) & 0xf));
-}
-
-export function normalizePhoneNumber(rawPhone: string): string {
-  let cleaned = toAsciiDigits(rawPhone).replace(/[^\d+]/g, '');
-
-  if (cleaned.startsWith('00')) {
-    cleaned = '+' + cleaned.slice(2);
-  } else if (cleaned.startsWith('05')) {
-    cleaned = '+971' + cleaned.slice(1);
-  } else if (cleaned.startsWith('5') && cleaned.length === 9) {
-    cleaned = '+971' + cleaned;
-  } else if (!cleaned.startsWith('+')) {
-    cleaned = '+' + cleaned;
-  }
-
-  // "+971 050…" (international prefix plus the domestic trunk 0) is the same
-  // number as "+971 50…": fold it, so one number has one rate-limit key.
-  return cleaned.replace(/^\+9710/, '+971');
-}
-
-// UAE mobile networks: 50, 52, 54, 55, 56, 58. Matches the checkout form.
-const UAE_MOBILE = /^\+9715[024568]\d{7}$/;
-
+export { normalizePhoneNumber };
 
 function allowedPrefixes(): string[] {
   return (process.env.OTP_ALLOWED_PREFIXES || '+971')

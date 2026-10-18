@@ -95,6 +95,31 @@ export async function startServer(env: Record<string, string> = {}, opts: { port
   throw new Error(`server did not start:\n${log}`);
 }
 
+/**
+ * Settings → Phone check for a started server, written straight into its database (as a save in
+ * the hub would), then waited for until the shop serves it. 'sms_code' is the SMS-code checkout
+ * (the default is 'whatsapp').
+ */
+export async function setPhoneCheck(server: Pick<RunningServer, 'base' | 'dataDir'>, mode: 'whatsapp' | 'sms_code', unconfirmedCancelHours = 24): Promise<void> {
+  const Database = (await import('better-sqlite3')).default;
+  const db = new Database(path.join(server.dataDir, 'shop.db'));
+  try {
+    db.pragma('busy_timeout = 5000');
+    const at = new Date().toISOString();
+    db.prepare('INSERT INTO settings (key, data, updated_at) VALUES (?, ?, ?) ON CONFLICT(key) DO UPDATE SET data = excluded.data, updated_at = excluded.updated_at').run('phoneCheck', JSON.stringify({ mode, unconfirmedCancelHours }), at);
+    db.prepare("INSERT INTO kv (key, data, updated_at) VALUES ('v:settings', '1', ?) ON CONFLICT(key) DO UPDATE SET data = CAST(CAST(data AS INTEGER) + 1 AS TEXT), updated_at = excluded.updated_at").run(at);
+  } finally {
+    db.close();
+  }
+  for (let i = 0; i < 60; i++) {
+    const res = await rawFetch(`${server.base}/api/settings/public`);
+    const body = (await res.json()) as { phoneVerification?: { check?: string } };
+    if (body.phoneVerification?.check === mode) return;
+    await new Promise((r) => setTimeout(r, 200));
+  }
+  throw new Error(`the shop did not switch Phone check to ${mode}`);
+}
+
 export function freePort(): Promise<number> {
   return new Promise((resolve, reject) => {
     const probe = net.createServer();

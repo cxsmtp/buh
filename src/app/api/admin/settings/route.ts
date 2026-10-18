@@ -1,6 +1,6 @@
 import { requireAdmin } from '@/lib/server/guard';
 import { handleRouteError, json } from '@/lib/server/http';
-import { adminView } from '@/lib/server/settings';
+import { adminView, behindProxy, phoneCheckNoticeDue } from '@/lib/server/settings';
 
 /** All settings for the admin hub; secrets come back blank, with a "saved" flag. */
 export async function GET(req: Request) {
@@ -18,6 +18,9 @@ export async function GET(req: Request) {
       assistant: adminView('assistant'),
       delivery: adminView('delivery'),
       payments: adminView('payments'),
+      phoneCheck: adminView('phoneCheck'),
+      // Settings → Phone check's warning (no TRUST_PROXY: stricter limits) and the hub's one-time notice.
+      phoneCheckInfo: { behindProxy: behindProxy(), whatsappNotice: phoneCheckNoticeDue() },
     });
   } catch (err) {
     return handleRouteError(err, 'admin/settings');

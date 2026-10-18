@@ -281,6 +281,11 @@ export const AdminInventoryTab: React.FC<AdminInventoryTabProps> = ({ products, 
                     {p.active === false && !p.archived && <strong className="ml-1 text-ink">· hidden</strong>}
                     {!p.archived && isSoldOut(p) && <strong className="ml-1 text-danger">· sold out</strong>}
                   </span>
+                  {p.measurementsReview && !p.archived && (
+                    <span className="mt-1 inline-block px-1.5 py-0.5 rounded-md border border-warning-line bg-warning-soft text-[11px] font-semibold text-ink" title="Measurements carried over from the standard sizes: open Edit → Sizes, keep only what this set includes, and save.">
+                      Check measurements
+                    </span>
+                  )}
                   {!p.archived && (
                     <span className="mt-1 flex flex-wrap gap-1">
                       {p.profiles.map((s) => {

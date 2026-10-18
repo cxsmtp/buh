@@ -13,7 +13,7 @@
  */
 import assert from 'node:assert/strict';
 import { after, before, test } from 'node:test';
-import { hasBuild, startServer, type RunningServer } from './server.mjs';
+import { hasBuild, setPhoneCheck, startServer, type RunningServer } from './server.mjs';
 import { openAdminSection } from './helpers.mjs';
 
 type PW = typeof import('playwright');
@@ -28,6 +28,8 @@ let cookie = '';
 before(async () => {
   if (skip) return;
   server = await startServer();
+  // These screens go through the SMS-code checkout (Settings → Phone check "SMS code"; the default, WhatsApp, is test/phone-check-e2e.test.mts).
+  await setPhoneCheck(server, 'sms_code');
   browser = await pw!.chromium.launch();
   const h = { 'content-type': 'application/json', origin: server.base };
   await fetch(`${server.base}/api/admin/login`, { method: 'POST', headers: h, body: JSON.stringify({ email: 'x@y.z', password: 'x' }) });

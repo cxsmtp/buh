@@ -8,6 +8,7 @@ import { shrinkPhoto } from '@/lib/shrinkPhoto';
 import { shortSizeName } from '@/lib/client/stock';
 import { AI_STAGING_PRESETS, transformProductImage } from '@/lib/aiImageTransform';
 import { Sheet } from '@/components/common/Sheet';
+import { measurementRows, standardMeasurements } from '@/lib/measurements';
 
 /**
  * Add or edit a product in four steps, made for a phone:
@@ -16,7 +17,9 @@ import { Sheet } from '@/components/common/Sheet';
  *      image checks straight away. Drag or use the arrows to order them; the first
  *      is the cover.
  *   2. Name, category and price (more details folded away).
- *   3. Sizes from the presets in Settings → Catalogue, each with its pieces in stock.
+ *   3. Sizes from the presets in Settings → Catalogue, each with its pieces in stock and the
+ *      measurements of what this set includes (empty until filled in, or "Use standard sizes";
+ *      the shop shows only what is filled in), and whether the sheet is fitted or flat.
  *   4. Publish (or keep hidden).
  * The draft saves itself on the server as the owner goes (like the settings), so
  * nothing is lost to a phone call; it can be finished on another device. Stock
@@ -40,8 +43,11 @@ interface Draft {
   weave: Product['weave'];
   price: string;
   compareAtPrice: string;
+  /** Optional: none means the shop shows no colour choice. */
   colors: Array<{ name: string; hex: string }>;
   photos: string[]; // uploaded URLs; first = cover
+  /** The set's sheet has elastic corners (else it is a flat sheet). */
+  fitted: boolean;
   sizes: BedProfileMeasurement[];
   stock: Record<string, number>;
   defaultProfileId: string;
@@ -50,6 +56,23 @@ interface Draft {
   isNewArrival: boolean;
   /** Stock when editing began: sent as "expected" on save. */
   seenStock: Record<string, number>;
+  /** What the BUH-02.10 update took off the shop (a standard duvet cover), per size: offered back in one tap. */
+  legacy: NonNullable<Product['legacyMeasurements']>;
+}
+
+/** A size added from a preset: its name, mattress and price, but none of the pieces (those are this product's own). */
+function sizeFromPreset(preset: BedProfileMeasurement): BedProfileMeasurement {
+  return {
+    id: preset.id,
+    name: preset.name,
+    badge: preset.badge,
+    mattressSize: preset.mattressSize,
+    fittedSheet: '',
+    flatSheet: '',
+    pillowcases: '',
+    piecesIncluded: preset.piecesIncluded,
+    priceDelta: preset.priceDelta,
+  };
 }
 
 function draftFrom(product: Product | null, catalog: CatalogSettings): Draft {
@@ -67,15 +90,17 @@ function draftFrom(product: Product | null, catalog: CatalogSettings): Draft {
       weave: 'Percale',
       price: '',
       compareAtPrice: '',
-      colors: [{ name: 'As pictured', hex: '#ffffff' }],
+      colors: [],
       photos: [],
-      sizes: king ? [king] : [],
+      fitted: false,
+      sizes: king ? [sizeFromPreset(king)] : [],
       stock: king ? { [king.id]: 1 } : {},
       defaultProfileId: king?.id ?? '',
       active: true,
       isFeatured: false,
       isNewArrival: true,
       seenStock: {},
+      legacy: {},
     };
   }
   // The shop shows the styled photo first when there is one, so it stays the cover here.
@@ -95,8 +120,9 @@ function draftFrom(product: Product | null, catalog: CatalogSettings): Draft {
     weave: product.weave,
     price: String(product.price),
     compareAtPrice: product.compareAtPrice ? String(product.compareAtPrice) : '',
-    colors: product.colors.length ? product.colors : [{ name: 'As pictured', hex: '#ffffff' }],
+    colors: product.colors,
     photos,
+    fitted: product.fitted === true,
     sizes: product.profiles,
     stock: { ...product.stockBySize },
     defaultProfileId: product.defaultProfileId,
@@ -104,6 +130,7 @@ function draftFrom(product: Product | null, catalog: CatalogSettings): Draft {
     isFeatured: product.isFeatured,
     isNewArrival: Boolean(product.isNewArrival),
     seenStock: { ...product.stockBySize },
+    legacy: product.legacyMeasurements ?? {},
   };
 }
 
@@ -149,6 +176,19 @@ export function ProductEditor({
   const set = <K extends keyof Draft>(key: K, value: Draft[K]) => setDraft((d) => ({ ...d, [key]: value }));
   const unusedPresets = useMemo(() => catalog.sizes.filter((s) => !draft.sizes.some((x) => x.id === s.id)), [catalog.sizes, draft.sizes]);
   const totalStock = draft.sizes.reduce((n, s) => n + (draft.stock[s.id] ?? 0), 0);
+  // Kept aside by the update (a standard duvet cover on a set that isn't a duvet product), for sizes still offered.
+  const legacyShown = Object.entries(draft.legacy ?? {}).filter(([size, f]) => f.duvetCover && draft.sizes.some((x) => x.id === size));
+  const restoreLegacy = () =>
+    setDraft((d) => {
+      const legacy = { ...(d.legacy ?? {}) };
+      const sizes = d.sizes.map((x) => {
+        const kept = legacy[x.id];
+        if (!kept) return x;
+        delete legacy[x.id];
+        return { ...x, ...kept };
+      });
+      return { ...d, sizes, legacy };
+    });
 
   // 1. Pick up a saved draft, if there is one.
   useEffect(() => {
@@ -254,7 +294,7 @@ export function ProductEditor({
   const addSize = (id: string) => {
     const preset = catalog.sizes.find((s) => s.id === id);
     if (!preset) return;
-    setDraft((d) => ({ ...d, sizes: [...d.sizes, preset], stock: { ...d.stock, [id]: d.stock[id] ?? 1 }, defaultProfileId: d.defaultProfileId || id }));
+    setDraft((d) => ({ ...d, sizes: [...d.sizes, sizeFromPreset(preset)], stock: { ...d.stock, [id]: d.stock[id] ?? 1 }, defaultProfileId: d.defaultProfileId || id }));
   };
   const removeSize = (id: string) =>
     setDraft((d) => {
@@ -264,6 +304,19 @@ export function ProductEditor({
       return { ...d, sizes, stock, defaultProfileId: d.defaultProfileId === id ? sizes[0]?.id ?? '' : d.defaultProfileId };
     });
   const updateSize = (id: string, patch: Partial<BedProfileMeasurement>) => setDraft((d) => ({ ...d, sizes: d.sizes.map((s) => (s.id === id ? { ...s, ...patch } : s)) }));
+  /** "Use standard sizes": the preset's measurements into the fields still empty (the duvet cover only for a duvet product). */
+  const applyStandard = (id: string) => {
+    const std = standardMeasurements(draft, catalog.sizes.find((x) => x.id === id));
+    setDraft((d) => ({
+      ...d,
+      sizes: d.sizes.map((s) => {
+        if (s.id !== id) return s;
+        const out = { ...s };
+        for (const [k, v] of Object.entries(std) as Array<[keyof typeof std, string]>) if (v && !String(out[k] ?? '').trim()) out[k] = v;
+        return out;
+      }),
+    }));
+  };
   const setQty = (id: string, qty: number) => setDraft((d) => ({ ...d, stock: { ...d.stock, [id]: Math.max(0, Math.min(100_000, Math.round(qty) || 0)) } }));
 
   // ── steps ─────────────────────────────────────────────────────────────────
@@ -314,6 +367,11 @@ export function ProductEditor({
       price: Number(draft.price),
       compareAtPrice: draft.compareAtPrice ? Number(draft.compareAtPrice) : null,
       colors: draft.colors.filter((c) => c.name.trim()),
+      fitted: draft.fitted,
+      // Saved from the editor: the measurements are the owner's own now.
+      measurementsReview: false,
+      // What the update kept aside and the owner didn't put back stays kept (never deleted).
+      legacyMeasurements: Object.keys(draft.legacy ?? {}).length ? draft.legacy : null,
       featuredImage: main,
       galleryImages: gallery,
       aiTransformedImage: null,
@@ -533,7 +591,7 @@ export function ProductEditor({
             </div>
             <details className="rounded-xl border border-line bg-surface px-3 py-1">
               <summary className="min-h-11 flex items-center gap-2 font-semibold cursor-pointer">
-                <ChevronDown className="w-4 h-4" aria-hidden="true" /> More details (SKU, description, fabric, colours)
+                <ChevronDown className="w-4 h-4" aria-hidden="true" /> More details (SKU, description, fabric, colours){draft.colors.length > 0 && ` · ${draft.colors.length} ${draft.colors.length === 1 ? 'colour' : 'colours'}`}
               </summary>
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 pb-3">
                 <div>
@@ -577,12 +635,19 @@ export function ProductEditor({
                   <textarea id="pe-desc" className={`${field} min-h-[90px]`} value={draft.description} maxLength={4000} onChange={(e) => set('description', e.target.value)} />
                 </div>
                 <fieldset className="sm:col-span-2 space-y-2">
-                  <legend className={label}>Colours</legend>
+                  <legend className={label}>Colours (optional)</legend>
+                  <p className="text-xs text-ink-soft">
+                    {draft.colors.length === 0
+                      ? 'None: the shop shows no colour. Add one to name it, or several to let shoppers choose.'
+                      : draft.colors.length === 1
+                        ? 'One colour: the shop shows it as a label.'
+                        : 'Shoppers choose one of these.'}
+                  </p>
                   {draft.colors.map((c, i) => (
                     <div key={i} className="flex items-center gap-2">
                       <input type="color" value={c.hex} onChange={(e) => set('colors', draft.colors.map((x, j) => (j === i ? { ...x, hex: e.target.value } : x)))} className="w-11 h-11 rounded-lg border border-line-strong shrink-0" aria-label={`Colour ${i + 1} swatch`} />
                       <input className={field} value={c.name} maxLength={40} onChange={(e) => set('colors', draft.colors.map((x, j) => (j === i ? { ...x, name: e.target.value } : x)))} aria-label={`Colour ${i + 1} name`} />
-                      <button type="button" onClick={() => set('colors', draft.colors.filter((_, j) => j !== i))} disabled={draft.colors.length === 1} className="min-h-11 min-w-11 flex items-center justify-center text-ink-soft disabled:opacity-30" aria-label={`Remove colour ${i + 1}`}>
+                      <button type="button" onClick={() => set('colors', draft.colors.filter((_, j) => j !== i))} className="min-h-11 min-w-11 flex items-center justify-center text-ink-soft" aria-label={`Remove colour ${i + 1}`}>
                         <Trash2 className="w-4 h-4" aria-hidden="true" />
                       </button>
                     </div>
@@ -600,6 +665,28 @@ export function ProductEditor({
 
         {step === 2 && (
           <section className="space-y-3" aria-label="Sizes and stock">
+            {product?.measurementsReview && (
+              <p className="rounded-xl border border-warning-line bg-warning-soft px-3 py-2 text-xs text-ink" data-testid="measurements-review">
+                <strong>Check measurements.</strong> These sizes were filled in from the standard sizes when they were added. Open each size, keep only what this set includes, and save: the shop shows only what is filled in.
+              </p>
+            )}
+            {legacyShown.length > 0 && (
+              <div className="rounded-xl border border-warning-line bg-warning-soft px-3 py-2 text-xs text-ink space-y-2" data-testid="measurements-legacy">
+                <p>
+                  <strong>Taken off the shop by the update:</strong> {legacyShown.map(([size, f]) => `${shortSizeName(draft.sizes.find((x) => x.id === size)!)} duvet cover ${f.duvetCover}`).join(' · ')}. It was the standard size&apos;s duvet cover, and this set isn&apos;t a duvet product. If the set does include one, put it back.
+                </p>
+                <button type="button" onClick={restoreLegacy} className="min-h-11 px-3 rounded-xl bg-ink text-white font-bold">
+                  Put {legacyShown.length === 1 ? 'it' : 'them'} back
+                </button>
+              </div>
+            )}
+            <label className="flex items-start gap-3 rounded-xl border border-line bg-surface px-3 py-2 min-h-14">
+              <input type="checkbox" className="w-5 h-5 mt-0.5 shrink-0" checked={draft.fitted} onChange={(e) => set('fitted', e.target.checked)} />
+              <span>
+                <span className="block font-semibold text-ink">Fitted sheet (elastic corners)</span>
+                <span className="block text-xs text-ink-soft">{draft.fitted ? 'The shop shows “Fitted sheet” with its size.' : 'Off: the set has a flat sheet; the shop shows “Flat sheet”.'}</span>
+              </span>
+            </label>
             <p className="text-ink-soft">
               Sizes and pieces in stock <span className="text-ink-soft">({totalStock} in total)</span>. Tap a size below to add it.
             </p>
@@ -607,6 +694,9 @@ export function ProductEditor({
               {draft.sizes.map((s) => {
                 const qty = draft.stock[s.id] ?? 0;
                 const open = openSize === s.id;
+                const preset = catalog.sizes.find((x) => x.id === s.id);
+                const shown = measurementRows(draft, s);
+                const standard = standardMeasurements(draft, preset);
                 return (
                   <li key={s.id} className="rounded-xl border border-line bg-surface">
                     <div className="flex items-center gap-2 p-2">
@@ -629,29 +719,41 @@ export function ProductEditor({
                       <button type="button" onClick={() => setOpenSize(open ? null : s.id)} aria-expanded={open} className="min-h-11 px-2 font-semibold text-ink underline">
                         {open ? 'Done' : 'Measurements & price'}
                       </button>
+                      <span className="text-[11px] text-ink-soft min-w-0 truncate">{shown.length ? shown.map((m) => m.label).join(' · ') : 'No measurements: none shown'}</span>
                       <button type="button" onClick={() => removeSize(s.id)} disabled={draft.sizes.length === 1} className="ml-auto min-h-11 min-w-11 flex items-center justify-center text-ink-soft disabled:opacity-30" aria-label={`Remove ${s.name}`}>
                         <Trash2 className="w-4 h-4" aria-hidden="true" />
                       </button>
                     </div>
                     {open && (
                       <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 p-2.5 border-t border-line text-xs">
+                        <p className="sm:col-span-2 text-ink-soft">
+                          Fill in only what this set includes: empty lines are not shown in the shop.
+                          {preset && (
+                            <button type="button" onClick={() => applyStandard(s.id)} className="ml-2 min-h-11 px-3 rounded-full border border-line-strong bg-surface font-semibold text-ink" aria-label={`Use standard sizes for ${s.name}`}>
+                              Use standard sizes
+                            </button>
+                          )}
+                        </p>
                         {(
                           [
                             ['name', 'Name shown'],
                             ['badge', 'Short label'],
                             ['mattressSize', 'Mattress'],
-                            ['fittedSheet', 'Fitted sheet'],
-                            ['flatSheet', 'Flat sheet'],
+                            draft.fitted ? ['fittedSheet', 'Fitted sheet'] : ['flatSheet', 'Flat sheet'],
                             ['pillowcases', 'Pillowcases'],
                             ['duvetCover', 'Duvet cover'],
-                            ['cushionCovers', 'Cushion covers'],
+                            ['otherPieces', 'Other pieces (e.g. cushion covers)'],
                           ] as Array<[keyof BedProfileMeasurement, string]>
-                        ).map(([k, l]) => (
-                          <label key={k} className="block">
-                            <span className="text-ink-soft">{l}</span>
-                            <input className={field} value={String(s[k] ?? '')} maxLength={80} onChange={(e) => updateSize(s.id, { [k]: e.target.value })} />
-                          </label>
-                        ))}
+                        ).map(([k, l]) => {
+                          // The standard size as a hint (what "Use standard sizes" would fill in).
+                          const hint = preset && k in standard ? String(standard[k as keyof typeof standard] ?? '') : '';
+                          return (
+                            <label key={k} className="block min-w-0">
+                              <span className="text-ink-soft">{l}</span>
+                              <input className={field} value={String(s[k] ?? '')} maxLength={80} placeholder={hint ? `e.g. ${hint}` : undefined} onChange={(e) => updateSize(s.id, { [k]: e.target.value })} />
+                            </label>
+                          );
+                        })}
                         <label className="block">
                           <span className="text-ink-soft">Price difference (AED, + or −)</span>
                           <input className={field} type="number" step="0.01" value={s.priceDelta} onChange={(e) => updateSize(s.id, { priceDelta: Number(e.target.value) || 0 })} />

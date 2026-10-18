@@ -1,5 +1,6 @@
 import crypto from 'node:crypto';
 import fs from 'node:fs';
+import net from 'node:net';
 import path from 'node:path';
 import type { BankState, CardPayment, CardState, Customer, Emirate, Order, OrderAttention, OrderStatus } from '@/types';
 import { deliveryCheck, uaeDate } from '@/lib/delivery';
@@ -11,7 +12,7 @@ import { parseReceiptDataUrl } from './imageInput';
 import { verifyPhoneToken } from './phoneToken';
 import { getProduct, invalidateProducts, listProducts } from './products';
 import { bump } from './live';
-import { bankTransferReady, cardPaymentsReady, getSettings, phoneCodesOn } from './settings';
+import { bankTransferReady, cardPaymentsReady, getSettings, phoneCheckMode, phoneCodesOn } from './settings';
 import { audit } from './audit';
 import { kvGet, kvSet } from './kv';
 import { logEvent as logEvent_ } from './log';
@@ -24,9 +25,13 @@ import { validatePhone } from '@/lib/otpService';
  * is computed here from the catalogue, never taken from the browser:
  *  - prices come from the product and the chosen bed size;
  *  - stock is reserved in the same transaction (no overselling the last set);
- *  - the phone number is the one proven by an SMS code (a signed token), or, for a
- *    card order, the one the card holder gave (paying is the proof; the order waits
- *    for Stripe's word before it counts, and "Confirm on WhatsApp" still applies);
+ *  - the phone number is the one proven by an SMS code (a signed token); with Settings →
+ *    Phone check "WhatsApp (free)" (the default), the one typed at checkout, confirmed by the
+ *    customer's one WhatsApp message afterwards (an order still unconfirmed after the set hours
+ *    is cancelled, its pieces back on sale), and with caps per phone, per connection and in
+ *    total (no code costs an attacker anything now); for a card order, the one the card
+ *    holder gave (paying is the proof; the order waits for Stripe's word before it counts,
+ *    and "Confirm on WhatsApp" still applies);
  *  - one checkout attempt (idempotency key) creates at most one order.
  * A bank-transfer order gets a private page (src/lib/server/bankPay.ts) where the customer sees
  * the bank details and uploads the transfer screenshot; the account is never on the website.
@@ -48,6 +53,30 @@ export const MAX_UNVERIFIED_CARD_LINES = 5;
 /** An unpaid card order is cancelled (its pieces back on sale) after this long. */
 export const CARD_PAYMENT_TTL_MS = 10 * 60 * 1000;
 export const CARD_PAYMENT_TTL_MINUTES = CARD_PAYMENT_TTL_MS / 60_000;
+/**
+ * Settings → Phone check "WhatsApp (free)": orders no code proved and not yet confirmed hold
+ * pieces, so they can't pile up: per phone, per connection and across the shop. (Changeable by
+ * tests only.)
+ */
+export const UNCONFIRMED_LIMITS = {
+  perPhone: 2,
+  perIp: 4,
+  shop: 60,
+  /** No TRUST_PROXY (the shop can't tell customers apart, so no per-connection cap): stricter. */
+  shopNoProxy: 15,
+  /** The owner is alerted when this share of the shop cap is reached. */
+  nearShare: 0.8,
+  /** Of one product's size, at most this share of its pieces is held by orders not yet confirmed (at least sizeMin). */
+  sizeShare: 0.5,
+  sizeMin: 2,
+};
+/** The shop-wide cap on unconfirmed orders that applies with this connection's address known or not. */
+export function unconfirmedShopCap(ipKnown = process.env.TRUST_PROXY === '1'): number {
+  return ipKnown ? UNCONFIRMED_LIMITS.shop : UNCONFIRMED_LIMITS.shopNoProxy;
+}
+/** An order no code proved and not yet confirmed (on WhatsApp or by phone call), still waiting. */
+const UNCONFIRMED_OPEN =
+  "status = 'pending_confirmation' AND phone_check <> 'confirmed' AND COALESCE(json_extract(data, '$.customer.phoneVerified'), 0) = 0 AND card_state NOT IN ('paid', 'refund_pending', 'refunded')";
 
 const ORDER_SOURCES = ['instagram', 'whatsapp', 'facebook', 'tiktok', 'google', 'email', 'direct', 'other'];
 const EMIRATES: Emirate[] = ['Dubai', 'Abu Dhabi', 'Sharjah', 'Ajman', 'Ras Al Khaimah', 'Fujairah', 'Umm Al Quwain'];
@@ -121,6 +150,9 @@ interface Row {
   bank_emailed_at: string | null;
   bank_checked_at: string | null;
   bank_checked_by: string | null;
+  phone_check_method: string | null;
+  wa_cancel_at: string | null;
+  wa_unopened_cancel_at: string | null;
 }
 /**
  * The order's JSON, the WhatsApp confirmation (migration 8), the card payment (migration 9) and the
@@ -128,8 +160,9 @@ interface Row {
  */
 const COLUMNS =
   'data, wa_code, phone_check, wa_hold, wa_opened_at, phone_checked_at, phone_checked_by, card_state, payment_ref, paid_fils, paid_at, card_label, refund_ref, refunded_at, card_livemode, refunded_fils, refund_outside_at, needs_attention, ' +
-  'id, status, payment_status, pay_nonce, pay_expires_at, bank_state, transfer_uploads, transfer_uploaded_at, bank_emailed_at, bank_checked_at, bank_checked_by';
-const ATTENTION_KINDS: OrderAttention['kind'][] = ['refund_failed', 'booked_after_cancel', 'refund_outside_stripe', 'card_unreachable'];
+  'id, status, payment_status, pay_nonce, pay_expires_at, bank_state, transfer_uploads, transfer_uploaded_at, bank_emailed_at, bank_checked_at, bank_checked_by, ' +
+  'phone_check_method, wa_cancel_at, wa_unopened_cancel_at';
+const ATTENTION_KINDS: OrderAttention['kind'][] = ['refund_failed', 'booked_after_cancel', 'refund_outside_stripe', 'card_unreachable', 'call_customer', 'bank_unconfirmed'];
 const CARD_STATES: CardState[] = ['pending', 'failed', 'paid', 'refund_pending', 'refunded', 'canceled'];
 const BANK_STATES: BankState[] = ['awaiting', 'uploaded', 'not_received', 'paid'];
 
@@ -205,6 +238,8 @@ function fromRow(r: Row): Order {
     }
   }
   if (r.wa_code && (r.phone_check === 'awaiting' || r.phone_check === 'confirmed' || r.phone_check === 'mismatch')) {
+    // A bank transfer is never auto-cancelled (its private page lasts 14 days): no deadline is shown.
+    const cancels = r.phone_check !== 'confirmed' && order.paymentMethod !== 'bank_transfer';
     order.whatsappCheck = {
       status: r.phone_check,
       code: r.wa_code,
@@ -212,6 +247,9 @@ function fromRow(r: Row): Order {
       ...(r.wa_opened_at ? { openedAt: r.wa_opened_at } : {}),
       ...(r.phone_checked_at ? { checkedAt: r.phone_checked_at } : {}),
       ...(r.phone_checked_by ? { checkedBy: r.phone_checked_by } : {}),
+      ...(r.phone_check === 'confirmed' ? { method: r.phone_check_method === 'call' ? ('call' as const) : ('whatsapp' as const) } : {}),
+      ...(r.wa_cancel_at && cancels ? { cancelAt: r.wa_cancel_at } : {}),
+      ...(r.wa_unopened_cancel_at && cancels && !r.wa_opened_at ? { openBy: r.wa_unopened_cancel_at } : {}),
     };
   }
   return order;
@@ -302,11 +340,23 @@ export function placeOrder(input: unknown, context: PlaceOrderContext = {}): Pla
   const paymentMethod = text(body.paymentMethod, 'Payment method', 20, { required: true });
   const card = paymentMethod === 'online_card';
   if (card && !cardPaymentsReady()) throw new HttpError(400, 'Card payment is not available right now. Please choose Cash on Delivery.', {}, { code: 'card_unavailable' });
-  // With an SMS gateway switched on, a card order proves its phone like any order. Without one, a
-  // card order needs no code: the card holder pays before it counts (a code, if given, still wins).
+  // Settings → Phone check "WhatsApp (free)": no code; the number typed (UAE mobile rules) is
+  // confirmed by the customer's WhatsApp message afterwards. "SMS code": with an SMS gateway
+  // switched on, a card order proves its phone like any order. Without one, a card order needs no
+  // code: the card holder pays before it counts. A code, if given, always wins.
+  const whatsappMode = phoneCheckMode() === 'whatsapp';
   const provenPhone = verifyPhoneToken(body.verificationToken);
-  const phone = provenPhone ?? (card && !phoneCodesOn() && body.verificationToken === undefined ? validatePhone((body.customer as Obj | undefined)?.phone) : null);
+  const typedPhone = (body.customer as Obj | undefined)?.phone;
+  const phone =
+    provenPhone ??
+    (whatsappMode && typedPhone !== undefined
+      ? validatePhone(typedPhone)
+      : card && !phoneCodesOn() && body.verificationToken === undefined
+        ? validatePhone(typedPhone)
+        : null);
   if (!phone) throw new HttpError(401, 'Please verify your UAE mobile number again (the code check has expired).');
+  // No code proved it: the WhatsApp message (or the owner's call) will.
+  const unproven = !provenPhone;
 
   const idempotencyKey = text(body.idempotencyKey, 'Checkout reference', 64, { required: true });
   if (!/^[A-Za-z0-9-]{16,64}$/.test(idempotencyKey)) throw new HttpError(400, 'Checkout reference is invalid.');
@@ -374,11 +424,15 @@ export function placeOrder(input: unknown, context: PlaceOrderContext = {}): Pla
 
   if (!Array.isArray(body.items) || body.items.length === 0) throw new HttpError(400, 'Your bag is empty.');
   if (body.items.length > MAX_LINES) throw new HttpError(400, `At most ${MAX_LINES} lines per order.`);
-  // No code proved this phone: a card order holds pieces before anyone has paid, so a small bag only.
-  const unverifiedCard = card && !provenPhone;
-  if (unverifiedCard && body.items.length > MAX_UNVERIFIED_CARD_LINES) {
-    throw new HttpError(400, `Paying by card, at most ${MAX_UNVERIFIED_CARD_LINES} different items per order. For more, place a second order, or choose Cash on Delivery.`, {}, { code: 'card_bag_limit' });
-  }
+  // No code proved this phone: the order holds pieces before anyone has paid or confirmed (a card
+  // order until it is paid, any other until the WhatsApp message or the owner's call), so a small
+  // bag only.
+  const smallBag = !provenPhone;
+  const bagLimit = (what: string) =>
+    card
+      ? new HttpError(400, `Paying by card, at most ${what} per order. For more, place a second order, or choose Cash on Delivery.`, {}, { code: 'card_bag_limit' })
+      : new HttpError(400, `At most ${what} per order until we have confirmed your number. For more, please message us on WhatsApp.`, {}, { code: 'unconfirmed_bag_limit' });
+  if (smallBag && body.items.length > MAX_UNVERIFIED_CARD_LINES) throw bagLimit(`${MAX_UNVERIFIED_CARD_LINES} different items`);
   const lines = body.items.map((raw, i) => {
     const it = (raw && typeof raw === 'object' ? raw : {}) as Obj;
     const quantity = it.quantity;
@@ -397,20 +451,37 @@ export function placeOrder(input: unknown, context: PlaceOrderContext = {}): Pla
   const perProduct = new Map<string, number>();
   for (const l of lines) perProduct.set(l.productId, (perProduct.get(l.productId) ?? 0) + l.quantity);
   if ([...perProduct.values()].some((q) => q > MAX_QTY)) throw new HttpError(400, `At most ${MAX_QTY} of one product per order.`);
-  if (unverifiedCard) {
-    const perItem = new Map<string, number>();
-    for (const l of lines) perItem.set(`${l.productId}|${l.profileId}`, (perItem.get(`${l.productId}|${l.profileId}`) ?? 0) + l.quantity);
-    if ([...perItem.values()].some((q) => q > MAX_UNVERIFIED_CARD_QTY)) {
-      throw new HttpError(400, `Paying by card, at most ${MAX_UNVERIFIED_CARD_QTY} of each item per order. For more, choose Cash on Delivery, or contact us.`, {}, { code: 'card_bag_limit' });
-    }
+  // Pieces per product and size (the same size may come on two lines).
+  const perItem = new Map<string, { productId: string; profileId: string; quantity: number }>();
+  for (const l of lines) {
+    const k = `${l.productId}|${l.profileId}`;
+    perItem.set(k, { productId: l.productId, profileId: l.profileId, quantity: (perItem.get(k)?.quantity ?? 0) + l.quantity });
   }
-  // The connection's address is kept only as a hash (enough to count, not to know it).
-  const ipHash = card && context.ip ? sha256(`card-ip:${context.ip}`) : null;
+  if (smallBag && [...perItem.values()].some((q) => q.quantity > MAX_UNVERIFIED_CARD_QTY)) throw bagLimit(`${MAX_UNVERIFIED_CARD_QTY} of each item`);
+  // The connection's address is kept only as a hash (enough to count, not to know it); in card_ip
+  // (migration 9) for every order, for the caps on card orders and on orders not yet confirmed.
+  // IPv6: by its /64 (one home or phone gets a whole /64, so a single address is no limit).
+  const ipHash = context.ip ? sha256(`card-ip:${connectionKey(context.ip)}`) : null;
 
   const courierSettings = getSettings('courier');
   const store = getSettings('store');
-  // "Confirm on WhatsApp" (Settings → Store & contact): only with the shop's number set.
-  const askWhatsApp = Boolean(store.confirmOrdersOnWhatsApp && waMeLink(store.whatsappNumber, ''));
+  // "Confirm on WhatsApp": only with the shop's number set (Settings → Store & contact). With Phone
+  // check "WhatsApp (free)" it is how every order is confirmed; otherwise Store & contact's switch.
+  const shopNumber = Boolean(waMeLink(store.whatsappNumber, ''));
+  const askWhatsApp = shopNumber && ((whatsappMode && unproven) || store.confirmOrdersOnWhatsApp);
+  // WhatsApp mode, no code, not a card: cancelled if still not confirmed after the set hours, and
+  // sooner if the customer never even opens WhatsApp (a card order is cancelled in 10 minutes if
+  // unpaid, and a paid one is trusted). A bank transfer is never cancelled for this (its private
+  // page lasts 14 days): at the deadline it is flagged for the owner, its pieces still held.
+  const whatsappUnconfirmed = whatsappMode && unproven && !card;
+  const phoneCheck = getSettings('phoneCheck');
+  const cancelAt = whatsappUnconfirmed && askWhatsApp ? new Date(Date.now() + phoneCheck.unconfirmedCancelHours * 3600_000).toISOString() : null;
+  const unopenedAt =
+    cancelAt && paymentMethod !== 'bank_transfer' ? new Date(Date.now() + Math.min(phoneCheck.unopenedCancelHours, phoneCheck.unconfirmedCancelHours) * 3600_000).toISOString() : null;
+  const shopCap = unconfirmedShopCap(Boolean(ipHash));
+  // WhatsApp mode without the shop's number: nothing can confirm the order. Still taken, never
+  // treated as verified, and flagged for the owner to call the customer.
+  const callCustomer = whatsappMode && unproven && !shopNumber && !card;
   listProducts({ includeHidden: true }); // load (and seed) the catalogue before the transaction
   // A screenshot sent with the order (a checkout page from before this version) is the first upload:
   // written beside its place first (if that fails, no order), moved there once the order is saved.
@@ -421,14 +492,40 @@ export function placeOrder(input: unknown, context: PlaceOrderContext = {}): Pla
     order = placeInTransaction();
   } catch (err) {
     if (receipt) fs.rmSync(freshReceipt, { force: true });
+    // The shop-wide cap refused a customer: the owner is told (outside the rolled-back transaction).
+    if (err instanceof HttpError && err.details?.code === 'shop_busy') noteUnconfirmedPressure('refused', shopCap);
     throw err;
   }
+  if (whatsappUnconfirmed) noteUnconfirmedPressure('placed', shopCap);
   function placeInTransaction(): Order {
     return inTransaction(() => {
       // One verified phone can't tie up the stock with a pile of unconfirmed orders.
       const open = (getDb().prepare("SELECT COUNT(*) AS n FROM orders WHERE phone = ? AND status = 'pending_confirmation'").get(phone) as { n: number }).n;
       if (open >= MAX_OPEN_PER_PHONE) {
         throw new HttpError(429, `You already have ${open} orders waiting for confirmation. We'll call you shortly, or contact us to add to them.`);
+      }
+      if (whatsappUnconfirmed) {
+        // No code cost anything: orders not yet confirmed are capped per phone, per connection and
+        // overall (stricter when the shop can't tell connections apart), and can hold only part of
+        // any one size's pieces.
+        const count = (where: string, ...args: unknown[]) => getDb().prepare(`SELECT COUNT(*) FROM orders WHERE ${UNCONFIRMED_OPEN}${where}`).pluck().get(...args) as number;
+        if (count(' AND phone = ?', phone) >= UNCONFIRMED_LIMITS.perPhone) {
+          throw new HttpError(429, `You already have ${UNCONFIRMED_LIMITS.perPhone} orders waiting for your WhatsApp confirmation. Please confirm them first (tap “Confirm on WhatsApp”), or contact us.`, {}, { code: 'unconfirmed_limit' });
+        }
+        if (ipHash && count(' AND card_ip = ?', ipHash) >= UNCONFIRMED_LIMITS.perIp) {
+          throw new HttpError(429, 'Several orders from this connection are waiting for their WhatsApp confirmation. Please confirm them first, or contact us.', {}, { code: 'unconfirmed_limit' });
+        }
+        if (count('') >= shopCap) {
+          throw new HttpError(429, 'We’re receiving a lot of orders right now, sorry. Please try again in a little while, or message us on WhatsApp.', {}, { code: 'shop_busy' });
+        }
+        for (const item of perItem.values()) {
+          const held = unconfirmedHeld(item.productId, item.profileId);
+          const left = (getDb().prepare('SELECT qty FROM product_stock WHERE product_id = ? AND size_id = ?').pluck().get(item.productId, item.profileId) as number | undefined) ?? 0;
+          const cap = Math.max(UNCONFIRMED_LIMITS.sizeMin, Math.floor((left + held) * UNCONFIRMED_LIMITS.sizeShare));
+          if (held + item.quantity > cap && item.quantity <= left) {
+            throw new HttpError(409, 'This piece is very popular right now — please message us on WhatsApp and we’ll reserve it for you.', {}, { code: 'popular_piece' });
+          }
+        }
       }
       if (card) {
         // Unpaid card orders hold pieces, so they can't pile up: per phone, per connection, and overall.
@@ -446,8 +543,9 @@ export function placeOrder(input: unknown, context: PlaceOrderContext = {}): Pla
         if (!product || !product.active) throw new HttpError(409, 'An item in your bag is no longer available. Please remove it and try again.');
         const profile = product.profiles.find((p) => p.id === line.profileId);
         if (!profile) throw new HttpError(409, `${product.title}: that bed size is no longer offered.`);
-        const color = line.color && product.colors.some((c2) => c2.name === line.color) ? line.color : product.colors[0]?.name;
-        if (line.color && color !== line.color) throw new HttpError(409, `${product.title}: that colour is no longer offered.`);
+        // No colours on the product: none is chosen (a colour sent from an older bag is ignored).
+        const color = !product.colors.length ? undefined : line.color && product.colors.some((c2) => c2.name === line.color) ? line.color : product.colors[0]?.name;
+        if (product.colors.length && line.color && color !== line.color) throw new HttpError(409, `${product.title}: that colour is no longer offered.`);
         // Reserve this size's pieces atomically: fails if another order took the last one.
         const reserved = getDb()
           .prepare('UPDATE product_stock SET qty = qty - ? WHERE product_id = ? AND size_id = ? AND qty >= ? AND EXISTS (SELECT 1 FROM products WHERE id = ? AND active = 1 AND archived = 0)')
@@ -528,17 +626,21 @@ export function placeOrder(input: unknown, context: PlaceOrderContext = {}): Pla
       };
       writeOrder(created, idempotencyKey);
       logEvent(id, 'customer', 'created', { total: created.total, paymentMethod });
+      if (ipHash) getDb().prepare('UPDATE orders SET card_ip = ? WHERE id = ?').run(ipHash, id);
       if (card) {
-        getDb().prepare("UPDATE orders SET card_state = 'pending', card_ip = ? WHERE id = ?").run(ipHash, id);
+        getDb().prepare("UPDATE orders SET card_state = 'pending' WHERE id = ?").run(id);
         created.card = { state: 'pending' };
       }
       if (askWhatsApp) {
         // 4 random digits, made here (never by the browser); not a secret from the customer.
         const code = String(crypto.randomInt(0, 10_000)).padStart(4, '0');
         const hold = store.holdUntilWhatsAppConfirmed;
-        getDb().prepare("UPDATE orders SET wa_code = ?, phone_check = 'awaiting', wa_hold = ? WHERE id = ?").run(code, hold ? 1 : 0, id);
-        created.whatsappCheck = { status: 'awaiting', code, hold };
-        logEvent(id, 'shop', 'whatsapp_asked', { hold });
+        getDb().prepare("UPDATE orders SET wa_code = ?, phone_check = 'awaiting', wa_hold = ?, wa_cancel_at = ?, wa_unopened_cancel_at = ? WHERE id = ?").run(code, hold ? 1 : 0, cancelAt, unopenedAt, id);
+        logEvent(id, 'shop', 'whatsapp_asked', { hold, ...(cancelAt ? { [paymentMethod === 'bank_transfer' ? 'flagAt' : 'cancelAt']: cancelAt } : {}), ...(unopenedAt ? { openBy: unopenedAt } : {}) });
+      }
+      if (callCustomer) {
+        setAttention(id, 'call_customer', `No WhatsApp number is set (Settings → Store & contact), so this customer could not confirm on WhatsApp: call them on ${phone} before shipping.`);
+        logEvent(id, 'shop', 'call_customer');
       }
       if (paymentMethod === 'bank_transfer') {
         // The private page with the bank details and the screenshot upload (the account is never on the website).
@@ -560,6 +662,81 @@ export function placeOrder(input: unknown, context: PlaceOrderContext = {}): Pla
   }
   invalidateProducts();
   return { order, created: true };
+}
+
+/**
+ * The part of a connection's address that names one customer: an IPv4 address as it is; an IPv6
+ * address by its /64 (a home or a phone gets a whole /64, and can pick any address in it); an
+ * IPv4-mapped IPv6 address as its IPv4 address.
+ */
+export function connectionKey(ip: string): string {
+  const v = ip.trim().replace(/^\[|\]$/g, '').split('%')[0];
+  const mapped = /^::ffff:(\d{1,3}(?:\.\d{1,3}){3})$/i.exec(v);
+  if (mapped && net.isIPv4(mapped[1])) return mapped[1];
+  if (!net.isIPv6(v)) return v.toLowerCase();
+  const [head, tail = ''] = v.split('::');
+  const groups = (part: string) => {
+    if (!part) return [] as string[];
+    return part.split(':').flatMap((g) => {
+      if (!net.isIPv4(g)) return [g];
+      const [a, b, c, d] = g.split('.').map(Number);
+      return [((a << 8) | b).toString(16), ((c << 8) | d).toString(16)];
+    });
+  };
+  const h = groups(head);
+  const t = v.includes('::') ? groups(tail) : [];
+  const full = v.includes('::') ? [...h, ...Array(8 - h.length - t.length).fill('0'), ...t] : h;
+  return `${full.slice(0, 4).map((g) => parseInt(g, 16).toString(16)).join(':')}::/64`;
+}
+
+/** Pieces of one product's size held by orders not yet confirmed (inside the caller's transaction). */
+function unconfirmedHeld(productId: string, sizeId: string): number {
+  return getDb()
+    .prepare(
+      `SELECT COALESCE(SUM(json_extract(j.value, '$.quantity')), 0) FROM (SELECT data FROM orders WHERE ${UNCONFIRMED_OPEN}) AS o, json_each(o.data, '$.items') AS j
+       WHERE json_extract(j.value, '$.productId') = ? AND json_extract(j.value, '$.profileId') = ?`
+    )
+    .pluck()
+    .get(productId, sizeId) as number;
+}
+
+/** Orders not yet confirmed (WhatsApp mode), the shop cap that applies, and the last refusal (Settings → System shows it for a day). */
+export function unconfirmedPressure(now = Date.now()): { open: number; cap: number; near: boolean; refusedAt: string | null } {
+  const open = getDb().prepare(`SELECT COUNT(*) FROM orders WHERE ${UNCONFIRMED_OPEN}`).pluck().get() as number;
+  const cap = unconfirmedShopCap();
+  const refused = kvGet<{ at: string }>('unconfirmed:refused')?.data;
+  return { open, cap, near: open >= Math.ceil(cap * UNCONFIRMED_LIMITS.nearShare), refusedAt: refused && now - Date.parse(refused.at) < 24 * 3600_000 ? refused.at : null };
+}
+
+/**
+ * After an order no code proved (placed, or refused by the shop cap): at 80% of the cap, or on a
+ * refusal, logged and emailed to the owner (each at most every 6 hours). The monitor shows it as
+ * a problem while it lasts. Never throws.
+ */
+function noteUnconfirmedPressure(what: 'placed' | 'refused', cap: number): void {
+  try {
+    const open = getDb().prepare(`SELECT COUNT(*) FROM orders WHERE ${UNCONFIRMED_OPEN}`).pluck().get() as number;
+    if (what === 'placed' && open < Math.ceil(cap * UNCONFIRMED_LIMITS.nearShare)) return;
+    const key = what === 'refused' ? 'unconfirmed:refused' : 'unconfirmed:near';
+    const last = kvGet<{ at: string; alertedAt?: string }>(key)?.data;
+    const now = new Date().toISOString();
+    const alert = !last?.alertedAt || Date.now() - Date.parse(last.alertedAt) >= 6 * 3600_000;
+    kvSet(key, { at: now, open, cap, alertedAt: alert ? now : last?.alertedAt });
+    logEvent_('warn', what === 'refused' ? 'unconfirmed_cap_refused' : 'unconfirmed_cap_near', { open, cap });
+    if (!alert) return;
+    const subject = what === 'refused' ? 'Orders refused: too many waiting for WhatsApp' : 'Many orders are waiting for WhatsApp';
+    const body =
+      what === 'refused'
+        ? `A customer could not order because ${open} orders are waiting for their WhatsApp confirmation (the cap is ${cap}). They were asked to try again later or message you on WhatsApp.`
+        : `${open} orders are waiting for their WhatsApp confirmation (the cap is ${cap}; new ones are refused at ${cap}).`;
+    void import('./adminAlerts')
+      .then(({ alertOwner }) =>
+        alertOwner(subject, `${body}\n\nOpen the Admin Hub → Orders: confirm the real ones (or call them), and cancel any you don't recognise. Many at once from strangers can be someone holding your stock.`)
+      )
+      .catch(() => undefined);
+  } catch (err) {
+    logEvent_('warn', 'unconfirmed_pressure_note_failed', { error: err instanceof Error ? err.message : String(err) });
+  }
 }
 
 // ── Receipts (admin) ────────────────────────────────────────────────────────
@@ -779,9 +956,38 @@ export function transfersAwaitedCount(): number {
   return getDb().prepare(`SELECT COUNT(*) FROM orders WHERE bank_state IN ('awaiting', 'not_received') AND ${OPEN_TRANSFER}`).pluck().get() as number;
 }
 
-/** Claim an order's one bank-details email (two copies of the shop may try at once during an update). */
-export function claimBankEmail(id: string): boolean {
-  return getDb().prepare('UPDATE orders SET bank_emailed_at = ? WHERE id = ? AND bank_emailed_at IS NULL').run(new Date().toISOString(), id).changes === 1;
+/**
+ * Bank-details emails go to whatever address was typed at checkout, so they are limited: at most
+ * 3 a day to one address, and 5 a day for orders from one connection (counted from the orders
+ * themselves, so a restart or a second copy of the shop doesn't reset them). (Changeable by tests only.)
+ */
+export const BANK_EMAIL_LIMITS = { perAddress: 3, perConnection: 5, windowMs: 24 * 3600_000 };
+
+/**
+ * Claim an order's one bank-details email (two copies of the shop may try at once during an
+ * update): 'claimed', 'already' (sent, or being sent), or 'limited' (the address, or the
+ * connection, had its share today: the customer still has the private page from checkout).
+ */
+export function claimBankEmail(id: string): 'claimed' | 'already' | 'limited' {
+  return inTransaction(() => {
+    const db = getDb();
+    const row = db.prepare("SELECT bank_emailed_at, card_ip, lower(json_extract(data, '$.customer.email')) AS email FROM orders WHERE id = ?").get(id) as
+      | { bank_emailed_at: string | null; card_ip: string | null; email: string | null }
+      | undefined;
+    if (!row || row.bank_emailed_at) return 'already';
+    const since = new Date(Date.now() - BANK_EMAIL_LIMITS.windowMs).toISOString();
+    const sent = (where: string, value: string) =>
+      db.prepare(`SELECT COUNT(*) FROM orders WHERE payment_method = 'bank_transfer' AND bank_emailed_at >= ? AND ${where}`).pluck().get(since, value) as number;
+    if (row.email && sent("lower(json_extract(data, '$.customer.email')) = ?", row.email) >= BANK_EMAIL_LIMITS.perAddress) return 'limited';
+    if (row.card_ip && sent('card_ip = ?', row.card_ip) >= BANK_EMAIL_LIMITS.perConnection) return 'limited';
+    return db.prepare('UPDATE orders SET bank_emailed_at = ? WHERE id = ? AND bank_emailed_at IS NULL').run(new Date().toISOString(), id).changes === 1 ? 'claimed' : 'already';
+  });
+}
+
+/** A bank-details email not sent because of the limits above (noted on the order's history). */
+export function bankEmailLimited(id: string): void {
+  logEvent(id, 'shop', 'bank_email_limited');
+  bump('orders');
 }
 
 /** The bank-details email was sent (noted on the order's history), or failed (noted; the owner sends it on WhatsApp). */
@@ -807,7 +1013,8 @@ const NEXT: Record<OrderStatus, OrderStatus[]> = {
 export function updateOrderByAdmin(id: string, patch: unknown, actor: string): Order {
   if (!patch || typeof patch !== 'object' || Array.isArray(patch)) throw new HttpError(400, 'Changes must be an object.');
   const p = patch as Obj;
-  const updated = inTransaction(() => {
+  // Audited inside the transaction (the owner's "ship anyway"), so a rollback can't leave its entry behind unnoted.
+  const updated = auditedTransaction((auditFn) => {
     const order = getOrder(id);
     if (!order) throw new HttpError(404, 'Order not found.');
     const changes: Obj = {};
@@ -819,6 +1026,11 @@ export function updateOrderByAdmin(id: string, patch: unknown, actor: string): O
         throw new HttpError(409, `An order that is ${order.status.replace(/_/g, ' ')} cannot become ${status.replace(/_/g, ' ')}.`);
       }
       if (status !== 'cancelled') assertNotHeld(order);
+      if (status !== 'cancelled' && unconfirmedCod(order)) {
+        // Not confirmed on WhatsApp yet: only with the owner's explicit "ship anyway" (recorded).
+        if (p.shipUnconfirmed !== true) throw shipAnywayQuestion(order);
+        noteShipAnyway(order, actor, `status:${status}`, auditFn);
+      }
       assertCardAllows(order, status);
       releaseStock(order, status);
       if (status === 'delivered') order.courier.deliveredAt = new Date().toISOString();
@@ -903,30 +1115,235 @@ export function assertNotHeld(order: Order): void {
   }
 }
 
-export type WhatsAppResult = 'confirmed' | 'mismatch';
+export type WhatsAppResult = 'confirmed' | 'mismatch' | 'call' | 'use_sender' | 'correct_phone';
+
+/** Why a cancelled or delivered order can't be confirmed (or its number changed) any more. */
+function closedOrderProblem(order: Order): HttpError {
+  if (order.status === 'delivered') return new HttpError(409, `${order.id} is already delivered: nothing to confirm or change.`, {}, { code: 'order_closed' });
+  const auto = (getDb().prepare("SELECT at FROM order_events WHERE order_id = ? AND event IN ('auto_cancelled_unconfirmed', 'auto_cancelled_unopened') ORDER BY id DESC LIMIT 1").pluck().get(order.id) as string | undefined) ?? null;
+  const at = auto ? `${new Date(auto).toLocaleString('en-GB', { timeZone: 'Asia/Dubai', day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })} (UAE)` : '';
+  return new HttpError(409, auto ? `Auto-cancelled at ${at} — its pieces are back on sale, so ask the customer to place a new order.` : `${order.id} is cancelled — ask the customer to place a new order.`, {}, { code: 'order_closed' });
+}
+
+/** The order's phone becomes `to` (validated), the old number kept in its history; audited. Inside the caller's audited transaction. */
+function changeOrderPhone(order: Order, to: string, actor: string, why: string, auditFn: (action: string, details: Record<string, unknown>) => void): void {
+  const from = order.customer.phone;
+  order.customer.phone = to;
+  writeOrder(order);
+  getDb().prepare('UPDATE orders SET phone = ? WHERE id = ?').run(to, order.id);
+  logEvent(order.id, actor, 'phone_changed', { from, to, ...(why === 'owner_correction' ? { correction: true } : {}) });
+  auditFn('order.phone_changed', { by: actor, orderId: order.id, from, to, why });
+}
 
 /**
  * The owner's one tap: the customer's WhatsApp message came from the number on the order
- * (confirmed), or from another number (mismatch). Idempotent: the same answer again changes
- * nothing. Written to the audit log inside the same transaction, so it is never reported done
- * (or saved) without its audit entry. A mismatch can still be corrected to confirmed.
+ * (confirmed), or from another number (mismatch); "Confirmed by phone call" (call: the owner
+ * rang the customer, also for an order that could not be asked on WhatsApp); "Use the number it
+ * came from" (use_sender: the order's phone becomes the sender's, validated like checkout's, the
+ * old number kept in the order's history, then confirmed); or, once confirmed, "Correct the phone
+ * number" (correct_phone: undoes a wrong number, the same way). Idempotent: the same answer again
+ * changes nothing. Written to the audit log inside the same transaction, so it is never reported
+ * done (or saved) without its audit entry. A mismatch can still be corrected to confirmed. A
+ * cancelled (perhaps auto-cancelled: its pieces are back on sale) or delivered order is never
+ * confirmed or changed (409). Confirming stops the auto-cancel (Settings → Phone check).
  */
-export function checkWhatsApp(id: string, result: WhatsAppResult, actor: string): { order: Order; changed: boolean } {
-  return inTransaction(() => {
+export function checkWhatsApp(id: string, result: WhatsAppResult, actor: string, opts: { phone?: string } = {}): { order: Order; changed: boolean } {
+  return auditedTransaction((auditOrThrow) => {
     const order = getOrder(id);
     if (!order) throw new HttpError(404, 'Order not found.');
     const check = order.whatsappCheck;
-    if (!check) throw new HttpError(409, 'This order was not asked to confirm on WhatsApp.');
-    if (check.status === result) return { order, changed: false };
+    const closed = order.status === 'cancelled' || order.status === 'delivered';
     const at = new Date().toISOString();
-    getDb().prepare('UPDATE orders SET phone_check = ?, phone_checked_at = ?, phone_checked_by = ?, updated_at = ? WHERE id = ?').run(result, at, actor, at, id);
-    logEvent(id, actor, result === 'confirmed' ? 'whatsapp_confirmed' : 'whatsapp_mismatch', { from: check.status });
-    if (!audit(result === 'confirmed' ? 'order.whatsapp_confirmed' : 'order.whatsapp_mismatch', { by: actor, orderId: id, from: check.status, held: check.hold })) {
-      throw new HttpError(503, 'The audit log could not be written, so nothing was changed. Please try again.');
+
+    if (result === 'correct_phone') {
+      if (closed) throw closedOrderProblem(order);
+      if (!opts.phone) throw new HttpError(400, 'Type the correct phone number.');
+      const to = validatePhone(opts.phone);
+      if (to === order.customer.phone) return { order, changed: false };
+      changeOrderPhone(order, to, actor, 'owner_correction', auditOrThrow);
+      bump('orders');
+      return { order: getOrder(id)!, changed: true };
     }
+
+    if (!check && result !== 'call') throw new HttpError(409, 'This order was not asked to confirm on WhatsApp.');
+    if (result === 'mismatch') {
+      if (check!.status === 'mismatch') return { order, changed: false };
+      if (check!.status === 'confirmed') throw new HttpError(409, `${order.id} is already confirmed.`);
+      if (closed) throw closedOrderProblem(order);
+      getDb().prepare("UPDATE orders SET phone_check = 'mismatch', phone_checked_at = ?, phone_checked_by = ?, updated_at = ? WHERE id = ?").run(at, actor, at, id);
+      logEvent(id, actor, 'whatsapp_mismatch', { from: check!.status });
+      auditOrThrow('order.whatsapp_mismatch', { by: actor, orderId: id, from: check!.status, held: check!.hold });
+      bump('orders');
+      return { order: getOrder(id)!, changed: true };
+    }
+
+    // confirmed, call, use_sender: never on an order that is over (the sweep may have cancelled it
+    // and put its pieces back on sale).
+    if (closed) throw closedOrderProblem(order);
+    if (result === 'call' && !check && (order.customer.phoneVerified || order.status !== 'pending_confirmation')) {
+      // Only an order still waiting: asked on WhatsApp (awaiting or mismatch), or one no code proved
+      // that could not be asked (no shop number: "call the customer").
+      throw new HttpError(409, `${order.id} isn't waiting for a confirmation.`);
+    }
+    if (result === 'use_sender') {
+      if (!opts.phone) throw new HttpError(400, 'Type the number the message came from.');
+      const to = validatePhone(opts.phone);
+      if (check!.status === 'confirmed' && to === order.customer.phone) return { order, changed: false };
+      if (check!.status === 'confirmed') throw new HttpError(409, `${order.id} is already confirmed: use “Correct the phone number” to change it.`);
+      if (to !== order.customer.phone) changeOrderPhone(order, to, actor, 'whatsapp_sender', auditOrThrow);
+    } else if (check?.status === 'confirmed') {
+      return { order, changed: false };
+    }
+    const from = check?.status ?? 'none';
+    const method = result === 'call' ? 'call' : 'whatsapp';
+    // An order never asked (no shop number) gets its code now, so every version shows it confirmed.
+    const code = check?.code ?? String(crypto.randomInt(0, 10_000)).padStart(4, '0');
+    getDb()
+      .prepare("UPDATE orders SET wa_code = ?, phone_check = 'confirmed', phone_check_method = ?, phone_checked_at = ?, phone_checked_by = ?, updated_at = ? WHERE id = ?")
+      .run(code, method, at, actor, at, id);
+    if (order.attention?.kind === 'call_customer') getDb().prepare('UPDATE orders SET needs_attention = NULL WHERE id = ?').run(id);
+    logEvent(id, actor, method === 'call' ? 'phone_call_confirmed' : 'whatsapp_confirmed', { from, ...(result === 'use_sender' ? { numberChanged: true } : {}) });
+    auditOrThrow(method === 'call' ? 'order.phone_call_confirmed' : 'order.whatsapp_confirmed', { by: actor, orderId: id, from, held: Boolean(check?.hold), method });
     bump('orders');
     return { order: getOrder(id)!, changed: true };
   });
+}
+
+/**
+ * A cash-on-delivery order whose phone no code proved and that is not yet confirmed (on WhatsApp
+ * or by phone call). Shipping it takes the owner's explicit "ship anyway" (they may have called).
+ */
+export function unconfirmedCod(order: Order): boolean {
+  return order.paymentMethod === 'cod' && order.status === 'pending_confirmation' && !order.customer.phoneVerified && order.whatsappCheck?.status !== 'confirmed';
+}
+
+function shipAnywayQuestion(order: Order): HttpError {
+  return new HttpError(409, `This customer hasn't confirmed ${order.id} on WhatsApp yet — ship anyway?`, {}, { code: 'whatsapp_unconfirmed' });
+}
+
+/**
+ * Inside the caller's audited transaction: the owner chose to ship an unconfirmed order (history
+ * and audit, or nothing happens). It also stops the auto-cancel: the owner has decided.
+ */
+function noteShipAnyway(order: Order, actor: string, via: string, auditFn: (action: string, details: Record<string, unknown>) => void): void {
+  getDb().prepare('UPDATE orders SET wa_cancel_at = NULL, wa_unopened_cancel_at = NULL WHERE id = ?').run(order.id);
+  logEvent(order.id, actor, 'ship_unconfirmed', { via, check: order.whatsappCheck?.status ?? 'none' });
+  auditFn('order.ship_unconfirmed', { by: actor, orderId: order.id, via, check: order.whatsappCheck?.status ?? 'none', autoCancelStopped: Boolean(order.whatsappCheck?.cancelAt || order.whatsappCheck?.openBy) });
+}
+
+/**
+ * Before a courier is booked (dispatch): an unconfirmed COD order needs `shipUnconfirmed` (the
+ * owner's "ship anyway"), recorded in the order's history and the audit log before the booking.
+ */
+export function assertShipAllowed(orderId: string, actor: string, shipUnconfirmed: boolean): void {
+  const order = getOrder(orderId);
+  if (!order || !unconfirmedCod(order)) return;
+  if (!shipUnconfirmed) throw shipAnywayQuestion(order);
+  auditedTransaction((auditFn) => {
+    // Read again inside the transaction: the sweep may have cancelled it meanwhile.
+    const now = getOrder(orderId);
+    if (!now || !unconfirmedCod(now)) {
+      if (now?.status === 'cancelled') throw new HttpError(409, `${orderId} was cancelled meanwhile: nothing was booked.`);
+      return;
+    }
+    noteShipAnyway(now, actor, 'courier', auditFn);
+  });
+  bump('orders');
+}
+
+/**
+ * Settings → Phone check "WhatsApp (free)": orders still not confirmed when their time is up
+ * (wa_cancel_at, set at checkout), or sooner when the customer never even opened WhatsApp
+ * (wa_unopened_cancel_at), are cancelled and their pieces put back on sale, exactly once (the
+ * order is claimed with one conditional UPDATE, so two copies of the shop can't both do it),
+ * audited before it counts. Not cancelled: a confirmed order (WhatsApp or phone call), a paid card
+ * order, and a bank transfer: one whose screenshot is uploaded or that is paid is left to the owner
+ * (its time is cleared), and one with neither is flagged for the owner ("check your bank, then
+ * cancel or confirm"), its pieces still held and its private page still open (14 days). Returns
+ * how many were cancelled.
+ */
+export function sweepUnconfirmedOrders(now = Date.now()): number {
+  const nowIso = new Date(now).toISOString();
+  const due = getDb()
+    .prepare(
+      `SELECT id FROM orders WHERE wa_cancel_at IS NOT NULL AND wa_cancel_at <= ? AND phone_check IN ('awaiting', 'mismatch')
+       UNION SELECT id FROM orders WHERE wa_unopened_cancel_at IS NOT NULL AND wa_unopened_cancel_at <= ? AND phone_check IN ('awaiting', 'mismatch') AND wa_opened_at IS NULL
+       LIMIT 100`
+    )
+    .pluck()
+    .all(nowIso, nowIso) as string[];
+  let cancelled = 0;
+  let flagged = false;
+  for (const id of due) {
+    try {
+      const done = auditedTransaction((auditOrThrow): 'cancelled' | 'flagged' | false => {
+        const r = getDb().prepare('SELECT wa_cancel_at, wa_unopened_cancel_at, wa_opened_at, phone_check FROM orders WHERE id = ?').get(id) as
+          | { wa_cancel_at: string | null; wa_unopened_cancel_at: string | null; wa_opened_at: string | null; phone_check: string }
+          | undefined;
+        if (!r || (r.phone_check !== 'awaiting' && r.phone_check !== 'mismatch')) return false;
+        const unopened = Boolean(r.wa_unopened_cancel_at && !r.wa_opened_at && r.wa_unopened_cancel_at <= nowIso);
+        const expired = Boolean(r.wa_cancel_at && r.wa_cancel_at <= nowIso);
+        if (!unopened && !expired) return false;
+        const claimed =
+          getDb()
+            .prepare("UPDATE orders SET wa_cancel_at = NULL, wa_unopened_cancel_at = NULL WHERE id = ? AND wa_cancel_at IS ? AND wa_unopened_cancel_at IS ? AND phone_check IN ('awaiting', 'mismatch')")
+            .run(id, r.wa_cancel_at, r.wa_unopened_cancel_at).changes === 1;
+        if (!claimed) return false;
+        const order = getOrder(id)!;
+        const paidCard = order.card?.state === 'paid' || order.card?.state === 'refund_pending' || order.card?.state === 'refunded';
+        const bank = order.paymentMethod === 'bank_transfer';
+        const transferIn = bank && (order.bankTransfer?.state === 'uploaded' || order.bankTransfer?.state === 'paid' || order.paymentStatus === 'verified' || order.paymentStatus === 'paid');
+        if (order.status !== 'pending_confirmation' || paidCard || transferIn) {
+          if (transferIn && order.status === 'pending_confirmation') logEvent(id, 'shop', 'auto_cancel_skipped', { why: 'transfer' });
+          return false;
+        }
+        const dueAt = unopened && !expired ? r.wa_unopened_cancel_at! : r.wa_cancel_at ?? r.wa_unopened_cancel_at!;
+        const hours = Math.round((Date.parse(dueAt) - Date.parse(order.createdAt)) / 3600_000);
+        if (bank) {
+          // Never cancelled for this: the customer may be paying (the private page lasts 14 days).
+          setAttention(id, 'bank_unconfirmed', `Bank transfer not confirmed after ${hours} h — check your bank, then cancel or confirm. (Its pieces are still held; the customer's payment page stays open until it is paid or cancelled, 14 days at most.)`);
+          logEvent(id, 'shop', 'bank_unconfirmed_flagged', { hours, check: order.whatsappCheck?.status });
+          auditOrThrow('order.bank_unconfirmed_flagged', { orderId: id, hours, check: order.whatsappCheck?.status, amountFils: fils(order.total), by: 'shop' });
+          return 'flagged';
+        }
+        releaseStock(order, 'cancelled');
+        order.status = 'cancelled';
+        writeOrder(order);
+        const why = unopened && !expired ? 'whatsapp_never_opened' : 'not_confirmed';
+        logEvent(id, 'shop', why === 'whatsapp_never_opened' ? 'auto_cancelled_unopened' : 'auto_cancelled_unconfirmed', { hours, check: order.whatsappCheck?.status });
+        auditOrThrow('order.auto_cancelled_unconfirmed', { orderId: id, hours, why, check: order.whatsappCheck?.status, amountFils: fils(order.total), by: 'shop' });
+        return 'cancelled';
+      });
+      if (done === 'cancelled') cancelled++;
+      if (done === 'flagged') {
+        flagged = true;
+        notifyAttention(getOrder(id));
+      }
+    } catch (err) {
+      logEvent_('warn', 'unconfirmed_sweep_order_failed', { orderId: id, error: err instanceof Error ? err.message : String(err) });
+    }
+  }
+  if (cancelled) invalidateProducts();
+  if (cancelled || flagged) bump('orders');
+  return cancelled;
+}
+
+let unconfirmedTimer: NodeJS.Timeout | null = null;
+
+/** Start the sweep of unconfirmed orders (every 5 minutes, and once soon after start). Off with UNCONFIRMED_SWEEP_DISABLED=1. */
+export function startUnconfirmedSweep(): void {
+  if (unconfirmedTimer || process.env.UNCONFIRMED_SWEEP_DISABLED === '1') return;
+  const tick = () => {
+    try {
+      const n = sweepUnconfirmedOrders();
+      if (n) logEvent_('info', 'unconfirmed_orders_cancelled', { orders: n });
+    } catch (err) {
+      logEvent_('warn', 'unconfirmed_sweep_failed', { error: err instanceof Error ? err.message : String(err) });
+    }
+  };
+  setTimeout(tick, 45_000).unref();
+  unconfirmedTimer = setInterval(tick, 5 * 60_000);
+  unconfirmedTimer.unref();
 }
 
 /**
@@ -1363,7 +1780,7 @@ export function cardView(card: CardPayment): Pick<CardPayment, 'state' | 'label'
 
 /** The customer's side of the WhatsApp confirmation (not who confirmed it). */
 function whatsAppView(check: NonNullable<Order['whatsappCheck']>) {
-  return { status: check.status, code: check.code, hold: check.hold };
+  return { status: check.status, code: check.code, hold: check.hold, ...(check.cancelAt ? { cancelAt: check.cancelAt } : {}), ...(check.openBy ? { openBy: check.openBy } : {}) };
 }
 
 function trackingView(order: Order) {
@@ -1378,12 +1795,14 @@ function trackingView(order: Order) {
 }
 
 /**
- * Track Order: needs both the order number and the phone number on it. Shows
- * status and delivery only: no address, email or full name.
+ * Track Order: needs both the order number and the phone number on it (the one on it now, or one
+ * it had before the owner changed it: "Use the number it came from", a correction). Shows status
+ * and delivery only: no address, email or full name.
  */
 export function lookupOrder(id: string, phone: string) {
   const order = getOrder(id.trim().toUpperCase());
-  if (!order || order.customer.phone !== phone) return null;
+  if (!order) return null;
+  if (order.customer.phone !== phone && !hadPhone(order.id, phone)) return null;
   return {
     id: order.id,
     createdAt: order.createdAt,
@@ -1400,6 +1819,15 @@ export function lookupOrder(id: string, phone: string) {
     ...(order.card ? { card: cardView(order.card) } : {}),
     ...(order.bankTransfer ? { bankTransfer: bankView(order.bankTransfer) } : {}),
   };
+}
+
+/** The number was on the order before the owner changed it (its phone_changed history). */
+function hadPhone(orderId: string, phone: string): boolean {
+  return Boolean(
+    getDb()
+      .prepare("SELECT 1 FROM order_events WHERE order_id = ? AND event = 'phone_changed' AND (json_extract(detail, '$.from') = ? OR json_extract(detail, '$.to') = ?) LIMIT 1")
+      .get(orderId, phone, phone)
+  );
 }
 
 // ── Customers (admin CRM), built from orders ────────────────────────────────

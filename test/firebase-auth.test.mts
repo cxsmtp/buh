@@ -241,21 +241,27 @@ async function publicConfig() {
 test('/api/settings/public exposes the Firebase config only while Firebase is switched on', async () => {
   settings._clearSettingsCache();
   await settings.updateSettings('sms', { provider: 'firebase', isEnabled: false, firebase: GOOD });
-  assert.deepEqual(await publicConfig(), { method: 'server' });
+  // Settings → Phone check "WhatsApp (free)" (the default): no code at all, so no Firebase config either.
+  await settings.updateSettings('sms', { isEnabled: true });
+  assert.deepEqual(await publicConfig(), { method: 'server', check: 'whatsapp', cancelHours: 24 });
+  await settings.updateSettings('phoneCheck', { mode: 'sms_code' });
+  await settings.updateSettings('sms', { isEnabled: false });
+  assert.deepEqual(await publicConfig(), { method: 'server', check: 'sms_code' });
 
   await settings.updateSettings('sms', { isEnabled: true });
-  assert.deepEqual(await publicConfig(), { method: 'firebase', firebase: GOOD });
+  assert.deepEqual(await publicConfig(), { method: 'firebase', firebase: GOOD, check: 'sms_code' });
 
   // A gateway in the server environment takes precedence, as for every other option.
   process.env.SMS_WEBHOOK_URL = 'https://sms.example.com/send';
   try {
-    assert.deepEqual(await publicConfig(), { method: 'server' });
+    assert.deepEqual(await publicConfig(), { method: 'server', check: 'sms_code' });
   } finally {
     delete process.env.SMS_WEBHOOK_URL;
   }
 
   await settings.updateSettings('sms', { provider: 'twilio', isEnabled: false });
-  assert.deepEqual(await publicConfig(), { method: 'server' });
+  assert.deepEqual(await publicConfig(), { method: 'server', check: 'sms_code' });
+  await settings.updateSettings('phoneCheck', { mode: 'whatsapp' });
 });
 
 test('route logic: a UAE mobile gets the same signed phone token as /api/otp/verify; others are refused', async () => {
@@ -266,6 +272,9 @@ test('route logic: a UAE mobile gets the same signed phone token as /api/otp/ver
   assert.equal(await status(confirmFirebasePhone(sign(claims()), { fetchCerts: f, now: NOW })), 404);
 
   await settings.updateSettings('sms', { provider: 'firebase', isEnabled: true, firebase: GOOD });
+  // WhatsApp (free), the default: Firebase is never used, so no token is accepted either.
+  assert.equal(await status(confirmFirebasePhone(sign(claims()), { fetchCerts: f, now: NOW })), 404);
+  await settings.updateSettings('phoneCheck', { mode: 'sms_code' });
   const ok = await confirmFirebasePhone(sign(claims()), { fetchCerts: f, now: NOW });
   assert.equal(ok.valid, true);
   assert.equal(ok.phone, '+971501234567');

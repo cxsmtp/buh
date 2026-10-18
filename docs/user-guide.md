@@ -62,12 +62,13 @@ The shop can sit on the home screen of a phone or tablet and open full screen, w
 ## For customers: placing an order
 
 1. Choose a set, a bed size and a colour, then **Add to Bag** and **Proceed to Checkout**.
-2. **Verify your UAE mobile.** Type the number (50 123 4567, 050…, +971… all work) and tap **Send code**. Enter the 6-digit code from the SMS; it is checked as soon as the sixth digit is in. Pasting the code or using the phone's autofill works too.
+2. **Your UAE mobile.** Type the number (50 123 4567, 050…, +971… all work). Checkout says **We confirm orders over WhatsApp.** and sends no code (Settings → Phone check "WhatsApp (free)", the default): the WhatsApp message after ordering is the confirmation (step 4). Only UAE mobiles (50, 52, 54, 55, 56, 58) are taken.
+   - **When the shop uses SMS codes** (Settings → Phone check "SMS code"): tap **Send code** and enter the 6-digit code from the SMS; it is checked as soon as the sixth digit is in. Pasting the code or using the phone's autofill works too.
    - The code is valid for 10 minutes, and a new one can be requested after 30 seconds.
    - After 5 wrong tries the code stops working; request a new one.
    - **Outside the UAE?** As soon as a non-UAE number is typed, checkout shows **Email orders@…**, which opens an email with the bag already listed.
    - **SMS not arriving?** If the shop's SMS service is down, checkout says so and offers the shop's email.
-3. Fill in the delivery address (or **Use My GPS**), choose Cash on Delivery or bank transfer, and **Confirm & Raise Order**. The button stays locked until the phone is verified.
+3. Fill in the delivery address (or **Use My GPS**), choose Cash on Delivery or bank transfer, and **Place order**. The button stays locked until a UAE mobile is typed (with SMS codes: until it is verified).
    - **Paying by bank transfer:** the shop's bank account is never shown on the website. After you order, you get it privately:
      - by email (if you gave one): "Bank details for your order BUH-…", with the amount, the reference to use (your order number) and your order's private link; you can also just reply to that email with your screenshot;
      - on WhatsApp: the **Confirm on WhatsApp** message also asks for the bank details, and the shop replies with them;
@@ -75,7 +76,7 @@ The shop can sit on the home screen of a phone or tablet and open full screen, w
    - **Paying by card** (when the shop has switched it on): choose **Card**, type the card in Stripe's secure field and tap **Pay AED …**. No SMS code is needed (paying is the proof), but the UAE mobile is still asked for the courier. A bank's own check (3-D Secure) opens on the same page.
    - **Apple Pay / Google Pay** (top of checkout, on an iPhone or Mac with Safari, or Chrome on Android or a computer): one tap pays and fills in your name, email, phone and delivery address. If the shop can't tell your area from the wallet's address, checkout fills in the rest, asks you to choose the area and tap the button again; nothing is charged until then. The phone must be a UAE mobile (if the wallet's isn't, type one in checkout).
    - The confirmation says **Payment is being confirmed…** until Stripe has told the shop, then **Paid by card · Apple Pay · Visa •••• 4242** (usually within seconds). A declined card is not charged and nothing is kept: try another card or choose cash on delivery.
-4. **One last step: Confirm on WhatsApp** (when the shop has switched it on). The confirmation screen shows a large green **Confirm on WhatsApp** button. Tap it: WhatsApp opens with "Confirm my order BUH-… · code 1234" to the shop already typed; tap **Send**. That message, from your own WhatsApp, shows the shop the number is yours. Your order is placed either way (unless the shop holds orders until the message comes: then the screen says "We'll start your order once we get your message"). The same button is in **Track Order** until the shop has confirmed it.
+4. **Confirm on WhatsApp.** The confirmation screen shows a large green **Confirm on WhatsApp** button: "To confirm your order, tap to send us a WhatsApp message. Orders not confirmed within 24 hours are cancelled." (the shop's hours). Tap it: WhatsApp opens with "Confirm my order BUH-… · code 1234" to the shop already typed; tap **Send**. That message, from your own WhatsApp, shows the shop the number is yours. The same button is in **Track Order** and in the bank-details email until the shop has confirmed it. With SMS codes the step is optional ("Your order is placed either way", unless the shop holds orders until the message comes). If the shop has no WhatsApp number set, the screen says the shop will call you to confirm.
 5. **Track Order:** enter the order number (shown on the confirmation and pre-filled on the same phone) and the mobile number used for the order.
 - **Picking up where you left off.** The bag and your delivery details are kept on your phone (**Not you? Clear them** at checkout forgets the details). **Save or send this bag as a link** carries it to another browser, e.g. from Instagram's built-in browser to Safari or Chrome.
 - **Most designs are one or two pieces.** A size shows **Only 1 left** or **Sold out**; you can't add more than there are, and a sold-out size offers **Ask us** (WhatsApp or email) instead.
@@ -129,6 +130,7 @@ Set these up once, in **Settings → Passkeys & recovery codes**, so you can alw
 - The version (BUH-xx.xx.xx) shows bottom left on every page (in the shop it is only text). In the Admin Hub, tap it for **Settings → Versions**: every release with what changed, and (with automatic updates on) **Switch to this version** for any release from BUH-02.00.00, or **Update to the latest**. The shop stays open while it switches, and the database is saved first.
 - **Going back below BUH-02.09.00 with card payments on** leaves card orders unchecked (older versions don't know them): switch card payments off in Settings → Payments first. Stripe keeps resending its webhooks until a version that knows them is back.
 - **Going back below BUH-02.09.00 republishes your bank account** through the old public settings (older versions show the IBAN at checkout): clear the IBAN in Settings → Branding & bank first if it must stay private.
+- **Going back below BUH-02.10.00:** a product edited in the older version loses its **Fitted sheet** tick and **Other pieces** (that version doesn't know them): after updating again, open the product and tick or type them again. During the update minute (both versions running), a product with no colours ordered through the older one answers "that colour is no longer offered": the customer just tries again. Orders not confirmed on WhatsApp are not cancelled by the older version; the newer one does it once it is back.
 - **Updates** (with the updater turned on, see the deployment guide) install themselves without closing the shop or signing you out. If a new version does not start properly, the shop stays on the one before and an alert is written. A customer in the middle of checkout carries on: their bag, details and SMS code are kept.
 - **One Podman container (a Windows laptop or a Linux server):** paste the one-line `setup` command once (Settings → Versions shows it, one line for Command Prompt and one for PowerShell; deployment guide, "One Podman container"). The images are private, so Podman must be logged in to `ghcr.io` first (deployment guide, "Private images"); when that login expires, Settings → Versions says so in red and updates wait until you log in again. The page also has a switch, **Install new versions automatically** (on by default): off, nothing is checked or installed by itself, but "Update to the latest", switching versions and restarting a stopped shop still work; it says when the last check ran and what it found. Under **Installed on this server** you see each version installed, with its digest, when, and why; a release marked "verified" runs exactly the contents it was first published with. If a version ever comes back with other contents, it is refused and the page warns you in red. Nothing is downloaded or kept on the computer but the images. The same then happens, with one difference: at the switch the shop is closed for a few seconds. The new version is tried first beside the running one, and if it does not answer, the old one is put back. Settings → Versions then says "Automatic updates: Podman (one container)". The shop keeps its own settings and port. From then on, update with **Update to the latest**, not with the old Podman commands (stop the updater first if you must). Without it, the page shows the two Podman commands to update by hand. The updater also keeps itself up to date. After the computer restarts, start Podman (`podman machine start`, or let Podman Desktop start it); the shop and the updater come back if Podman's restart service is on (the set-up prints the one line for it), otherwise run `podman start beautifuluaehome-updater` and it starts the shop.
 
@@ -136,7 +138,7 @@ Set these up once, in **Settings → Passkeys & recovery codes**, so you can alw
 
 New orders appear under **Orders & Dispatches** within seconds, with a notice at the top. An order shows **via Instagram** (or WhatsApp, TikTok…) when that is where the customer came from. For each order:
 
-- **Confirm & Assign Courier** books Jeebly or Eco Express and prints the label.
+- **Confirm & Assign Courier** books Jeebly or Eco Express and prints the label. For a cash-on-delivery order the customer hasn't confirmed on WhatsApp yet, it first asks **"This customer hasn't confirmed on WhatsApp yet — ship anyway?"** (you may have confirmed by phone call): **OK** books it and the "ship anyway" is kept in the order's **History** and the audit log; **Cancel** books nothing. With **Hold orders until confirmed on WhatsApp** on, it can't be booked at all until confirmed.
 - **Mark dispatched**, then **Out for delivery** or **Mark delivered**, as the parcel moves.
 - **Bank transfers** (filter **Transfer to check**, with a count of screenshots waiting): each order shows where it stands: **Waiting for bank transfer** → **Transfer screenshot received** → **Payment received**.
   - **View transfer screenshot** opens what the customer uploaded (hub only); earlier ones stay under **Earlier: #1, #2…**.
@@ -158,16 +160,28 @@ Every change is recorded with who made it and when.
 
 #### Confirm on WhatsApp (free, no WhatsApp API)
 
-Customers confirm their number with one WhatsApp message they send you; nothing to sign up for or pay.
+Customers confirm their number with one WhatsApp message they send you; nothing to sign up for or pay. With **Settings → Phone check** "WhatsApp (free)" (the default) this message is how every order is confirmed: no SMS code is sent at checkout.
 
+- **Settings → Phone check:**
+  - **WhatsApp (free)** (default, for new and existing shops) or **SMS code** (the SMS gateway or Firebase below; checkout as before, the WhatsApp step optional).
+  - **Cancel orders not confirmed after (hours)**: 24 by default, 2 to 168. An order still not confirmed by then is cancelled by itself, its pieces back on sale (once), and the cancellation is in its **History** and the audit log. Never cancelled: orders confirmed on WhatsApp or by phone call (or shipped anyway), paid card orders, and bank transfers. A new value applies to new orders.
+  - **If the customer never opens WhatsApp, cancel after (hours)**: 6 by default, 2 to 48, never later than the hours above. An order whose customer never even tapped **Confirm on WhatsApp** goes back on sale sooner (in its **History** as "WhatsApp never opened"); customers are told at checkout.
+  - **Bank transfers are never cancelled by themselves** (their private payment page lasts 14 days). One still not confirmed after the hours above is flagged in Orders and emailed to you: **Bank transfer not confirmed after 24 h — check your bank, then cancel or confirm.** Its pieces stay held and the customer's page stays open until it is paid or cancelled (14 days at most).
+  - **Limits** (no code costs anything, so nobody can hold your stock with fake orders): until confirmed, an order takes at most 2 of each item and 5 different items; at most 2 orders waiting per phone, 4 per connection and 60 across the shop; and orders waiting can hold at most half of any size's pieces (at least 2): beyond it the customer reads "This piece is very popular right now — please message us on WhatsApp". At 80% of the shop's limit, and whenever it turns a customer away, you get an email and Settings → System shows it.
+  - **Behind no proxy** (no `TRUST_PROXY=1`), the shop can't tell customers apart: the section says so and the shop's limit is 15. The Hostinger set-up has `TRUST_PROXY=1`.
+  - **No WhatsApp number set** (Settings → Store & contact): the section says so in red. Orders are still taken, never treated as confirmed, and marked **Not confirmed: no WhatsApp number set — call the customer**; they are not cancelled by themselves.
 - **Settings → Store & contact:**
-  - **Ask customers to confirm their order on WhatsApp**: on as soon as the shop's WhatsApp number is set. With no number, nothing changes.
+  - **Ask customers to confirm their order on WhatsApp**: on as soon as the shop's WhatsApp number is set (with Phone check "WhatsApp (free)" every order is asked anyway). With no number, nothing is asked.
   - **Hold orders until confirmed on WhatsApp**: off by default. Off, orders go through as usual and simply show "not yet confirmed". On, an order can't be confirmed or booked with a courier until you mark the message received (you can always cancel it).
-- **In Orders** (phone view first), an order shows **Awaiting WhatsApp confirmation · code 1234** with the customer's phone number. When "Confirm my order BUH-… · code 1234" arrives in your WhatsApp, check it comes from that number, then tap:
+- **In Orders** (phone view first), an order shows **Awaiting WhatsApp — auto-cancels in 13 h · code 1234** with the customer's phone number. When "Confirm my order BUH-… · code 1234" arrives in your WhatsApp, check it comes from that number, then tap:
   - **Confirmed on WhatsApp**; then **Reply on WhatsApp** opens a thank-you to the customer, ready to send;
-  - or **Number didn't match** (from another number: call the customer or cancel). You can still tap **Confirmed on WhatsApp** later.
+  - **Confirmed by phone call** when you rang the customer instead (shown as "Confirmed by phone call by … at …"; it stops the auto-cancel);
+  - **Ask to confirm** opens WhatsApp to the customer with "Hello Salma, please confirm your order BUH-… from Beautiful UAE Home by replying YES. Thank you!" ready to send;
+  - or **Number didn't match** (from another number). Then either call the customer, cancel, or type the number it came from and tap **Use the number it came from**: the box asks you to confirm the number exactly as it will be saved (+9715…), the order's phone becomes that number (checked like checkout's: a UAE mobile), the old one stays in the order's **History**, and the order is confirmed. You can still tap **Confirmed on WhatsApp** later.
+  - **Typed the wrong number?** On a confirmed order, open **Correct the phone number**, type the right one and save: checked the same way, in the order's **History** and the audit log. Not on a cancelled or delivered order. Track Order finds the order with the current number or any number it had before.
+- **An order that is cancelled (by you, or by itself) or delivered can't be confirmed any more**: the tap answers "Auto-cancelled at … — ask the customer to place a new order" (its pieces are back on sale).
 - The **Awaiting WhatsApp** filter lists the ones still waiting, and the daily summary counts them. A second tap changes nothing; each answer is in the audit log with who and when.
-- The shop's own SMS / Firebase code check at checkout is separate and works as before.
+- With Phone check "SMS code", the SMS / Firebase code check at checkout works as before and this step is optional.
 
 ### Inventory
 
@@ -177,6 +191,7 @@ Customers confirm their number with one WhatsApp message they send you; nothing 
 - **Show:** All, **Low** (a few pieces left in all), **Sold out** (none left in any size), **Hidden**, **Removed**; and a **Category** list. The two cards at the top (sold out, running low) open those lists, and the number on **Inventory** in the bottom bar is the same count.
 - Tap a product to open it: the sizes with **− / +**, then the quick actions below.
 - **Edit** opens the step-by-step editor; **+ Add product** starts a new one (see below).
+- **Check measurements** (a small ochre badge): the update that brought measurements per product kept every measurement the shop showed before (nothing is filled in), fitted sheets ticked as fitted, and took off only a duvet cover that was just the standard size's on a set that isn't a duvet product (a duvet cover you typed yourself stays). Open **Edit → Sizes** once, keep only what each set includes, and save: the badge goes. A duvet cover taken off is kept: the editor shows **Taken off the shop by the update** with **Put it back** (one tap, then save).
 - **Hide / Show in shop**, **Sold out** (every size to 0, with Undo), **Duplicate** (a hidden copy with no stock, for another colour: change its photos and colour, then show it), **Share** (the product's link, through your phone's share sheet or copied), **History**, the arrows (its place in the shop) and **Remove** (out of the shop for good but kept for past orders; restore it, hidden, under **Removed**).
 
 ### Managing stock from your phone
@@ -194,8 +209,10 @@ On a phone the bottom bar is **Orders**, **Inventory**, **Chats** and **More** (
 **Adding a product from the phone** goes in four steps; **Next** moves on, and the step names at the top go back:
 
 1. **Photos:** **Take photo** opens the camera; **From gallery** picks several at once. Each is made smaller on the phone (at most 1600 px) and uploaded straight away. The first photo is the **cover**: tap the star to make another one the cover, or the arrows (or drag, on a computer) to change the order.
-2. **Details:** name, category and price; **More details** has the SKU, the "was" price, descriptions, fabric and colours.
+2. **Details:** name, category and price; **More details** has the SKU, the "was" price, descriptions, fabric and colours. **Colours are optional:** with none, the shop shows no colour; with one, it shows it as a label; with several, shoppers choose one.
 3. **Sizes:** tap a size (from your presets in Settings → Catalogue) to add it, then set its pieces with **− / +** or type them.
+   - **Fitted sheet (elastic corners):** tick it when the set's sheet is fitted; left unticked (the default), the set has a flat sheet. The shop shows "Fitted sheet" or "Flat sheet" with its size.
+   - **Measurements & price** under each size: the sheet, **Pillowcases**, **Duvet cover** and **Other pieces** (e.g. cushion covers) of this product. They start empty: fill in only what the set includes. **Use standard sizes** fills the empty ones from the size preset (sheet and pillowcases; the duvet cover only for a duvet product), shown greyed as a hint until then. The shop shows only the lines you filled in, and no Measurements at all when there are none.
 4. **Publish:** shown in the shop (or **Save hidden**), new arrival, featured.
 
 The draft saves itself as you go ("Draft saved" at the top), so a phone call or a closed tab loses nothing; open **Add product** again (on any device) to continue, or **Start over**. Editing a product works the same way; if a customer buys while you edit its stock, **Save** shows the new figures to check.
@@ -233,7 +250,7 @@ On each product, customers see **Ask in chat**, **Ask on WhatsApp** and **Ask on
 - **Branding & bank:** the shop's name, tagline and logo (the logo's letters sit on one of the palette's tones: champagne gold, antique gold, ink or dusty rose), and bank-transfer details.
 - **Festival themes:** see below.
 - **Payments:** card, Apple Pay and Google Pay through your Stripe account (see "Card payments" above).
-- **Phone verification:** the SMS gateway (see below).
+- **Phone check:** WhatsApp (free, the default) or SMS code, the hours before unconfirmed orders cancel, and the SMS gateway (see below).
 - **Couriers:** see below.
 - **System & backups:** health (disk, database, backups, SMS), backups, and **Settings history**: every save keeps the version it replaced (keys excepted); **Restore** puts an earlier one back and can itself be undone.
 
@@ -315,7 +332,9 @@ The line at the top of the Admin Hub shows when the last backup ran:
 
 **Back up now** runs one immediately. Backups run every 12 hours on their own. Courier, SMS and Stripe keys are not in backups: after a restore, enter them again. Restoring: see HOSTINGER_DEPLOYMENT_GUIDE.md.
 
-### Phone verification (SMS)
+### Phone check and the SMS gateway
+
+**Settings → Phone check** chooses how checkout checks the number: **WhatsApp (free)** (the default; see [Confirm on WhatsApp](#confirm-on-whatsapp-free-no-whatsapp-api)) or **SMS code**. The SMS gateway below is used only with **SMS code**; with WhatsApp a saved gateway sends nothing.
 
 Enter the gateway's details, tap **Send test** to try it on your own mobile, then **Save Gateway Credentials**. Checkout then sends codes through it (a gateway set in `.env.production` takes priority). Keys are kept on the server and never shown again: leave a key field blank to keep the saved one. Webhook and Infobip URLs must be public https addresses.
 
@@ -325,7 +344,7 @@ Enter the gateway's details, tap **Send test** to try it on your own mobile, the
 2. Authentication → Sign-in method: turn on **Phone**.
 3. Authentication → Settings → Authorized domains: add your shop's domain.
 4. Upgrade to the **Blaze** plan. Firebase only sends phone codes on Blaze, and Google bills every SMS; set a budget alert.
-5. Project settings → add a Web app, copy `apiKey`, `authDomain`, `projectId` and `appId` into **Settings → Phone verification**, choose **Firebase Phone Auth** and save.
+5. Project settings → add a Web app, copy `apiKey`, `authDomain`, `projectId` and `appId` into **Settings → Phone check** (SMS gateway), choose **Firebase Phone Auth** and save, and set Phone check to **SMS code**.
 
 There is no **Send test** for Firebase: try a checkout on your own phone (a billed SMS). A gateway in `.env.production` still takes priority.
 

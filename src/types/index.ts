@@ -19,7 +19,10 @@ export interface BedProfileMeasurement {
   flatSheet: string;    // e.g. "260 x 270 cm"
   pillowcases: string;  // e.g. "2 pcs (50 x 80 cm)"
   duvetCover?: string;  // e.g. "240 x 260 cm"
+  /** Older size presets only (not shown in the shop): use otherPieces on a product. */
   cushionCovers?: string; // e.g. "2 pcs (45 x 45 cm)"
+  /** Anything else in the set, free text (e.g. "2 cushion covers 45 x 45 cm"). */
+  otherPieces?: string;
   piecesIncluded: number;
   priceDelta: number;   // e.g. +0 for Single, +40 for King, +60 for Super King
 }
@@ -56,6 +59,19 @@ export interface Product {
   isNewArrival?: boolean;
   rating: number;
   reviewsCount: number;
+  /**
+   * Measurements per size (on profiles) are the ones the owner filled in on this product; the
+   * shop shows only those. fitted: the set's sheet is a fitted sheet (elastic corners), so the
+   * shop shows "Fitted sheet" with fittedSheet; otherwise (the default) "Flat sheet" with flatSheet.
+   */
+  fitted?: boolean;
+  /** Measurements carried over from the standard sizes by an update: the owner checks them once (Admin Hub only). */
+  measurementsReview?: boolean;
+  /**
+   * Values the BUH-02.10 update took off a size (a standard duvet cover on a set that is not a
+   * duvet product), per size id: never shown to customers; the editor offers them back in one tap.
+   */
+  legacyMeasurements?: Record<string, Partial<Pick<BedProfileMeasurement, 'fittedSheet' | 'flatSheet' | 'pillowcases' | 'duvetCover'>>>;
   profiles: BedProfileMeasurement[];
   defaultProfileId: BedSizeProfileId;
   createdAt: string;
@@ -210,7 +226,7 @@ export interface CardPayment {
 
 /** Something on an order the owner must look at (a refund that failed, a booking after a cancel…). Admin only. */
 export interface OrderAttention {
-  kind: 'refund_failed' | 'booked_after_cancel' | 'refund_outside_stripe' | 'card_unreachable';
+  kind: 'refund_failed' | 'booked_after_cancel' | 'refund_outside_stripe' | 'card_unreachable' | 'call_customer' | 'bank_unconfirmed';
   text: string;
   at: string;
 }
@@ -255,6 +271,16 @@ export interface WhatsAppCheck {
   openedAt?: string;
   checkedAt?: string;
   checkedBy?: string;
+  /** How it was confirmed: the customer's WhatsApp message, or the owner's phone call. */
+  method?: 'whatsapp' | 'call';
+  /**
+   * Settings → Phone check "WhatsApp (free)": when an order still not confirmed is cancelled
+   * (its pieces back on sale). Absent: never cancelled for this (an SMS-verified or older order,
+   * or a bank transfer: flagged for the owner instead).
+   */
+  cancelAt?: string;
+  /** Sooner than cancelAt: when it is cancelled if the customer never opens WhatsApp (absent once opened). */
+  openBy?: string;
 }
 
 export interface Customer {
@@ -469,6 +495,25 @@ export interface FirebaseWebConfig {
 export interface PhoneVerificationConfig {
   method: 'server' | 'firebase';
   firebase?: FirebaseWebConfig;
+  /**
+   * Settings → Phone check. 'whatsapp' (the default): no code is sent; the customer confirms the
+   * order with one WhatsApp message. Absent (pages from before) or 'sms_code': the SMS code.
+   */
+  check?: PhoneCheckMode;
+  /** WhatsApp mode: orders not confirmed within this many hours are cancelled. */
+  cancelHours?: number;
+}
+
+export type PhoneCheckMode = 'whatsapp' | 'sms_code';
+
+/** Settings → Phone check: how checkout makes sure the phone number is the customer's. */
+export interface PhoneCheckSettings {
+  /** 'whatsapp' (free, the default): one WhatsApp message after ordering. 'sms_code': a code by SMS gateway or Firebase. */
+  mode: PhoneCheckMode;
+  /** WhatsApp mode: an order not confirmed within this many hours (2 to 168) is cancelled, its pieces back on sale. */
+  unconfirmedCancelHours: number;
+  /** WhatsApp mode: sooner, when the customer never even opened WhatsApp (2 to 48, never later than unconfirmedCancelHours). */
+  unopenedCancelHours: number;
 }
 
 export interface SmsGatewaySettings {
