@@ -67,7 +67,11 @@ The shop can sit on the home screen of a phone or tablet and open full screen, w
    - After 5 wrong tries the code stops working; request a new one.
    - **Outside the UAE?** As soon as a non-UAE number is typed, checkout shows **Email orders@…**, which opens an email with the bag already listed.
    - **SMS not arriving?** If the shop's SMS service is down, checkout says so and offers the shop's email.
-3. Fill in the delivery address (or **Use My GPS**), choose Cash on Delivery or bank transfer (with an optional receipt screenshot or PDF), and **Confirm & Raise Order**. The button stays locked until the phone is verified.
+3. Fill in the delivery address (or **Use My GPS**), choose Cash on Delivery or bank transfer, and **Confirm & Raise Order**. The button stays locked until the phone is verified.
+   - **Paying by bank transfer:** the shop's bank account is never shown on the website. After you order, you get it privately:
+     - by email (if you gave one): "Bank details for your order BUH-…", with the amount, the reference to use (your order number) and your order's private link; you can also just reply to that email with your screenshot;
+     - on WhatsApp: the **Confirm on WhatsApp** message also asks for the bank details, and the shop replies with them;
+     - on your order's private page: the confirmation screen's **Upload your transfer screenshot** opens it (Track Order shows the same button). It has the account (with **Copy** buttons), the amount and the reference, and an upload for a screenshot or PDF of the transfer (up to 5 MB). After uploading: "Thank you, we'll confirm your order once we see the transfer." Uploading again replaces it. The page works until the order is paid or cancelled, or for 14 days; please don't share its link.
    - **Paying by card** (when the shop has switched it on): choose **Card**, type the card in Stripe's secure field and tap **Pay AED …**. No SMS code is needed (paying is the proof), but the UAE mobile is still asked for the courier. A bank's own check (3-D Secure) opens on the same page.
    - **Apple Pay / Google Pay** (top of checkout, on an iPhone or Mac with Safari, or Chrome on Android or a computer): one tap pays and fills in your name, email, phone and delivery address. If the shop can't tell your area from the wallet's address, checkout fills in the rest, asks you to choose the area and tap the button again; nothing is charged until then. The phone must be a UAE mobile (if the wallet's isn't, type one in checkout).
    - The confirmation says **Payment is being confirmed…** until Stripe has told the shop, then **Paid by card · Apple Pay · Visa •••• 4242** (usually within seconds). A declined card is not charged and nothing is kept: try another card or choose cash on delivery.
@@ -132,9 +136,13 @@ New orders appear under **Orders & Dispatches** within seconds, with a notice at
 
 - **Confirm & Assign Courier** books Jeebly or Eco Express and prints the label.
 - **Mark dispatched**, then **Out for delivery** or **Mark delivered**, as the parcel moves.
-- **Bank transfers:**
-  - **View receipt** opens what the customer uploaded.
-  - **Mark payment received** once the money is in the account.
+- **Bank transfers** (filter **Transfer to check**, with a count of screenshots waiting): each order shows where it stands: **Waiting for bank transfer** → **Transfer screenshot received** → **Payment received**.
+  - **View transfer screenshot** opens what the customer uploaded (hub only); earlier ones stay under **Earlier: #1, #2…**.
+  - **Payment received** once the money is in the account (it asks you to confirm the amount). The order is marked paid, its private page closes, and **Tell the customer on WhatsApp** opens WhatsApp with "We've received your payment for order BUH-…, thank you ✓" ready to send. Tapping it twice changes nothing.
+  - **Not received yet** if it isn't in the account: the customer can upload again, and **Tell the customer on WhatsApp** has a polite message with their link.
+  - **Send bank details on WhatsApp** opens WhatsApp to the customer with the bank details, amount, reference and the order's private link already typed (for customers without email, or who asked on WhatsApp). The private link is also shown with a **Copy** button.
+  - The order says whether the details were emailed. **History** shows each step (link made, emailed, screenshot uploaded, received).
+  - The daily summary email counts the transfers to check and those not received yet.
 - **Card payments** (filter **Card payments**) show how they were paid: **Paid by card · Apple Pay · Visa •••• 4242**, or **Waiting for the card payment** (not confirmed or booked until Stripe says paid; an order left unpaid for 30 minutes cancels itself and its items go back on sale). Only Stripe marks a card order paid: there is no "payment received" button for it.
   - **Cancel & refund AED … to the card** cancels a paid card order and refunds the full amount through Stripe (it reaches the customer's card in 5–10 working days). It happens once, even if tapped twice; it shows **Refund … on its way** until Stripe confirms, then **Refunded**.
   - A full refund you make in the Stripe dashboard instead also shows here.
@@ -282,9 +290,10 @@ Customers pay by card, Apple Pay or Google Pay into **your own Stripe account**;
 
 ### Bank details
 
-Under **Settings → Branding & bank → Bank transfer details**. Customers paying by transfer see exactly these at checkout, with your instructions.
+Under **Settings → Branding & bank → Bank transfer details**. These are **never shown on the website**: each customer who chooses bank transfer gets them privately (the email, your WhatsApp message, and their order's private page), with your note. **Preview what customers receive** shows the email and the WhatsApp message exactly.
 
 - **Bank transfer only appears at checkout once the bank name, account name and IBAN are saved.**
+- The email is sent automatically when the customer gives an email address and **Settings → Email** is set up; replies (with screenshots) come to your support email.
 - The IBAN is checked (AE plus 21 digits, with its check digits), so most typos are caught.
 
 ### Backups

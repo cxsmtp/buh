@@ -371,7 +371,7 @@ test('WhatsApp texts: the confirmation asks for the bank details; the owner’s 
   assert.ok(!/[ &#+\n]/.test(href.split('?text=')[1]), 'reserved characters and new lines are escaped');
   assert.equal(messages.paymentReceivedReply('BUH-1'), "We've received your payment for order BUH-1, thank you ✓");
   assert.match(messages.notReceivedReply('BUH-1', 490, link), /haven't seen your transfer of AED 490 for order BUH-1[\s\S]*\/pay\//);
-  const email = messages.bankDetailsEmail({ orderId: 'BUH-1', total: 490, bank: BANK, link });
+  const email = messages.bankDetailsEmail({ orderId: 'BUH-1', total: 490, bank: { ...BANK, branch: '', instructions: '' }, link });
   assert.equal(email.subject, 'Bank details for your order BUH-1');
   assert.ok(email.text.includes(link) && email.text.includes('or reply to this email with your screenshot'));
 });
