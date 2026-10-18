@@ -10,6 +10,7 @@ import { postJson } from '@/lib/apiClient';
 import { formatAccuracy, suggestAreaFromGps, UAE_KEY_LOCATIONS } from '@/lib/uaeLocations';
 import { deliveryCheck } from '@/lib/delivery';
 import { AreaCombobox } from './AreaCombobox';
+import { WhatsAppConfirm } from './WhatsAppConfirm';
 import { 
   X, 
   CheckCircle2, 
@@ -384,6 +385,7 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
 
   // SUCCESS CONFIRMATION SCREEN
   if (confirmedOrder) {
+    const askWhatsApp = Boolean(confirmedOrder.whatsappCheck && shopWhatsApp);
     const whatsappMessage = encodeURIComponent(
       `Hello Beautiful UAE Home! I have placed Order #${confirmedOrder.id} (${confirmedOrder.customer.fullName}) for AED ${confirmedOrder.total}. Payment method: ${confirmedOrder.paymentMethod === 'cod' ? 'Cash on Delivery' : 'Bank Transfer'}. Please confirm dispatch.`
     );
@@ -397,7 +399,7 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
           </div>
 
           <div>
-            <span className="label-caps text-gold-deep">Order confirmed</span>
+            <span className="label-caps text-gold-deep">{askWhatsApp && confirmedOrder.whatsappCheck?.hold ? 'Order received' : 'Order confirmed'}</span>
             <h2 id="order-confirmed-title" className="font-serif text-3xl text-ink mt-2">
               Thank you for your order
             </h2>
@@ -405,6 +407,9 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
               Your linens are being prepared with care in Dubai. We will send a tracking link as soon as they ship.
             </p>
           </div>
+
+          {/* Confirm on WhatsApp (Settings → Store & contact): one message from the customer's own WhatsApp. */}
+          {askWhatsApp && <WhatsAppConfirm orderId={confirmedOrder.id} phone={confirmedOrder.customer.phone} check={confirmedOrder.whatsappCheck!} />}
 
           {/* Order Details Card */}
           <div className="bg-ivory rounded-2xl p-4 text-left border border-line space-y-2 text-xs">
@@ -452,7 +457,7 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
           {/* WhatsApp Direct Notification, and Done: always on the screen */}
           <div className="shrink-0 border-t border-line bg-surface p-4 pb-[max(1rem,env(safe-area-inset-bottom))] flex flex-col sm:flex-row gap-2">
             {/* The shop's WhatsApp number from Settings → Store & contact (hidden when none is set). */}
-            {shopWhatsApp && (
+            {shopWhatsApp && !askWhatsApp && (
               <a
                 href={`https://wa.me/${shopWhatsApp}?text=${whatsappMessage}`}
                 target="_blank"

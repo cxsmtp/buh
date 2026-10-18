@@ -255,6 +255,21 @@ const MIGRATIONS: Array<(db: DB) => void> = [
       CREATE INDEX stock_moves_unaudited ON stock_moves(id) WHERE audited_at IS NULL;
     `);
   },
+  // 8: "Confirm on WhatsApp". The customer sends the shop one WhatsApp message (order number +
+  //    wa_code); the owner marks it confirmed, or that the number didn't match. Own columns, so
+  //    an older version rewriting the order's JSON (during an update or after a rollback)
+  //    leaves them alone. Orders from before have phone_check 'none' (never asked).
+  (db) => {
+    db.exec(`
+      ALTER TABLE orders ADD COLUMN wa_code TEXT;
+      ALTER TABLE orders ADD COLUMN phone_check TEXT NOT NULL DEFAULT 'none';   -- none | awaiting | confirmed | mismatch
+      ALTER TABLE orders ADD COLUMN wa_hold INTEGER NOT NULL DEFAULT 0;         -- 1: not confirmed or booked until confirmed
+      ALTER TABLE orders ADD COLUMN wa_opened_at TEXT;
+      ALTER TABLE orders ADD COLUMN phone_checked_at TEXT;
+      ALTER TABLE orders ADD COLUMN phone_checked_by TEXT;
+      CREATE INDEX orders_awaiting_whatsapp ON orders(created_at) WHERE phone_check = 'awaiting';
+    `);
+  },
 ];
 
 let db: DB | null = null;

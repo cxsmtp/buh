@@ -112,6 +112,15 @@ With `TRUST_PROXY=1` (behind the shop's proxy, which sets the real address), an 
   - The route is closed unless Firebase is the switched-on SMS option, is same-origin only, size-capped and limited to 30 attempts per address per 15 minutes. Firebase's own abuse limits apply to sending; the shop's per-number send limits do not.
   - The web config (API key, auth domain, project ID, app ID) is public by design. Protect the project in Firebase: authorized domains set to the shop only, a Google Cloud budget alert, and (optionally) SMS region policy allowing only the UAE.
 
+## Confirm on WhatsApp (BUH-02.09)
+
+- **No third party.** A plain `https://wa.me/<shop number>?text=…` link: the customer's own WhatsApp sends the message, the owner reads it in theirs. No WhatsApp Business API, no unofficial WhatsApp library (those break WhatsApp's terms and get numbers banned), no data leaves the shop.
+- **What it proves:** the person who sent the message holds the WhatsApp account of the number the owner sees as the sender. The owner compares that with the order's phone (shown next to the buttons) before tapping **Confirmed on WhatsApp**. It doesn't prove anything by itself: the shop never sees the message.
+- **The code is not a password.** 4 digits from `crypto.randomInt`, made by the server with the order, shown to the customer and to anyone who has the order number and its phone (Track Order). It only ties a message to an order. It is kept in the order's own columns, never in the server log or the audit log (`logEvent` also redacts any `code` field).
+- **The owner's answer** (`POST /api/admin/orders/<id>/whatsapp`): `requireAdmin` (private-link door, session, same site), a 1 KB body with one allow-listed field (`result`: `confirmed` or `mismatch`), the order looked up on the server (unknown: 404). Idempotent: the same answer again changes nothing. The audit entry is written inside the same transaction, so an answer is never saved or reported done without it.
+- **Hold until confirmed** (off by default) is enforced on the server: confirming or booking a courier is refused until the order is confirmed; cancelling always works.
+- **"Customer opened WhatsApp"** (`POST /api/orders/whatsapp-opened`): same site, 1 KB, needs the order number and the phone on it (like Track Order), only sets that order's "opened" time once, answers `{ ok: true }` whether or not the pair matched (no oracle), 10 per order and 30 per address per 15 minutes.
+
 ## Outbound calls (SSRF)
 
 URLs an admin can type (SMS webhook, Infobip base URL) must be https, use port 443, carry no credentials, and resolve only to public addresses.

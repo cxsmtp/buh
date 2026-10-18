@@ -11,6 +11,8 @@ import { verifyPhoneToken } from './phoneToken';
 import { getProduct, invalidateProducts, listProducts } from './products';
 import { bump } from './live';
 import { bankTransferReady, getSettings } from './settings';
+import { audit } from './audit';
+import { waMeLink } from '@/lib/whatsappConfirm';
 
 /**
  * Orders, stored on the server. Everything that decides what a customer pays
@@ -64,31 +66,58 @@ function receiptsDir(): string {
 
 interface Row {
   data: string;
+  wa_code: string | null;
+  phone_check: string;
+  wa_hold: number;
+  wa_opened_at: string | null;
+  phone_checked_at: string | null;
+  phone_checked_by: string | null;
 }
-const parse = (r: Row | undefined): Order | undefined => (r ? (JSON.parse(r.data) as Order) : undefined);
+/** The order's JSON and the WhatsApp confirmation, kept in its own columns (migration 8). */
+const COLUMNS = 'data, wa_code, phone_check, wa_hold, wa_opened_at, phone_checked_at, phone_checked_by';
+
+function fromRow(r: Row): Order {
+  const order = JSON.parse(r.data) as Order;
+  delete order.whatsappCheck;
+  if (r.wa_code && (r.phone_check === 'awaiting' || r.phone_check === 'confirmed' || r.phone_check === 'mismatch')) {
+    order.whatsappCheck = {
+      status: r.phone_check,
+      code: r.wa_code,
+      hold: r.wa_hold === 1,
+      ...(r.wa_opened_at ? { openedAt: r.wa_opened_at } : {}),
+      ...(r.phone_checked_at ? { checkedAt: r.phone_checked_at } : {}),
+      ...(r.phone_checked_by ? { checkedBy: r.phone_checked_by } : {}),
+    };
+  }
+  return order;
+}
+const parse = (r: Row | undefined): Order | undefined => (r ? fromRow(r) : undefined);
 
 export function getOrder(id: string): Order | undefined {
-  return parse(getDb().prepare('SELECT data FROM orders WHERE id = ?').get(id) as Row | undefined);
+  return parse(getDb().prepare(`SELECT ${COLUMNS} FROM orders WHERE id = ?`).get(id) as Row | undefined);
 }
 
 export function listOrders({ limit = 500, status }: { limit?: number; status?: string } = {}): Order[] {
   const n = Math.min(Math.max(1, Math.floor(limit)), 2000);
   const rows = status
-    ? (getDb().prepare('SELECT data FROM orders WHERE status = ? ORDER BY created_at DESC LIMIT ?').all(status, n) as Row[])
-    : (getDb().prepare('SELECT data FROM orders ORDER BY created_at DESC LIMIT ?').all(n) as Row[]);
-  return rows.map((r) => JSON.parse(r.data) as Order);
+    ? (getDb().prepare(`SELECT ${COLUMNS} FROM orders WHERE status = ? ORDER BY created_at DESC LIMIT ?`).all(status, n) as Row[])
+    : (getDb().prepare(`SELECT ${COLUMNS} FROM orders ORDER BY created_at DESC LIMIT ?`).all(n) as Row[]);
+  return rows.map(fromRow);
 }
 
 /** Every order, newest first, for backups and the customer list (no cap). */
 export function allOrders(): Order[] {
   const out: Order[] = [];
-  for (const r of getDb().prepare('SELECT data FROM orders ORDER BY created_at DESC').iterate() as IterableIterator<Row>) {
-    out.push(JSON.parse(r.data) as Order);
+  for (const r of getDb().prepare(`SELECT ${COLUMNS} FROM orders ORDER BY created_at DESC`).iterate() as IterableIterator<Row>) {
+    out.push(fromRow(r));
   }
   return out;
 }
 
 function writeOrder(order: Order, idempotencyKey?: string) {
+  // The WhatsApp confirmation lives in its own columns (see confirmOnWhatsApp below), never in the JSON.
+  const { whatsappCheck: _check, ...stored } = order;
+  void _check;
   getDb()
     .prepare(
       `INSERT INTO orders (id, created_at, updated_at, phone, status, payment_method, payment_status, total_fils, idempotency_key, data)
@@ -106,7 +135,7 @@ function writeOrder(order: Order, idempotencyKey?: string) {
       paymentStatus: order.paymentStatus,
       total: fils(order.total),
       key: idempotencyKey ?? null,
-      data: JSON.stringify(order),
+      data: JSON.stringify(stored),
     });
   bump('orders'); // the admin hub shows it straight away
 }
@@ -142,7 +171,7 @@ export function placeOrder(input: unknown): PlaceOrderResult {
 
   const idempotencyKey = text(body.idempotencyKey, 'Checkout reference', 64, { required: true });
   if (!/^[A-Za-z0-9-]{16,64}$/.test(idempotencyKey)) throw new HttpError(400, 'Checkout reference is invalid.');
-  const existing = parse(getDb().prepare('SELECT data FROM orders WHERE idempotency_key = ?').get(idempotencyKey) as Row | undefined);
+  const existing = parse(getDb().prepare(`SELECT ${COLUMNS} FROM orders WHERE idempotency_key = ?`).get(idempotencyKey) as Row | undefined);
   if (existing) {
     // The same checkout sent twice (double tap, network retry): same order back.
     if (existing.customer.phone !== phone) throw new HttpError(409, 'This checkout reference was already used.');
@@ -218,6 +247,9 @@ export function placeOrder(input: unknown): PlaceOrderResult {
   if ([...perProduct.values()].some((q) => q > MAX_QTY)) throw new HttpError(400, `At most ${MAX_QTY} of one product per order.`);
 
   const courierSettings = getSettings('courier');
+  const store = getSettings('store');
+  // "Confirm on WhatsApp" (Settings → Store & contact): only with the shop's number set.
+  const askWhatsApp = Boolean(store.confirmOrdersOnWhatsApp && waMeLink(store.whatsappNumber, ''));
   listProducts({ includeHidden: true }); // load (and seed) the catalogue before the transaction
   const order = inTransaction(() => {
     // One verified phone can't tie up the stock with a pile of unconfirmed orders.
@@ -312,6 +344,14 @@ export function placeOrder(input: unknown): PlaceOrderResult {
     };
     writeOrder(created, idempotencyKey);
     logEvent(id, 'customer', 'created', { total: created.total, paymentMethod });
+    if (askWhatsApp) {
+      // 4 random digits, made here (never by the browser); not a secret from the customer.
+      const code = String(crypto.randomInt(0, 10_000)).padStart(4, '0');
+      const hold = store.holdUntilWhatsAppConfirmed;
+      getDb().prepare("UPDATE orders SET wa_code = ?, phone_check = 'awaiting', wa_hold = ? WHERE id = ?").run(code, hold ? 1 : 0, id);
+      created.whatsappCheck = { status: 'awaiting', code, hold };
+      logEvent(id, 'shop', 'whatsapp_asked', { hold });
+    }
     if (receipt) {
       // Written inside the transaction: if this fails, the order (and its stock) is rolled back.
       fs.writeFileSync(path.join(receiptsDir(), `${id}.${receipt.ext}`), receipt.bytes, { mode: 0o600 });
@@ -363,6 +403,7 @@ export function updateOrderByAdmin(id: string, patch: unknown, actor: string): O
       if (!NEXT[order.status].includes(status)) {
         throw new HttpError(409, `An order that is ${order.status.replace(/_/g, ' ')} cannot become ${status.replace(/_/g, ' ')}.`);
       }
+      if (status !== 'cancelled') assertNotHeld(order);
       // Pieces go back on sale only if they never left: once dispatched, the piece is with the
       // courier (most designs are one of a kind), so the owner adds it back with + when it returns.
       if (status === 'cancelled' && (order.status === 'pending_confirmation' || order.status === 'pending_payment' || order.status === 'confirmed')) {
@@ -396,6 +437,66 @@ export function updateOrderByAdmin(id: string, patch: unknown, actor: string): O
   return updated;
 }
 
+/**
+ * Settings → Store & contact "Hold orders until confirmed on WhatsApp": an order asked to
+ * confirm is not confirmed or booked until the owner has marked the customer's message as
+ * received. Cancelling is always possible.
+ */
+export function assertNotHeld(order: Order): void {
+  const check = order.whatsappCheck;
+  if (check?.hold && check.status !== 'confirmed') {
+    throw new HttpError(409, `${order.id} is held until the customer confirms on WhatsApp. Tap “Confirmed on WhatsApp” once their message has come, or cancel the order.`, {}, { code: 'whatsapp_hold' });
+  }
+}
+
+export type WhatsAppResult = 'confirmed' | 'mismatch';
+
+/**
+ * The owner's one tap: the customer's WhatsApp message came from the number on the order
+ * (confirmed), or from another number (mismatch). Idempotent: the same answer again changes
+ * nothing. Written to the audit log inside the same transaction, so it is never reported done
+ * (or saved) without its audit entry. A mismatch can still be corrected to confirmed.
+ */
+export function checkWhatsApp(id: string, result: WhatsAppResult, actor: string): { order: Order; changed: boolean } {
+  return inTransaction(() => {
+    const order = getOrder(id);
+    if (!order) throw new HttpError(404, 'Order not found.');
+    const check = order.whatsappCheck;
+    if (!check) throw new HttpError(409, 'This order was not asked to confirm on WhatsApp.');
+    if (check.status === result) return { order, changed: false };
+    const at = new Date().toISOString();
+    getDb().prepare('UPDATE orders SET phone_check = ?, phone_checked_at = ?, phone_checked_by = ?, updated_at = ? WHERE id = ?').run(result, at, actor, at, id);
+    logEvent(id, actor, result === 'confirmed' ? 'whatsapp_confirmed' : 'whatsapp_mismatch', { from: check.status });
+    if (!audit(result === 'confirmed' ? 'order.whatsapp_confirmed' : 'order.whatsapp_mismatch', { by: actor, orderId: id, from: check.status, held: check.hold })) {
+      throw new HttpError(503, 'The audit log could not be written, so nothing was changed. Please try again.');
+    }
+    bump('orders');
+    return { order: getOrder(id)!, changed: true };
+  });
+}
+
+/**
+ * The customer tapped "Confirm on WhatsApp": note when their WhatsApp opened, once. Needs the
+ * order number and the phone number on it (as Track Order does), so nobody can mark another
+ * order. Says nothing about whether the pair matched.
+ */
+export function markWhatsAppOpened(id: string, phone: string): boolean {
+  const at = new Date().toISOString();
+  const changed = getDb()
+    .prepare("UPDATE orders SET wa_opened_at = ? WHERE id = ? AND phone = ? AND phone_check = 'awaiting' AND wa_opened_at IS NULL")
+    .run(at, id.trim().toUpperCase(), phone).changes === 1;
+  if (changed) {
+    logEvent(id.trim().toUpperCase(), 'customer', 'whatsapp_opened');
+    bump('orders');
+  }
+  return changed;
+}
+
+/** Orders still waiting for the customer's WhatsApp message (not cancelled). */
+export function awaitingWhatsAppCount(): number {
+  return (getDb().prepare("SELECT COUNT(*) AS n FROM orders WHERE phone_check = 'awaiting' AND status <> 'cancelled'").get() as { n: number }).n;
+}
+
 /** Record a courier booking result on the order (used by dispatch). */
 export function recordBooking(id: string, actor: string, booking: Partial<Order['courier']> & { notes?: string }): Order {
   return inTransaction(() => {
@@ -417,10 +518,16 @@ export function recordBooking(id: string, actor: string, booking: Partial<Order[
 
 /** A placed order as shown to the customer who placed it (no internal notes). */
 export function customerView(order: Order) {
-  const { adminNotes: _notes, paymentReceiptUrl: _receipt, ...rest } = order;
+  const { adminNotes: _notes, paymentReceiptUrl: _receipt, whatsappCheck: _check, ...rest } = order;
   void _notes;
   void _receipt;
-  return { ...rest, courier: trackingView(order) };
+  void _check;
+  return { ...rest, courier: trackingView(order), ...(order.whatsappCheck ? { whatsappCheck: whatsAppView(order.whatsappCheck) } : {}) };
+}
+
+/** The customer's side of the WhatsApp confirmation (not who confirmed it). */
+function whatsAppView(check: NonNullable<Order['whatsappCheck']>) {
+  return { status: check.status, code: check.code, hold: check.hold };
 }
 
 function trackingView(order: Order) {
@@ -453,6 +560,7 @@ export function lookupOrder(id: string, phone: string) {
     area: order.customer.area,
     items: order.items.map((i) => ({ title: i.title, image: i.image, profileName: i.profileName, color: i.color, quantity: i.quantity, totalPrice: i.totalPrice })),
     courier: trackingView(order),
+    ...(order.whatsappCheck ? { whatsappCheck: whatsAppView(order.whatsappCheck) } : {}),
   };
 }
 
