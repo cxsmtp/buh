@@ -75,12 +75,18 @@ function initialView(): HubView {
 }
 
 /** Everything the admin hub shows (no React state here). */
+/** Settings → Phone check's warning (no TRUST_PROXY) and the one-time "now on WhatsApp" notice. */
+interface PhoneCheckInfo {
+  behindProxy: boolean;
+  whatsappNotice: boolean;
+}
+
 async function fetchAdminData() {
   const [orders, customers, products, settings, chats] = await Promise.all([
     getJson<{ orders: Order[] }>('/api/admin/orders'),
     getJson<{ customers: Customer[] }>('/api/admin/customers'),
     getJson<{ products: Product[] }>('/api/admin/products'),
-    getJson<AdminSettings>('/api/admin/settings'),
+    getJson<AdminSettings & { phoneCheckInfo?: PhoneCheckInfo }>('/api/admin/settings'),
     getJson<{ waiting: number }>('/api/admin/chats'),
   ]);
   return { orders, customers, products, settings, chats };
@@ -137,6 +143,7 @@ export function AdminApp() {
   const [chatsWaiting, setChatsWaiting] = useState(0);
   const [chatsKey, setChatsKey] = useState(0);
   const [newOrderNotice, setNewOrderNotice] = useState(false);
+  const [phoneCheckInfo, setPhoneCheckInfo] = useState<PhoneCheckInfo>({ behindProxy: true, whatsappNotice: false });
   const [updateReady, setUpdateReady] = useState(false);
   // "This is your private link: bookmark it" (after the link was made or moved here).
   const [linkNotice, setLinkNotice] = useState<string | null>(null);
@@ -194,6 +201,7 @@ export function AdminApp() {
       if (st.data.bank) setBankDetails(st.data.bank.value);
       setAdminSettings({ courier: st.data.courier, sms: st.data.sms, catalog: st.data.catalog, store: st.data.store, theme: st.data.theme, email: st.data.email, assistant: st.data.assistant, delivery: st.data.delivery, payments: st.data.payments ?? { value: NO_PAYMENTS, secretsSet: {} }, phoneCheck: st.data.phoneCheck ?? { value: DEFAULT_PHONE_CHECK, secretsSet: {} } });
       setAdminSettingsLoaded(true);
+      if (st.data.phoneCheckInfo) setPhoneCheckInfo(st.data.phoneCheckInfo);
     }
     setAdminLoadError(o.ok && c.ok && p.ok && st.ok ? '' : 'Some admin data could not be loaded. Check your connection and refresh.');
   }, []);
@@ -258,6 +266,11 @@ export function AdminApp() {
     void postJson('/api/admin/logout', {});
     setAuth('out');
   };
+  const dismissPhoneCheckNotice = () => {
+    setPhoneCheckInfo((x) => ({ ...x, whatsappNotice: false }));
+    void sendJson('DELETE', '/api/admin/notices/phone-check');
+  };
+
   const dismissLinkNotice = () => {
     setLinkNotice(null);
     void sendJson('DELETE', '/api/admin/link/notice');
@@ -389,6 +402,29 @@ export function AdminApp() {
             </div>
           )}
 
+          {phoneCheckInfo.whatsappNotice && (
+            <div role="status" className="rounded-2xl border border-gold/50 bg-surface px-3.5 py-3 space-y-2" data-testid="phone-check-notice">
+              <p className="text-xs text-ink leading-relaxed">
+                <strong>Customers now confirm on WhatsApp instead of an SMS code</strong> — change in Settings → Phone check.
+              </p>
+              <div className="flex flex-wrap gap-2">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setSettingsOpen((x) => ({ id: 'sms', n: x.n + 1 }));
+                    setAdminTab('settings');
+                  }}
+                  className="min-h-10 px-3 rounded-xl border border-line-strong bg-surface text-ink text-xs font-bold"
+                >
+                  Open Phone check
+                </button>
+                <button type="button" onClick={dismissPhoneCheckNotice} className="min-h-10 px-3 rounded-xl bg-ink text-white text-xs font-bold">
+                  Got it
+                </button>
+              </div>
+            </div>
+          )}
+
           {newOrderNotice && (
             <div role="status" className="rounded-2xl border border-success-line bg-success-soft text-success px-3.5 py-2.5 text-xs flex items-center gap-2">
               <strong>Orders updated</strong>
@@ -481,7 +517,13 @@ export function AdminApp() {
                       key={`phonecheck-${adminSettingsLoaded}-${settingsEpoch}-${undone['phoneCheck'] ?? 0}`}
                       value={adminSettings.phoneCheck.value}
                       shopWhatsApp={adminSettings.store.value.whatsappNumber}
-                      onSave={(v) => saveSettings('phoneCheck', v)}
+                      behindProxy={phoneCheckInfo.behindProxy}
+                      onSave={async (v) => {
+                        const problem = await saveSettings('phoneCheck', v);
+                        // Chosen now: the one-time notice is over.
+                        if (!problem) setPhoneCheckInfo((x) => ({ ...x, whatsappNotice: false }));
+                        return problem;
+                      }}
                       auto={autoSaveHooks}
                     />
                     <h3 className="font-serif font-bold text-base text-ink border-t border-line pt-4">SMS gateway <span className="font-sans text-xs font-normal text-ink-muted">(used only with &ldquo;SMS code&rdquo;)</span></h3>

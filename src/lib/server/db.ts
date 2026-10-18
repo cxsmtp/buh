@@ -334,13 +334,18 @@ const MIGRATIONS: Array<(db: DB) => void> = [
   //     'call'); wa_cancel_at is when an order still unconfirmed is cancelled (set at checkout from
   //     Settings → Phone check, so changing the setting later never cancels an order early). The
   //     connection's hashed address goes in card_ip (migration 9) for every order now, for the
-  //     per-connection cap. Own columns, like migrations 8–10, so an older version rewriting the
-  //     order's JSON leaves them alone; an older version simply never cancels such an order.
+  //     per-connection cap. wa_unopened_cancel_at is sooner: when it is cancelled if the customer
+  //     never even opened WhatsApp (wa_opened_at still empty). A bank transfer is never cancelled
+  //     for this: at wa_cancel_at it is flagged for the owner. Own columns, like migrations 8–10, so
+  //     an older version rewriting the order's JSON leaves them alone; an older version simply never
+  //     cancels such an order.
   (db) => {
     db.exec(`
-      ALTER TABLE orders ADD COLUMN phone_check_method TEXT;   -- whatsapp | call (once confirmed)
-      ALTER TABLE orders ADD COLUMN wa_cancel_at TEXT;         -- ISO time: cancelled if still not confirmed
+      ALTER TABLE orders ADD COLUMN phone_check_method TEXT;     -- whatsapp | call (once confirmed)
+      ALTER TABLE orders ADD COLUMN wa_cancel_at TEXT;           -- ISO time: cancelled if still not confirmed
+      ALTER TABLE orders ADD COLUMN wa_unopened_cancel_at TEXT;  -- ISO time: cancelled sooner if WhatsApp was never opened
       CREATE INDEX orders_unconfirmed_due ON orders(wa_cancel_at) WHERE wa_cancel_at IS NOT NULL AND phone_check IN ('awaiting', 'mismatch');
+      CREATE INDEX orders_unopened_due ON orders(wa_unopened_cancel_at) WHERE wa_unopened_cancel_at IS NOT NULL AND phone_check IN ('awaiting', 'mismatch');
     `);
   },
 ];

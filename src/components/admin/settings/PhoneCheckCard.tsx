@@ -13,23 +13,48 @@ import { useAutoSave, type AutoSaveHooks } from './useAutoSave';
  * The server checks every value again.
  */
 
-export const DEFAULT_PHONE_CHECK: PhoneCheckSettings = { mode: 'whatsapp', unconfirmedCancelHours: 24 };
+export const DEFAULT_PHONE_CHECK: PhoneCheckSettings = { mode: 'whatsapp', unconfirmedCancelHours: 24, unopenedCancelHours: 6 };
 
 const label = 'block text-xs font-semibold text-ink-soft mb-1';
 
-export function PhoneCheckCard({ value, shopWhatsApp, onSave, auto }: { value: PhoneCheckSettings; /** Settings → Store & contact's number (empty: WhatsApp can't confirm anything). */ shopWhatsApp: string; onSave: (v: PhoneCheckSettings) => Promise<string | null>; auto?: AutoSaveHooks }) {
+export function PhoneCheckCard({
+  value,
+  shopWhatsApp,
+  behindProxy = true,
+  onSave,
+  auto,
+}: {
+  value: PhoneCheckSettings;
+  /** Settings → Store & contact's number (empty: WhatsApp can't confirm anything). */
+  shopWhatsApp: string;
+  /** TRUST_PROXY is set (the shop sees each customer's connection); false: stricter limits apply. */
+  behindProxy?: boolean;
+  onSave: (v: PhoneCheckSettings) => Promise<string | null>;
+  auto?: AutoSaveHooks;
+}) {
   const [d, setD] = useState<PhoneCheckSettings>(value);
   const [hours, setHours] = useState(String(value.unconfirmedCancelHours));
+  const [unopened, setUnopened] = useState(String(value.unopenedCancelHours ?? DEFAULT_PHONE_CHECK.unopenedCancelHours));
   const [saving, setSaving] = useState(false);
   const [status, setStatus] = useState<{ ok: boolean; text: string } | null>(null);
   const hoursNumber = Number(hours);
   const hoursOk = Number.isInteger(hoursNumber) && hoursNumber >= 2 && hoursNumber <= 168;
-  const draft: PhoneCheckSettings = { mode: d.mode, unconfirmedCancelHours: hoursOk ? hoursNumber : value.unconfirmedCancelHours };
-  const autosave = useAutoSave({ settingsKey: 'phoneCheck', value: draft, enabled: Boolean(auto) && hoursOk, ...auto });
+  const unopenedNumber = Number(unopened);
+  const unopenedOk = Number.isInteger(unopenedNumber) && unopenedNumber >= 2 && unopenedNumber <= 48 && (!hoursOk || unopenedNumber <= hoursNumber);
+  const draft: PhoneCheckSettings = {
+    mode: d.mode,
+    unconfirmedCancelHours: hoursOk ? hoursNumber : value.unconfirmedCancelHours,
+    unopenedCancelHours: unopenedOk ? unopenedNumber : Math.min(value.unopenedCancelHours ?? 6, hoursOk ? hoursNumber : value.unconfirmedCancelHours),
+  };
+  const autosave = useAutoSave({ settingsKey: 'phoneCheck', value: draft, enabled: Boolean(auto) && hoursOk && unopenedOk, ...auto });
 
   const save = async () => {
     if (!hoursOk) {
       setStatus({ ok: false, text: 'Cancel after: a whole number of hours from 2 to 168.' });
+      return;
+    }
+    if (!unopenedOk) {
+      setStatus({ ok: false, text: `If WhatsApp is never opened: a whole number of hours from 2 to ${Math.min(48, hoursNumber)}.` });
       return;
     }
     autosave.cancel();
@@ -67,6 +92,13 @@ export function PhoneCheckCard({ value, shopWhatsApp, onSave, auto }: { value: P
         </p>
       )}
 
+      {d.mode === 'whatsapp' && !behindProxy && (
+        <p role="alert" data-testid="phone-check-no-proxy" className="flex items-start gap-2 text-xs text-ink bg-warning-soft border border-warning-line rounded-xl p-3">
+          <AlertCircle className="w-4 h-4 shrink-0 mt-0.5 text-warning" aria-hidden="true" />
+          <span>Behind no proxy, the shop can&apos;t tell customers apart: limits are stricter (at most 15 orders waiting for WhatsApp across the shop). Set TRUST_PROXY=1 when the shop runs behind its proxy.</span>
+        </p>
+      )}
+
       <div className={d.mode === 'whatsapp' ? '' : 'opacity-60'}>
         <label className={label} htmlFor="pc-hours">Cancel orders not confirmed after (hours)</label>
         <input
@@ -83,9 +115,30 @@ export function PhoneCheckCard({ value, shopWhatsApp, onSave, auto }: { value: P
           className="w-28 px-3 py-2 rounded-xl border border-line-strong bg-surface text-ink text-sm focus:outline-none focus:ring-2 focus:ring-gold"
         />
         <p className="text-[11px] text-ink-muted mt-1">
-          2 to 168 (a week). The pieces go back on sale and the cancellation is in the order&apos;s history. Not cancelled: orders confirmed on WhatsApp or by phone call, paid card orders, and bank transfers with a screenshot uploaded. Customers are told at checkout. Changing it applies to new orders.
+          2 to 168 (a week). The pieces go back on sale and the cancellation is in the order&apos;s history. Not cancelled: orders confirmed on WhatsApp or by phone call (or shipped anyway), paid card orders, and bank transfers. Customers are told at checkout. Changing it applies to new orders.
         </p>
         {!hoursOk && <p role="alert" className="text-[11px] text-danger font-semibold mt-1">A whole number of hours from 2 to 168.</p>}
+      </div>
+
+      <div className={d.mode === 'whatsapp' ? '' : 'opacity-60'}>
+        <label className={label} htmlFor="pc-unopened">If the customer never opens WhatsApp, cancel after (hours)</label>
+        <input
+          id="pc-unopened"
+          type="number"
+          inputMode="numeric"
+          min={2}
+          max={Math.min(48, hoursOk ? hoursNumber : 48)}
+          step={1}
+          value={unopened}
+          disabled={d.mode !== 'whatsapp'}
+          onChange={(e) => setUnopened(e.target.value)}
+          aria-invalid={!unopenedOk}
+          className="w-28 px-3 py-2 rounded-xl border border-line-strong bg-surface text-ink text-sm focus:outline-none focus:ring-2 focus:ring-gold"
+        />
+        <p className="text-[11px] text-ink-muted mt-1">
+          2 to 48, never later than the hours above. An order whose customer never even tapped &ldquo;Confirm on WhatsApp&rdquo; goes back on sale sooner. Bank transfers are never cancelled: after the hours above they are flagged for you to check your bank.
+        </p>
+        {!unopenedOk && <p role="alert" className="text-[11px] text-danger font-semibold mt-1">A whole number of hours from 2 to {Math.min(48, hoursOk ? hoursNumber : 48)}.</p>}
       </div>
 
       <div className="flex flex-wrap items-center gap-3">

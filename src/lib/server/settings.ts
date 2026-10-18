@@ -68,7 +68,7 @@ const DEFAULTS: SettingsMap = {
   // Off, and no keys: checkout offers cash on delivery (and bank transfer) until the owner adds them.
   payments: { cardEnabled: false, stripePublishableKey: '', stripeSecretKey: '', stripeWebhookSecret: '' },
   // WhatsApp (free) for every shop, new or existing, until the owner chooses SMS codes.
-  phoneCheck: { mode: 'whatsapp', unconfirmedCancelHours: 24 },
+  phoneCheck: { mode: 'whatsapp', unconfirmedCancelHours: 24, unopenedCancelHours: 6 },
 };
 
 /** Where customers are asked to email: Settings → Store first, then NEXT_PUBLIC_SUPPORT_EMAIL. */
@@ -576,7 +576,18 @@ const VALIDATORS: { [K in SettingsKey]: (input: Obj, current: SettingsMap[K]) =>
     if (!Number.isInteger(hours) || hours < MIN_CANCEL_HOURS || hours > MAX_CANCEL_HOURS) {
       throw new HttpError(400, `Cancel unconfirmed orders after: a whole number of hours from ${MIN_CANCEL_HOURS} to ${MAX_CANCEL_HOURS}.`);
     }
-    return { mode: mode as PhoneCheckMode, unconfirmedCancelHours: hours };
+    // "If the customer never opens WhatsApp, cancel after": sooner, never later than the hours above.
+    // Typed later than them: refused; left as it was while the hours above came down: brought down too.
+    const given = input.unopenedCancelHours !== undefined;
+    let unopened = given ? Number(input.unopenedCancelHours) : current.unopenedCancelHours;
+    if (!Number.isInteger(unopened) || unopened < MIN_CANCEL_HOURS || unopened > MAX_UNOPENED_HOURS) {
+      throw new HttpError(400, `If the customer never opens WhatsApp, cancel after: a whole number of hours from ${MIN_CANCEL_HOURS} to ${MAX_UNOPENED_HOURS}.`);
+    }
+    if (unopened > hours) {
+      if (given) throw new HttpError(400, `If the customer never opens WhatsApp, cancel after: at most ${hours} hours (the time to confirm).`);
+      unopened = hours;
+    }
+    return { mode: mode as PhoneCheckMode, unconfirmedCancelHours: hours, unopenedCancelHours: unopened };
   },
 
   async email(input, current) {
@@ -759,11 +770,34 @@ export function phoneCodesOn(): boolean {
 export const PHONE_CHECK_MODES: readonly PhoneCheckMode[] = ['whatsapp', 'sms_code'];
 export const MIN_CANCEL_HOURS = 2;
 export const MAX_CANCEL_HOURS = 168;
+export const MAX_UNOPENED_HOURS = 48;
 
 /** Settings → Phone check: 'whatsapp' (the default, free) or 'sms_code' (the gateways, unchanged). */
 export function phoneCheckMode(): PhoneCheckMode {
   const mode = getSettings('phoneCheck').mode;
   return mode === 'sms_code' ? 'sms_code' : 'whatsapp';
+}
+
+/**
+ * A one-time Admin Hub notice for a shop that had an SMS gateway switched on and never chose a
+ * phone check: since this version its customers confirm on WhatsApp instead of an SMS code (the
+ * owner's choice of default). Gone once dismissed, or once Settings → Phone check is saved.
+ */
+export function phoneCheckNoticeDue(): boolean {
+  const db = getDb();
+  if (db.prepare("SELECT 1 FROM settings WHERE key = 'phoneCheck'").get()) return false;
+  if (db.prepare("SELECT 1 FROM kv WHERE key = 'notice:phone-check-whatsapp'").get()) return false;
+  return hasEnvGateway() || getSettings('sms').isEnabled;
+}
+
+/** "Got it" on the notice above. */
+export function dismissPhoneCheckNotice(): void {
+  getDb().prepare("INSERT INTO kv (key, data, updated_at) VALUES ('notice:phone-check-whatsapp', ?, ?) ON CONFLICT(key) DO NOTHING").run(JSON.stringify({ dismissed: true }), new Date().toISOString());
+}
+
+/** Settings → Phone check's warning: without TRUST_PROXY the shop can't tell connections apart (stricter limits apply). */
+export function behindProxy(): boolean {
+  return process.env.TRUST_PROXY === '1';
 }
 
 function hasEnvGateway(): boolean {

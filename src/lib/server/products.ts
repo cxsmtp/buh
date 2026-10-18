@@ -2,6 +2,7 @@ import crypto from 'node:crypto';
 import { audit } from './audit';
 import type { BedProfileMeasurement, Product } from '@/types';
 import { INITIAL_PRODUCTS } from '@/data/initialData';
+import { DEFAULT_BED_PROFILES } from '@/data/bedProfiles';
 import { getDb, inTransaction } from './db';
 import { HttpError } from './http';
 import { acceptImageRef } from './images';
@@ -64,7 +65,7 @@ function seedIfEmpty() {
       const { stockCount, stockBySize, ...rest } = p;
       void stockCount;
       // The starter catalogue says only what each set includes (no review needed: nothing was carried over).
-      insert.run(p.id, JSON.stringify(carryOverMeasurements(rest as Product, [])), i, new Date().toISOString());
+      insert.run(p.id, JSON.stringify(carryOverMeasurements(rest as Product, [], { keepLegacy: false })), i, new Date().toISOString());
       void stockBySize;
       writeStock(p.id, seedStock(p));
     });
@@ -75,36 +76,48 @@ function seedIfEmpty() {
 // ── measurements per product (BUH-02.10) ────────────────────────────────────
 
 /**
- * Until BUH-02.10 every size of every product carried the standard measurements (fitted sheet,
- * flat sheet, pillowcases, duvet cover), so each set claimed a duvet cover. From now on the shop
- * shows only what the owner filled in on the product. The products already in the shop keep their
- * sheet and pillowcase sizes (a standard size fills one only where it was empty), keep a duvet cover
- * only when they are a duvet product, are fitted when they are fitted sheets, and are marked
- * "Check measurements" for the owner to look at once. Runs once (a kv row marks it done, in the same
- * transaction), audited as one entry.
+ * Until BUH-02.10 a product's sizes were filled in from the standard sizes when they were added,
+ * so most sets carried a duvet cover; the shop showed each size's own values (fitted sheet, flat
+ * sheet, pillowcases, and the duvet cover when there was one), never a fallback. From now on the
+ * shop shows only what the owner filled in on the product. The products already in the shop keep
+ * every value the customer used to see (an empty one stays empty: nothing is filled in from a
+ * standard size), with one exception: a duvet cover that is just the standard size's own on a set
+ * that is not a duvet product is taken off the shop. Any duvet cover the owner typed (different from
+ * the standard size's) stays. Nothing is deleted: what is taken off is kept in legacyMeasurements
+ * (never shown to customers), and the editor's "Check measurements" note offers it back in one tap.
+ * Fitted sheets are ticked as fitted. Runs once (a kv row marks it done, in the same transaction),
+ * audited as one entry.
  */
 const MEASUREMENTS_STEP = 'step:measurements-per-product';
 
-export function carryOverMeasurements(p: Product, presets: BedProfileMeasurement[]): Product {
+const sameText = (a: string, b: string) => a.trim().replace(/\s+/g, ' ').toLowerCase() === b.trim().replace(/\s+/g, ' ').toLowerCase();
+
+export function carryOverMeasurements(p: Product, presets: BedProfileMeasurement[], { keepLegacy = true }: { keepLegacy?: boolean } = {}): Product {
   const duvet = isDuvetProduct(p);
   const fitted = typeof p.fitted === 'boolean' ? p.fitted : p.category === 'fitted-sheets' || /\bfitted sheets?\b/i.test(p.title);
-  const pick = (own: unknown, std: unknown) => (typeof own === 'string' && own.trim() ? own : typeof std === 'string' ? std : '');
-  return {
-    ...p,
-    fitted,
-    profiles: (p.profiles ?? []).map((s) => {
-      const std = presets.find((x) => x.id === s.id);
-      const { duvetCover, ...rest } = s;
-      const keptDuvet = duvet ? pick(duvetCover, std?.duvetCover) : '';
-      return {
-        ...rest,
-        flatSheet: pick(s.flatSheet, std?.flatSheet),
-        fittedSheet: pick(s.fittedSheet, std?.fittedSheet),
-        pillowcases: pick(s.pillowcases, std?.pillowcases),
-        ...(keptDuvet ? { duvetCover: keptDuvet } : {}),
-      };
-    }),
-  };
+  const own = (v: unknown) => (typeof v === 'string' ? v : '');
+  const legacy: NonNullable<Product['legacyMeasurements']> = { ...(p.legacyMeasurements ?? {}) };
+  const profiles = (p.profiles ?? []).map((s) => {
+    const { duvetCover, ...rest } = s;
+    const cover = own(duvetCover);
+    // The standard size's duvet cover (the owner's Settings → Catalogue, and the shop's built-in one).
+    const standards = [presets.find((x) => x.id === s.id)?.duvetCover, (DEFAULT_BED_PROFILES as Record<string, BedProfileMeasurement | undefined>)[s.id]?.duvetCover]
+      .map(own)
+      .filter((x) => x.trim());
+    const onlyStandard = Boolean(cover.trim()) && standards.some((x) => sameText(x, cover));
+    const keep = Boolean(cover.trim()) && (duvet || !onlyStandard);
+    if (cover.trim() && !keep && keepLegacy) legacy[s.id] = { ...legacy[s.id], duvetCover: cover };
+    return {
+      ...rest,
+      fittedSheet: own(s.fittedSheet),
+      flatSheet: own(s.flatSheet),
+      pillowcases: own(s.pillowcases),
+      ...(keep ? { duvetCover: cover } : {}),
+    };
+  });
+  const { legacyMeasurements: _old, ...base } = p;
+  void _old;
+  return { ...base, fitted, profiles, ...(Object.keys(legacy).length ? { legacyMeasurements: legacy } : {}) };
 }
 
 /** The once-only step above. Safe to call often: after the first time it is one indexed read. */
@@ -128,6 +141,7 @@ export function carryOverMeasurementsOnce(): void {
     const update = db.prepare('UPDATE products SET data = ?, updated_at = ? WHERE id = ?');
     let fitted = 0;
     let duvet = 0;
+    let keptAside = 0;
     for (const r of rows) {
       let p: Product;
       try {
@@ -138,9 +152,10 @@ export function carryOverMeasurementsOnce(): void {
       const next = { ...carryOverMeasurements(p, presets), measurementsReview: true };
       if (next.fitted) fitted++;
       if (next.profiles.some((s) => s.duvetCover)) duvet++;
+      if (next.legacyMeasurements) keptAside++;
       update.run(JSON.stringify(next), new Date().toISOString(), r.id);
     }
-    summary = { by: 'update', products: rows.length, fitted, withDuvetCover: duvet, audited: false };
+    summary = { by: 'update', products: rows.length, fitted, withDuvetCover: duvet, standardDuvetTakenOff: keptAside, audited: false };
     db.prepare('INSERT INTO kv (key, data, updated_at) VALUES (?, ?, ?)').run(MEASUREMENTS_STEP, JSON.stringify(summary), new Date().toISOString());
   });
   if (!summary) return;
@@ -435,6 +450,25 @@ function validateProfile(v: unknown, i: number): BedProfileMeasurement {
   };
 }
 
+const LEGACY_FIELDS = ['fittedSheet', 'flatSheet', 'pillowcases', 'duvetCover'] as const;
+
+/** Values an update took off the shop (kept for the owner): size id → field → text; anything else dropped. */
+function legacyMeasurementsOf(v: unknown): Product['legacyMeasurements'] {
+  if (!v || typeof v !== 'object' || Array.isArray(v)) return undefined;
+  const out: NonNullable<Product['legacyMeasurements']> = {};
+  for (const [size, fields] of Object.entries(v as Obj).slice(0, 12)) {
+    if (!SIZE_ID.test(size) || !fields || typeof fields !== 'object' || Array.isArray(fields)) continue;
+    const kept: Record<string, string> = {};
+    for (const f of LEGACY_FIELDS) {
+      const raw = (fields as Obj)[f];
+      const t = typeof raw === 'string' ? text(raw.slice(0, 80), `Earlier ${f}`, 80) : '';
+      if (t) kept[f] = t;
+    }
+    if (Object.keys(kept).length) out[size] = kept;
+  }
+  return Object.keys(out).length ? out : undefined;
+}
+
 export function validateProduct(input: unknown): StoredProduct {
   if (!input || typeof input !== 'object' || Array.isArray(input)) throw new HttpError(400, 'Product must be an object.');
   const p = input as Obj;
@@ -498,6 +532,7 @@ export function validateProduct(input: unknown): StoredProduct {
     reviewsCount: num(p.reviewsCount ?? 0, 'Reviews', 0, 1_000_000, { integer: true }),
     fitted: p.fitted === true,
     measurementsReview: p.measurementsReview === true ? true : undefined,
+    legacyMeasurements: legacyMeasurementsOf(p.legacyMeasurements),
     profiles,
     defaultProfileId,
     createdAt: typeof p.createdAt === 'string' ? p.createdAt.slice(0, 40) : new Date().toISOString(),

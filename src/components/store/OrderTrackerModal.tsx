@@ -25,7 +25,7 @@ interface TrackedOrder {
   area: string;
   items: Array<{ title: string; profileName: string; quantity: number; totalPrice: number }>;
   courier: { awbNumber: string; trackingUrl: string; status: string };
-  whatsappCheck?: Pick<WhatsAppCheck, 'status' | 'code' | 'hold' | 'cancelAt'>;
+  whatsappCheck?: Pick<WhatsAppCheck, 'status' | 'code' | 'hold' | 'cancelAt' | 'openBy'>;
   /** A bank transfer: where it stands, and the customer's own private page while it is open. */
   bankTransfer?: Pick<BankTransferCheck, 'state' | 'uploads' | 'payPath'>;
 }
@@ -143,7 +143,7 @@ export const OrderTrackerModal: React.FC<OrderTrackerModalProps> = ({
                 </div>
 
                 {searchResult.whatsappCheck && searchResult.status !== 'cancelled' && (
-                  <WhatsAppConfirm orderId={searchResult.id} phone={foundPhone} check={searchResult.whatsappCheck} bankDetails={Boolean(searchResult.bankTransfer && searchResult.bankTransfer.state !== 'paid')} cancelHours={cancelHoursOf(searchResult.createdAt, searchResult.whatsappCheck.cancelAt)} />
+                  <WhatsAppConfirm orderId={searchResult.id} phone={foundPhone} check={searchResult.whatsappCheck} bankDetails={Boolean(searchResult.bankTransfer && searchResult.bankTransfer.state !== 'paid')} cancelHours={cancelHoursOf(searchResult.createdAt, searchResult.whatsappCheck.cancelAt)} openHours={cancelHoursOf(searchResult.createdAt, searchResult.whatsappCheck.openBy)} />
                 )}
 
                 {/* Bank transfer: the details and the screenshot upload are on the order's private page. */}

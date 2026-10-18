@@ -6,6 +6,7 @@ import type { Order } from '@/types';
 import { getJson, postJson } from '@/lib/apiClient';
 import { safeFirstName } from '@/lib/bankMessages';
 import { askToConfirmMessage, confirmedReply, timeLeft, waMeLink } from '@/lib/whatsappConfirm';
+import { normalizePhoneNumber } from '@/lib/phoneNumber';
 
 /** True while an order still needs the customer's WhatsApp message (and is not cancelled). */
 export function awaitingWhatsApp(order: Order): boolean {
@@ -19,7 +20,7 @@ export function heldForWhatsApp(order: Order): boolean {
 
 const when = (iso?: string) => (iso ? new Date(iso).toLocaleString([], { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' }) : '');
 
-type Answer = 'confirmed' | 'mismatch' | 'call' | 'use_sender';
+type Answer = 'confirmed' | 'mismatch' | 'call' | 'use_sender' | 'correct_phone';
 
 /**
  * The order's confirmation, for the owner's phone first: the code and the phone number to compare
@@ -33,18 +34,24 @@ export function OrderWhatsAppCheck({ order, onOrderChanged, shopName }: { order:
   const [busy, setBusy] = useState(false);
   const [problem, setProblem] = useState('');
   const [sender, setSender] = useState('');
+  const [correction, setCorrection] = useState('');
   const check = order.whatsappCheck;
   const callOnly = !check && order.attention?.kind === 'call_customer';
   if (!check && !callOnly) return null;
 
   const answer = async (result: Answer) => {
-    if (result === 'use_sender' && !window.confirm(`Change the phone number on ${order.id} from ${order.customer.phone} to ${sender.trim()}, and mark it confirmed? The old number stays in the order's history.`)) return;
+    const typed = (result === 'correct_phone' ? correction : sender).trim();
+    // The number exactly as the server will store it (same rules; the server checks it again).
+    const shown = normalizePhoneNumber(typed);
+    if (result === 'use_sender' && !window.confirm(`Change the phone number on ${order.id} from ${order.customer.phone} to ${shown}, and mark it confirmed? The old number stays in the order's history.`)) return;
+    if (result === 'correct_phone' && !window.confirm(`Correct the phone number on ${order.id} from ${order.customer.phone} to ${shown}? The old number stays in the order's history (and still finds the order in Track Order).`)) return;
     setBusy(true);
     setProblem('');
-    const { ok, data } = await postJson<{ order?: Order; message?: string }>(`/api/admin/orders/${encodeURIComponent(order.id)}/whatsapp`, result === 'use_sender' ? { result, phone: sender.trim() } : { result });
+    const { ok, data } = await postJson<{ order?: Order; message?: string }>(`/api/admin/orders/${encodeURIComponent(order.id)}/whatsapp`, result === 'use_sender' || result === 'correct_phone' ? { result, phone: typed } : { result });
     setBusy(false);
     if (ok && data.order) {
       setSender('');
+      setCorrection('');
       onOrderChanged(data.order);
     } else setProblem(data.message || 'Not saved. Please try again.');
   };
@@ -63,7 +70,13 @@ export function OrderWhatsAppCheck({ order, onOrderChanged, shopName }: { order:
         {callOnly && <strong className="text-warning">Not confirmed: no WhatsApp number set — call the customer</strong>}
         {check && status === 'awaiting' && (
           <strong className="text-warning">
-            Awaiting WhatsApp{check.cancelAt && order.status !== 'cancelled' ? ` — auto-cancels in ${timeLeft(check.cancelAt)}` : ' confirmation'} · code <span className="font-mono text-sm">{check.code}</span>
+            Awaiting WhatsApp
+            {check.openBy && order.status !== 'cancelled'
+              ? ` — auto-cancels in ${timeLeft(check.openBy)} unless the customer opens WhatsApp`
+              : check.cancelAt && order.status !== 'cancelled'
+                ? ` — auto-cancels in ${timeLeft(check.cancelAt)}`
+                : ' confirmation'}{' '}
+            · code <span className="font-mono text-sm">{check.code}</span>
           </strong>
         )}
         {check && status === 'confirmed' && (
@@ -133,6 +146,33 @@ export function OrderWhatsAppCheck({ order, onOrderChanged, shopName }: { order:
           </button>
         </form>
       )}
+      {status === 'confirmed' && order.status !== 'cancelled' && order.status !== 'delivered' && (
+        <details className="text-ink-soft">
+          <summary className="min-h-9 flex items-center cursor-pointer font-semibold">Correct the phone number</summary>
+          <form
+            className="mt-1 flex flex-col min-[380px]:flex-row gap-2"
+            onSubmit={(e) => {
+              e.preventDefault();
+              if (correction.trim()) void answer('correct_phone');
+            }}
+          >
+            <label className="sr-only" htmlFor={`correct-${order.id}`}>The correct phone number</label>
+            <input
+              id={`correct-${order.id}`}
+              type="tel"
+              inputMode="tel"
+              maxLength={20}
+              placeholder="Correct number, e.g. 050 123 4567"
+              value={correction}
+              onChange={(e) => setCorrection(e.target.value)}
+              className="flex-1 min-w-0 px-3 py-2 rounded-xl border border-line-strong bg-surface text-ink text-xs focus:outline-none focus:ring-2 focus:ring-gold"
+            />
+            <button type="submit" disabled={busy || !correction.trim()} className={`${button} bg-ink text-white`}>
+              Save the number
+            </button>
+          </form>
+        </details>
+      )}
       {status === 'confirmed' && reply && (
         <a href={reply} target="_blank" rel="noopener noreferrer" className={`${button} bg-whatsapp text-white w-full min-[380px]:w-auto inline-flex`}>
           <MessageCircle className="w-4 h-4" aria-hidden="true" /> Reply on WhatsApp
@@ -163,11 +203,17 @@ function describe(e: OrderEvent): string {
     case 'phone_call_confirmed':
       return `Confirmed by phone call by ${e.actor}`;
     case 'phone_changed':
-      return `Phone changed from ${String(e.detail?.from ?? '')} to ${String(e.detail?.to ?? '')} (${e.actor})`;
+      return `Phone ${e.detail?.correction ? 'corrected' : 'changed'} from ${String(e.detail?.from ?? '')} to ${String(e.detail?.to ?? '')} (${e.actor})`;
     case 'ship_unconfirmed':
       return `Shipped without WhatsApp confirmation (${e.actor})`;
     case 'auto_cancelled_unconfirmed':
       return `Cancelled: not confirmed within ${Number(e.detail?.hours) || ''} h (pieces back on sale)`;
+    case 'auto_cancelled_unopened':
+      return `Cancelled: WhatsApp never opened within ${Number(e.detail?.hours) || ''} h (pieces back on sale)`;
+    case 'bank_unconfirmed_flagged':
+      return `Bank transfer not confirmed after ${Number(e.detail?.hours) || ''} h: flagged (not cancelled)`;
+    case 'bank_email_limited':
+      return 'Bank details email not sent: that address (or connection) had enough today';
     case 'auto_cancel_skipped':
       return 'Not auto-cancelled: transfer screenshot or payment in';
     case 'call_customer':

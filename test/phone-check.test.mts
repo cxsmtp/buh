@@ -104,9 +104,9 @@ test('settings: the mode is allow-listed and the hours are a whole number from 2
   }
   assert.equal(settings.getSettings('phoneCheck').mode, 'whatsapp', 'nothing saved by the refused ones');
   await updateSettings('phoneCheck', { mode: 'sms_code', unconfirmedCancelHours: 2 });
-  assert.deepEqual(settings.getSettings('phoneCheck'), { mode: 'sms_code', unconfirmedCancelHours: 2 });
-  await updateSettings('phoneCheck', { mode: 'whatsapp', unconfirmedCancelHours: 168, extra: 'ignored' });
-  assert.deepEqual(settings.getSettings('phoneCheck'), { mode: 'whatsapp', unconfirmedCancelHours: 168 }, 'unknown fields are dropped');
+  assert.deepEqual(settings.getSettings('phoneCheck'), { mode: 'sms_code', unconfirmedCancelHours: 2, unopenedCancelHours: 2 }, 'the sooner hours come down with it');
+  await updateSettings('phoneCheck', { mode: 'whatsapp', unconfirmedCancelHours: 168, unopenedCancelHours: 6, extra: 'ignored' });
+  assert.deepEqual(settings.getSettings('phoneCheck'), { mode: 'whatsapp', unconfirmedCancelHours: 168, unopenedCancelHours: 6 }, 'unknown fields are dropped');
   assert.ok(settings.settingsHistory().some((v) => v.key === 'phoneCheck'), 'in Settings history');
   await updateSettings('phoneCheck', { unconfirmedCancelHours: 24 });
 });
@@ -243,13 +243,15 @@ test('auto-cancel: after the set hours an unconfirmed order is cancelled once, i
   closeOpen();
 });
 
-test('auto-cancel exemptions: a bank transfer with its screenshot (or paid) and a paid card order; a bank transfer with neither is cancelled', async () => {
+test('auto-cancel exemptions: every bank transfer (with neither screenshot nor payment it is flagged for the owner instead, its pieces held, its page open) and a paid card order', async () => {
   await updateSettings('store', { whatsappNumber: SHOP_WA });
   closeOpen();
   orders.RECEIPT_LIMITS.minFreeBytes = 0; // a test machine's disk may be nearly full
   const PNG = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==';
   const withShot = place({ paymentMethod: 'bank_transfer' });
-  assert.ok(withShot.whatsappCheck?.cancelAt, 'a bank transfer is asked too');
+  assert.equal(withShot.whatsappCheck?.status, 'awaiting', 'a bank transfer is asked too');
+  assert.equal(withShot.whatsappCheck?.cancelAt, undefined, 'but never told it is auto-cancelled (its page lasts 14 days)');
+  assert.equal(withShot.whatsappCheck?.openBy, undefined);
   orders.uploadTransfer(withShot.id, PNG);
   const paid = place({ paymentMethod: 'bank_transfer' });
   orders.checkBankTransfer(paid.id, 'received', 'owner@shop.test');
@@ -257,14 +259,27 @@ test('auto-cancel exemptions: a bank transfer with its screenshot (or paid) and 
   // A paid card order is trusted: card orders get no deadline at all; even one forced on is exempt.
   const card = place();
   getDb().prepare("UPDATE orders SET card_state = 'paid' WHERE id = ?").run(card.id);
-  for (const o of [withShot, paid, neither, card]) due(o.id);
-  assert.equal(orders.sweepUnconfirmedOrders(), 1);
-  assert.equal(orders.getOrder(neither.id)!.status, 'cancelled');
+  getDb().prepare('UPDATE orders SET wa_cancel_at = ? WHERE id = ?').run(new Date(Date.now() + 3600_000).toISOString(), card.id);
+  const later = Date.now() + 25 * 3600_000; // a day on
+  const p = listProducts()[0];
+  const held = stockOf(p.id, p.profiles[0].id);
+  const auditBefore = auditEntries().length;
+  assert.equal(orders.sweepUnconfirmedOrders(later), 0, 'nothing cancelled');
+  assert.deepEqual(auditEntries().slice(auditBefore).map((e) => [e.action, e.details.orderId]), [['order.bank_unconfirmed_flagged', neither.id]], 'audited');
+  const flagged = orders.getOrder(neither.id)!;
+  assert.equal(flagged.status, 'pending_confirmation', 'a bank transfer with neither is not cancelled');
+  assert.equal(flagged.attention?.kind, 'bank_unconfirmed');
+  assert.equal(flagged.attention?.text.startsWith('Bank transfer not confirmed after 24 h — check your bank, then cancel or confirm'), true, flagged.attention?.text);
+  assert.equal(stockOf(p.id, p.profiles[0].id), held, 'its pieces stay held');
+  assert.ok(flagged.bankTransfer?.payPath, 'its private page stays open');
+  assert.ok(orders.orderEvents(neither.id).some((e) => e.event === 'bank_unconfirmed_flagged'));
   assert.equal(orders.getOrder(withShot.id)!.status, 'pending_confirmation');
   assert.equal(orders.getOrder(paid.id)!.status, 'pending_confirmation');
   assert.equal(orders.getOrder(card.id)!.status, 'pending_confirmation');
-  assert.equal(orders.getOrder(withShot.id)!.whatsappCheck!.cancelAt, undefined, 'its deadline is cleared: the owner decides');
-  assert.equal(orders.sweepUnconfirmedOrders(), 0);
+  assert.equal(getDb().prepare('SELECT wa_cancel_at FROM orders WHERE id = ?').pluck().get(withShot.id), null, 'its deadline is cleared: the owner decides');
+  const again = auditEntries().length;
+  assert.equal(orders.sweepUnconfirmedOrders(later), 0);
+  assert.equal(auditEntries().length, again, 'flagged once');
   closeOpen();
 });
 
@@ -403,7 +418,7 @@ test('rollback safety: an order placed with no code is plain JSON an older versi
   const src = fs.readFileSync('src/lib/server/db.ts', 'utf8');
   const m11 = src.slice(src.indexOf('// 11 (phone check by WhatsApp)'), src.indexOf('];', src.indexOf('// 11 (phone check by WhatsApp)')));
   const statements = m11.slice(m11.indexOf('db.exec(`') + 9, m11.indexOf('`);')).split(';').map((s) => s.replace(/--.*$/gm, '').trim()).filter(Boolean);
-  assert.equal(statements.length, 3);
+  assert.equal(statements.length, 5);
   for (const s of statements) assert.match(s, /^(ALTER TABLE orders ADD COLUMN|CREATE INDEX)/, s);
   closeOpen();
 });

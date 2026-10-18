@@ -1,6 +1,6 @@
 import { audit } from '@/lib/server/audit';
 import { requireAdmin } from '@/lib/server/guard';
-import { handleRouteError, HttpError, json, readJsonBody } from '@/lib/server/http';
+import { allowFields, handleRouteError, HttpError, json, readJsonBody } from '@/lib/server/http';
 import { getOrder, orderEvents, updateOrderByAdmin } from '@/lib/server/orders';
 import { cancelUnpaidCardOrder } from '@/lib/server/payments';
 
@@ -16,6 +16,8 @@ export async function GET(req: Request, { params }: { params: Promise<{ id: stri
   }
 }
 
+const PATCH_FIELDS = ['status', 'paymentStatus', 'adminNotes', 'clearAttention', 'shipUnconfirmed'] as const;
+
 /**
  * Change status, payment status or notes (a bank transfer is marked paid only through
  * ./bank, "Payment received"; a card payment only by Stripe). Cancelling returns the stock. An unpaid card order is
@@ -26,6 +28,8 @@ export async function PATCH(req: Request, { params }: { params: Promise<{ id: st
     const session = await requireAdmin(req);
     const { id } = await params;
     const body = await readJsonBody(req, 8 * 1024);
+    // What the hub sends (updateOrderByAdmin checks each value): nothing else is taken.
+    allowFields(body, PATCH_FIELDS);
     const current = getOrder(id);
     const unpaidCard = current?.paymentMethod === 'online_card' && (current.card?.state === 'pending' || current.card?.state === 'failed');
     if (unpaidCard && body.status === 'cancelled' && Object.keys(body).length === 1) {

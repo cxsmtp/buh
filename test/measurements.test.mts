@@ -68,7 +68,7 @@ const legacy = (id: string, over: Record<string, unknown>) => ({
   ...over,
 });
 
-test('existing products are carried over once: sheets and pillowcases kept, duvet only for duvet products, fitted for fitted sheets, marked for review, one audit entry', () => {
+test('existing products are carried over once: what the customer saw is kept (no fallback filled in), a standard duvet cover kept aside on non-duvet sets, the owner’s own kept, fitted for fitted sheets, marked for review, one audit entry', () => {
   // A shop from before this release: products with the standard measurements, no step done yet.
   const db = getDb();
   const insert = db.prepare('INSERT INTO products (id, data, stock, active, position, updated_at) VALUES (?, ?, 0, 1, ?, ?)');
@@ -77,6 +77,14 @@ test('existing products are carried over once: sheets and pillowcases kept, duve
     legacy('old-duvet', { title: 'Paisley set', category: 'duvet-covers', description: '', shortDescription: '' }),
     legacy('old-mentions', { title: 'Sage set', category: 'bedsheets', description: 'Comes with a duvet cover.', shortDescription: '' }),
     legacy('old-fitted', { title: 'Cotton fitted sheet', category: 'fitted-sheets', description: '', shortDescription: '' }),
+    // Reported in review: the owner had typed their own duvet cover on a sheet set; it must not be dropped.
+    legacy('old-own-duvet', {
+      title: 'Linen set',
+      category: 'bedsheets',
+      description: '',
+      shortDescription: '',
+      profiles: [{ ...DEFAULT_BED_PROFILES.king, duvetCover: 'Own 230 x 250 cm' }, { ...DEFAULT_BED_PROFILES.queen, duvetCover: `  ${DEFAULT_BED_PROFILES.queen.duvetCover!.toUpperCase()} ` }],
+    }),
   ];
   rows.forEach((p, i) => insert.run(p.id, JSON.stringify(p), i, new Date().toISOString()));
 
@@ -87,20 +95,27 @@ test('existing products are carried over once: sheets and pillowcases kept, duve
   assert.equal(sheet.fitted, false, 'a flat sheet by default');
   assert.equal(sheet.profiles[0].flatSheet, DEFAULT_BED_PROFILES.king.flatSheet, 'sheet kept as shown today');
   assert.equal(sheet.profiles[0].pillowcases, DEFAULT_BED_PROFILES.king.pillowcases);
-  assert.equal(sheet.profiles[0].duvetCover, undefined, 'no duvet cover claimed for a sheet set');
+  assert.equal(sheet.profiles[0].duvetCover, undefined, 'the standard duvet cover is not claimed for a sheet set');
+  assert.deepEqual(sheet.legacyMeasurements, { king: { duvetCover: DEFAULT_BED_PROFILES.king.duvetCover }, queen: { duvetCover: DEFAULT_BED_PROFILES.queen.duvetCover } }, 'never deleted: kept aside for the owner');
   assert.equal(sheet.profiles[1].flatSheet, 'Own flat 230 x 250 cm', "the product's own value wins");
-  assert.equal(sheet.profiles[1].pillowcases, DEFAULT_BED_PROFILES.queen.pillowcases, 'an empty one gets the standard size');
+  assert.equal(sheet.profiles[1].pillowcases, '', 'an empty one stays empty: the old shop showed it empty (no fallback), so nothing is made up');
+  const ownDuvet = by('old-own-duvet');
+  assert.equal(ownDuvet.profiles[0].duvetCover, 'Own 230 x 250 cm', 'a duvet cover the owner typed stays, duvet product or not');
+  assert.equal(ownDuvet.profiles[1].duvetCover, undefined, 'the standard one (spaces and case aside) is kept aside');
+  assert.deepEqual(ownDuvet.legacyMeasurements, { queen: { duvetCover: `  ${DEFAULT_BED_PROFILES.queen.duvetCover!.toUpperCase()} ` } }, 'exactly as it was');
   assert.deepEqual(sheet.colors, [{ name: 'As pictured', hex: '#ffffff' }], 'saved colours are kept');
   assert.equal(by('old-duvet').profiles[0].duvetCover, DEFAULT_BED_PROFILES.king.duvetCover, 'duvet category keeps it');
+  assert.equal(by('old-duvet').legacyMeasurements, undefined, 'nothing taken off a duvet product');
   assert.equal(by('old-mentions').profiles[1].duvetCover, DEFAULT_BED_PROFILES.queen.duvetCover, 'mentions a duvet: kept');
   assert.equal(by('old-fitted').fitted, true, 'fitted sheets are fitted');
   assert.deepEqual(measurementRows(by('old-fitted'), by('old-fitted').profiles[0]).map((r) => r.label), ['Fitted sheet', 'Pillowcases']);
 
   const entries = auditEntries(dir, 'product.measurements_carried_over');
   assert.equal(entries.length, 1, 'one audit entry');
-  assert.equal(entries[0].details.products, 4);
+  assert.equal(entries[0].details.products, 5);
   assert.equal(entries[0].details.fitted, 1);
-  assert.equal(entries[0].details.withDuvetCover, 2);
+  assert.equal(entries[0].details.withDuvetCover, 3);
+  assert.equal(entries[0].details.standardDuvetTakenOff, 3, 'old-sheet, old-fitted and old-own-duvet');
   const marker = JSON.parse((db.prepare('SELECT data FROM kv WHERE key = ?').get('step:measurements-per-product') as { data: string }).data);
   assert.equal(marker.audited, true);
 });
@@ -168,6 +183,24 @@ test('the shop never gets the review mark (the public catalogue strips it)', asy
   const text = await res.text();
   assert.ok(text.includes('old-duvet') || text.includes('old-mentions'));
   assert.equal(text.includes('measurementsReview'), false);
+  assert.equal(text.includes('legacyMeasurements'), false, 'nor what the update kept aside');
+});
+
+test('kept-aside values are never lost: other saves keep them, the editor’s "Put it back" restores them, garbage is dropped', () => {
+  const id = 'old-fitted';
+  const kept = products.getProduct(id)!.legacyMeasurements!;
+  assert.equal(kept.king.duvetCover, DEFAULT_BED_PROFILES.king.duvetCover);
+  // A save that doesn't mention them (show/hide, stock, an older editor) keeps them.
+  assert.deepEqual(products.updateProduct(id, { active: true }).legacyMeasurements, kept);
+  assert.deepEqual(products.updateProduct(id, { title: 'Cotton fitted sheet set' }).legacyMeasurements, kept);
+  // Only allow-listed fields and sizes, text capped: anything else is dropped.
+  const odd = products.updateProduct(id, { legacyMeasurements: { king: { duvetCover: '240 x 260 cm', evil: '<script>' }, 'BAD ID': { duvetCover: 'x' }, queen: 'nope' } }).legacyMeasurements;
+  assert.deepEqual(odd, { king: { duvetCover: '240 x 260 cm' } });
+  // "Put it back": the editor moves it onto the size and sends what is left (none: null).
+  const p = products.getProduct(id)!;
+  const restored = products.updateProduct(id, { profiles: p.profiles.map((x) => (x.id === 'king' ? { ...x, duvetCover: '240 x 260 cm' } : x)), legacyMeasurements: null });
+  assert.equal(restored.profiles.find((x) => x.id === 'king')!.duvetCover, '240 x 260 cm');
+  assert.equal(restored.legacyMeasurements, undefined);
 });
 
 test('a new shop: the starter catalogue claims no duvet cover on sheet sets and needs no review', () => {

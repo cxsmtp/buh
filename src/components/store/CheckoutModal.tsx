@@ -651,7 +651,7 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
           </div>
 
           {/* Confirm on WhatsApp (Settings → Store & contact): one message from the customer's own WhatsApp. */}
-          {askWhatsApp && <WhatsAppConfirm orderId={confirmedOrder.id} phone={confirmedOrder.customer.phone} check={confirmedOrder.whatsappCheck!} bankDetails={byTransfer} cancelHours={cancelHours} />}
+          {askWhatsApp && <WhatsAppConfirm orderId={confirmedOrder.id} phone={confirmedOrder.customer.phone} check={confirmedOrder.whatsappCheck!} bankDetails={byTransfer} cancelHours={cancelHours} openHours={cancelHoursOf(confirmedOrder.createdAt, confirmedOrder.whatsappCheck?.openBy)} />}
           {weCall && (
             <p role="status" className="text-xs text-ink-soft bg-ivory border border-line rounded-xl px-3 py-2">
               We&rsquo;ll call you on <span className="font-mono">{confirmedOrder.customer.phone}</span> to confirm your order.

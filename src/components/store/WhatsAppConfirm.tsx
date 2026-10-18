@@ -12,9 +12,25 @@ import { confirmLink } from '@/lib/whatsappConfirm';
  * WhatsApp shows the shop the number is theirs. Nothing without the shop's WhatsApp number.
  * A bank-transfer order's message also asks for the bank details (never on the website).
  * With Settings → Phone check "WhatsApp (free)" (cancelHours given) this message is the order's
- * confirmation: said plainly, with the hours after which an unconfirmed order is cancelled.
+ * confirmation: said plainly, with the hours after which an unconfirmed order is cancelled (and the
+ * sooner hours when the button is never tapped).
  */
-export function WhatsAppConfirm({ orderId, phone, check, bankDetails = false, cancelHours }: { orderId: string; phone: string; check: Pick<WhatsAppCheck, 'status' | 'code' | 'hold'>; bankDetails?: boolean; cancelHours?: number | null }) {
+export function WhatsAppConfirm({
+  orderId,
+  phone,
+  check,
+  bankDetails = false,
+  cancelHours,
+  openHours,
+}: {
+  orderId: string;
+  phone: string;
+  check: Pick<WhatsAppCheck, 'status' | 'code' | 'hold'>;
+  bankDetails?: boolean;
+  cancelHours?: number | null;
+  /** Sooner: the order is cancelled after this many hours if the button is never tapped. */
+  openHours?: number | null;
+}) {
   const link = confirmLink(useShop().store.whatsappNumber, orderId, check.code, { bankDetails });
   if (!link) return null;
 
@@ -49,7 +65,9 @@ export function WhatsAppConfirm({ orderId, phone, check, bankDetails = false, ca
             ? 'To confirm your order, tap to send us a WhatsApp message.'
             : 'Tap to send us a WhatsApp message so we know this number is yours.'}{' '}
         {cancelHours
-          ? `Orders not confirmed within ${cancelHours} hours are cancelled.`
+          ? openHours && openHours < cancelHours
+            ? `Please tap within ${openHours} hours: orders not confirmed within ${cancelHours} hours are cancelled (after ${openHours} hours if WhatsApp is never opened).`
+            : `Orders not confirmed within ${cancelHours} hours are cancelled.`
           : check.hold
             ? 'We’ll start your order once we get your message.'
             : 'Your order is placed either way.'}

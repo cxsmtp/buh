@@ -56,6 +56,8 @@ interface Draft {
   isNewArrival: boolean;
   /** Stock when editing began: sent as "expected" on save. */
   seenStock: Record<string, number>;
+  /** What the BUH-02.10 update took off the shop (a standard duvet cover), per size: offered back in one tap. */
+  legacy: NonNullable<Product['legacyMeasurements']>;
 }
 
 /** A size added from a preset: its name, mattress and price, but none of the pieces (those are this product's own). */
@@ -98,6 +100,7 @@ function draftFrom(product: Product | null, catalog: CatalogSettings): Draft {
       isFeatured: false,
       isNewArrival: true,
       seenStock: {},
+      legacy: {},
     };
   }
   // The shop shows the styled photo first when there is one, so it stays the cover here.
@@ -127,6 +130,7 @@ function draftFrom(product: Product | null, catalog: CatalogSettings): Draft {
     isFeatured: product.isFeatured,
     isNewArrival: Boolean(product.isNewArrival),
     seenStock: { ...product.stockBySize },
+    legacy: product.legacyMeasurements ?? {},
   };
 }
 
@@ -172,6 +176,19 @@ export function ProductEditor({
   const set = <K extends keyof Draft>(key: K, value: Draft[K]) => setDraft((d) => ({ ...d, [key]: value }));
   const unusedPresets = useMemo(() => catalog.sizes.filter((s) => !draft.sizes.some((x) => x.id === s.id)), [catalog.sizes, draft.sizes]);
   const totalStock = draft.sizes.reduce((n, s) => n + (draft.stock[s.id] ?? 0), 0);
+  // Kept aside by the update (a standard duvet cover on a set that isn't a duvet product), for sizes still offered.
+  const legacyShown = Object.entries(draft.legacy ?? {}).filter(([size, f]) => f.duvetCover && draft.sizes.some((x) => x.id === size));
+  const restoreLegacy = () =>
+    setDraft((d) => {
+      const legacy = { ...(d.legacy ?? {}) };
+      const sizes = d.sizes.map((x) => {
+        const kept = legacy[x.id];
+        if (!kept) return x;
+        delete legacy[x.id];
+        return { ...x, ...kept };
+      });
+      return { ...d, sizes, legacy };
+    });
 
   // 1. Pick up a saved draft, if there is one.
   useEffect(() => {
@@ -353,6 +370,8 @@ export function ProductEditor({
       fitted: draft.fitted,
       // Saved from the editor: the measurements are the owner's own now.
       measurementsReview: false,
+      // What the update kept aside and the owner didn't put back stays kept (never deleted).
+      legacyMeasurements: Object.keys(draft.legacy ?? {}).length ? draft.legacy : null,
       featuredImage: main,
       galleryImages: gallery,
       aiTransformedImage: null,
@@ -648,8 +667,18 @@ export function ProductEditor({
           <section className="space-y-3" aria-label="Sizes and stock">
             {product?.measurementsReview && (
               <p className="rounded-xl border border-warning-line bg-warning-soft px-3 py-2 text-xs text-ink" data-testid="measurements-review">
-                <strong>Check measurements.</strong> These sizes were filled in from the standard sizes when the shop was updated. Open each size, keep only what this set includes, and save: the shop shows only what is filled in.
+                <strong>Check measurements.</strong> These sizes were filled in from the standard sizes when they were added. Open each size, keep only what this set includes, and save: the shop shows only what is filled in.
               </p>
+            )}
+            {legacyShown.length > 0 && (
+              <div className="rounded-xl border border-warning-line bg-warning-soft px-3 py-2 text-xs text-ink space-y-2" data-testid="measurements-legacy">
+                <p>
+                  <strong>Taken off the shop by the update:</strong> {legacyShown.map(([size, f]) => `${shortSizeName(draft.sizes.find((x) => x.id === size)!)} duvet cover ${f.duvetCover}`).join(' · ')}. It was the standard size&apos;s duvet cover, and this set isn&apos;t a duvet product. If the set does include one, put it back.
+                </p>
+                <button type="button" onClick={restoreLegacy} className="min-h-11 px-3 rounded-xl bg-ink text-white font-bold">
+                  Put {legacyShown.length === 1 ? 'it' : 'them'} back
+                </button>
+              </div>
             )}
             <label className="flex items-start gap-3 rounded-xl border border-line bg-surface px-3 py-2 min-h-14">
               <input type="checkbox" className="w-5 h-5 mt-0.5 shrink-0" checked={draft.fitted} onChange={(e) => set('fitted', e.target.checked)} />

@@ -67,6 +67,11 @@ export interface Product {
   fitted?: boolean;
   /** Measurements carried over from the standard sizes by an update: the owner checks them once (Admin Hub only). */
   measurementsReview?: boolean;
+  /**
+   * Values the BUH-02.10 update took off a size (a standard duvet cover on a set that is not a
+   * duvet product), per size id: never shown to customers; the editor offers them back in one tap.
+   */
+  legacyMeasurements?: Record<string, Partial<Pick<BedProfileMeasurement, 'fittedSheet' | 'flatSheet' | 'pillowcases' | 'duvetCover'>>>;
   profiles: BedProfileMeasurement[];
   defaultProfileId: BedSizeProfileId;
   createdAt: string;
@@ -221,7 +226,7 @@ export interface CardPayment {
 
 /** Something on an order the owner must look at (a refund that failed, a booking after a cancel…). Admin only. */
 export interface OrderAttention {
-  kind: 'refund_failed' | 'booked_after_cancel' | 'refund_outside_stripe' | 'card_unreachable' | 'call_customer';
+  kind: 'refund_failed' | 'booked_after_cancel' | 'refund_outside_stripe' | 'card_unreachable' | 'call_customer' | 'bank_unconfirmed';
   text: string;
   at: string;
 }
@@ -270,9 +275,12 @@ export interface WhatsAppCheck {
   method?: 'whatsapp' | 'call';
   /**
    * Settings → Phone check "WhatsApp (free)": when an order still not confirmed is cancelled
-   * (its pieces back on sale). Absent: never cancelled for this (an SMS-verified or older order).
+   * (its pieces back on sale). Absent: never cancelled for this (an SMS-verified or older order,
+   * or a bank transfer: flagged for the owner instead).
    */
   cancelAt?: string;
+  /** Sooner than cancelAt: when it is cancelled if the customer never opens WhatsApp (absent once opened). */
+  openBy?: string;
 }
 
 export interface Customer {
@@ -504,6 +512,8 @@ export interface PhoneCheckSettings {
   mode: PhoneCheckMode;
   /** WhatsApp mode: an order not confirmed within this many hours (2 to 168) is cancelled, its pieces back on sale. */
   unconfirmedCancelHours: number;
+  /** WhatsApp mode: sooner, when the customer never even opened WhatsApp (2 to 48, never later than unconfirmedCancelHours). */
+  unopenedCancelHours: number;
 }
 
 export interface SmsGatewaySettings {

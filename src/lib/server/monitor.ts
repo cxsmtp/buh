@@ -6,7 +6,7 @@ import { dataDir } from './dataDir';
 import { getDb } from './db';
 import { kvGet, kvSet } from './kv';
 import { logEvent } from './log';
-import { awaitingWhatsAppCount, cardTakings, ordersNeedingAttention, receiptsNoRoom, transfersAwaitedCount, transfersToCheckCount } from './orders';
+import { awaitingWhatsAppCount, cardTakings, ordersNeedingAttention, receiptsNoRoom, transfersAwaitedCount, transfersToCheckCount, unconfirmedPressure } from './orders';
 import { listProducts } from './products';
 import { getSettings, phoneCheckMode } from './settings';
 
@@ -69,7 +69,17 @@ export function currentProblems(now = Date.now()): Problem[] {
     if (!getSettings('store').whatsappNumber) {
       problems.push({ id: 'whatsapp', level: 'warning', text: 'No WhatsApp number is set (Settings → Store & contact): customers can’t confirm their orders on WhatsApp, so call each one before shipping.' });
     }
-  } else {
+  }
+  // Orders no code proved, waiting for WhatsApp: near the shop cap (80%), or the cap refused a customer in the last day.
+  const pressure = unconfirmedPressure(now);
+  if (pressure.near || pressure.refusedAt) {
+    problems.push({
+      id: 'unconfirmed',
+      level: 'warning',
+      text: `${pressure.open} orders are waiting for their WhatsApp confirmation (new ones are refused at ${pressure.cap})${pressure.refusedAt ? '; the cap refused a customer in the last day' : ''}. In Orders, confirm the real ones and cancel any you don't recognise.`,
+    });
+  }
+  if (phoneCheckMode() !== 'whatsapp') {
     const sms = getSettings('sms');
     const envGateway = Boolean(process.env.TWILIO_ACCOUNT_SID || process.env.INFOBIP_API_KEY || process.env.SMS_WEBHOOK_URL);
     if (process.env.NODE_ENV === 'production' && !sms.isEnabled && !envGateway && process.env.OTP_DEV_MODE !== 'true') {
