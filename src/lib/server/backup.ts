@@ -104,6 +104,7 @@ function csvFiles(): TarEntry[] {
     x.source?.source ?? '', x.source?.campaign ?? '', x.deliveryOption ?? 'standard',
     x.whatsappCheck?.status ?? '', x.whatsappCheck?.checkedAt ?? '', x.whatsappCheck?.checkedBy ?? '',
     x.card?.state ?? '', x.card?.ref ?? '', x.card?.label ?? '', x.card?.paidAt ?? '', x.card?.paidAmount ?? '', x.card?.refundRef ?? '', x.card?.refundedAt ?? '',
+    x.card?.refundedAmount ?? '', x.card?.mode ?? '', x.card?.refundOutsideAt ?? '', x.attention?.text ?? '',
   ];
   return [
     {
@@ -113,7 +114,8 @@ function csvFiles(): TarEntry[] {
           'customer_name', 'phone', 'email', 'emirate', 'area', 'street', 'building_villa', 'flat_villa_no', 'landmark', 'bank_transfer_ref',
           'courier', 'awb', 'awb_simulated', 'courier_status', 'admin_notes', 'source', 'campaign', 'delivery',
           'whatsapp_check', 'whatsapp_checked_at', 'whatsapp_checked_by',
-          'card_payment', 'payment_ref', 'card', 'paid_at', 'paid_aed', 'refund_ref', 'refunded_at'],
+          'card_payment', 'payment_ref', 'card', 'paid_at', 'paid_aed', 'refund_ref', 'refunded_at',
+          'refunded_aed', 'stripe_mode', 'refund_outside_stripe_at', 'needs_attention'],
         orders.map(o)
       )),
     },

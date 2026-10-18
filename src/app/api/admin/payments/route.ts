@@ -6,7 +6,7 @@ import { appUrl } from '@/lib/server/runtimeConfig';
 import { getSettings, stripeMode } from '@/lib/server/settings';
 
 /** The events the shop listens for (the owner ticks these in Stripe → Webhooks). */
-const EVENTS = ['payment_intent.succeeded', 'payment_intent.payment_failed', 'payment_intent.canceled', 'charge.refunded'];
+const EVENTS = ['payment_intent.succeeded', 'payment_intent.payment_failed', 'payment_intent.canceled', 'charge.refunded', 'charge.refund.updated'];
 
 /** Where Stripe should send its webhook: this shop's own address. */
 function webhookUrl(req: Request): string {

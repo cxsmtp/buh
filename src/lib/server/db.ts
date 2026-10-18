@@ -286,6 +286,11 @@ const MIGRATIONS: Array<(db: DB) => void> = [
       ALTER TABLE orders ADD COLUMN card_label TEXT;
       ALTER TABLE orders ADD COLUMN refund_ref TEXT;
       ALTER TABLE orders ADD COLUMN refunded_at TEXT;
+      ALTER TABLE orders ADD COLUMN card_livemode INTEGER;     -- 1 live, 0 test: the Stripe mode the PaymentIntent was made in
+      ALTER TABLE orders ADD COLUMN card_ip TEXT;              -- hash of the placing connection's address (a cap on unpaid card orders)
+      ALTER TABLE orders ADD COLUMN refunded_fils INTEGER;     -- refunded so far (a partial refund made in the Stripe dashboard)
+      ALTER TABLE orders ADD COLUMN refund_outside_at TEXT;    -- cancelled without a Stripe refund through the shop (refunded in Stripe's dashboard)
+      ALTER TABLE orders ADD COLUMN needs_attention TEXT;      -- JSON {kind, text, at}: something the owner must look at
       CREATE UNIQUE INDEX orders_by_payment_ref ON orders(payment_ref) WHERE payment_ref IS NOT NULL;
       CREATE INDEX orders_card_open ON orders(created_at) WHERE card_state IN ('pending', 'failed');
       CREATE TABLE stripe_events (

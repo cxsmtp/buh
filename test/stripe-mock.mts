@@ -27,6 +27,7 @@ export interface MockIntent {
   metadata: Record<string, string>;
   latest_charge: string | null;
   last_payment_error: null | { code?: string; decline_code?: string; message?: string };
+  livemode: boolean;
 }
 
 export interface MockRequest {
@@ -45,6 +46,12 @@ export interface StripeMock {
   refundStatus: string;
   /** Mark an intent paid, with how (e.g. Apple Pay, Visa 4242). */
   succeed(id: string, card?: { brand?: string; last4?: string; wallet?: string | null }): MockIntent;
+  /** A refund made in Stripe's dashboard (not through the shop): the charge shows it as refunded. */
+  dashboardRefund(id: string, amount: number): { charge: Record<string, unknown>; refund: Record<string, unknown> };
+  /** A refund failing after Stripe took it (the card was closed): Stripe puts the amount back on the charge. */
+  failRefund(id: string, reason?: string): Record<string, unknown>;
+  /** The refunds made (by the shop or the dashboard). */
+  refunds: Map<string, Record<string, unknown>>;
   /** The signed webhook body Stripe would send (with this secret, or another one). */
   event(type: string, object: unknown, opts?: { id?: string; secret?: string }): { body: string; signature: string; id: string };
   close(): Promise<void>;
@@ -64,6 +71,7 @@ export async function startStripeMock(): Promise<StripeMock> {
     requests,
     intents,
     refundStatus: 'succeeded',
+    refunds,
   } as StripeMock;
 
   const err = (status: number, type: string, message: string, code?: string) => ({ status, body: { error: { type, message, ...(code ? { code } : {}) } } });
@@ -89,6 +97,7 @@ export async function startStripeMock(): Promise<StripeMock> {
         metadata: { orderId: String(body.get('metadata[orderId]') ?? '') },
         latest_charge: null,
         last_payment_error: null,
+        livemode: false,
       };
       pi.client_secret = `${pi.id}_secret_${crypto.randomBytes(12).toString('hex')}`;
       intents.set(pi.id, pi);
@@ -109,7 +118,12 @@ export async function startStripeMock(): Promise<StripeMock> {
     if (method === 'POST' && path === '/v1/refunds') {
       const pi = intents.get(String(body.get('payment_intent')));
       if (!pi || pi.status !== 'succeeded') return err(400, 'invalid_request_error', 'This PaymentIntent does not have a successful charge to refund.', 'charge_not_refundable');
-      const refund = { id: id('re'), object: 'refund', amount: pi.amount, currency: pi.currency, payment_intent: pi.id, status: mock.refundStatus, metadata: { orderId: body.get('metadata[orderId]') } };
+      const charge = charges.get(pi.latest_charge!)!;
+      const left = pi.amount - Number(charge.amount_refunded);
+      const amount = body.has('amount') ? Number(body.get('amount')) : left;
+      if (amount > left || amount <= 0) return err(400, 'invalid_request_error', `Refund amount (${amount}) is greater than unrefunded amount on charge (${left})`, 'amount_too_large');
+      const refund = { id: id('re'), object: 'refund', amount, currency: pi.currency, payment_intent: pi.id, charge: charge.id, status: mock.refundStatus, metadata: { orderId: body.get('metadata[orderId]') } };
+      if (refund.status !== 'failed' && refund.status !== 'canceled') charge.amount_refunded = Number(charge.amount_refunded) + amount;
       refunds.set(refund.id, refund);
       return { status: 200, body: refund };
     }
@@ -167,6 +181,23 @@ export async function startStripeMock(): Promise<StripeMock> {
     pi.amount_received = pi.amount;
     pi.latest_charge = charge.id;
     return pi;
+  };
+  mock.dashboardRefund = (piId, amount) => {
+    const pi = intents.get(piId)!;
+    const charge = charges.get(pi.latest_charge!)!;
+    charge.amount_refunded = Number(charge.amount_refunded) + amount;
+    const refund = { id: id('re'), object: 'refund', amount, currency: pi.currency, payment_intent: pi.id, charge: charge.id, status: 'succeeded', metadata: {} };
+    refunds.set(refund.id, refund);
+    return { charge: { ...charge, refunds: { object: 'list', data: [refund] } }, refund };
+  };
+  mock.failRefund = (refundId, reason = 'expired_or_canceled_card') => {
+    const refund = refunds.get(refundId)!;
+    const pi = intents.get(String(refund.payment_intent))!;
+    const charge = charges.get(pi.latest_charge!)!;
+    if (refund.status !== 'failed') charge.amount_refunded = Number(charge.amount_refunded) - Number(refund.amount);
+    refund.status = 'failed';
+    refund.failure_reason = reason;
+    return { ...refund };
   };
   mock.event = (type, object, opts = {}) => {
     const eventId = opts.id ?? id('evt');

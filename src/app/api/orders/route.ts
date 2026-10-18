@@ -1,7 +1,7 @@
 import { audit } from '@/lib/server/audit';
 import { enforceIpLimit } from '@/lib/server/guard';
 import { assertSameOrigin, clientIp, handleRouteError, HttpError, json, readJsonBody } from '@/lib/server/http';
-import { customerView, placeOrder } from '@/lib/server/orders';
+import { customerView, getOrder, placeOrder } from '@/lib/server/orders';
 import { abandonUnstarted, startCardPayment } from '@/lib/server/payments';
 
 /**
@@ -16,13 +16,16 @@ export async function POST(req: Request) {
     enforceIpLimit(req, 'orders', 20, 60 * 60 * 1000, 'Too many orders from this connection. Please try again later.');
     // A bank receipt (max 5 MB) arrives base64-encoded, so allow ~7 MB.
     const body = await readJsonBody(req, 7 * 1024 * 1024);
-    const { order, created } = placeOrder(body);
-    if (created) audit('order.created', { orderId: order.id, total: order.total, paymentMethod: order.paymentMethod, ip: clientIp(req) });
+    const ip = clientIp(req);
+    const { order, created } = placeOrder(body, { ip });
+    if (created) audit('order.created', { orderId: order.id, total: order.total, paymentMethod: order.paymentMethod, ip });
     if (order.paymentMethod !== 'online_card') return json({ success: true, order: customerView(order) }, created ? 201 : 200);
-    // The same checkout sent again (a retry): the same order, and the same PaymentIntent.
+    // The same checkout sent again (a retry): the same order, and the same PaymentIntent (or, once
+    // paid, the paid order: never a second charge).
     if (order.card?.state !== 'pending' && order.card?.state !== 'failed') return json({ success: true, order: customerView(order) }, 200);
     try {
-      const { clientSecret } = await startCardPayment(order.id);
+      const { clientSecret, paid } = await startCardPayment(order.id);
+      if (paid) return json({ success: true, order: customerView(getOrder(order.id)!) }, 200);
       return json({ success: true, order: customerView(order), payment: { clientSecret } }, created ? 201 : 200);
     } catch (err) {
       // No client secret left the server, so nobody can pay it: free its pieces now.

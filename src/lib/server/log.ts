@@ -5,6 +5,9 @@
  */
 
 const SECRET_KEY = /(pass(word)?|secret|token|api.?key|auth|authorization|cookie|otp|code|sid|clientkey)/i;
+// Field names that look like secrets but hold none: Stripe's error code (e.g. resource_missing) and
+// a card's decline code (e.g. insufficient_funds) are needed to understand a failed payment.
+const SAFE_KEYS = new Set(['stripeCode', 'declineCode']);
 const PHONE = /\+?\d[\d\s-]{7,}\d/g;
 const EMAIL = /([A-Za-z0-9._%+-])[A-Za-z0-9._%+-]*@([A-Za-z0-9.-]+\.[A-Za-z]{2,})/g;
 // A long random path segment: the private admin link (32 characters) or a password-reset
@@ -39,7 +42,7 @@ export function redact(value: unknown, depth = 0): unknown {
   if (value && typeof value === 'object') {
     const out: Record<string, unknown> = {};
     for (const [k, v] of Object.entries(value)) {
-      out[k] = SECRET_KEY.test(k) ? '[redacted]' : redact(v, depth + 1);
+      out[k] = SECRET_KEY.test(k) && !SAFE_KEYS.has(k) ? '[redacted]' : redact(v, depth + 1);
     }
     return out;
   }

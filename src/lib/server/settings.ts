@@ -730,6 +730,14 @@ export function phoneVerificationConfig(): PhoneVerificationConfig {
   return { method: 'firebase', firebase: { apiKey, authDomain, projectId, appId } };
 }
 
+/**
+ * An SMS gateway (or Firebase) is switched on, so checkout can send phone codes: card orders then
+ * prove their phone like every other order. Saved settings can only be on when complete.
+ */
+export function phoneCodesOn(): boolean {
+  return hasEnvGateway() || getSettings('sms').isEnabled;
+}
+
 function hasEnvGateway(): boolean {
   const g = envGateways();
   return Boolean(g.twilio || g.infobip || g.webhook);

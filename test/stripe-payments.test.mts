@@ -278,7 +278,7 @@ test('the confirmation screen’s check asks Stripe (never the browser): paid wi
   assert.equal((await ask(data.payment!.clientSecret, 'abandon')).body.card.state, 'paid');
 });
 
-test('left checkout, or not paid in 30 minutes: stopped at Stripe, cancelled, stock released exactly once', async () => {
+test('left checkout, or not paid in time (10 minutes): stopped at Stripe, cancelled, stock released exactly once', async () => {
   const p = product();
   const size = p.profiles[0].id;
   const start = stockOf(p.id, size);
@@ -291,7 +291,7 @@ test('left checkout, or not paid in 30 minutes: stopped at Stripe, cancelled, st
   assert.equal(intentOf(left.data.order!.id).status, 'canceled', 'stopped at Stripe first');
   assert.equal(stockOf(p.id, size), start - 1);
 
-  // Backdate the other one past 30 minutes; the sweep cancels it once.
+  // Backdate the other one past the time limit; the sweep cancels it once.
   getDb().prepare('UPDATE orders SET created_at = ? WHERE id = ?').run(new Date(Date.now() - 31 * 60_000).toISOString(), late.data.order!.id);
   assert.equal(await payments.sweepCardOrders(), 1);
   assert.equal(await payments.sweepCardOrders(), 0, 'nothing left to sweep');
@@ -396,6 +396,316 @@ test('Cancel & refund: once (refund:<id>), recorded from Stripe’s answer or it
   assert.equal(done.outcome, 'refunded');
 });
 
+// ── Review fixes (BUH-02.09 review) ──────────────────────────────────────────
+
+/** A paid card order (through the signed webhook), and its intent. */
+async function paidCard(over: Record<string, unknown> = {}) {
+  const { data } = await placeCard(over);
+  const id = data.order!.id;
+  const pi = mock.succeed(intentOf(id).id);
+  const ev = mock.event('payment_intent.succeeded', pi);
+  await webhook(ev.body, ev.signature);
+  assert.equal(orders.getOrder(id)!.card!.state, 'paid');
+  return { id, pi, data };
+}
+/** Audit entries of this action (the log may mask an order number's digits as if a phone, so by action). */
+const auditLinesWith = (action: string) =>
+  fs
+    .readdirSync(dir)
+    .filter((f) => /^audit-.*\.jsonl$/.test(f))
+    .flatMap((f) => fs.readFileSync(path.join(dir, f), 'utf8').split('\n').filter(Boolean))
+    .filter((l) => l.includes(`"action":"${action}"`));
+
+test('an unpaid card order the saved keys can’t reach (another mode, no key, Stripe has no such payment) is cancelled once, not stuck', async () => {
+  const p = product();
+  const size = p.profiles[0].id;
+  // Its intent is made in test mode (the stand-in says livemode: false), and that is kept.
+  const gone = await placeCard();
+  assert.equal(getDb().prepare('SELECT card_livemode FROM orders WHERE id = ?').pluck().get(gone.data.order!.id), 0);
+  assert.equal(orders.getOrder(gone.data.order!.id)!.card!.mode, 'test');
+
+  // 1. Stripe says no such payment (another account's keys): the sweep cancels it, stock back once.
+  const start = stockOf(p.id, size);
+  mock.intents.delete(intentOf(gone.data.order!.id)?.id ?? '');
+  getDb().prepare('UPDATE orders SET created_at = ? WHERE id = ?').run(new Date(Date.now() - 11 * 60_000).toISOString(), gone.data.order!.id);
+  assert.equal(await payments.sweepCardOrders(), 1);
+  assert.equal(await payments.sweepCardOrders(), 0, 'once');
+  const o1 = orders.getOrder(gone.data.order!.id)!;
+  assert.equal(o1.status, 'cancelled');
+  assert.equal(o1.card!.state, 'canceled');
+  assert.equal(stockOf(p.id, size), start + 1, 'its piece back on sale, once');
+  assert.equal(o1.attention, undefined, 'a test-mode payment needs no owner check');
+  assert.match(auditLinesWith('payment.card_cancelled').at(-1)!, /can't be charged with this Stripe account: Stripe has no such payment/, 'audited with why');
+
+  // 2. Made in live mode, the keys now test: the owner's Cancel works without asking Stripe, and
+  //    the order is flagged (check the live dashboard in case it was paid there).
+  const live = await placeCard();
+  getDb().prepare('UPDATE orders SET card_livemode = 1 WHERE id = ?').run(live.data.order!.id);
+  const cancels = () => mock.requests.filter((r) => r.path.endsWith('/cancel')).length;
+  const before = cancels();
+  const cancelled = await payments.cancelUnpaidCardOrder(live.data.order!.id, 'owner@shop.test');
+  assert.equal(cancelled.status, 'cancelled');
+  assert.equal(cancels(), before, 'no call to the wrong account');
+  assert.equal(cancelled.attention?.kind, 'card_unreachable');
+  assert.match(cancelled.attention!.text, /Stripe live mode/);
+  assert.equal(stockOf(p.id, size), start + 1);
+
+  // 3. No secret key saved: leaving checkout still cancels it (stock back), and says nothing of cash.
+  const nokey = await placeCard();
+  await settings.updateSettings('payments', { cardEnabled: false, stripeSecretKey: null });
+  try {
+    const r = await payments.abandonCardPayment(nokey.data.order!.id, nokey.data.payment!.clientSecret);
+    assert.equal(r.status, 'cancelled');
+    assert.equal(stockOf(p.id, size), start + 1);
+  } finally {
+    await keysOn();
+  }
+});
+
+test('a paid card order the saved keys can’t reach: Cancel & refund says why (to the owner), and “Cancel without Stripe refund” is audited, once', async () => {
+  const p = product();
+  const size = p.profiles[0].id;
+  const { id } = await paidCard();
+  const before = stockOf(p.id, size);
+  // Reachable: the owner must refund through Stripe.
+  await assert.rejects(payments.cancelPaidCardWithoutStripe(id, 'owner@shop.test'), (e: { details?: { code?: string } }) => e.details?.code === 'card_reachable');
+
+  getDb().prepare('UPDATE orders SET card_livemode = 1 WHERE id = ?').run(id);
+  const refunds = () => mock.requests.filter((r) => r.path === '/v1/refunds').length;
+  const r0 = refunds();
+  await assert.rejects(payments.refundCardOrder(id, 'owner@shop.test'), (e: { status: number; message: string; details?: { code?: string } }) => {
+    assert.equal(e.status, 409);
+    assert.equal(e.details?.code, 'card_unreachable');
+    assert.match(e.message, /Cancel without Stripe refund/);
+    assert.doesNotMatch(e.message, /Cash on Delivery/, 'owner copy, not customer copy');
+    return true;
+  });
+  assert.equal(refunds(), r0, 'nothing sent to the wrong account');
+  assert.throws(() => orders.updateOrderByAdmin(id, { status: 'cancelled' }, 'owner@shop.test'), /Cancel & refund/, 'a plain cancel still refuses');
+
+  const done = await payments.cancelPaidCardWithoutStripe(id, 'owner@shop.test');
+  assert.equal(done.status, 'cancelled');
+  assert.equal(done.card!.state, 'paid', 'not marked refunded: the owner refunds it in Stripe');
+  assert.ok(done.card!.refundOutsideAt);
+  assert.equal(done.attention?.kind, 'refund_outside_stripe');
+  assert.match(done.attention!.text, /Stripe dashboard/);
+  assert.equal(stockOf(p.id, size), before + 1);
+  const again = await payments.cancelPaidCardWithoutStripe(id, 'owner@shop.test');
+  assert.equal(again.status, 'cancelled');
+  assert.equal(stockOf(p.id, size), before + 1, 'released once');
+  assert.equal(auditLinesWith('payment.cancelled_without_refund').length, 1);
+  // Mark as handled clears the note (and the problem in Settings → System).
+  const { currentProblems } = await import('@/lib/server/monitor');
+  assert.ok(currentProblems().some((x) => x.id === 'orders'));
+  for (const o of orders.listOrders()) if (o.attention) orders.updateOrderByAdmin(o.id, { clearAttention: true }, 'owner@shop.test');
+  assert.equal(orders.getOrder(id)!.attention, undefined);
+  assert.ok(!currentProblems().some((x) => x.id === 'orders'));
+});
+
+test('saving keys of another mode while card orders are open warns (never blocks); same mode says nothing', async () => {
+  const open = await placeCard();
+  assert.equal(payments.paymentsModeWarning(TEST_KEYS.secret, TEST_KEYS.secret), null);
+  const w = payments.paymentsModeWarning(TEST_KEYS.secret, 'sk_live_51BuhLiveKey00000000000000');
+  assert.ok(w && /still open from test mode/.test(w) && /Cancel without Stripe refund/.test(w), w ?? '');
+  assert.match(payments.paymentsModeWarning(TEST_KEYS.secret, '') ?? '', /Without a secret key/);
+  await payments.abandonCardPayment(open.data.order!.id, open.data.payment!.clientSecret);
+});
+
+test('unpaid card orders hold stock for 10 minutes; unverified ones: 2 of each item, 5 lines; a per-connection cap; a polite shop-wide cap', async () => {
+  assert.equal(orders.CARD_PAYMENT_TTL_MS, 10 * 60_000);
+  const recent = await placeCard();
+  getDb().prepare('UPDATE orders SET created_at = ? WHERE id = ?').run(new Date(Date.now() - 9 * 60_000).toISOString(), recent.data.order!.id);
+  await payments.sweepCardOrders();
+  assert.equal(orders.getOrder(recent.data.order!.id)!.status, 'pending_payment', '9 minutes: still held');
+  getDb().prepare('UPDATE orders SET created_at = ? WHERE id = ?').run(new Date(Date.now() - 11 * 60_000).toISOString(), recent.data.order!.id);
+  assert.equal(await payments.sweepCardOrders(), 1, '11 minutes: stopped and cancelled');
+
+  const p = listProducts()[0];
+  const item = (profile = 0, quantity = 1) => ({ productId: p.id, profileId: p.profiles[profile].id, quantity });
+  const three = await placeCard({ items: [item(0, 3)] });
+  assert.equal(three.res.status, 400);
+  assert.equal(three.data.code, 'card_bag_limit');
+  assert.match(three.data.message!, /at most 2 of each item/);
+  const split = await placeCard({ items: [item(0, 2), item(0, 1)] });
+  assert.equal(split.res.status, 400, 'split over lines counts together');
+  const many = await placeCard({ items: [item(0), item(1), item(2), item(3), item(0), item(1)] });
+  assert.equal(many.res.status, 400);
+  assert.match(many.data.message!, /at most 5 different items/);
+  // A phone proved with a code: the usual limits.
+  const { issuePhoneToken } = await import('@/lib/server/phoneToken');
+  const verified = await placeCard({ items: [item(0, 3)], verificationToken: issuePhoneToken('+971551112233') });
+  assert.equal(verified.res.status, 201, verified.data.message);
+  assert.equal((verified.data.order as unknown as { customer: { phoneVerified: boolean } }).customer.phoneVerified, true);
+  await payments.abandonCardPayment(verified.data.order!.id, verified.data.payment!.clientSecret);
+
+  // Per connection (when the address is known): 3 unpaid card orders, whatever the phones.
+  process.env.TRUST_PROXY = '1';
+  try {
+    const fromIp = (ip: string, k: number) =>
+      ordersRoute.POST(jsonRequest(cardBody({ customer: { ...cardBody().customer, phone: `+97156${ip.slice(-1)}00000${k}` } }), { origin: ORIGIN, 'x-real-ip': ip }) as never);
+    const placed: Array<{ order: { id: string }; payment: { clientSecret: string } }> = [];
+    for (let k = 0; k < orders.MAX_UNPAID_CARD_PER_IP; k++) {
+      const res = await fromIp('203.0.113.7', k);
+      assert.equal(res.status, 201);
+      placed.push(await res.json());
+    }
+    const fourth = await fromIp('203.0.113.7', 9);
+    assert.equal(fourth.status, 429);
+    assert.equal((await fourth.json()).code, 'card_unpaid_limit');
+    assert.equal((await fromIp('203.0.113.8', 1)).status, 201, 'another connection is not affected');
+    const stored = getDb().prepare('SELECT card_ip FROM orders WHERE id = ?').pluck().get(placed[0].order.id) as string;
+    assert.match(stored, /^[0-9a-f]{64}$/, 'kept as a hash, not the address');
+    for (const o of placed) await payments.abandonCardPayment(o.order.id, o.payment.clientSecret);
+  } finally {
+    delete process.env.TRUST_PROXY;
+  }
+
+  // The shop-wide cap: a polite word to the customer.
+  const fake = Array.from({ length: orders.MAX_UNPAID_CARD_TOTAL }, (_, k) => `BUH-FAKE-CAP${k}`);
+  const ins = getDb().prepare("INSERT INTO orders (id, created_at, updated_at, phone, status, payment_method, payment_status, total_fils, data, card_state) VALUES (?, ?, ?, '+971500000000', 'pending_payment', 'online_card', 'pending', 100, '{}', 'pending')");
+  const now = new Date().toISOString();
+  for (const f of fake) ins.run(f, now, now);
+  try {
+    const busy = await placeCard();
+    assert.equal(busy.res.status, 429);
+    assert.equal(busy.data.code, 'card_busy');
+    assert.match(busy.data.message!, /very busy right now, sorry/);
+  } finally {
+    getDb().prepare(`DELETE FROM orders WHERE id IN (${fake.map(() => '?').join(',')})`).run(...fake);
+  }
+});
+
+test('with an SMS gateway on, a card order proves its phone with a code like any order (checkout is told)', async () => {
+  process.env.SMS_WEBHOOK_URL = 'https://sms.example.com/send';
+  try {
+    assert.equal(settings.phoneCodesOn(), true);
+    const pub = await (await publicRoute.GET()).json();
+    assert.deepEqual(pub.payments, { card: true, publishableKey: TEST_KEYS.publishable, phoneCheck: true });
+    const none = await placeCard();
+    assert.equal(none.res.status, 401, 'no code: refused');
+    const { issuePhoneToken } = await import('@/lib/server/phoneToken');
+    const ok = await placeCard({ verificationToken: issuePhoneToken('+971552223344') });
+    assert.equal(ok.res.status, 201);
+    assert.equal((ok.data.order as unknown as { customer: { phone: string; phoneVerified: boolean } }).customer.phone, '+971552223344', 'the proved number');
+    await payments.abandonCardPayment(ok.data.order!.id, ok.data.payment!.clientSecret);
+  } finally {
+    delete process.env.SMS_WEBHOOK_URL;
+  }
+  assert.equal(settings.phoneCodesOn(), false);
+  assert.equal((await placeCard()).res.status, 201, 'no gateway: as before, no code needed');
+});
+
+test('a partial refund in Stripe’s dashboard, then Cancel & refund: only what is left, once; a full dashboard refund cancels the order once', async () => {
+  const p = product();
+  const size = p.profiles[0].id;
+  const { id, pi } = await paidCard();
+  // Refunded AED 10 in the dashboard; its webhook says so.
+  const { charge } = mock.dashboardRefund(pi.id, 1000);
+  const partial = mock.event('charge.refunded', charge);
+  await webhook(partial.body, partial.signature);
+  let o = orders.getOrder(id)!;
+  assert.equal(o.card!.state, 'paid');
+  assert.equal(o.card!.refundedAmount, 10);
+  assert.equal(orders.refundableFils(o), pi.amount - 1000);
+  const before = stockOf(p.id, size);
+  // The owner was shown the full amount (an old screen): refused, with what is left.
+  await assert.rejects(payments.refundCardOrder(id, 'owner@shop.test', pi.amount), (e: { details?: { code?: string } }) => e.details?.code === 'refund_amount_changed');
+  const r = await payments.refundCardOrder(id, 'owner@shop.test', pi.amount - 1000);
+  assert.equal(r.outcome, 'refunded');
+  assert.equal(r.order.status, 'cancelled');
+  assert.equal(stockOf(p.id, size), before + 1);
+  const calls = mock.requests.filter((x) => x.path === '/v1/refunds' && x.body.get('payment_intent') === pi.id);
+  assert.equal(calls.length, 1);
+  assert.equal(calls[0].body.get('amount'), String(pi.amount - 1000), 'the amount is said explicitly');
+  assert.equal(calls[0].idempotencyKey, `refund:${id}:${pi.amount - 1000}`);
+  o = orders.getOrder(id)!;
+  assert.equal(o.card!.state, 'refunded');
+
+  // Partial refund made in the dashboard but its webhook not here yet: Stripe's word is used.
+  const second = await paidCard();
+  mock.dashboardRefund(second.pi.id, 500);
+  await assert.rejects(payments.refundCardOrder(second.id, 'owner@shop.test', second.pi.amount), /is left to refund/);
+  assert.equal(orders.getOrder(second.id)!.card!.refundedAmount, 5, 'noted from Stripe');
+  assert.equal((await payments.refundCardOrder(second.id, 'owner@shop.test', second.pi.amount - 500)).outcome, 'refunded');
+
+  // A full refund in the dashboard: the order is cancelled and its piece back, exactly once.
+  const third = await paidCard();
+  const before3 = stockOf(p.id, size);
+  const full = mock.dashboardRefund(third.pi.id, third.pi.amount);
+  const ev = mock.event('charge.refunded', full.charge);
+  await webhook(ev.body, ev.signature);
+  await webhook(ev.body, ev.signature);
+  const again = mock.event('charge.refunded', full.charge);
+  await webhook(again.body, again.signature);
+  const o3 = orders.getOrder(third.id)!;
+  assert.equal(o3.card!.state, 'refunded');
+  assert.equal(o3.status, 'cancelled');
+  assert.equal(stockOf(p.id, size), before3 + 1, 'released once');
+});
+
+test('a refund that fails later goes back to paid, audited, flagged for the owner; trying again is a new refund', async () => {
+  const { id, pi } = await paidCard();
+  mock.refundStatus = 'pending';
+  try {
+    const first = await payments.refundCardOrder(id, 'owner@shop.test');
+    assert.equal(first.outcome, 'refund_pending');
+    const refundId = first.order.card!.refundRef!;
+    const failed = mock.failRefund(refundId);
+    const ev = mock.event('charge.refund.updated', failed);
+    assert.equal(payments.handleStripeWebhook(Buffer.from(ev.body), ev.signature).outcome, 'refund_failed');
+    assert.equal(payments.handleStripeWebhook(Buffer.from(ev.body), ev.signature).outcome, 'duplicate');
+    // refund.failed for the same refund (if ticked too) changes nothing more.
+    const ev2 = mock.event('refund.failed', failed);
+    assert.equal(payments.handleStripeWebhook(Buffer.from(ev2.body), ev2.signature).outcome, 'ignored');
+    const o = orders.getOrder(id)!;
+    assert.equal(o.card!.state, 'paid', 'the money is still with the shop');
+    assert.equal(o.card!.refundRef, undefined);
+    assert.equal(o.attention?.kind, 'refund_failed');
+    assert.match(o.attention!.text, /expired or canceled card/);
+    assert.equal(auditLinesWith('payment.refund_failed').length, 1);
+    for (let i = 0; i < 50 && !printed.some((l) => l.includes('"owner_alert"')); i++) await new Promise((r) => setTimeout(r, 20));
+    assert.ok(printed.some((l) => l.includes('"owner_alert"')), 'the owner is alerted');
+    // An update that is not a failure is ignored.
+    const ok = mock.event('charge.refund.updated', { ...failed, status: 'succeeded' });
+    assert.equal(payments.handleStripeWebhook(Buffer.from(ok.body), ok.signature).outcome, 'ignored');
+  } finally {
+    mock.refundStatus = 'succeeded';
+  }
+  const retry = await payments.refundCardOrder(id, 'owner@shop.test');
+  assert.equal(retry.outcome, 'refunded');
+  const keys = mock.requests.filter((x) => x.path === '/v1/refunds' && x.body.get('payment_intent') === pi.id).map((x) => x.idempotencyKey);
+  assert.deepEqual(keys, [`refund:${id}`, `refund:${id}:try2`]);
+  orders.updateOrderByAdmin(id, { clearAttention: true }, 'owner@shop.test');
+});
+
+test('a courier booking that comes back after the order was cancelled or refunded is kept, flagged, audited and alerted, never quietly saved', async () => {
+  const { id } = await paidCard();
+  await payments.refundCardOrder(id, 'owner@shop.test');
+  assert.equal(orders.getOrder(id)!.status, 'cancelled');
+  const booked = orders.recordBooking(id, 'owner@shop.test', { provider: 'jeebly', awbNumber: 'JB123456', bookingState: 'booked', status: 'Booked with the carrier' });
+  assert.equal(booked.status, 'cancelled', 'not moved to confirmed');
+  assert.equal(booked.courier.awbNumber, 'JB123456', 'the AWB is kept (needed to cancel the pickup)');
+  assert.equal(booked.attention?.kind, 'booked_after_cancel');
+  assert.match(booked.attention!.text, /AWB JB123456.*Cancel that pickup/);
+  assert.equal(auditLinesWith('order.booking_exception').length, 1);
+  // A booking for an order still fine is saved as before, with no note.
+  const { id: fine } = await paidCard();
+  const ok = orders.recordBooking(fine, 'owner@shop.test', { provider: 'jeebly', awbNumber: 'JB999', bookingState: 'booked' });
+  assert.equal(ok.status, 'confirmed');
+  assert.equal(ok.attention, undefined);
+  orders.updateOrderByAdmin(id, { clearAttention: true }, 'owner@shop.test');
+});
+
+test('a Stripe error code reaches the log (not redacted as if it were an SMS code)', async () => {
+  const { logEvent } = await import('@/lib/server/log');
+  const mark = printed.length;
+  logEvent('warn', 'stripe_test_error', { orderId: 'BUH-X', ...payments.stripeError({ type: 'StripeInvalidRequestError', code: 'resource_missing', statusCode: 404, message: 'No such payment_intent' }) });
+  const line = printed.slice(mark).join('\n');
+  assert.match(line, /"stripeCode":"resource_missing"/);
+  assert.doesNotMatch(line, /\[redacted\]/);
+  assert.equal((redact({ code: '123456', otpCode: '1' }) as Record<string, string>).code, '[redacted]', 'SMS codes are still redacted');
+});
+
 test('keys and client secrets never reach the logs', () => {
   const all = printed.join('\n');
   assert.ok(!all.includes(TEST_KEYS.secret), 'secret key');
@@ -423,7 +733,7 @@ test('migration 9 only adds (columns, indexes, a table); backups carry card paym
   const backup = await import('@/lib/server/backup');
   const result = await backup.createBackup();
   const csv = result.csv.find((c) => c.name === 'orders.csv')!.data.toString('utf8');
-  assert.match(csv.split(/\r?\n/)[0], /card_payment,payment_ref,card,paid_at,paid_aed,refund_ref,refunded_at/);
+  assert.match(csv.split(/\r?\n/)[0], /card_payment,payment_ref,card,paid_at,paid_aed,refund_ref,refunded_at,refunded_aed,stripe_mode,refund_outside_stripe_at,needs_attention/);
   assert.match(csv, /Paid|paid/);
   const target = fs.mkdtempSync(path.join(os.tmpdir(), 'buh-restore-card-'));
   execFileSync(process.execPath, ['scripts/restore-backup.mjs', result.file, target]);
@@ -432,6 +742,10 @@ test('migration 9 only adds (columns, indexes, a table); backups carry card paym
   assert.ok(paidRow && String(paidRow.payment_ref).startsWith('pi_') && Number(paidRow.paid_fils) > 0 && paidRow.paid_at);
   assert.ok((restored.prepare("SELECT COUNT(*) AS n FROM orders WHERE card_state = 'refunded' AND refund_ref IS NOT NULL").get() as { n: number }).n >= 1);
   assert.ok((restored.prepare('SELECT COUNT(*) AS n FROM stripe_events').get() as { n: number }).n >= 1, 'the applied events come back (so a resent one is still ignored)');
+  // The review fixes' columns come back too: the mode, the dashboard refunds, the refunds outside Stripe.
+  assert.ok((restored.prepare('SELECT COUNT(*) AS n FROM orders WHERE card_livemode = 0').get() as { n: number }).n >= 1);
+  assert.ok((restored.prepare('SELECT COUNT(*) AS n FROM orders WHERE refunded_fils > 0').get() as { n: number }).n >= 1);
+  assert.ok((restored.prepare('SELECT COUNT(*) AS n FROM orders WHERE refund_outside_at IS NOT NULL').get() as { n: number }).n >= 1);
   const pay = JSON.parse((restored.prepare("SELECT data FROM settings WHERE key = 'payments'").get() as { data: string }).data);
   assert.equal(pay.stripeSecretKey, '');
   assert.equal(pay.stripeWebhookSecret, '');
@@ -445,7 +759,7 @@ test('migration 9 only adds (columns, indexes, a table); backups carry card paym
   const run = (code: string) => spawnSync(process.execPath, ['--import', 'tsx', '-e', `process.env.DATA_DIR=${JSON.stringify(old)}; ${code}`], { encoding: 'utf8' });
   assert.equal(run(`const m = await import('@/lib/server/db'); (m.getDb ?? m.default.getDb)();`).status, 0);
   const db = new Database(path.join(old, 'shop.db'));
-  db.exec(`DROP INDEX orders_by_payment_ref; DROP INDEX orders_card_open; DROP TABLE stripe_events; ${['card_state', 'payment_ref', 'card_secret_hash', 'paid_fils', 'paid_at', 'card_label', 'refund_ref', 'refunded_at'].map((c) => `ALTER TABLE orders DROP COLUMN ${c};`).join(' ')}`);
+  db.exec(`DROP INDEX orders_by_payment_ref; DROP INDEX orders_card_open; DROP TABLE stripe_events; ${['card_state', 'payment_ref', 'card_secret_hash', 'paid_fils', 'paid_at', 'card_label', 'refund_ref', 'refunded_at', 'card_livemode', 'card_ip', 'refunded_fils', 'refund_outside_at', 'needs_attention'].map((c) => `ALTER TABLE orders DROP COLUMN ${c};`).join(' ')}`);
   db.exec("INSERT INTO orders (id, created_at, updated_at, phone, status, payment_method, payment_status, total_fils, data) VALUES ('BUH-OLD-9', '2026-01-01', '2026-01-01', '+971501234567', 'pending_confirmation', 'cod', 'cod_pending', 100, '{\"id\":\"BUH-OLD-9\"}')");
   db.pragma('user_version = 8');
   db.close();

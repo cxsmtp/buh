@@ -171,6 +171,8 @@ export interface Order {
    * orders table's own columns, not in the order's JSON. Customers see only state and label.
    */
   card?: CardPayment;
+  /** Needs the owner's attention (own column, admin only; cleared with "Mark as handled"). */
+  attention?: OrderAttention;
 }
 
 /**
@@ -192,6 +194,19 @@ export interface CardPayment {
   paidAmount?: number;
   refundRef?: string;
   refundedAt?: string;
+  /** Refunded so far, in AED (a partial refund made in the Stripe dashboard). Admin only. */
+  refundedAmount?: number;
+  /** "test" or "live": the Stripe mode the payment was made in. Admin only. */
+  mode?: 'test' | 'live';
+  /** Cancelled without a refund through the shop (Stripe could not see the payment): refund it in Stripe's dashboard. */
+  refundOutsideAt?: string;
+}
+
+/** Something on an order the owner must look at (a refund that failed, a booking after a cancel…). Admin only. */
+export interface OrderAttention {
+  kind: 'refund_failed' | 'booked_after_cancel' | 'refund_outside_stripe' | 'card_unreachable';
+  text: string;
+  at: string;
 }
 
 /** Settings → Payments: card payments (with Apple Pay and Google Pay) through the owner's Stripe account. */
