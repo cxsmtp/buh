@@ -1,17 +1,18 @@
 import fs from 'node:fs';
 import { Readable } from 'node:stream';
-import { auditOrThrow } from '@/lib/server/audit';
 import { enforceLimit, requireAdmin } from '@/lib/server/guard';
 import { assertSameOrigin, handleRouteError } from '@/lib/server/http';
 import { logEvent } from '@/lib/server/log';
-import { parsePeriod, writeAccountantZip } from '@/lib/server/reports';
+import { parsePeriod, prepareAccountantExport } from '@/lib/server/reports';
 import { getSettings } from '@/lib/server/settings';
 
 /**
  * "Export for my accountant": ?from=YYYY-MM-DD&to=YYYY-MM-DD → one ZIP (sales, order items,
- * expenses, every bill, the summary, the audit log of the period and its check). Who exported which
- * period is written to the audit log first (if it can't be, there is no export). Built on the
- * server's disk one file at a time and streamed, then removed.
+ * refunds, expenses, every bill, the summary, the audit log of the period and its check). Who
+ * exported which period is written to the audit log first (if it can't be, there is no export),
+ * and a build that then fails is written too. One export at a time (429), refused (507) when the
+ * disk is too full. Built on the server's disk one file at a time without holding up the shop,
+ * then streamed and removed (src/lib/server/reports.ts: prepareAccountantExport).
  */
 export async function GET(req: Request) {
   try {
@@ -21,15 +22,24 @@ export async function GET(req: Request) {
     enforceLimit(`export:${session.email}`, 20, 10 * 60_000, 'Too many exports at once. Wait a few minutes.');
     const q = new URL(req.url).searchParams;
     const { from, to } = parsePeriod(q.get('from'), q.get('to'));
-    auditOrThrow('report.exported', { by: session.email, from, to, what: 'accountant zip' });
-    const shop = getSettings('brand').storeName || 'Beautiful UAE Home';
-    const result = writeAccountantZip(from, to, shop);
+    const result = await prepareAccountantExport(session.email, from, to, getSettings('brand').storeName || 'Beautiful UAE Home');
     logEvent('info', 'report_exported', { from, to, orders: result.orders, expenses: result.expenses, bills: result.bills });
-    const size = fs.statSync(result.file).size;
-    const stream = fs.createReadStream(result.file);
-    const done = () => fs.rm(result.file, { force: true }, () => undefined);
-    stream.on('close', done);
-    stream.on('error', done);
+    let stream: fs.ReadStream;
+    let size: number;
+    try {
+      size = fs.statSync(result.file).size;
+      stream = fs.createReadStream(result.file);
+    } catch (err) {
+      result.release();
+      fs.rmSync(result.file, { force: true });
+      throw err;
+    }
+    const finished = () => {
+      result.release();
+      fs.rm(result.file, { force: true }, () => undefined);
+    };
+    stream.on('close', finished);
+    stream.on('error', finished);
     return new Response(Readable.toWeb(stream) as ReadableStream, {
       headers: {
         'Content-Type': 'application/zip',

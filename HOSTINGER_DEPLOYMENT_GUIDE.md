@@ -109,6 +109,8 @@ The shop backs itself up every 12 hours, and straight after a restart if one is 
 
 **Encryption:** with `BACKUP_PASSPHRASE` set, the email carries one AES-256 encrypted file instead of plain customer data. That is recommended, because email is not a safe place for customers' addresses and phone numbers.
 
+**Size:** one backup holds at most 6 GB of data (database, photos, receipts, bills, audit log); it is made and restored a piece at a time, so it needs disk, not memory. From 80% the Admin Hub and an email warn you; beyond it the backup is refused (and you are told) instead of making one too big to restore.
+
 **If something is wrong**, the status line at the top of the Admin Hub turns amber (taken but not emailed) or red (failed or overdue), and a failure is also emailed. **Back up now** runs one immediately.
 
 Before every update, the updater also saves a copy of the database on the server, as `backups/pre-update-<time>.db` (the newest 5 are kept).
@@ -154,7 +156,7 @@ To check a backup on your own computer (Node 20+, in a checkout of this reposito
 BACKUP_PASSPHRASE='your passphrase' node scripts/restore-backup.mjs buh-backup-….tar.gz.enc ./restored
 ```
 
-Plain `.tar.gz` backups also open with any archive tool (`tar -xzf`).
+Plain `.tar.gz` backups also open with any archive tool (`tar -xzf`). A restore needs free disk for the restored data plus 256 MB; on any problem it removes what it wrote.
 
 ## 5. Updates without downtime, and rollback
 

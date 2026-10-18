@@ -5,7 +5,7 @@ import { ensureAdminLink } from './adminLinkSetup';
 import { MIN_PASSPHRASE_LENGTH, auditRestoreOnce, emailConfigured, startBackupSchedule } from './backup';
 import { refreshPayHashes } from './bankPay';
 import { getDb } from './db';
-import { normalizeBankStates, startUnconfirmedSweep } from './orders';
+import { backfillRefundLedger, normalizeBankStates, startUnconfirmedSweep } from './orders';
 import { startMonitor } from './monitor';
 import { startCardSweep } from './payments';
 import { startFestivalRefresh } from './theme';
@@ -35,7 +35,8 @@ export async function onStartup() {
   step('unconfirmed_sweep', startUnconfirmedSweep);
   // Restored onto a server with another key: the bank-transfer orders' private links follow it.
   // Bank orders an older version wrote after migration 10 (an update's overlap, a rollback) get
-  // their state. Both retried every minute until they work, and then kept up (both are cheap).
+  // their state. Card refunds from before the refunds ledger are filled in. All retried every
+  // minute until they work, and then kept up (all are cheap).
   startBankUpkeep();
   try {
     // The Admin Hub's private link: made (and printed once) on the first start, or by the update that brought it.
@@ -109,7 +110,7 @@ function step(name: string, fn: () => unknown): void {
 
 let bankUpkeep: ReturnType<typeof setInterval> | null = null;
 
-/** One round of the bank-transfer upkeep; true when both parts worked. Exported for tests. */
+/** One round of the upkeep (bank transfers, the refunds ledger); true when every part worked. Exported for tests. */
 export function bankUpkeepOnce(): boolean {
   let ok = true;
   try {
@@ -125,6 +126,13 @@ export function bankUpkeepOnce(): boolean {
   } catch (err) {
     ok = false;
     logEvent('warn', 'bank_states_fill_failed', { error: err instanceof Error ? err.message : String(err) });
+  }
+  try {
+    // Card refunds made before the refunds ledger (or by an older version during an update): filled in.
+    backfillRefundLedger();
+  } catch (err) {
+    ok = false;
+    logEvent('warn', 'refund_ledger_fill_failed', { error: err instanceof Error ? err.message : String(err) });
   }
   return ok;
 }

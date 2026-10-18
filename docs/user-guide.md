@@ -242,7 +242,7 @@ On a phone: **More → Money**; on a laptop: the **Money** tab. Three parts: **E
 1. Tap **Add expense**.
 2. Check the date (today is filled in), type the amount in AED (`125.50`), pick the category, who you paid and how (cash, card, bank transfer, other). Add a note if it helps.
 3. Tap **Take photo** to photograph the bill with the camera, or **Photo or PDF** to pick one (a PDF invoice from an email works too). Add more than one if the bill has several pages.
-4. Tap **Save expense**.
+4. Tap **Save expense**. If a bill could not be attached, the expense is still saved: fix anything you need and tap **Save expense** again (it changes that same expense; a bill sent twice is kept once).
 
 - **Categories:** Stock & fabric, Packaging, Courier & delivery, Marketing & ads, Rent, Utilities, Software & fees, Bank & card charges, Other. **New** next to the list adds your own.
 - **Photos are made smaller** (they stay readable) and their location and camera details are removed before they are stored. Each bill can be up to 10 MB.
@@ -257,8 +257,8 @@ On a phone: **More → Money**; on a laptop: the **Money** tab. Three parts: **E
 3. Tap **Export for my accountant (ZIP)** and send the file to your accountant (WhatsApp, email or a drive).
 
 - **Your financial year starts in:** January (the calendar year) unless you choose another month; quarters and years follow it.
-- **What counts as a sale:** every order placed in the period, except orders cancelled before any money was taken, card orders still waiting for payment, and Stripe test payments. A card payment refunded later shows as a sale (when placed) and a refund (when refunded).
-- **The ZIP** holds `summary.html` (open and print, or Print → Save as PDF), `summary.csv`, `sales.csv` (one row per order: date, number, customer name, emirate, items, amounts, payment method and reference, refund, status, courier and AWB), `order-items.csv`, `expenses.csv`, every bill in `bills/` (named date_category_amount_expense), the period's audit log with its check, and a `README.txt` explaining each file. The CSVs open in Excel (Arabic names included).
+- **What counts as a sale:** every order placed in the period, except orders cancelled before any money was taken, card orders still waiting for payment, and Stripe test payments. A card payment refunded later shows as a sale (when placed) and a refund on the day each refund was made: a part refunded in one month and the rest in the next appear in each month, and a refund that failed comes off on the day it failed. Refunds made before BUH-02.10 are dated as well as the shop knows (marked "approximate" in `refunds.csv`).
+- **The ZIP** holds `summary.html` (open and print, or Print → Save as PDF), `summary.csv`, `sales.csv` (one row per order: date, number, customer name, emirate, items, amounts, payment method and reference, refund, status, courier and AWB), `order-items.csv`, `refunds.csv` (one row per refund, by its date), `expenses.csv` (every expense of the period, however many), every bill in `bills/` (named date_category_amount_expense), the period's audit log with its check, and a `README.txt` explaining each file. The CSVs open in Excel (Arabic names included). One export is made at a time (a second one says to wait), and none is made when the server's disk is nearly full.
 - **VAT:** the shop is not VAT-registered and no VAT is added. Reports show your sales of the last 12 months against the AED 375,000 mandatory registration threshold; from 80% it turns amber (Settings → System & backups shows it too, and you get an email). Talk to your accountant then.
 
 **Audit log**
@@ -266,7 +266,9 @@ On a phone: **More → Money**; on a laptop: the **Money** tab. Three parts: **E
 A read-only list of everything that changes money or the shop, newest first: orders placed and changed (status, cash collected, notes), payments, refunds and declines, transfers checked, stock moves, products and prices (before → after), settings, the admin link, sign-ins (and refused ones), passwords, passkeys and recovery codes, backups and restores, updates asked for, expenses and their bills, and every export.
 
 - Filter by dates, **What** (for example "All payment" or `expense.created`), **Who** and an order or expense number; **CSV** and **JSONL** download what is shown (each download is itself recorded).
-- The green line **"The log is intact"** means every entry's signature and its link to the one before were checked. If anything was changed, removed or reordered it turns red and says where (file and line). After restoring onto a new server, it says the older months were signed with that server's key and can't be checked here.
+- The green line **"The log is intact"** means every entry's signature and its link to the one before were checked, and no month is missing. If anything was changed, removed or reordered, or a month is missing or cut short, it turns red (**BROKEN**) and says where (file and line).
+- After restoring a backup onto a new server, a grey line says those entries were **signed by another server's key (fingerprint …): restored from a backup**: they are in order, but only that server could check their signatures. New entries start a fresh chain. That is normal after a restore, not a problem.
+- An amber **unverified** line means entries that can't be checked (made before key ids and not signed by this server's key): ask for help if you did not restore a backup.
 
 ### Settings
 
@@ -394,4 +396,4 @@ Enter the Jeebly and Eco Express keys and use **Test connection**. Keys are kept
 
 ### Audit log files
 
-The log is kept in `DATA_DIR/audit-YYYY-MM.jsonl` (one file a month, in backups too); read it in **Money → Audit log**. Each line is chained to the one before, so edits are detectable.
+The log is kept in `DATA_DIR/audit-YYYY-MM.jsonl` (one file a month, in backups too); read it in **Money → Audit log**. Each line is chained to the one before and names the key that signed it (a fingerprint, never the key), and each month's first line names the month before's last one, so edits and missing months are detectable.

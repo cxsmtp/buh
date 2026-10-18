@@ -352,7 +352,10 @@ const MIGRATIONS: Array<(db: DB) => void> = [
   //     reports. Nothing is ever overwritten or deleted: every state of an expense is a row in
   //     expense_versions (made, each edit, removed), a removed expense keeps its row with who, when
   //     and why, and a bill taken off an expense keeps its file. Amounts are whole fils. The
-  //     categories are the owner's list (these to start with; more can be added).
+  //     categories are the owner's list (these to start with; more can be added). card_refunds: the
+  //     refunds ledger, one row per refund to a card (and a negative row when one failed afterwards),
+  //     so a report books each refund on the day it was made. Orders refunded before it are filled
+  //     in by backfillRefundLedger() (src/lib/server/orders.ts), their dates marked approximate.
   (db) => {
     db.exec(`
       CREATE TABLE expense_categories (
@@ -406,6 +409,19 @@ const MIGRATIONS: Array<(db: DB) => void> = [
         removed_why    TEXT
       );
       CREATE INDEX expense_bills_by_expense ON expense_bills(expense_id);
+      CREATE TABLE card_refunds (
+        id                INTEGER PRIMARY KEY,
+        order_id          TEXT NOT NULL REFERENCES orders(id),
+        amount_fils       INTEGER NOT NULL CHECK (amount_fils <> 0),   -- negative: a refund that failed afterwards
+        at                TEXT NOT NULL,                               -- when the money went back (ISO, UTC)
+        source            TEXT NOT NULL CHECK (source IN ('stripe', 'hub')),
+        stripe_refund_id  TEXT,                                        -- Stripe's re_… (never made up here)
+        date_approx       INTEGER NOT NULL DEFAULT 0                   -- 1: filled in from an order made before this table
+      );
+      CREATE UNIQUE INDEX card_refunds_by_stripe_id ON card_refunds(stripe_refund_id) WHERE stripe_refund_id IS NOT NULL AND amount_fils > 0;
+      CREATE UNIQUE INDEX card_refunds_reversal_by_stripe_id ON card_refunds(stripe_refund_id) WHERE stripe_refund_id IS NOT NULL AND amount_fils < 0;
+      CREATE INDEX card_refunds_by_order ON card_refunds(order_id);
+      CREATE INDEX card_refunds_by_at ON card_refunds(at);
     `);
     const add = db.prepare("INSERT INTO expense_categories (id, name, position, created_at, created_by) VALUES (?, ?, ?, ?, 'shop')");
     const now = new Date().toISOString();

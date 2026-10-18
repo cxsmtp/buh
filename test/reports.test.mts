@@ -178,8 +178,8 @@ test('CSV: UTF-8 with a BOM, formula-injection safe (= + - @ get an apostrophe),
   assert.equal(aedText(7), '0.07');
 });
 
-test('the accountant\'s ZIP: every file, sales and expenses as in the report, bills named date_category_amount_id, the period\'s audit log and its check', () => {
-  const result = reports.writeAccountantZip('2026-08-01', '2026-08-31', 'Beautiful UAE Home');
+test('the accountant\'s ZIP: every file, sales and expenses as in the report, bills named date_category_amount_id, the period\'s audit log and its check', async () => {
+  const result = await reports.writeAccountantZip('2026-08-01', '2026-08-31', 'Beautiful UAE Home');
   assert.equal(result.name, 'accounts_2026-08-01_to_2026-08-31.zip');
   assert.ok(result.file.startsWith(path.join(dir, 'exports')), 'built in the private exports folder');
   const zip = readZip(fs.readFileSync(result.file));
@@ -191,7 +191,7 @@ test('the accountant\'s ZIP: every file, sales and expenses as in the report, bi
     assert.match(unzip.stdout, /No errors detected/);
   }
   const billNames = [`bills/2026-08-03_packaging_0.10_${e1.id}.png`, `bills/2026-08-03_packaging_0.10_${e1.id}-2.pdf`];
-  assert.deepEqual(names.filter((x) => !x.startsWith('bills/')), ['README.txt', 'summary.html', 'summary.csv', 'sales.csv', 'order-items.csv', 'expenses.csv', 'audit-log.jsonl', 'audit-check.txt']);
+  assert.deepEqual(names.filter((x) => !x.startsWith('bills/')), ['README.txt', 'summary.html', 'summary.csv', 'sales.csv', 'order-items.csv', 'refunds.csv', 'expenses.csv', 'audit-log.jsonl', 'audit-check.txt']);
   assert.deepEqual(names.filter((x) => x.startsWith('bills/')), billNames, 'active bills only (the one taken off is not sent)');
   assert.deepEqual(zip.get(billNames[0]), ex.readBill(e1.id, bill1.id)!.bytes);
   assert.deepEqual(zip.get(billNames[1]), ex.readBill(e1.id, bill2.id)!.bytes);
@@ -239,9 +239,9 @@ test('the accountant\'s ZIP: every file, sales and expenses as in the report, bi
   fs.rmSync(result.file);
 });
 
-test('the ZIP includes the audit entries of the period (and only those), with their signatures', () => {
+test('the ZIP includes the audit entries of the period (and only those), with their signatures', async () => {
   const today = periods.dubaiToday();
-  const result = reports.writeAccountantZip(today, today);
+  const result = await reports.writeAccountantZip(today, today);
   const zip = readZip(fs.readFileSync(result.file));
   const lines = zip.get('audit-log.jsonl')!.toString().trim().split('\n').map((l) => JSON.parse(l));
   assert.ok(lines.some((e) => e.action === 'expense.created' && e.details.expenseId === e1.id));
@@ -305,7 +305,7 @@ test('the chain check says where the log breaks (an edited line), and tells a lo
     v = auditLib.verifyAllAuditLogs();
     assert.equal(v.ok, false);
     assert.equal(v.months[0].otherKey, true);
-    assert.match(view.verificationText(v)[0], /signed with another server's key/);
+    assert.match(view.verificationText(v)[0], /signed by another server's key \(fingerprint [0-9a-f]{16}\): restored from a backup/);
   } finally {
     fs.writeFileSync(keyFile, key);
     auditLib._resetAuditState();

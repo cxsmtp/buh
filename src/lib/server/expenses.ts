@@ -3,7 +3,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { uaeDate } from '@/lib/delivery';
 import { auditedTransaction } from './audit';
-import { aedText, toCsv } from './csv';
+import { aedText, csvHead, csvRow, toCsv } from './csv';
 import { dataDir } from './dataDir';
 import { getDb } from './db';
 import { folderRoomProblem } from './diskRoom';
@@ -122,6 +122,11 @@ export function parseDate(value: unknown, field = 'Date'): string {
   return value;
 }
 
+/** A name as stored and compared: NFKC (full-width and look-alike forms folded), no invisible format characters, single spaces. */
+export function normalName(s: string): string {
+  return s.normalize('NFKC').replace(/\p{Cf}/gu, '').replace(/[\p{Cc}\s]+/gu, ' ').trim();
+}
+
 function plain(value: unknown, field: string, max: number, { required = false } = {}): string {
   if (value === undefined || value === null || value === '') {
     if (required) throw new HttpError(400, `${field} is required.`);
@@ -154,10 +159,13 @@ function categoryName(id: unknown): { id: string; name: string } {
 
 /** The owner's own category ("Photography"): added to the list (a name already there is that one). */
 export function addCategory(name: unknown, actor: string): ExpenseCategory {
-  const clean = plain(name, 'Category', 40, { required: true });
+  const clean = normalName(plain(name, 'Category', 40, { required: true }));
+  if (!clean) throw new HttpError(400, 'Category is required.');
+  const same = (a: string) => normalName(a).toLowerCase() === clean.toLowerCase();
   return auditedTransaction((auditOrThrow) => {
-    const same = getDb().prepare('SELECT id, name FROM expense_categories WHERE name = ? COLLATE NOCASE').get(clean) as ExpenseCategory | undefined;
-    if (same) return same;
+    // "Packaging", "PACKAGING", "Ｐａｃｋａｇｉｎｇ" and "Pack\u200baging" are the same category.
+    const existing = (getDb().prepare('SELECT id, name FROM expense_categories').all() as ExpenseCategory[]).find((c) => same(c.name));
+    if (existing) return existing;
     const count = getDb().prepare('SELECT COUNT(*) FROM expense_categories').pluck().get() as number;
     if (count >= 60) throw new HttpError(409, 'There are already 60 categories.');
     const slug = clean.toLowerCase().normalize('NFKD').replace(/[^a-z0-9]+/g, '_').replace(/^_+|_+$/g, '').slice(0, 24) || 'cat';
@@ -211,7 +219,7 @@ function billOf(r: BillRow): ExpenseBill {
     id: r.id,
     expenseId: r.expense_id,
     ext: r.ext,
-    mime: r.mime,
+    mime: isBillExt(r.ext) ? MIME[r.ext] : 'application/octet-stream',
     size: r.size,
     sha256: r.sha256,
     name: r.original_name,
@@ -274,6 +282,83 @@ export function listExpenses({ from, to, includeRemoved = false, limit = 2000 }:
   const stmt = getDb().prepare('SELECT * FROM expense_bills WHERE expense_id = ? ORDER BY added_at, id');
   for (const r of rows) bills.set(r.id, stmt.all(r.id) as BillRow[]);
   return rows.map((r) => fromRow(r, bills.get(r.id) ?? []));
+}
+
+export interface ExpenseTotals {
+  count: number;
+  fils: number;
+  byCategory: Array<{ id: string; name: string; count: number; fils: number }>;
+  byMethod: Record<string, { count: number; fils: number }>;
+}
+
+/** The totals of the expenses dated from..to (removed ones left out), summed by the database: every one of them, however many. */
+export function expenseTotals({ from, to }: { from: string; to: string }): ExpenseTotals {
+  const rows = getDb()
+    .prepare('SELECT e.category_id AS id, c.name AS name, e.method AS method, COUNT(*) AS n, SUM(e.amount_fils) AS f FROM expenses e JOIN expense_categories c ON c.id = e.category_id WHERE e.removed_at IS NULL AND e.spent_on >= ? AND e.spent_on <= ? GROUP BY e.category_id, e.method')
+    .all(from, to) as Array<{ id: string; name: string; method: string; n: number; f: number }>;
+  const cats = new Map<string, { id: string; name: string; count: number; fils: number }>();
+  const byMethod: Record<string, { count: number; fils: number }> = {};
+  let count = 0;
+  let fils = 0;
+  for (const r of rows) {
+    count += r.n;
+    fils += r.f;
+    const c = cats.get(r.id) ?? { id: r.id, name: r.name, count: 0, fils: 0 };
+    c.count += r.n;
+    c.fils += r.f;
+    cats.set(r.id, c);
+    const m = (byMethod[r.method] ??= { count: 0, fils: 0 });
+    m.count += r.n;
+    m.fils += r.f;
+  }
+  return { count, fils, byCategory: [...cats.values()].sort((a, b) => b.fils - a.fils || a.name.localeCompare(b.name)), byMethod };
+}
+
+/** How many bills (not taken off) the expenses dated from..to (not removed) have. */
+export function activeBillCount({ from, to }: { from: string; to: string }): number {
+  return getDb()
+    .prepare('SELECT COUNT(*) FROM expense_bills b JOIN expenses e ON e.id = b.expense_id WHERE b.removed_at IS NULL AND e.removed_at IS NULL AND e.spent_on >= ? AND e.spent_on <= ?')
+    .pluck()
+    .get(from, to) as number;
+}
+
+/** The bytes of those bills (to know the export's size before making it). */
+export function activeBillBytes({ from, to }: { from: string; to: string }): number {
+  return getDb()
+    .prepare('SELECT COALESCE(SUM(b.size), 0) FROM expense_bills b JOIN expenses e ON e.id = b.expense_id WHERE b.removed_at IS NULL AND e.removed_at IS NULL AND e.spent_on >= ? AND e.spent_on <= ?')
+    .pluck()
+    .get(from, to) as number;
+}
+
+/**
+ * Every expense (dated from..to when given), oldest first, a page of `pageSize` at a time from the
+ * database (for the accountant's ZIP and the backups: all of them, never a capped list in memory).
+ */
+export function* iterExpenses({ from, to, includeRemoved = false, pageSize = 500 }: { from?: string; to?: string; includeRemoved?: boolean; pageSize?: number } = {}): Generator<Expense> {
+  const where: string[] = ['(e.spent_on, e.created_at, e.id) > (?, ?, ?)'];
+  const args: unknown[] = [];
+  if (from) {
+    where.push('e.spent_on >= ?');
+    args.push(from);
+  }
+  if (to) {
+    where.push('e.spent_on <= ?');
+    args.push(to);
+  }
+  if (!includeRemoved) where.push('e.removed_at IS NULL');
+  const page = getDb().prepare(`${SELECT} WHERE ${where.join(' AND ')} ORDER BY e.spent_on, e.created_at, e.id LIMIT ?`);
+  const billsOf = getDb().prepare('SELECT * FROM expense_bills WHERE expense_id IN (SELECT value FROM json_each(?)) ORDER BY added_at, id');
+  let after: [string, string, string] = ['', '', ''];
+  for (;;) {
+    const rows = page.all(...after, ...args, pageSize) as Row[];
+    if (!rows.length) return;
+    const bills = new Map<string, BillRow[]>();
+    for (const b of billsOf.all(JSON.stringify(rows.map((r) => r.id))) as BillRow[]) bills.set(b.expense_id, [...(bills.get(b.expense_id) ?? []), b]);
+    for (const r of rows) yield fromRow(r, bills.get(r.id) ?? []);
+    const last = rows[rows.length - 1];
+    after = [last.spent_on, last.created_at, last.id];
+    if (rows.length < pageSize) return;
+  }
 }
 
 export function expenseVersions(id: string): ExpenseVersion[] {
@@ -380,8 +465,14 @@ export function removeExpense(id: string, why: unknown, actor: string): Expense 
 
 // ── Bills ───────────────────────────────────────────────────────────────────
 
-export type BillExt = 'jpg' | 'png' | 'webp' | 'heic' | 'pdf';
-const MIME: Record<BillExt, string> = { jpg: 'image/jpeg', png: 'image/png', webp: 'image/webp', heic: 'image/heic', pdf: 'application/pdf' };
+export const BILL_EXTS = ['jpg', 'png', 'webp', 'heic', 'pdf'] as const;
+export type BillExt = (typeof BILL_EXTS)[number];
+/** The type each kind of bill is served as: fixed here, never what the database or the browser says. */
+export const BILL_MIME: Readonly<Record<BillExt, string>> = Object.freeze({ jpg: 'image/jpeg', png: 'image/png', webp: 'image/webp', heic: 'image/heic', pdf: 'application/pdf' });
+const MIME = BILL_MIME;
+const isBillExt = (ext: unknown): ext is BillExt => typeof ext === 'string' && (BILL_EXTS as readonly string[]).includes(ext);
+/** A bill's id: 24 hex characters (also its file's name, with its extension). */
+const BILL_ID = /^[a-f0-9]{24}$/;
 const HEIF_BRANDS = new Set(['heic', 'heix', 'hevc', 'hevx', 'heim', 'heis', 'mif1', 'msf1', 'heif']);
 
 export function expensesDir(): string {
@@ -413,14 +504,15 @@ export function stripImageMetadata(bytes: Buffer, ext: BillExt): Buffer {
     const parts: Buffer[] = [bytes.subarray(0, 2)];
     let i = 2;
     for (;;) {
-      if (i + 4 > bytes.length || bytes[i] !== 0xff) throw bad();
+      if (i + 2 > bytes.length || bytes[i] !== 0xff) throw bad();
       const marker = bytes[i + 1];
       if (marker === 0xff) {
         i++;
         continue;
       }
-      if (marker === 0xda || marker === 0xd9) {
-        parts.push(bytes.subarray(i));
+      if (marker === 0xd9) {
+        // The end of the image: anything after it (a second picture, a depth map, hidden data) goes.
+        parts.push(bytes.subarray(i, i + 2));
         break;
       }
       if (marker === 0x01 || (marker >= 0xd0 && marker <= 0xd7)) {
@@ -428,12 +520,22 @@ export function stripImageMetadata(bytes: Buffer, ext: BillExt): Buffer {
         i += 2;
         continue;
       }
+      if (i + 4 > bytes.length) throw bad();
       const len = bytes.readUInt16BE(i + 2);
       if (len < 2 || i + 2 + len > bytes.length) throw bad();
-      // APP1 (EXIF, XMP), APP3–APP13 (IPTC and makers' notes), APP15 and comments go.
-      const drop = marker === 0xe1 || (marker >= 0xe3 && marker <= 0xed) || marker === 0xef || marker === 0xfe;
+      // APP1 (EXIF, XMP), APP2's MPF (the extra pictures; the colour profile stays), APP3–APP13
+      // (IPTC and makers' notes), APP15 and comments go.
+      const mpf = marker === 0xe2 && bytes.toString('latin1', i + 4, i + 8) === 'MPF\0';
+      const drop = marker === 0xe1 || mpf || (marker >= 0xe3 && marker <= 0xed) || marker === 0xef || marker === 0xfe;
       if (!drop) parts.push(bytes.subarray(i, i + 2 + len));
       i += 2 + len;
+      if (marker === 0xda) {
+        // The scan's data, up to the next marker (0xFF00 is a stuffed byte, 0xFFD0–D7 restarts).
+        const from = i;
+        while (i + 1 < bytes.length && !(bytes[i] === 0xff && bytes[i + 1] !== 0x00 && !(bytes[i + 1] >= 0xd0 && bytes[i + 1] <= 0xd7))) i++;
+        if (i + 1 >= bytes.length) throw bad();
+        parts.push(bytes.subarray(from, i));
+      }
     }
     return Buffer.concat(parts);
   }
@@ -496,10 +598,14 @@ export function parseBill(file: unknown): { ext: BillExt; mime: string; bytes: B
 /** Attach a bill to an expense (kept even if the expense is later removed). Audited before it counts. */
 export function attachBill(expenseId: string, file: unknown, name: unknown, actor: string): ExpenseBill {
   const bill = parseBill(file);
-  const original = plain(name, 'File name', 120).replace(/[\\/]/g, '_');
+  const original = normalName(plain(name, 'File name', 120)).replace(/[\\/]/g, '_');
   const expense = getExpense(expenseId);
   if (!expense) throw new HttpError(404, 'Expense not found.');
   if (expense.removed) throw new HttpError(409, 'This expense was removed: no more bills can be added.');
+  const sha256 = crypto.createHash('sha256').update(bill.bytes).digest('hex');
+  // The same file again (a retry after a lost answer, a double tap): the bill already there.
+  const same = sameBill(expenseId, sha256);
+  if (same) return billOf(same);
   if (expense.bills.filter((b) => !b.removed).length >= BILL_LIMITS.perExpense) throw new HttpError(409, `An expense can have at most ${BILL_LIMITS.perExpense} bills.`);
   const dir = expensesDir();
   const room = folderRoomProblem(dir, bill.bytes.length, BILL_LIMITS, 'bills');
@@ -508,24 +614,42 @@ export function attachBill(expenseId: string, file: unknown, name: unknown, acto
     throw new HttpError(507, `The bill can't be stored right now: ${room}. Free some space on the server and try again.`, {}, { code: 'no_room' });
   }
   const id = crypto.randomBytes(12).toString('hex');
-  const sha256 = crypto.createHash('sha256').update(bill.bytes).digest('hex');
   const fresh = path.join(dir, `${id}.${bill.ext}.${process.pid}.tmp`);
+  const final = path.join(dir, `${id}.${bill.ext}`);
   fs.writeFileSync(fresh, bill.bytes, { mode: 0o600 });
+  let placed = false;
   try {
-    auditedTransaction((auditOrThrow) => {
+    // The file is put in place inside the transaction, before COMMIT: a row is never without its
+    // file, and if the commit fails the file goes again (no file without a row either).
+    const kept = auditedTransaction((auditOrThrow) => {
       const now = getExpense(expenseId);
       if (!now || now.removed) throw new HttpError(409, 'This expense was removed: no more bills can be added.');
+      const twin = sameBill(expenseId, sha256);
+      if (twin) return twin;
+      if (now.bills.filter((b) => !b.removed).length >= BILL_LIMITS.perExpense) throw new HttpError(409, `An expense can have at most ${BILL_LIMITS.perExpense} bills.`);
       getDb()
         .prepare('INSERT INTO expense_bills (id, expense_id, ext, mime, size, sha256, original_name, added_at, added_by) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)')
-        .run(id, expenseId, bill.ext, bill.mime, bill.bytes.length, sha256, original, new Date().toISOString(), actor);
+        .run(id, expenseId, bill.ext, MIME[bill.ext], bill.bytes.length, sha256, original, new Date().toISOString(), actor);
       auditOrThrow('expense.bill_added', { by: actor, expenseId, billId: id, type: bill.ext, size: bill.bytes.length, sha256 });
+      fs.renameSync(fresh, final);
+      placed = true;
+      return null;
     });
-    fs.renameSync(fresh, path.join(dir, `${id}.${bill.ext}`));
+    if (kept) {
+      fs.rmSync(fresh, { force: true });
+      return billOf(kept);
+    }
   } catch (err) {
     fs.rmSync(fresh, { force: true });
+    if (placed) fs.rmSync(final, { force: true });
     throw err;
   }
   return billOf(getDb().prepare('SELECT * FROM expense_bills WHERE id = ?').get(id) as BillRow);
+}
+
+/** A bill of this expense (not taken off) with exactly these bytes, if there is one. */
+function sameBill(expenseId: string, sha256: string): BillRow | undefined {
+  return getDb().prepare('SELECT * FROM expense_bills WHERE expense_id = ? AND sha256 = ? AND removed_at IS NULL ORDER BY added_at, id LIMIT 1').get(expenseId, sha256) as BillRow | undefined;
 }
 
 /** Take a bill off an expense (a wrong photo): marked removed, its file kept. */
@@ -544,18 +668,20 @@ export function removeBill(expenseId: string, billId: string, why: unknown, acto
 
 /** A bill's bytes (removed ones too: the books keep them), or null. */
 export function readBill(expenseId: string, billId: string): { bytes: Buffer; mime: string; ext: BillExt } | null {
-  if (!/^[a-f0-9]{24}$/.test(billId)) return null;
-  const row = getDb().prepare('SELECT ext, mime FROM expense_bills WHERE id = ? AND expense_id = ?').get(billId, expenseId) as { ext: BillExt; mime: string } | undefined;
-  if (!row) return null;
+  if (!BILL_ID.test(billId)) return null;
+  const row = getDb().prepare('SELECT ext FROM expense_bills WHERE id = ? AND expense_id = ?').get(billId, expenseId) as { ext: string } | undefined;
+  // Only the five kinds of bill, served as the type that kind always has (never the stored one).
+  if (!row || !isBillExt(row.ext)) return null;
   try {
-    return { bytes: fs.readFileSync(path.join(expensesDir(), `${billId}.${row.ext}`)), mime: row.mime, ext: row.ext };
+    return { bytes: fs.readFileSync(path.join(expensesDir(), `${billId}.${row.ext}`)), mime: MIME[row.ext], ext: row.ext };
   } catch {
     return null;
   }
 }
 
-/** The bill's file on disk (for the accountant's ZIP, read one at a time). */
-export function billFile(bill: { id: string; ext: BillExt }): string {
+/** The bill's file on disk (for the accountant's ZIP, read one at a time); refuses an id or extension that isn't a bill's. */
+export function billFile(bill: { id: string; ext: string }): string {
+  if (!BILL_ID.test(bill.id) || !isBillExt(bill.ext)) throw new Error('Not a bill.');
   return path.join(expensesDir(), `${bill.id}.${bill.ext}`);
 }
 
@@ -573,10 +699,11 @@ export function expenseCsvRow(e: Expense, billNames: string[] = e.bills.filter((
 
 /** For backups: every expense (removed ones too) and every bill, as Excel-safe CSV. */
 export function expenseCsvFiles(): TarEntry[] {
-  const all = listExpenses({ includeRemoved: true, limit: 1_000_000 }).reverse();
   const bills = getDb().prepare('SELECT * FROM expense_bills ORDER BY added_at, id').all() as BillRow[];
+  let expenses = csvHead(EXPENSE_CSV_HEADERS);
+  for (const e of iterExpenses({ includeRemoved: true })) expenses += csvRow(expenseCsvRow(e));
   return [
-    { name: 'expenses.csv', data: Buffer.from(toCsv(EXPENSE_CSV_HEADERS, all.map((e) => expenseCsvRow(e)))) },
+    { name: 'expenses.csv', data: Buffer.from(expenses) },
     {
       name: 'expense_bills.csv',
       data: Buffer.from(toCsv(

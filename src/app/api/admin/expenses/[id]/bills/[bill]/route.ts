@@ -1,10 +1,13 @@
+import { BILL_CSP } from '@/lib/csp';
 import { requireAdmin } from '@/lib/server/guard';
 import { allowFields, handleRouteError, HttpError, json, readJsonBody } from '@/lib/server/http';
 import { getExpense, readBill, removeBill } from '@/lib/server/expenses';
 
 /**
- * A bill's photo or PDF, for the signed-in hub only. Shown in the browser (inline), never cached,
- * its type fixed (nosniff) and sandboxed so it can never run script.
+ * A bill's photo or PDF, for the signed-in hub only, never cached, its type fixed by its kind
+ * (nosniff). A photo is shown in the browser (inline) under BILL_CSP (sandboxed: nothing in it can
+ * run; next.config.ts sends the same policy for this path). A PDF is downloaded instead
+ * (attachment): browsers refuse to show a PDF under a sandbox policy, and a PDF can carry script.
  */
 export async function GET(req: Request, { params }: { params: Promise<{ id: string; bill: string }> }) {
   try {
@@ -15,10 +18,10 @@ export async function GET(req: Request, { params }: { params: Promise<{ id: stri
     return new Response(new Uint8Array(file.bytes), {
       headers: {
         'Content-Type': file.mime,
-        'Content-Disposition': `inline; filename="${id}-${bill.slice(0, 6)}.${file.ext}"`,
+        'Content-Disposition': `${file.ext === 'pdf' ? 'attachment' : 'inline'}; filename="${id}-${bill.slice(0, 6)}.${file.ext}"`,
         'Cache-Control': 'private, no-store',
         'X-Content-Type-Options': 'nosniff',
-        'Content-Security-Policy': "default-src 'none'; img-src 'self'; object-src 'self'; sandbox",
+        'Content-Security-Policy': BILL_CSP,
       },
     });
   } catch (err) {

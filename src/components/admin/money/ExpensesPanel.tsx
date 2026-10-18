@@ -120,7 +120,9 @@ function ExpenseForm({
   const [addingCategory, setAddingCategory] = useState(false);
   // One key per form: a double tap or a retry saves one expense.
   const key = useRef(newKey());
-  const savedId = useRef<string | null>(editing?.id ?? null);
+  // The expense as last saved: once the first Save made it, every later Save (after a bill that
+  // failed, say) changes that one (with its version), so an edit in between is never lost.
+  const saved = useRef<{ id: string; version: number } | null>(editing ? { id: editing.id, version: editing.version } : null);
   const camera = useRef<HTMLInputElement>(null);
   const picker = useRef<HTMLInputElement>(null);
   const set = (k: keyof FormState) => (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement>) => setForm((f) => ({ ...f, [k]: e.target.value }));
@@ -149,15 +151,16 @@ function ExpenseForm({
     setBusy(true);
     try {
       const fields = { date: form.date, amount: form.amount.trim(), categoryId: form.categoryId, payee: form.payee, method: form.method, note: form.note };
-      let expenseId = savedId.current;
-      if (editing) {
-        const { ok, data } = await sendJson<{ message?: string }>('PATCH', `/api/admin/expenses/${editing.id}`, { version: editing.version, ...fields });
+      if (saved.current) {
+        const { ok, data } = await sendJson<{ expense?: ExpenseView; message?: string }>('PATCH', `/api/admin/expenses/${saved.current.id}`, { version: saved.current.version, ...fields });
         if (!ok) throw new Error(data.message || 'Could not save the changes.');
-      } else if (!expenseId) {
+        if (data.expense) saved.current = { id: data.expense.id, version: data.expense.version };
+      } else {
         const { ok, data } = await sendJson<{ expense?: ExpenseView; message?: string }>('POST', '/api/admin/expenses', { key: key.current, ...fields });
         if (!ok || !data.expense) throw new Error(data.message || 'Could not save the expense.');
-        expenseId = savedId.current = data.expense.id;
+        saved.current = { id: data.expense.id, version: data.expense.version };
       }
+      const expenseId = saved.current.id;
       // The bills, one by one; one that fails is said, the rest still go.
       const failed: string[] = [];
       for (const file of files) {

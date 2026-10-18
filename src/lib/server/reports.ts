@@ -2,14 +2,17 @@ import fs from 'node:fs';
 import path from 'node:path';
 import type { Order, PaymentMethod } from '@/types';
 import { dubaiDateOf, dubaiToday, twelveMonthsTo } from '@/lib/reportPeriods';
-import { auditEntries, auditExport, verificationText } from './auditView';
-import { verifyAllAuditLogs } from './audit';
-import { aedText, toCsv } from './csv';
-import { dataDir } from './dataDir';
-import { billFile, EXPENSE_CSV_HEADERS, expenseCsvRow, listExpenses, type Expense } from './expenses';
+import { auditExportChunks, iterAuditEntries, verificationText } from './auditView';
+import { audit, auditFiles, auditOrThrow, verifyAllAuditLogs } from './audit';
+import { takeExportLock } from './exportLock';
+import { aedText, csvHead, csvRow, toCsv } from './csv';
+import { dataDir, dataFile } from './dataDir';
+import { diskRoomProblem } from './diskRoom';
+import { activeBillBytes, activeBillCount, billFile, EXPENSE_CSV_HEADERS, expenseCsvRow, expenseTotals, iterExpenses, type Expense } from './expenses';
 import { HttpError } from './http';
 import { kvGet, kvSet } from './kv';
-import { allOrders } from './orders';
+import { logEvent } from './log';
+import { allOrders, backfillRefundLedger, refundLedger, type RefundRow } from './orders';
 import { PALETTE } from '@/lib/design/tokens';
 import { ZipWriter } from './zip';
 
@@ -20,8 +23,10 @@ import { ZipWriter } from './zip';
  *
  * What counts as a sale: an order placed in the period, unless it was cancelled before any money
  * was taken, is still waiting for its card payment, or was paid in Stripe's test mode. A card order
- * paid and later refunded counts as a sale (when placed) and as a refund (when refunded), so both
- * appear in the books. Cancelled orders are in sales.csv, marked as not counted, with the reason.
+ * paid and later refunded counts as a sale (when placed) and as a refund (on the day each refund
+ * was made, from the refunds ledger: a partial refund in one month and the rest in another are
+ * booked in each; a refund that failed afterwards comes off on the day it failed). Cancelled
+ * orders are in sales.csv, marked as not counted, with the reason.
  *
  * The shop is not VAT-registered: no VAT is added or reported. The 12-month sales are shown
  * against the AED 375,000 mandatory registration threshold, with a warning from 80%.
@@ -37,17 +42,12 @@ export interface OrderClass {
   /** Why not counted ('' when counted). */
   reason: string;
   paid: boolean;
-  /** Refunded to the card so far, in fils, and when (UAE date). */
-  refundFils: number;
-  refundDate: string;
 }
 
 /** How an order counts in the books (see the comment at the top). */
 export function classifyOrder(o: Order): OrderClass {
   const card = o.paymentMethod === 'online_card' ? o.card : undefined;
   const cardTaken = card ? fils(card.paidAmount) > 0 && ['paid', 'refund_pending', 'refunded'].includes(card.state) : false;
-  const refundFils = card ? (fils(card.refundedAmount) || (card.state === 'refunded' ? fils(card.paidAmount) : 0)) : 0;
-  const refundDate = refundFils ? dubaiDateOf(card?.refundedAt || o.createdAt) : '';
   const paid =
     o.paymentMethod === 'online_card'
       ? cardTaken
@@ -58,7 +58,38 @@ export function classifyOrder(o: Order): OrderClass {
   if (card?.mode === 'test') reason = 'Stripe test mode (not real money)';
   else if (o.status === 'pending_payment') reason = 'waiting for the card payment';
   else if (o.status === 'cancelled' && !cardTaken) reason = 'cancelled';
-  return { counted: !reason, reason, paid, refundFils: card?.mode === 'test' ? 0 : refundFils, refundDate };
+  return { counted: !reason, reason, paid };
+}
+
+/** A refund from the ledger, with its UAE date and whether it counts (not a Stripe test payment). */
+export interface BookedRefund extends RefundRow {
+  date: string;
+  counted: boolean;
+  /** Why not counted ('' when counted). */
+  reason: string;
+}
+
+/**
+ * The refunds of these orders, from the ledger, by the day each was made. Orders refunded before
+ * the ledger existed are filled in first (once; their dates are the best known ones, marked
+ * approximate). A refund is never dated by the day its order was placed.
+ */
+export function bookedRefunds(orders: Order[]): BookedRefund[] {
+  try {
+    backfillRefundLedger();
+  } catch (err) {
+    // The report still shows what the ledger has; the upkeep tries again every minute.
+    logEvent('warn', 'refund_ledger_fill_failed', { error: err instanceof Error ? err.message : String(err) });
+  }
+  const byId = new Map(orders.map((o) => [o.id, o]));
+  const out: BookedRefund[] = [];
+  for (const r of refundLedger()) {
+    const o = byId.get(r.orderId);
+    if (!o) continue;
+    const reason = o.card?.mode === 'test' ? 'Stripe test mode (not real money)' : '';
+    out.push({ ...r, date: dubaiDateOf(r.at), counted: !reason, reason });
+  }
+  return out;
 }
 
 export interface MethodTotals {
@@ -110,20 +141,17 @@ export function parsePeriod(from: unknown, to: unknown): { from: string; to: str
 const inPeriod = (date: string, from: string, to: string) => date >= from && date <= to;
 
 /** Net sales (counted orders placed, less refunds made) in a period: for the VAT threshold. */
-function netSales(orders: Order[], from: string, to: string): number {
+function netSales(orders: Order[], refunds: BookedRefund[], from: string, to: string): number {
   let n = 0;
-  for (const o of orders) {
-    const c = classifyOrder(o);
-    if (c.counted && inPeriod(dubaiDateOf(o.createdAt), from, to)) n += fils(o.total);
-    if (c.refundFils && inPeriod(c.refundDate, from, to)) n -= c.refundFils;
-  }
+  for (const o of orders) if (classifyOrder(o).counted && inPeriod(dubaiDateOf(o.createdAt), from, to)) n += fils(o.total);
+  for (const r of refunds) if (r.counted && inPeriod(r.date, from, to)) n -= r.amountFils;
   return n;
 }
 
 /** The last 12 months' sales against the mandatory VAT registration threshold. */
-export function vatStatus(now = Date.now(), orders: Order[] = allOrders()): VatStatus {
+export function vatStatus(now = Date.now(), orders: Order[] = allOrders(), refunds: BookedRefund[] = bookedRefunds(orders)): VatStatus {
   const { from, to } = twelveMonthsTo(dubaiToday(now));
-  const salesFils = netSales(orders, from, to);
+  const salesFils = netSales(orders, refunds, from, to);
   const ratio = salesFils / VAT_THRESHOLD_FILS;
   const level = ratio >= 1 ? 'over' : ratio >= VAT_WARN_RATIO ? 'near' : 'ok';
   const pct = Math.floor(ratio * 100);
@@ -138,6 +166,7 @@ export function vatStatus(now = Date.now(), orders: Order[] = allOrders()): VatS
 
 export function buildReport(from: string, to: string, now = Date.now()): Report {
   const orders = allOrders();
+  const booked = bookedRefunds(orders);
   const methods: PaymentMethod[] = ['cod', 'bank_transfer', 'online_card'];
   const byMethod = Object.fromEntries(methods.map((m) => [m, { orders: 0, fils: 0, paidOrders: 0, paidFils: 0 }])) as Record<PaymentMethod, MethodTotals>;
   const sales = { orders: 0, itemsFils: 0, deliveryFils: 0, codFeeFils: 0, discountFils: 0, grossFils: 0, paidFils: 0, unpaidFils: 0 };
@@ -177,30 +206,30 @@ export function buildReport(from: string, to: string, now = Date.now()): Report 
       }
       if (o.card?.refundOutsideAt) outside++;
     }
-    if (c.refundFils && inPeriod(c.refundDate, from, to)) {
-      refunds.count++;
-      refunds.fils += c.refundFils;
-      card.refundedFils += c.refundFils;
-    }
   }
+  // Refunds by the day the money went back (a failed one comes off on the day it failed).
+  let reversed = 0;
+  let reversedFils = 0;
+  let approx = 0;
+  for (const r of booked) {
+    if (!r.counted || !inPeriod(r.date, from, to)) continue;
+    if (r.amountFils > 0) refunds.count++;
+    else {
+      reversed++;
+      reversedFils -= r.amountFils;
+    }
+    if (r.dateApprox) approx++;
+    refunds.fils += r.amountFils;
+    card.refundedFils += r.amountFils;
+  }
+  if (reversed) notes.push(`${reversed} card refund${reversed === 1 ? '' : 's'} failed after being made: AED ${aedText(reversedFils)} came back to the shop and is taken off the refunds.`);
+  if (approx) notes.push(`${approx} refund${approx === 1 ? ' was' : 's were'} made before refunds were recorded one by one: ${approx === 1 ? 'its date is' : 'their dates are'} the best known (refunds.csv says "approximate").`);
   if (outside) notes.push(`${outside} card order${outside === 1 ? ' was' : 's were'} cancelled with the refund to be made in the Stripe dashboard: check those refunds there.`);
   if (card.paidCount) notes.push('Card payments: Stripe’s fees and payouts to your bank are in your Stripe dashboard (Balance → Payouts); add the fees here as an expense (Bank & card charges) from Stripe’s monthly statement.');
   if (sales.unpaidFils) notes.push(`AED ${aedText(sales.unpaidFils)} of these sales is not marked as paid yet (cash on delivery not collected, or a transfer not yet checked).`);
 
-  const expenses = listExpenses({ from, to });
-  const cats = new Map<string, { id: string; name: string; count: number; fils: number }>();
-  const expMethods: Record<string, { count: number; fils: number }> = {};
-  let expFils = 0;
-  for (const e of expenses) {
-    expFils += e.amountFils;
-    const c = cats.get(e.categoryId) ?? { id: e.categoryId, name: e.category, count: 0, fils: 0 };
-    c.count++;
-    c.fils += e.amountFils;
-    cats.set(e.categoryId, c);
-    const em = (expMethods[e.method] ??= { count: 0, fils: 0 });
-    em.count++;
-    em.fils += e.amountFils;
-  }
+  // Summed by the database: every expense of the period, however many.
+  const expenses = expenseTotals({ from, to });
   const netSalesFils = sales.grossFils - refunds.fils;
   return {
     from,
@@ -211,11 +240,11 @@ export function buildReport(from: string, to: string, now = Date.now()): Report 
     netSalesFils,
     byMethod,
     card,
-    expenses: { count: expenses.length, fils: expFils, byCategory: [...cats.values()].sort((a, b) => b.fils - a.fils), byMethod: expMethods },
-    profitFils: netSalesFils - expFils,
+    expenses,
+    profitFils: netSalesFils - expenses.fils,
     excluded,
     notes,
-    vat: vatStatus(now, orders),
+    vat: vatStatus(now, orders, booked),
   };
 }
 
@@ -255,22 +284,43 @@ function paymentStatusText(o: Order): string {
   return o.paymentStatus;
 }
 
-function salesCsv(orders: Order[]): string {
+function salesCsv(orders: Order[], refunds: BookedRefund[]): string {
+  // Each order's refunds so far (all of them, whenever made), the last one's date.
+  const refundOf = new Map<string, { fils: number; date: string; approx: boolean }>();
+  for (const r of refunds) {
+    if (!r.counted) continue;
+    const t = refundOf.get(r.orderId) ?? { fils: 0, date: '', approx: false };
+    t.fils += r.amountFils;
+    if (r.amountFils > 0) t.date = r.date;
+    t.approx ||= r.dateApprox;
+    refundOf.set(r.orderId, t);
+  }
   return toCsv(
-    ['date', 'order_number', 'customer_name', 'emirate', 'items', 'quantity', 'items_aed', 'delivery_fee_aed', 'cod_fee_aed', 'discount_aed', 'total_aed', 'payment_method', 'payment_status', 'payment_ref', 'paid', 'refund_aed', 'refund_date', 'order_status', 'courier', 'awb', 'counted_in_sales', 'not_counted_because', 'placed_at_utc'],
+    ['date', 'order_number', 'customer_name', 'emirate', 'items', 'quantity', 'items_aed', 'delivery_fee_aed', 'cod_fee_aed', 'discount_aed', 'total_aed', 'payment_method', 'payment_status', 'payment_ref', 'paid', 'refund_aed', 'refund_date', 'order_status', 'courier', 'awb', 'counted_in_sales', 'not_counted_because', 'placed_at_utc', 'refund_date_approximate'],
     orders.map((o) => {
       const c = classifyOrder(o);
+      const refund = refundOf.get(o.id);
       return [
         dubaiDateOf(o.createdAt), o.id, o.customer.fullName, o.customer.emirate,
         o.items.map((i) => `${i.title} (${i.profileName}${i.color ? `, ${i.color}` : ''}) x${i.quantity}`).join('; '),
         o.items.reduce((n, i) => n + i.quantity, 0),
         aedText(fils(o.subtotal)), aedText(fils(o.deliveryFee)), aedText(fils(o.codFee)), aedText(fils(o.discount)), aedText(fils(o.total)),
         METHOD[o.paymentMethod] ?? o.paymentMethod, paymentStatusText(o), paymentRef(o), c.paid ? 'yes' : 'no',
-        c.refundFils ? aedText(c.refundFils) : '', c.refundDate, o.status,
+        refund?.fils ? aedText(refund.fils) : '', refund?.fils ? refund.date : '', o.status,
         o.courier?.provider ?? '', o.courier?.simulated ? '' : (o.courier?.awbNumber ?? ''),
-        c.counted ? 'yes' : 'no', c.reason, o.createdAt,
+        c.counted ? 'yes' : 'no', c.reason, o.createdAt, refund?.fils && refund.approx ? 'yes' : '',
       ];
     })
+  );
+}
+
+const SOURCE: Record<RefundRow['source'], string> = { hub: 'Admin Hub', stripe: 'Stripe' };
+
+/** One row per refund (and per refund that failed afterwards) made in the period. */
+function refundsCsv(refunds: BookedRefund[]): string {
+  return toCsv(
+    ['date', 'order_number', 'amount_aed', 'kind', 'made_in', 'stripe_refund_id', 'at_utc', 'date_approximate', 'counted_in_refunds', 'not_counted_because'],
+    refunds.map((r) => [r.date, r.orderId, aedText(r.amountFils), r.amountFils > 0 ? 'refund' : 'refund failed (money back to the shop)', SOURCE[r.source] ?? r.source, r.stripeRefundId ?? '', r.at, r.dateApprox ? 'approximate' : '', r.counted ? 'yes' : 'no', r.reason])
   );
 }
 
@@ -350,6 +400,9 @@ function readme(r: Report, shop: string, bills: number, auditCount: number, veri
     '  sales.csv        One row per order placed in the period, cancelled ones too ("counted_in_sales" says',
     '                   whether it is in the totals, and why not). Customer name and emirate only.',
     '  order-items.csv  One row per item of those orders.',
+    '  refunds.csv      One row per refund to a card made in the period (by the day it was made), and per',
+    '                   refund that failed afterwards (a negative amount). "approximate": refunded before',
+    '                   refunds were recorded one by one, so the date is the best known.',
     '  expenses.csv     Every expense dated in the period. Removed ones are listed with who removed them,',
     '                   when and why, and are not in the totals. "bills" names the files in bills/.',
     `  bills/           ${bills} photo${bills === 1 ? '' : 's'} or PDF${bills === 1 ? '' : 's'} of the bills, named date_category_amount_expense.ext.`,
@@ -362,7 +415,7 @@ function readme(r: Report, shop: string, bills: number, auditCount: number, veri
     'How sales are counted',
     '  An order counts when it is placed, unless it was cancelled before any money was taken, is still',
     '  waiting for its card payment, or was a Stripe test payment. A card payment refunded later counts as a',
-    '  sale (when placed) and as a refund (when refunded). Cash on delivery and bank transfers not yet marked',
+    '  sale (when placed) and as a refund (on the day each refund was made). Cash on delivery and bank transfers not yet marked',
     '  as received are in the totals and shown as "not marked paid yet".',
     '',
     'VAT',
@@ -384,6 +437,9 @@ export interface ExportResult {
   auditEntries: number;
 }
 
+/** The export's disk guard: it is made only if the disk keeps this much free after it. (Changeable by tests only.) */
+export const EXPORT_LIMITS = { minFreeBytes: 1024 ** 3 };
+
 function exportsDir(): string {
   const dir = path.join(dataDir(), 'exports');
   fs.mkdirSync(dir, { recursive: true, mode: 0o700 });
@@ -398,61 +454,133 @@ function exportsDir(): string {
   return dir;
 }
 
+/** About how big the ZIP will be: the bills as they are, the audit months it reads, and the rest. */
+function estimatedSize(from: string, to: string, orders: number): number {
+  let audit = 0;
+  const first = new Date(Date.parse(`${from}T00:00:00Z`) - 86_400_000).toISOString().slice(0, 7);
+  for (const f of auditFiles()) {
+    const month = f.slice(6, 13);
+    if (month < first || month > to.slice(0, 7)) continue;
+    try {
+      audit += fs.statSync(dataFile(f)).size;
+    } catch {
+      // removed meanwhile
+    }
+  }
+  return activeBillBytes({ from, to }) + audit + orders * 2048 + 4 * 1024 ** 2;
+}
+
 /**
  * Write the accountant's ZIP for a period to a private temporary file (DATA_DIR/exports/, never in
- * backups), one entry at a time. The caller streams it and removes it.
+ * backups), one entry at a time and asynchronously: bills are copied a piece at a time, the
+ * expenses and the audit log are streamed (all of them, however many), and the shop keeps
+ * answering in between. Refused (507) when the disk would be left with too little room. The caller
+ * streams the file and removes it.
  */
-export function writeAccountantZip(from: string, to: string, shop = 'Beautiful UAE Home', now = Date.now()): ExportResult {
+export async function writeAccountantZip(from: string, to: string, shop = 'Beautiful UAE Home', now = Date.now()): Promise<ExportResult> {
   const report = buildReport(from, to, now);
-  const orders = allOrders()
-    .filter((o) => inPeriod(dubaiDateOf(o.createdAt), from, to))
-    .sort((a, b) => a.createdAt.localeCompare(b.createdAt));
-  const expenses = listExpenses({ from, to, includeRemoved: true }).reverse();
-  const audit = auditEntries({ from, to });
+  const all = allOrders();
+  const orders = all.filter((o) => inPeriod(dubaiDateOf(o.createdAt), from, to)).sort((a, b) => a.createdAt.localeCompare(b.createdAt));
+  const refunds = bookedRefunds(all).filter((r) => inPeriod(r.date, from, to));
+  const dir = exportsDir();
+  const room = diskRoomProblem(dir, estimatedSize(from, to, orders.length), EXPORT_LIMITS.minFreeBytes);
+  if (room) {
+    logEvent('warn', 'export_refused_no_room', { from, to, why: room });
+    throw new HttpError(507, `The export can't be made right now: ${room}. Free some space on the server and try again.`, {}, { code: 'no_room' });
+  }
+  const billCount = activeBillCount({ from, to });
+  let auditCount = 0;
+  for (const _ of iterAuditEntries({ from, to })) {
+    void _;
+    auditCount++;
+  }
   const verification = verifyAllAuditLogs();
   const name = `accounts_${from}_to_${to}.zip`;
-  const file = path.join(exportsDir(), `${process.pid}-${Date.now()}-${Math.random().toString(36).slice(2)}.zip`);
-  const zip = new ZipWriter(file);
+  const file = path.join(dir, `${process.pid}-${Date.now()}-${Math.random().toString(36).slice(2)}.zip`);
+  const zip = await ZipWriter.create(file);
   let bills = 0;
+  let expenses = 0;
   try {
-    zip.add('README.txt', Buffer.from(readme(report, shop, expenses.filter((e) => !e.removed).reduce((n, e) => n + billZipNames(e).length, 0), audit.length, verificationText(verification))));
-    zip.add('summary.html', Buffer.from(summaryHtml(report, shop)));
-    zip.add('summary.csv', Buffer.from(toCsv(['section', 'item', 'count', 'amount_aed'], summaryRows(report))));
-    zip.add('sales.csv', Buffer.from(salesCsv(orders)));
-    zip.add('order-items.csv', Buffer.from(orderItemsCsv(orders)));
-    zip.add('expenses.csv', Buffer.from(toCsv(EXPENSE_CSV_HEADERS, expenses.map((e) => expenseCsvRow(e, e.removed ? [] : billZipNames(e).map((n) => n.slice('bills/'.length)))))));
-    for (const e of expenses) {
-      if (e.removed) continue;
-      const names = billZipNames(e);
-      e.bills.filter((b) => !b.removed).forEach((b, i) => {
-        let data: Buffer;
-        try {
-          data = fs.readFileSync(billFile(b));
-        } catch {
-          return; // missing on disk: the expense row still names it
+    await zip.add('README.txt', Buffer.from(readme(report, shop, billCount, auditCount, verificationText(verification))));
+    await zip.add('summary.html', Buffer.from(summaryHtml(report, shop)));
+    await zip.add('summary.csv', Buffer.from(toCsv(['section', 'item', 'count', 'amount_aed'], summaryRows(report))));
+    await zip.add('sales.csv', Buffer.from(salesCsv(orders, bookedRefunds(all))));
+    await zip.add('order-items.csv', Buffer.from(orderItemsCsv(orders)));
+    await zip.add('refunds.csv', Buffer.from(refundsCsv(refunds)));
+    await zip.addStream(
+      'expenses.csv',
+      (function* () {
+        yield csvHead(EXPENSE_CSV_HEADERS);
+        let chunk = '';
+        for (const e of iterExpenses({ from, to, includeRemoved: true })) {
+          expenses++;
+          chunk += csvRow(expenseCsvRow(e, e.removed ? [] : billZipNames(e).map((n) => n.slice('bills/'.length))));
+          if (chunk.length > 64 * 1024) {
+            yield chunk;
+            chunk = '';
+          }
         }
-        zip.add(names[i], data, { compress: false, mtime: new Date(b.addedAt) });
+        if (chunk) yield chunk;
+      })()
+    );
+    for (const e of iterExpenses({ from, to })) {
+      const names = billZipNames(e);
+      const active = e.bills.filter((b) => !b.removed);
+      for (let i = 0; i < active.length; i++) {
+        let source: string;
+        try {
+          source = billFile(active[i]);
+          fs.accessSync(source, fs.constants.R_OK);
+        } catch {
+          continue; // missing on disk: the expense row still names it
+        }
+        await zip.addFile(names[i], source, { mtime: new Date(active[i].addedAt) });
         bills++;
-      });
+      }
     }
-    zip.add('audit-log.jsonl', Buffer.from(auditExport(audit, 'jsonl')));
-    zip.add(
+    await zip.addStream('audit-log.jsonl', auditExportChunks(iterAuditEntries({ from, to }), 'jsonl'));
+    await zip.add(
       'audit-check.txt',
       Buffer.from(
         [
-          `Checked ${new Date(now).toISOString()} on the shop's server (every month of the log, not only this period).`,
+          `Checked ${new Date(now).toISOString()} on the shop's server (every month of the log, not only this period). This server's key id: ${verification.keyId}.`,
           ...verificationText(verification),
           '',
-          ...verification.months.map((m) => `${m.file}: ${m.entries} entries, ${m.ok ? 'ok' : m.otherKey ? 'signed with another key' : m.problems.join('; ')}`),
+          ...verification.months.map((m) => `${m.file}: ${m.entries} entries, ${MONTH_STATUS[m.status]}${m.status === 'broken' ? `: ${m.problems.join('; ')}` : m.otherKeys.length ? ` (key ${m.otherKeys.join(', ')})` : ''}`),
           '',
         ].join('\r\n')
       )
     );
-    zip.close();
+    await zip.close();
   } catch (err) {
-    zip.abort();
+    await zip.abort();
     fs.rmSync(file, { force: true });
     throw err;
   }
-  return { file, name, orders: orders.length, expenses: expenses.length, bills, auditEntries: audit.length };
+  return { file, name, orders: orders.length, expenses, bills, auditEntries: auditCount };
+}
+
+const MONTH_STATUS: Record<string, string> = { intact: 'ok', other_key: "signed by another server's key (restored from a backup)", unverified: 'unverified (made before key ids)', broken: 'BROKEN' };
+
+/**
+ * The export as the hub asks for it: one at a time (429 otherwise), who exported which period
+ * written to the audit log first (no entry, no export), and a build that then fails written too
+ * (report.export_failed). The caller streams the file, then calls release() and removes it.
+ */
+export async function prepareAccountantExport(by: string, from: string, to: string, shop = 'Beautiful UAE Home'): Promise<ExportResult & { release: () => void }> {
+  const release = takeExportLock();
+  try {
+    auditOrThrow('report.exported', { by, from, to, what: 'accountant zip' });
+    try {
+      return { ...(await writeAccountantZip(from, to, shop)), release };
+    } catch (err) {
+      const error = err instanceof Error ? err.message.slice(0, 200) : String(err).slice(0, 200);
+      audit('report.export_failed', { by, from, to, error });
+      logEvent('error', 'report_export_failed', { from, to, error });
+      throw err;
+    }
+  } catch (err) {
+    release();
+    throw err;
+  }
 }

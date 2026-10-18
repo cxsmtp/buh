@@ -15,6 +15,16 @@ export function toCsv(headers: string[], rows: unknown[][]): string {
   return '\ufeff' + [headers, ...rows].map((r) => r.map(cell).join(',')).join('\r\n') + '\r\n';
 }
 
+/** One CSV line (with its CRLF), for a file written a row at a time: start it with csvHead(). */
+export function csvRow(row: unknown[]): string {
+  return row.map(cell).join(',') + '\r\n';
+}
+
+/** The BOM and the header line of a CSV written a row at a time (the same bytes as toCsv). */
+export function csvHead(headers: string[]): string {
+  return '\ufeff' + csvRow(headers);
+}
+
 /** Fils as a plain AED decimal with two places ("1250.50", "-3.05"), from whole numbers only (no float rounding). */
 export function aedText(fils: number): string {
   const sign = fils < 0 ? '-' : '';

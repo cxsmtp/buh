@@ -32,22 +32,28 @@ export function maskSecretPaths(s: string): string {
   return s.replace(SECRET_PATH, '/$1…');
 }
 
-function scrubString(s: string): string {
-  return maskSecretPaths(s)
+function scrubString(s: string, max = 500): string {
+  // Masked before it is cut, so a cut can never leave half a phone number unmasked.
+  return maskSecretPaths(s.slice(0, max * 2))
     .replace(STRIPE_SECRET, (_m, key: string | undefined, intent: string | undefined) => (key ? `${key}[redacted]` : `${intent}_[redacted]`))
     .replace(EMAIL, '$1***@$2')
     .replace(PHONE, (m) => (ISO_DATE.test(m) ? m : maskPhone(m)))
-    .slice(0, 500);
+    .slice(0, max);
 }
 
-export function redact(value: unknown, depth = 0): unknown {
+/**
+ * Secrets by key name, phones and emails masked, strings cut at 500 characters. `longText` lets
+ * some fields (by name, at any depth: an expense's note before → after in the audit log) keep up
+ * to `max` characters, masked the same way.
+ */
+export function redact(value: unknown, depth = 0, longText?: { keys: Set<string>; max: number }, long = false): unknown {
   if (depth > 4) return '[…]';
-  if (typeof value === 'string') return scrubString(value);
-  if (Array.isArray(value)) return value.slice(0, 20).map((v) => redact(v, depth + 1));
+  if (typeof value === 'string') return scrubString(value, long && longText ? longText.max : 500);
+  if (Array.isArray(value)) return value.slice(0, 20).map((v) => redact(v, depth + 1, longText, long));
   if (value && typeof value === 'object') {
     const out: Record<string, unknown> = {};
     for (const [k, v] of Object.entries(value)) {
-      out[k] = SECRET_KEY.test(k) && !SAFE_KEYS.has(k) ? '[redacted]' : redact(v, depth + 1);
+      out[k] = SECRET_KEY.test(k) && !SAFE_KEYS.has(k) ? '[redacted]' : redact(v, depth + 1, longText, long || Boolean(longText?.keys.has(k)));
     }
     return out;
   }

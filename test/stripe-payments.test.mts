@@ -770,7 +770,7 @@ test('migration 9 only adds (columns, indexes, a table); backups carry card paym
   const db = new Database(path.join(old, 'shop.db'));
   // Migration 10's columns go too (it runs again after 9).
   // Migrations 11 and 12 go too (they run again after 10): newest first.
-  db.exec('DROP TABLE expense_bills; DROP TABLE expense_versions; DROP TABLE expenses; DROP TABLE expense_categories;'); // migration 12
+  db.exec('DROP TABLE card_refunds; DROP TABLE expense_bills; DROP TABLE expense_versions; DROP TABLE expenses; DROP TABLE expense_categories;'); // migration 12
   db.exec('DROP INDEX orders_unconfirmed_due; DROP INDEX orders_unopened_due; ALTER TABLE orders DROP COLUMN phone_check_method; ALTER TABLE orders DROP COLUMN wa_cancel_at; ALTER TABLE orders DROP COLUMN wa_unopened_cancel_at;'); // migration 11
   db.exec(`DROP INDEX orders_by_pay_token; DROP INDEX orders_transfer_to_check; ${['pay_nonce', 'pay_token_hash', 'pay_expires_at', 'bank_state', 'transfer_uploads', 'transfer_uploaded_at', 'bank_emailed_at', 'bank_checked_at', 'bank_checked_by'].map((c) => `ALTER TABLE orders DROP COLUMN ${c};`).join(' ')}`);
   db.exec(`DROP INDEX orders_by_payment_ref; DROP INDEX orders_card_open; DROP TABLE stripe_events; ${['card_state', 'payment_ref', 'card_secret_hash', 'paid_fils', 'paid_at', 'card_label', 'refund_ref', 'refunded_at', 'card_livemode', 'card_ip', 'refunded_fils', 'refund_outside_at', 'needs_attention'].map((c) => `ALTER TABLE orders DROP COLUMN ${c};`).join(' ')}`);

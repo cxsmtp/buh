@@ -1,11 +1,12 @@
-import { auditOrThrow } from '@/lib/server/audit';
 import { enforceLimit, requireAdmin } from '@/lib/server/guard';
 import { assertSameOrigin, handleRouteError, HttpError } from '@/lib/server/http';
-import { auditEntries, auditExport } from '@/lib/server/auditView';
+import { auditExportStream } from '@/lib/server/auditView';
 
 /**
  * The audit log as shown (the same filters as ./route.ts), as Excel-safe CSV (?format=csv) or the
- * original signed JSON lines (?format=jsonl). Who exported what is written to the log first.
+ * original signed JSON lines (?format=jsonl). Who exported what is written to the log first; it is
+ * streamed, one export at a time (429 otherwise), and a failure half-way is written to the log too
+ * (src/lib/server/auditView.ts: auditExportStream).
  */
 export async function GET(req: Request) {
   try {
@@ -22,11 +23,9 @@ export async function GET(req: Request) {
       who: q.get('who') ?? undefined,
       order: q.get('order') ?? undefined,
     };
-    const shown = Object.fromEntries(Object.entries(filters).filter(([, v]) => v));
-    auditOrThrow('audit.exported', { by: session.email, format, filters: shown });
-    const entries = auditEntries(filters);
+    const body = auditExportStream(session.email, format, filters);
     const name = `audit-log${filters.from ? `_${filters.from}` : ''}${filters.to ? `_to_${filters.to}` : ''}.${format}`.replace(/[^A-Za-z0-9._-]/g, '');
-    return new Response(auditExport(entries, format), {
+    return new Response(body, {
       headers: {
         'Content-Type': format === 'csv' ? 'text/csv; charset=utf-8' : 'application/x-ndjson; charset=utf-8',
         'Content-Disposition': `attachment; filename="${name}"`,

@@ -392,7 +392,7 @@ test('migration 12 only adds (tables and an index) and seeds the categories', ()
   const sql = m12.slice(m12.indexOf('db.exec(`') + 9, m12.indexOf('`);'));
   const statements = sql.split(';').map((s) => s.replace(/--.*$/gm, '').trim()).filter(Boolean);
   assert.ok(statements.length >= 6);
-  for (const s of statements) assert.match(s, /^CREATE (TABLE|INDEX) /, s);
+  for (const s of statements) assert.match(s, /^CREATE (TABLE|INDEX|UNIQUE INDEX) /, s);
   assert.doesNotMatch(m12, /DROP|ALTER|DELETE|UPDATE /);
   assert.equal(getDb().pragma('user_version', { simple: true }), 12);
 });

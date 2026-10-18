@@ -137,12 +137,80 @@ test('a bill is served only to the hub: its own type, nosniff, no-script policy,
   assert.equal(got.headers.get('content-type'), 'image/png');
   assert.equal(got.headers.get('x-content-type-options'), 'nosniff');
   assert.match(got.headers.get('cache-control') || '', /no-store/);
-  // The API's own policy (next.config.ts) applies: nothing in it may run, load or be framed.
-  assert.match(got.headers.get('content-security-policy') || '', /default-src 'none'/);
+  // The bill's own policy (next.config.ts and the route agree): the image only, sandboxed, never framed.
+  assert.equal(got.headers.get('content-security-policy'), "default-src 'none'; img-src 'self'; frame-ancestors 'none'; sandbox");
   assert.match(got.headers.get('content-disposition') || '', /^inline; filename="EXP-/);
   assert.deepEqual(Buffer.from(await got.arrayBuffer()), PHOTO, 'a PNG without text chunks is stored byte for byte');
   assert.equal((await rawFetch(`${server.base}${bill.url}`)).status, 404, 'not without the door');
   assert.ok(fs.existsSync(path.join(server.dataDir, 'expenses', `${bill.id}.png`)));
+  // A PDF is downloaded, not shown (browsers won't open a PDF under a sandbox policy; a PDF can carry script).
+  const pdf = (await (await api('POST', `/api/admin/expenses/${e.id}/bills`, { file: `data:application/pdf;base64,${Buffer.from('%PDF-1.4\n%%EOF\n').toString('base64')}`, name: 'bill.pdf' })).json()).bill;
+  const gotPdf = await api('GET', pdf.url);
+  assert.equal(gotPdf.status, 200);
+  assert.equal(gotPdf.headers.get('content-type'), 'application/pdf');
+  assert.match(gotPdf.headers.get('content-disposition') || '', /^attachment; filename="EXP-.*\.pdf"$/);
+  assert.match(gotPdf.headers.get('content-security-policy') || '', /sandbox/);
+  await gotPdf.arrayBuffer();
+});
+
+test('in Chromium, under the policy actually sent: a photo of a bill opens in its own tab and shows; a PDF downloads', { skip: skip || skipBrowser }, async () => {
+  const e = await newExpense({ payee: 'Tab test' });
+  const photo = (await (await api('POST', `/api/admin/expenses/${e.id}/bills`, { file: `data:image/png;base64,${PHOTO.toString('base64')}`, name: 'p.png' })).json()).bill;
+  const pdf = (await (await api('POST', `/api/admin/expenses/${e.id}/bills`, { file: `data:application/pdf;base64,${Buffer.from('%PDF-1.4\n1 0 obj<<>>endobj\n%%EOF\n').toString('base64')}`, name: 'p.pdf' })).json()).bill;
+  const ctx = await browser.newContext({ acceptDownloads: true });
+  const [name, value] = cookie.split('=');
+  await ctx.addCookies([{ name, value, url: server.base }]);
+  const page = await ctx.newPage();
+  // Through the private link first (it sets the door cookie), as the owner's browser has.
+  await page.goto(server.adminUrl, { waitUntil: 'domcontentloaded' });
+  const res = await page.goto(`${server.base}${photo.url}`);
+  assert.equal(res!.status(), 200);
+  assert.match((await res!.allHeaders())['content-security-policy'] ?? '', /sandbox/);
+  const size = await page.evaluate(() => {
+    const img = document.querySelector('img');
+    return img ? [img.naturalWidth, img.naturalHeight] : null;
+  });
+  assert.ok(size && size[0] > 0 && size[1] > 0, `the photo shows (${JSON.stringify(size)})`);
+  const [download] = await Promise.all([page.waitForEvent('download'), page.goto(`${server.base}${pdf.url}`).catch(() => null)]);
+  assert.match(download.suggestedFilename(), /\.pdf$/);
+  await ctx.close();
+});
+
+test('in Chromium: a bill that fails to upload, the amount then corrected, Save again: the one expense is changed (not lost, not doubled)', { skip: skip || skipBrowser }, async () => {
+  const ctx = await browser.newContext({ viewport: { width: 375, height: 860 }, hasTouch: true });
+  const [name, value] = cookie.split('=');
+  await ctx.addCookies([{ name, value, url: server.base }]);
+  const page = await ctx.newPage();
+  let failNext = true;
+  await page.route('**/api/admin/expenses/*/bills', async (route) => {
+    if (failNext && route.request().method() === 'POST') {
+      failNext = false;
+      await route.fulfill({ status: 503, contentType: 'application/json', body: JSON.stringify({ message: 'Try again.' }) });
+    } else await route.continue();
+  });
+  await page.goto(server.adminUrl, { waitUntil: 'domcontentloaded' });
+  await openAdminSection(page, /^Money/);
+  await page.getByRole('heading', { name: 'Expenses' }).waitFor();
+  await page.getByRole('button', { name: 'Add expense' }).click();
+  const form = page.getByTestId('expense-form');
+  await form.waitFor();
+  const payee = `Retry Co ${Date.now()}`;
+  await form.getByLabel('Amount (AED)').fill('10.00');
+  await form.getByLabel('Paid to').fill(payee);
+  await form.getByTestId('bill-input').setInputFiles({ name: 'retry.pdf', mimeType: 'application/pdf', buffer: Buffer.from('%PDF-1.4\n%%EOF\n') });
+  await form.getByRole('button', { name: 'Save expense' }).click();
+  await form.getByText(/The expense is saved, but a bill could not be attached/).waitFor();
+  // The owner notices the amount was wrong, fixes it, and saves again (the bill goes this time).
+  await form.getByLabel('Amount (AED)').fill('12.50');
+  await form.getByRole('button', { name: 'Save expense' }).click();
+  await page.getByText('Expense saved.').waitFor();
+  const list = await (await api('GET', '/api/admin/expenses')).json();
+  const mine = (list.expenses as Array<{ payee: string; amountFils: number; version: number; bills: unknown[] }>).filter((x) => x.payee === payee);
+  assert.equal(mine.length, 1, 'one expense');
+  assert.equal(mine[0].amountFils, 1250, 'the corrected amount was saved');
+  assert.equal(mine[0].version, 2);
+  assert.equal(mine[0].bills.length, 1);
+  await ctx.close();
 });
 
 test('the accountant\'s ZIP over HTTP: a ZIP with the period\'s files and bills; who exported which period is audited first', { skip }, async () => {

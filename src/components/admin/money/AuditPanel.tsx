@@ -21,7 +21,7 @@ interface Page {
   page: number;
   pages: number;
   actions: string[];
-  verification: { ok: boolean };
+  verification: { ok: boolean; status?: 'intact' | 'other_key' | 'unverified' | 'broken' };
   verificationText: string[];
 }
 interface Filters {
@@ -34,6 +34,17 @@ interface Filters {
 const EMPTY: Filters = { from: '', to: '', action: '', who: '', order: '' };
 
 const query = (f: Filters) => Object.entries(f).filter(([, v]) => v).map(([k, v]) => `${k}=${encodeURIComponent(v)}`).join('&');
+
+/**
+ * The chain check's colour: intact green; restored from another server's backup neutral (in order,
+ * only that server can check the signatures); unverified amber; broken (tampered) red.
+ */
+const STATUS_CLASS: Record<string, string> = {
+  intact: 'border-success-line bg-success-soft text-success',
+  other_key: 'border-line bg-surface text-ink-soft',
+  unverified: 'border-warning-line bg-warning-soft text-warning',
+  broken: 'border-danger-line bg-danger-soft text-danger',
+};
 
 /** What an entry says, without the fields already shown (who, order). */
 function detailText(d: Record<string, unknown>): string {
@@ -75,13 +86,14 @@ export function AuditPanel() {
     setFilters(draft);
   };
   const prefixes = data ? [...new Set(data.actions.map((a) => `${a.split('.')[0]}.`))] : [];
+  const status = data?.verification.status ?? (data?.verification.ok ? 'intact' : 'broken');
 
   return (
     <section aria-labelledby={`${id}-h`} className="space-y-3">
       <h2 id={`${id}-h`} className="font-serif text-xl text-ink">Audit log</h2>
       {data && (
-        <div role="status" data-testid="audit-status" data-ok={data.verification.ok ? 'yes' : 'no'} className={`rounded-2xl border px-3.5 py-3 text-xs flex gap-2 ${data.verification.ok ? 'border-success-line bg-success-soft text-success' : 'border-danger-line bg-danger-soft text-danger'}`}>
-          {data.verification.ok ? <ShieldCheck className="w-4 h-4 shrink-0" aria-hidden="true" /> : <ShieldAlert className="w-4 h-4 shrink-0" aria-hidden="true" />}
+        <div role="status" data-testid="audit-status" data-ok={data.verification.ok ? 'yes' : 'no'} data-status={status} className={`rounded-2xl border px-3.5 py-3 text-xs flex gap-2 ${STATUS_CLASS[status]}`}>
+          {status === 'intact' || status === 'other_key' ? <ShieldCheck className="w-4 h-4 shrink-0" aria-hidden="true" /> : <ShieldAlert className="w-4 h-4 shrink-0" aria-hidden="true" />}
           <div className="min-w-0 space-y-0.5">
             {data.verificationText.map((t) => (
               <p key={t} className="break-words">{t}</p>

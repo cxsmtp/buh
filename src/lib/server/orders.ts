@@ -1548,12 +1548,82 @@ export function refundableFils(order: Order): number {
   return Math.max(0, fils(order.card?.paidAmount ?? 0) - fils(order.card?.refundedAmount ?? 0));
 }
 
+// ── The refunds ledger ──────────────────────────────────────────────────────
+
+export interface RefundRow {
+  orderId: string;
+  /** Fils; negative when a refund failed afterwards (the money came back to the shop). */
+  amountFils: number;
+  at: string;
+  source: 'stripe' | 'hub';
+  stripeRefundId: string | null;
+  /** Filled in from an order refunded before the ledger existed: the date is the best known one. */
+  dateApprox: boolean;
+}
+
+/**
+ * Bring the refunds ledger (card_refunds) to `totalFils` refunded so far for this order: one row
+ * for the difference, dated now (a negative one when a refund failed). Called in the transaction
+ * that changes the order's refunded amount, so the two always agree. A Stripe refund id is kept
+ * once per direction (a refund, and its reversal if it failed).
+ */
+function ledgerRefund(orderId: string, totalFils: number, source: RefundRow['source'], refundId?: string | null): number {
+  const db = getDb();
+  const sum = db.prepare('SELECT COALESCE(SUM(amount_fils), 0) FROM card_refunds WHERE order_id = ?').pluck().get(orderId) as number;
+  const delta = totalFils - sum;
+  if (!delta) return 0;
+  let id = refundId ?? null;
+  if (id && db.prepare(`SELECT 1 FROM card_refunds WHERE stripe_refund_id = ? AND amount_fils ${delta > 0 ? '>' : '<'} 0`).get(id)) id = null;
+  db.prepare('INSERT INTO card_refunds (order_id, amount_fils, at, source, stripe_refund_id) VALUES (?, ?, ?, ?, ?)').run(orderId, delta, new Date().toISOString(), source, id);
+  return delta;
+}
+
+const LEDGER_GAPS = `
+  SELECT o.id, o.refunded_at, o.updated_at,
+    CASE WHEN o.card_state = 'refunded' THEN COALESCE(o.refunded_fils, o.paid_fils, 0) ELSE COALESCE(o.refunded_fils, 0) END AS want,
+    COALESCE((SELECT SUM(r.amount_fils) FROM card_refunds r WHERE r.order_id = o.id), 0) AS have
+  FROM orders o
+  WHERE o.payment_method = 'online_card' AND (o.refunded_fils IS NOT NULL OR o.card_state = 'refunded' OR EXISTS (SELECT 1 FROM card_refunds r WHERE r.order_id = o.id))`;
+
+/**
+ * Orders refunded before the ledger existed (or by an older version during an update's overlap):
+ * one row each for what the ledger is missing, dated when the order says it was refunded (or last
+ * changed), marked approximate. Idempotent: an order whose ledger already adds up is left alone.
+ */
+export function backfillRefundLedger(): number {
+  type Gap = { id: string; refunded_at: string | null; updated_at: string; want: number; have: number };
+  const gaps = () => (getDb().prepare(LEDGER_GAPS).all() as Gap[]).filter((g) => g.want !== g.have);
+  if (!gaps().length) return 0;
+  const added = inTransaction(() => {
+    const insert = getDb().prepare("INSERT INTO card_refunds (order_id, amount_fils, at, source, date_approx) VALUES (?, ?, ?, 'stripe', 1)");
+    const found = gaps();
+    for (const g of found) insert.run(g.id, g.want - g.have, g.refunded_at || g.updated_at);
+    return found.length;
+  });
+  if (added) logEvent_('info', 'refund_ledger_filled_in', { orders: added });
+  return added;
+}
+
+/** Every row of the refunds ledger, oldest first. */
+export function refundLedger(): RefundRow[] {
+  return (getDb().prepare('SELECT order_id, amount_fils, at, source, stripe_refund_id, date_approx FROM card_refunds ORDER BY at, id').all() as Array<{ order_id: string; amount_fils: number; at: string; source: RefundRow['source']; stripe_refund_id: string | null; date_approx: number }>).map((r) => ({
+    orderId: r.order_id,
+    amountFils: r.amount_fils,
+    at: r.at,
+    source: r.source,
+    stripeRefundId: r.stripe_refund_id,
+    dateApprox: r.date_approx === 1,
+  }));
+}
+
 /** Stripe says how much of the charge is refunded so far (e.g. a partial refund in its dashboard): noted. */
 export function noteRefundedSoFar(orderId: string, refundedFils: number): void {
-  // Money back to a customer is in the audit log before it is on the order (or neither is).
-  const changed = inTransaction(() => {
+  // Money back to a customer is in the audit log before it is on the order (or neither is), and a
+  // commit that fails after the entry is written gets its "rolled back" entry.
+  const changed = auditedTransaction((auditOrThrow) => {
     const before = getDb().prepare('SELECT refunded_fils FROM orders WHERE id = ?').pluck().get(orderId) as number | null | undefined;
     if (getDb().prepare('UPDATE orders SET refunded_fils = ? WHERE id = ? AND COALESCE(refunded_fils, 0) <> ?').run(refundedFils, orderId, refundedFils).changes !== 1) return false;
+    ledgerRefund(orderId, refundedFils, 'stripe');
     auditOrThrow('payment.refunded_so_far', { orderId, fromFils: before ?? 0, toFils: refundedFils, via: 'stripe' });
     return true;
   });
@@ -1581,6 +1651,8 @@ export function recordCardRefund(orderId: string, refund: { id: string; status: 
     getDb()
       .prepare("UPDATE orders SET card_state = ?, refund_ref = ?, refunded_at = ?, refunded_fils = ? WHERE id = ? AND card_state IN ('paid', 'refund_pending')")
       .run(done ? 'refunded' : 'refund_pending', refund.id, done ? new Date().toISOString() : null, done ? paidFils : paidFils - left || null, orderId);
+    // In the ledger once Stripe says the money went back (a pending one when its webhook says so).
+    ledgerRefund(orderId, done ? paidFils : paidFils - left, done ? 'hub' : 'stripe', done ? refund.id : null);
     if (order.status !== 'cancelled' && order.status !== 'delivered') {
       releaseStock(order, 'cancelled');
       order.status = 'cancelled';
@@ -1608,13 +1680,19 @@ export function markCardRefunded(ref: string, charge: { amount: number; amountRe
     if (order.card.state !== 'paid' && order.card.state !== 'refund_pending') return 'ignored';
     if (charge.amountRefunded < (order.card.paidAmount !== undefined ? fils(order.card.paidAmount) : charge.amount)) {
       // A partial refund (Stripe's dashboard): noted, so "Cancel & refund" offers only what is left.
-      if (order.card.state === 'paid') getDb().prepare('UPDATE orders SET refunded_fils = ? WHERE id = ?').run(charge.amountRefunded, order.id);
+      if (order.card.state === 'paid' && fils(order.card.refundedAmount ?? 0) !== charge.amountRefunded) {
+        getDb().prepare('UPDATE orders SET refunded_fils = ? WHERE id = ?').run(charge.amountRefunded, order.id);
+        ledgerRefund(order.id, charge.amountRefunded, 'stripe', charge.refundId);
+        auditOrThrow('payment.refunded_so_far', { orderId: order.id, ref, fromFils: fils(order.card.refundedAmount ?? 0), toFils: charge.amountRefunded, via: actor, ...(event ? { event: event.id } : {}) });
+      }
       logEvent(order.id, actor, 'card_partly_refunded', { amount: aed(charge.amountRefunded) });
       return 'partial';
     }
     getDb()
       .prepare("UPDATE orders SET card_state = 'refunded', refunded_at = ?, refunded_fils = ?, refund_ref = COALESCE(refund_ref, ?) WHERE id = ? AND card_state IN ('paid', 'refund_pending')")
       .run(new Date().toISOString(), charge.amountRefunded, charge.refundId ?? null, order.id);
+    // The hub's own refund (pending until now), or one made in Stripe's dashboard.
+    ledgerRefund(order.id, charge.amountRefunded, order.card.refundRef ? 'hub' : 'stripe', order.card.refundRef ?? charge.refundId);
     // Refunded in full (also from Stripe's dashboard): the order is cancelled, its pieces back on
     // sale if they never left, exactly once (a cancelled or delivered order stays as it is).
     if (order.status !== 'cancelled' && order.status !== 'delivered') {
@@ -1651,6 +1729,8 @@ export function markRefundFailed(ref: string, refund: { id: string; amount: numb
       .prepare("UPDATE orders SET card_state = 'paid', refunded_at = NULL, refund_ref = NULL, refunded_fils = ? WHERE id = ? AND card_state IN ('refunded', 'refund_pending')")
       .run(stillRefunded || null, order.id).changes;
     if (changed !== 1) return 'ignored';
+    // A refund already booked comes off again, on the day it failed (a negative row).
+    ledgerRefund(order.id, stillRefunded, 'stripe', refund.id);
     const text = `Stripe could not refund AED ${aed(refund.amount)} to the customer's card${refund.reason ? ` (${refund.reason.replace(/_/g, ' ')})` : ''}: the money is still in your Stripe account. Refund it again, or pay the customer back another way.`;
     setAttention(order.id, 'refund_failed', text);
     logEvent(order.id, actor, 'card_refund_failed', { refund: refund.id, amount: aed(refund.amount), reason: refund.reason });
@@ -1719,7 +1799,8 @@ export function setCardLabel(orderId: string, label: string): void {
 export function cardTakings(from: string, to: string): { paid: number; paidFils: number; refunded: number; refundedFils: number } {
   const db = getDb();
   const paid = db.prepare("SELECT COUNT(*) AS n, COALESCE(SUM(paid_fils), 0) AS f FROM orders WHERE paid_at >= ? AND paid_at < ? AND card_state IN ('paid', 'refund_pending', 'refunded')").get(from, to) as { n: number; f: number };
-  const refunded = db.prepare("SELECT COUNT(*) AS n, COALESCE(SUM(paid_fils), 0) AS f FROM orders WHERE refunded_at >= ? AND refunded_at < ? AND card_state = 'refunded'").get(from, to) as { n: number; f: number };
+  // Refunds by the day the money went back (the ledger: partial ones too, less any that failed).
+  const refunded = db.prepare('SELECT COUNT(DISTINCT CASE WHEN amount_fils > 0 THEN order_id END) AS n, COALESCE(SUM(amount_fils), 0) AS f FROM card_refunds WHERE at >= ? AND at < ?').get(from, to) as { n: number; f: number };
   return { paid: paid.n, paidFils: paid.f, refunded: refunded.n, refundedFils: refunded.f };
 }
 
