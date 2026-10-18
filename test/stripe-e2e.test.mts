@@ -351,7 +351,8 @@ for (const width of [375, 1280]) {
     await cardOption.waitFor();
     await cardOption.focus();
     await page.keyboard.press('Enter');
-    assert.equal(await cardOption.getAttribute('aria-checked'), 'true', 'chosen with the keyboard');
+    // Chosen with the keyboard (waits for the redraw: on a busy machine React may not have updated yet).
+    await page.getByRole('radio', { name: /^Card/, checked: true }).waitFor();
     const field = page.locator('[data-testid="card-element"] input[data-stub-card]');
     await field.waitFor();
     assert.equal(await overflow(page), false, 'no sideways scroll');
@@ -366,7 +367,7 @@ for (const width of [375, 1280]) {
     await pay.waitFor();
     assert.equal(await pay.isEnabled(), true, 'no SMS code needed to pay by card');
     assert.equal(await page.getByRole('button', { name: 'Send code' }).count(), 0);
-    assert.ok(await page.getByText('Paying by card: no SMS code needed').isVisible());
+    await page.getByText('Paying by card: no SMS code needed').waitFor();
     await page.screenshot({ path: path.join(server.dataDir, `card-${width}.png`) });
     assert.deepEqual(errors, []);
     await ctx.close();

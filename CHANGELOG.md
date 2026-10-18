@@ -4,8 +4,8 @@
 
 - **Chats open again in the Admin Hub.** Reported: tapping a chat showed "Something went wrong… i is not a function". Newer Chrome on phones answers a scroll request in a way the chat screen didn't expect; the screen now ignores that answer, and a test plays that newer Chrome to keep it fixed.
 - **Status.**
-  - **Benchmark:** a one-line change in the hub's chat screen (no server or shop code changed); see the pull request.
-  - **Tests:** full suite passed, including the new chat test (fails before the fix, passes after) and a check that no screen in the shop or hub has the same pattern.
+  - **Benchmark:** not run: a one-line change in the hub's chat screen, no server or storefront code changed.
+  - **Tests:** 582 passed (4 browser tests timed out while other builds loaded the machine and passed when rerun; one card-payment browser test now waits for the screen to redraw), including the new chat test (fails before the fix, passes after) and a check that no screen in the shop or hub has the same pattern.
   - **Dependency audit:** production 0 vulnerabilities; no package changes.
   - **Security scan:** not applicable (no new input, route or data).
 
