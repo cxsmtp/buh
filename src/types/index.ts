@@ -159,6 +159,102 @@ export interface Order {
   adminNotes?: string;
   /** Where the customer came from (first visit in the last 30 days). */
   source?: { source: string; campaign?: string };
+  /**
+   * "Confirm on WhatsApp": the customer sends the shop one message from their own WhatsApp
+   * (order number + this code), which shows the owner the number really is theirs. Absent
+   * when the order was not asked (no WhatsApp number, or switched off). Kept in the orders
+   * table's own columns, not in the order's JSON.
+   */
+  whatsappCheck?: WhatsAppCheck;
+  /**
+   * Card payment through the owner's Stripe account (paymentMethod 'online_card'). Kept in the
+   * orders table's own columns, not in the order's JSON. Customers see only state and label.
+   */
+  card?: CardPayment;
+  /**
+   * Bank transfer (paymentMethod 'bank_transfer'): the customer gets the bank details privately
+   * (email, WhatsApp, the order's private page) and uploads the transfer screenshot there; the
+   * owner marks it received. Kept in the orders table's own columns, not in the order's JSON.
+   */
+  bankTransfer?: BankTransferCheck;
+  /** Needs the owner's attention (own column, admin only; cleared with "Mark as handled"). */
+  attention?: OrderAttention;
+}
+
+/**
+ * A card order's payment. Only Stripe's word moves it: the signed webhook, or the server asking
+ * Stripe directly. pending: waiting for the customer; failed: the last try was declined (they may
+ * try again until the order times out); paid; refund_pending / refunded; canceled: never paid,
+ * the order was cancelled and its stock released.
+ */
+export type CardState = 'pending' | 'failed' | 'paid' | 'refund_pending' | 'refunded' | 'canceled';
+
+export interface CardPayment {
+  state: CardState;
+  /** "Apple Pay · Visa •••• 4242", from Stripe once paid. */
+  label?: string;
+  /** The PaymentIntent id (pi_…), from Stripe. Admin only. */
+  ref?: string;
+  paidAt?: string;
+  /** What Stripe confirmed it took, in AED. Admin only. */
+  paidAmount?: number;
+  refundRef?: string;
+  refundedAt?: string;
+  /** Refunded so far, in AED (a partial refund made in the Stripe dashboard). Admin only. */
+  refundedAmount?: number;
+  /** "test" or "live": the Stripe mode the payment was made in. Admin only. */
+  mode?: 'test' | 'live';
+  /** Cancelled without a refund through the shop (Stripe could not see the payment): refund it in Stripe's dashboard. */
+  refundOutsideAt?: string;
+}
+
+/** Something on an order the owner must look at (a refund that failed, a booking after a cancel…). Admin only. */
+export interface OrderAttention {
+  kind: 'refund_failed' | 'booked_after_cancel' | 'refund_outside_stripe' | 'card_unreachable';
+  text: string;
+  at: string;
+}
+
+/** Settings → Payments: card payments (with Apple Pay and Google Pay) through the owner's Stripe account. */
+export interface PaymentSettings {
+  /** Offer "Card" (and Apple Pay / Google Pay) at checkout. Off until the keys are in. */
+  cardEnabled: boolean;
+  /** pk_test_… or pk_live_… (public: it goes to the browser). */
+  stripePublishableKey: string;
+  /** sk_… or rk_… (secret: never leaves the server). */
+  stripeSecretKey: string;
+  /** whsec_… (secret: proves a webhook came from Stripe). */
+  stripeWebhookSecret: string;
+}
+
+export type BankState = 'awaiting' | 'uploaded' | 'not_received' | 'paid';
+
+export interface BankTransferCheck {
+  /** awaiting the transfer → uploaded (a screenshot to check) → paid; or not_received (looked, not there yet). */
+  state: BankState;
+  /** Screenshots uploaded so far (the latest replaces the earlier ones on screen; all are kept). */
+  uploads: number;
+  uploadedAt?: string;
+  /** When the bank details were emailed to the customer (once). */
+  emailedAt?: string;
+  checkedAt?: string;
+  checkedBy?: string;
+  /** The order's private page, /pay/<token>, while it is open (not paid or cancelled, under 14 days). */
+  payPath?: string;
+  /** The same page as a full link for the customer, from the shop's configured address only (admin only). */
+  payUrl?: string;
+}
+
+export interface WhatsAppCheck {
+  status: 'awaiting' | 'confirmed' | 'mismatch';
+  /** 4 digits, made by the server. Ties the message to the order; not a password. */
+  code: string;
+  /** Settings → Store & contact "Hold orders until confirmed": not confirmed or booked until then. */
+  hold: boolean;
+  /** The customer tapped the button (their WhatsApp opened). */
+  openedAt?: string;
+  checkedAt?: string;
+  checkedBy?: string;
 }
 
 export interface Customer {
@@ -242,6 +338,10 @@ export interface StoreSettings {
   askOnWhatsApp: boolean;
   /** "Ask on Instagram" (opens a direct message to instagramHandle). */
   askOnInstagram: boolean;
+  /** Ask each customer to confirm their order with one WhatsApp message (needs the number). */
+  confirmOrdersOnWhatsApp: boolean;
+  /** Don't confirm or book an order until that message has come (off: it goes through, marked "not yet confirmed"). */
+  holdUntilWhatsAppConfirmed: boolean;
 }
 
 /** Settings → Delivery: where we deliver, how fast, and the optional same-day service. */

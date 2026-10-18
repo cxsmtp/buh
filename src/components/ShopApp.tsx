@@ -1,12 +1,12 @@
 'use client';
 
 import React, { useState, useEffect, useMemo, useCallback, useRef } from 'react';
-import { Product, Order, CartItem, BedProfileMeasurement, BrandSettings, BankTransferDetails, CatalogSettings, StoreSettings, DeliverySettings, PhoneVerificationConfig } from '@/types';
+import { Product, Order, CartItem, BedProfileMeasurement, BrandSettings, CatalogSettings, StoreSettings, DeliverySettings, PhoneVerificationConfig } from '@/types';
 import { DEFAULT_CATALOG, DEFAULT_DELIVERY, DEFAULT_STORE } from '@/data/catalogDefaults';
 import { askWhatsAppLink, piecesLeft, refreshCart, ShopProvider, type FestivalView, type ShopInfo } from '@/lib/client/shop';
 import { captureLanding, decodeBag, type BagLine, type Landing } from '@/lib/client/landing';
 import { useLiveUpdates } from '@/lib/client/live';
-import { INITIAL_BANK_DETAILS, INITIAL_BRAND_SETTINGS } from '@/data/initialData';
+import { INITIAL_BRAND_SETTINGS } from '@/data/initialData';
 import { getJson } from '@/lib/apiClient';
 import { applyUpdate, checkForUpdate, registerServiceWorker, useUpdateWaiting } from '@/lib/client/pwa';
 
@@ -14,7 +14,7 @@ import { applyUpdate, checkForUpdate, registerServiceWorker, useUpdateWaiting } 
 async function fetchCatalog() {
   const [products, settings] = await Promise.all([
     getJson<{ products: Product[] }>('/api/products'),
-    getJson<{ brand: BrandSettings; bank: BankTransferDetails; supportEmail?: string; store?: StoreSettings; catalog?: { categories: CatalogSettings['categories']; lowStockThreshold: number }; festival?: FestivalView | null; phoneVerification?: PhoneVerificationConfig; chat?: { name: string; greeting: string } | null; delivery?: DeliverySettings }>('/api/settings/public'),
+    getJson<{ brand: BrandSettings; bankTransfer?: boolean; supportEmail?: string; store?: StoreSettings; catalog?: { categories: CatalogSettings['categories']; lowStockThreshold: number }; festival?: FestivalView | null; phoneVerification?: PhoneVerificationConfig; chat?: { name: string; greeting: string } | null; delivery?: DeliverySettings; payments?: { card: boolean; publishableKey?: string; phoneCheck?: boolean } }>('/api/settings/public'),
   ]);
   return { products, settings };
 }
@@ -104,7 +104,8 @@ export function ShopApp({ initialProductId }: { initialProductId?: string } = {}
   const productsRef = useRef<Product[]>([]);
   const [catalogError, setCatalogError] = useState('');
   const [brandSettings, setBrandSettings] = useState<BrandSettings>(INITIAL_BRAND_SETTINGS);
-  const [bankDetails, setBankDetails] = useState<BankTransferDetails>(INITIAL_BANK_DETAILS);
+  // Checkout offers bank transfer (the account itself is never sent to the website).
+  const [bankTransfer, setBankTransfer] = useState(false);
   const [supportEmail, setSupportEmail] = useState<string | undefined>(undefined);
   // How checkout verifies phones (the shop's own SMS, or Firebase).
   const [phoneVerification, setPhoneVerification] = useState<PhoneVerificationConfig>({ method: 'server' });
@@ -114,6 +115,8 @@ export function ShopApp({ initialProductId }: { initialProductId?: string } = {}
   const [festival, setFestival] = useState<FestivalView | null>(null);
   const [chatInfo, setChatInfo] = useState<{ name: string; greeting: string } | null>(null);
   const [delivery, setDelivery] = useState<DeliverySettings>(DEFAULT_DELIVERY);
+  // Card payments (Settings → Payments): Stripe's publishable key when switched on.
+  const [cardPayments, setCardPayments] = useState<{ publishableKey: string; phoneCheck?: boolean } | null>(null);
   // Where this visitor first came from (Instagram, WhatsApp…), sent with the order.
   const [landing] = useState<Landing | null>(() => (typeof window === 'undefined' ? null : captureLanding()));
   // Pre-fills Track Order (only rendered once opened, so no server/client mismatch).
@@ -146,13 +149,15 @@ export function ShopApp({ initialProductId }: { initialProductId?: string } = {}
     }
     if (settings.ok) {
       setBrandSettings(settings.data.brand);
-      setBankDetails(settings.data.bank);
+      setBankTransfer(settings.data.bankTransfer === true);
       if (settings.data.supportEmail) setSupportEmail(settings.data.supportEmail);
       if (settings.data.phoneVerification) setPhoneVerification(settings.data.phoneVerification);
       if (settings.data.store) setStoreSettings(settings.data.store);
       setFestival(settings.data.festival ?? null);
       setChatInfo(settings.data.chat ?? null);
       if (settings.data.delivery) setDelivery(settings.data.delivery);
+      const pay = settings.data.payments;
+      setCardPayments(pay?.card && pay.publishableKey ? { publishableKey: pay.publishableKey, ...(pay.phoneCheck ? { phoneCheck: true } : {}) } : null);
       if (settings.data.catalog) {
         setLowStockThreshold(settings.data.catalog.lowStockThreshold);
         setCategories(settings.data.catalog.categories);
@@ -393,7 +398,8 @@ export function ShopApp({ initialProductId }: { initialProductId?: string } = {}
           <span className="opacity-60 hidden sm:inline">(your bag is kept)</span>
         </div>
       )}
-      {/* Header */}
+      {/* The announcement bar and the header stay at the top together while the page scrolls. */}
+      <div data-testid="shop-top" className="sticky top-0 z-40 pt-safe bg-ink">
         <MarqueeBar brandSettings={brandSettings} />
         <Header
           cartCount={totalCartCount}
@@ -403,10 +409,11 @@ export function ShopApp({ initialProductId }: { initialProductId?: string } = {}
           onOpenTrack={() => setIsTrackerOpen(true)}
           brandSettings={brandSettings}
         />
+      </div>
 
       {/* Main Content Area (on phones, room at the bottom for the tab bar and the Help button) */}
       <main className="flex-1 max-w-7xl mx-auto w-full pb-[calc(5rem+env(safe-area-inset-bottom,0px))] md:pb-16 px-4 sm:px-6">
-        <div className="pt-4 sm:pt-6 space-y-5">
+        <div className="pt-3 sm:pt-4 space-y-4">
           <HeroBanner brand={brandSettings} pieces={catalogLoaded ? products.length : null} />
 
           <StoryChips
@@ -417,7 +424,7 @@ export function ShopApp({ initialProductId }: { initialProductId?: string } = {}
             motif={festival?.festivalId && festival.showBanner ? festival.theme.motif : null}
           />
 
-          <div ref={resultsRef} className="scroll-mt-16 space-y-3">
+          <div ref={resultsRef} className="scroll-mt-28 space-y-3">
             {/* Count, and Filter (a bottom sheet) only when wanted */}
             <div className="flex flex-wrap items-center justify-between gap-3 border-t border-line pt-4">
               <p className="label-caps text-ink-muted" aria-live="polite">
@@ -572,9 +579,10 @@ export function ShopApp({ initialProductId }: { initialProductId?: string } = {}
         isOpen={isCheckoutOpen}
         onClose={() => setIsCheckoutOpen(false)}
         items={cart}
-        bank={bankDetails}
+        bankTransfer={bankTransfer}
         supportEmail={supportEmail}
         phoneVerification={phoneVerification}
+        card={cardPayments}
         landing={landing}
         onOrderPlaced={handleOrderPlaced}
         onPricesChanged={async () => {

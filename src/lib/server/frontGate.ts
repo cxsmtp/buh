@@ -18,7 +18,9 @@ import {
   takeReveal,
   verifyDoorToken,
 } from './adminLink';
+import { PAY_ROUTE, openPayOrderId } from './bankPay';
 import { logEvent } from './log';
+import { takeAll } from './rateLimit';
 import { SLOW_MS, addressOf, countsAsProbe, recordMiss, verdictFor } from './scannerGuard';
 
 /**
@@ -37,6 +39,11 @@ import { SLOW_MS, addressOf, countsAsProbe, recordMiss, verdictFor } from './sca
  * - The shop's front page, only for a browser with the admin session cookie, right
  *   after the update that brought private links: sent once to the new link, so an
  *   owner who is signed in sees it.
+ * A bank-transfer order's private page (/pay/<token>, and its upload at /api/pay/<token>,
+ * src/lib/server/bankPay.ts) is not part of the hub's door: it passes as it is, with
+ * no-referrer, noindex and no-store, and page views limited per address and per order. Only a
+ * token that opens no order (unknown, expired, paid, cancelled) is handed on as an unknown
+ * address, so it gets the shop's ordinary 404, byte for byte.
  * Done here rather than in a Next.js proxy: a proxy's rewrite leaves its own headers
  * on the answer (so a 404 would differ from an unknown address's), and a proxy that
  * runs for every request costs the storefront.
@@ -85,6 +92,7 @@ export type GateDecision =
   | { kind: 'pass' }
   | { kind: 'unknown'; url: string }
   | { kind: 'hub'; url: string; cookie: string; hubHeader: string }
+  | { kind: 'pay'; orderId: string; api: boolean }
   | { kind: 'renew'; cookie: string };
 
 function serializeCookie(c: ReturnType<typeof doorCookie>): string {
@@ -98,6 +106,11 @@ export function decide(rawUrl: string | undefined, cookieHeader: string | undefi
   if (path.length > 1 && path.endsWith('/')) return { kind: 'pass' };
   const unknown = (api: boolean): GateDecision => ({ kind: 'unknown', url: `${api ? NOWHERE_API : NOWHERE_PAGE}${query}` });
   if (path === HUB_ROUTE || path.startsWith(`${HUB_ROUTE}/`) || path === '/_buh' || path.startsWith('/_buh/') || path.startsWith('/api/_buh')) return unknown(path.startsWith('/api/'));
+  if (path.startsWith(`${PAY_ROUTE}/`) || path.startsWith(`/api${PAY_ROUTE}/`)) {
+    const api = path.startsWith('/api/');
+    const orderId = openPayOrderId(path.slice(api ? `/api${PAY_ROUTE}/`.length : `${PAY_ROUTE}/`.length), now);
+    return orderId ? { kind: 'pay', orderId, api } : unknown(api);
+  }
   if (path.startsWith('/api/')) {
     if (!isAdminApi(path)) return { kind: 'pass' };
     const door = verifyDoorToken(doorTokenFromCookieHeader(cookieHeader), now);
@@ -161,6 +174,8 @@ function finalHeaders(res: http.ServerResponse, set: Record<string, string>, coo
 }
 
 const HUB_HEADERS = { 'referrer-policy': 'no-referrer', 'x-robots-tag': 'noindex, nofollow', 'cache-control': 'no-store' };
+/** Views of one order's private page: a customer opens it a few times; a guesser is stopped. */
+export const PAY_VIEW_LIMITS = { perAddress: 60, perOrder: 60, windowMs: 15 * 60 * 1000 };
 
 /** Right after the update that brought private links: send a signed-in owner opening the shop to the new link, once. */
 async function revealFor(cookieHeader: string): Promise<string | null> {
@@ -227,6 +242,17 @@ export function installFrontGate(): void {
       finalHeaders(res, HUB_HEADERS, decision.cookie);
     } else if (decision.kind === 'renew') {
       finalHeaders(res, {}, decision.cookie);
+    } else if (decision.kind === 'pay') {
+      if (!decision.api) {
+        const { perAddress, perOrder, windowMs } = PAY_VIEW_LIMITS;
+        const refused = takeAll([...(ip ? [{ key: `pay-view:${ip}`, max: perAddress, windowMs }] : []), { key: `pay-view:order:${decision.orderId}`, max: perOrder, windowMs }]);
+        if (refused) {
+          res.writeHead(429, { 'Content-Type': 'text/plain; charset=utf-8', 'Retry-After': String(refused.result.retryAfterSec), ...HUB_HEADERS });
+          res.end('Too many requests. Please try again in a few minutes.\n');
+          return true;
+        }
+      }
+      finalHeaders(res, HUB_HEADERS);
     }
 
     // The shop's front page, for a browser signed in to the hub: maybe the new link, once.

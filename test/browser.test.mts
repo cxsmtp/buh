@@ -282,14 +282,14 @@ test('the shop and the admin hub share one store: a customer order reaches the o
   // Backups are visible to the owner.
   await admin.getByRole('status').filter({ hasText: /Backup/ }).waitFor();
 
-  // 3. Bank details saved in the admin show at checkout.
+  // 3. Bank details saved in the admin turn bank transfer on at checkout, without showing the account.
   await admin.getByRole('button', { name: /Settings/ }).first().click();
   await admin.getByRole('button', { name: /Branding & bank/ }).click();
   await admin.getByPlaceholder('Emirates NBD').fill('Mashreq');
   await admin.getByPlaceholder('BEAUTIFUL UAE HOME TEXTILES LLC').fill('BUH TEXTILES LLC');
   await admin.getByPlaceholder('AE07 0331 2345 6789 0123 456').fill('AE07 0331 2345 6789 0123 456');
   await admin.getByRole('button', { name: 'Save bank details' }).click();
-  await admin.getByText(/checkout shows these details now/).waitFor();
+  await admin.getByText(/new bank-transfer orders get these details/).waitFor();
 
   // 4. Hiding a product removes it from the shop.
   await admin.getByRole('navigation', { name: 'Admin sections' }).getByRole('button', { name: /^Inventory/ }).click();
@@ -308,8 +308,9 @@ test('the shop and the admin hub share one store: a customer order reaches the o
   await fresh.getByRole('button', { name: /Add to Bag/ }).click();
   await fresh.getByRole('button', { name: /Proceed to Checkout/ }).click();
   await fresh.getByRole('radio', { name: /Bank transfer/ }).click();
-  await fresh.getByText('AE07 0331 2345 6789 0123 456').waitFor();
-  await fresh.getByText('Mashreq Bank Details').waitFor();
+  await fresh.getByText(/we.ll send our bank details by email and WhatsApp, with a private link to upload your transfer screenshot/).waitFor();
+  const shown = await fresh.locator('body').innerText();
+  assert.ok(!shown.includes('AE07') && !shown.includes('Mashreq') && !shown.includes('BUH TEXTILES'), 'the account is never on the website');
 
   await fresh.close();
   await ctx.close();
@@ -381,6 +382,10 @@ test('regression: every admin tab and settings section fits a 375 px phone, SMS 
   await page.goto(server.adminUrl, { waitUntil: 'domcontentloaded' });
   await sessionChecked;
   await page.getByRole('status').filter({ hasText: /Backup/ }).waitFor(); // admin data loaded
+  // Reported: on a phone the backup card squeezed its explanation into a narrow column beside the button.
+  const card = (await page.getByRole('status').filter({ hasText: /Backup/ }).boundingBox())!;
+  const detail = (await page.getByTestId('backup-detail').boundingBox())!;
+  assert.ok(detail.width >= card.width * 0.8, `backup explanation ${Math.round(detail.width)} px of a ${Math.round(card.width)} px card`);
   const nav = page.getByRole('navigation', { name: 'Admin sections' });
   // On a phone the bar holds Orders, Inventory, Chats and More; Customers and Settings are under More.
   for (const tab of ['Orders', 'Inventory', 'Chats', 'More']) {

@@ -255,6 +255,80 @@ const MIGRATIONS: Array<(db: DB) => void> = [
       CREATE INDEX stock_moves_unaudited ON stock_moves(id) WHERE audited_at IS NULL;
     `);
   },
+  // 8: "Confirm on WhatsApp". The customer sends the shop one WhatsApp message (order number +
+  //    wa_code); the owner marks it confirmed, or that the number didn't match. Own columns, so
+  //    an older version rewriting the order's JSON (during an update or after a rollback)
+  //    leaves them alone. Orders from before have phone_check 'none' (never asked).
+  (db) => {
+    db.exec(`
+      ALTER TABLE orders ADD COLUMN wa_code TEXT;
+      ALTER TABLE orders ADD COLUMN phone_check TEXT NOT NULL DEFAULT 'none';   -- none | awaiting | confirmed | mismatch
+      ALTER TABLE orders ADD COLUMN wa_hold INTEGER NOT NULL DEFAULT 0;         -- 1: not confirmed or booked until confirmed
+      ALTER TABLE orders ADD COLUMN wa_opened_at TEXT;
+      ALTER TABLE orders ADD COLUMN phone_checked_at TEXT;
+      ALTER TABLE orders ADD COLUMN phone_checked_by TEXT;
+      CREATE INDEX orders_awaiting_whatsapp ON orders(created_at) WHERE phone_check = 'awaiting';
+    `);
+  },
+  // 9: card payments through the owner's Stripe account. Own columns, like migration 8, so an
+  //    older version rewriting the order's JSON leaves them alone; the order itself uses values
+  //    every version knows (payment method 'online_card', status 'pending_payment', JSON payment
+  //    status 'pending' → 'paid'). payment_ref is the PaymentIntent id Stripe gave (never made
+  //    up here); card_secret_hash lets the paying browser (which holds the client secret) ask
+  //    about its own order. stripe_events: each webhook event is applied once (Stripe resends).
+  (db) => {
+    db.exec(`
+      ALTER TABLE orders ADD COLUMN card_state TEXT NOT NULL DEFAULT 'none';   -- none | pending | failed | paid | refund_pending | refunded | canceled
+      ALTER TABLE orders ADD COLUMN payment_ref TEXT;
+      ALTER TABLE orders ADD COLUMN card_secret_hash TEXT;
+      ALTER TABLE orders ADD COLUMN paid_fils INTEGER;
+      ALTER TABLE orders ADD COLUMN paid_at TEXT;
+      ALTER TABLE orders ADD COLUMN card_label TEXT;
+      ALTER TABLE orders ADD COLUMN refund_ref TEXT;
+      ALTER TABLE orders ADD COLUMN refunded_at TEXT;
+      ALTER TABLE orders ADD COLUMN card_livemode INTEGER;     -- 1 live, 0 test: the Stripe mode the PaymentIntent was made in
+      ALTER TABLE orders ADD COLUMN card_ip TEXT;              -- hash of the placing connection's address (a cap on unpaid card orders)
+      ALTER TABLE orders ADD COLUMN refunded_fils INTEGER;     -- refunded so far (a partial refund made in the Stripe dashboard)
+      ALTER TABLE orders ADD COLUMN refund_outside_at TEXT;    -- cancelled without a Stripe refund through the shop (refunded in Stripe's dashboard)
+      ALTER TABLE orders ADD COLUMN needs_attention TEXT;      -- JSON {kind, text, at}: something the owner must look at
+      CREATE UNIQUE INDEX orders_by_payment_ref ON orders(payment_ref) WHERE payment_ref IS NOT NULL;
+      CREATE INDEX orders_card_open ON orders(created_at) WHERE card_state IN ('pending', 'failed');
+      CREATE TABLE stripe_events (
+        id        TEXT PRIMARY KEY,          -- Stripe's event id (evt_…)
+        type      TEXT NOT NULL,
+        order_id  TEXT,
+        at        TEXT NOT NULL,
+        outcome   TEXT NOT NULL
+      );
+    `);
+  },
+  // 10: bank transfer without the bank account on the website. Each bank-transfer order has a
+  //     private page (/pay/<token>) with the details and an upload for the transfer screenshot.
+  //     The token is never stored: it is made from the server's key and pay_nonce, and only its
+  //     hash is kept (to find the order). Own columns, like migrations 8 and 9, so an older version
+  //     rewriting the order's JSON leaves them alone. Orders from before carry on as they were:
+  //     a transfer already uploaded at checkout is "to check", the others wait for the transfer.
+  (db) => {
+    db.exec(`
+      ALTER TABLE orders ADD COLUMN pay_nonce TEXT;
+      ALTER TABLE orders ADD COLUMN pay_token_hash TEXT;
+      ALTER TABLE orders ADD COLUMN pay_expires_at TEXT;
+      ALTER TABLE orders ADD COLUMN bank_state TEXT NOT NULL DEFAULT 'none';   -- none | awaiting | uploaded | not_received | paid
+      ALTER TABLE orders ADD COLUMN transfer_uploads INTEGER NOT NULL DEFAULT 0;
+      ALTER TABLE orders ADD COLUMN transfer_uploaded_at TEXT;
+      ALTER TABLE orders ADD COLUMN bank_emailed_at TEXT;
+      ALTER TABLE orders ADD COLUMN bank_checked_at TEXT;
+      ALTER TABLE orders ADD COLUMN bank_checked_by TEXT;
+      CREATE UNIQUE INDEX orders_by_pay_token ON orders(pay_token_hash) WHERE pay_token_hash IS NOT NULL;
+      CREATE INDEX orders_transfer_to_check ON orders(created_at) WHERE bank_state = 'uploaded';
+      UPDATE orders SET bank_state = CASE
+          WHEN payment_status IN ('verified', 'paid') THEN 'paid'
+          WHEN payment_status = 'receipt_uploaded' THEN 'uploaded'
+          ELSE 'awaiting' END,
+        transfer_uploads = CASE WHEN json_extract(data, '$.paymentReceiptUrl') IS NOT NULL THEN 1 ELSE 0 END
+        WHERE payment_method = 'bank_transfer';
+    `);
+  },
 ];
 
 let db: DB | null = null;

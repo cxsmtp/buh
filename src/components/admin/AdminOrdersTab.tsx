@@ -1,7 +1,7 @@
 'use client';
 
 import React, { useState } from 'react';
-import { Order, CourierProvider, CourierSettings } from '@/types';
+import { BankTransferDetails, Order, CourierProvider, CourierSettings } from '@/types';
 import { ShippingLabelModal } from './ShippingLabelModal';
 import { 
   CheckCircle2, 
@@ -18,16 +18,47 @@ import {
   ShieldCheck,
   Building2,
   Banknote,
+  CreditCard,
   X,
 } from 'lucide-react';
 import { postJson, sendJson } from '@/lib/apiClient';
+import { awaitingWhatsApp, heldForWhatsApp, OrderTimeline, OrderWhatsAppCheck } from './OrderWhatsAppCheck';
+import { OrderBankTransfer, transferToCheck } from './OrderBankTransfer';
 
 interface AdminOrdersTabProps {
   orders: Order[];
   /** An order changed on the server (status, payment, courier): replace it in the list. */
   onOrderChanged: (order: Order) => void;
   courierSettings: CourierSettings;
+  /** The shop's bank account (Settings), for the "Send bank details on WhatsApp" message. */
+  bank?: BankTransferDetails;
+  shopName?: string;
 }
+
+/** A card order's payment, as the hub shows it (only Stripe's word moves it: src/lib/server/payments.ts). */
+export function cardBadge(order: Order): { text: string; tone: 'success' | 'warning' | 'danger' | 'muted' } | null {
+  const c = order.card;
+  if (order.paymentMethod !== 'online_card' || !c) return null;
+  if (c.state === 'paid' && c.refundOutsideAt) return { text: `Paid by card · cancelled without a Stripe refund: refund AED ${cardLeft(order)} in the Stripe dashboard`, tone: 'danger' };
+  if (c.state === 'paid') return { text: `Paid by card${c.label ? ` · ${c.label}` : ''}${c.refundedAmount ? ` · AED ${c.refundedAmount} refunded in Stripe` : ''}`, tone: 'success' };
+  if (c.state === 'pending') return { text: 'Waiting for the card payment', tone: 'warning' };
+  if (c.state === 'failed') return { text: 'Card declined: the customer may try again', tone: 'warning' };
+  if (c.state === 'refund_pending') return { text: `Refund of AED ${c.paidAmount ?? order.total} on its way to the card`, tone: 'warning' };
+  if (c.state === 'refunded') return { text: `Refunded AED ${c.paidAmount ?? order.total} to the card`, tone: 'muted' };
+  return { text: 'Card payment not taken (cancelled)', tone: 'muted' };
+}
+
+/** What is left to refund of a card payment (paid, less a partial refund made in Stripe's dashboard), in AED. */
+export function cardLeft(order: Order): number {
+  return Math.max(0, Math.round(((order.card?.paidAmount ?? order.total) - (order.card?.refundedAmount ?? 0)) * 100)) / 100;
+}
+
+const TONES = {
+  success: 'bg-success-soft text-success border-success-line',
+  warning: 'bg-warning-soft text-warning border-warning-line',
+  danger: 'bg-danger-soft text-danger border-danger-line',
+  muted: 'bg-sand text-ink-soft border-line',
+};
 
 /** Status moves the server allows (src/lib/server/orders.ts), with their button labels. */
 const NEXT_ACTIONS: Partial<Record<Order['status'], Array<{ to: Order['status']; label: string }>>> = {
@@ -43,10 +74,12 @@ export const AdminOrdersTab: React.FC<AdminOrdersTabProps> = ({
   orders,
   onOrderChanged,
   courierSettings,
+  bank,
+  shopName,
 }) => {
   const [busyOrderId, setBusyOrderId] = useState('');
 
-  const patchOrder = async (order: Order, changes: Partial<Pick<Order, 'status' | 'paymentStatus' | 'adminNotes'>>, confirmText?: string) => {
+  const patchOrder = async (order: Order, changes: Partial<Pick<Order, 'status' | 'paymentStatus' | 'adminNotes'>> & { clearAttention?: true }, confirmText?: string) => {
     if (confirmText && !window.confirm(confirmText)) return;
     setBusyOrderId(order.id);
     const { ok, data } = await sendJson<{ order?: Order; message?: string }>('PATCH', `/api/admin/orders/${encodeURIComponent(order.id)}`, changes);
@@ -55,7 +88,60 @@ export const AdminOrdersTab: React.FC<AdminOrdersTabProps> = ({
     else alert(data.message || 'The order could not be updated.');
   };
 
-  const [filter, setFilter] = useState<'all' | 'pending' | 'confirmed' | 'dispatched'>('all');
+  /** "Cancel & refund AED X": refunds what is left through Stripe, recorded from Stripe's answer; the order is cancelled. */
+  const refundOrder = async (order: Order) => {
+    const amount = cardLeft(order);
+    const left = ['dispatched', 'out_for_delivery'].includes(order.status);
+    if (
+      !window.confirm(
+        `Refund AED ${amount} to the customer's card and cancel ${order.id}?` +
+          (order.status === 'cancelled' ? '' : left ? ' It has left with the courier, so its pieces are NOT put back on sale.' : ' Its items go back into stock.') +
+          ' This cannot be undone.'
+      )
+    )
+      return;
+    setBusyOrderId(order.id);
+    const { ok, data } = await postJson<{ order?: Order; message?: string; code?: string }>(`/api/admin/orders/${encodeURIComponent(order.id)}/refund`, { amount });
+    setBusyOrderId('');
+    if (ok && data.order) return onOrderChanged(data.order);
+    // The keys now saved can't reach this payment (switched between test and live): the owner may
+    // cancel it here and refund it in the Stripe dashboard of the account it was paid to.
+    if (data.code === 'card_unreachable') {
+      if (
+        !window.confirm(
+          `${data.message}\n\nCancel ${order.id} without a Stripe refund? You then refund AED ${amount} yourself in the Stripe dashboard of the account it was paid to${order.card?.mode ? ` (${order.card.mode} mode)` : ''}.`
+        )
+      )
+        return;
+      setBusyOrderId(order.id);
+      const second = await postJson<{ order?: Order; message?: string }>(`/api/admin/orders/${encodeURIComponent(order.id)}/refund`, { amount, withoutStripeRefund: true, confirm: 'refund-in-stripe-dashboard' });
+      setBusyOrderId('');
+      if (second.ok && second.data.order) return onOrderChanged(second.data.order);
+      return alert(second.data.message || 'The order could not be cancelled.');
+    }
+    alert(data.message || 'The refund could not be made.');
+  };
+
+  /** "Mark payment received" on a bank transfer: the server's checked, audited "Payment received". */
+  const bankReceived = async (order: Order) => {
+    if (!window.confirm(`Confirm that AED ${order.total} for ${order.id} has arrived in the bank account?`)) return;
+    setBusyOrderId(order.id);
+    const { ok, data } = await postJson<{ order?: Order; message?: string }>(`/api/admin/orders/${encodeURIComponent(order.id)}/bank`, { result: 'received' });
+    setBusyOrderId('');
+    if (ok && data.order) onOrderChanged(data.order);
+    else alert(data.message || 'Not saved. Please try again.');
+  };
+
+  /** "Mark as handled" on a note that needed the owner (a failed refund, a booking after a cancel…). */
+  const handled = (order: Order) => patchOrder(order, { clearAttention: true });
+
+  const [filter, setFilter] = useState<'all' | 'pending' | 'whatsapp' | 'transfer' | 'card' | 'confirmed' | 'dispatched'>('all');
+  // Orders the owner has just answered stay in "Awaiting WhatsApp" (or "Transfer to check") for now, so the reply link is right there.
+  const [justChecked, setJustChecked] = useState<string[]>([]);
+  const whatsappChecked = (o: Order) => {
+    setJustChecked((ids) => (ids.includes(o.id) ? ids : [...ids, o.id]));
+    onOrderChanged(o);
+  };
   const [selectedOrderForConfirm, setSelectedOrderForConfirm] = useState<Order | null>(null);
   const [labelOrder, setLabelOrder] = useState<Order | null>(null);
 
@@ -69,6 +155,9 @@ export const AdminOrdersTab: React.FC<AdminOrdersTabProps> = ({
 
   const filteredOrders = orders.filter((o) => {
     if (filter === 'pending') return o.status === 'pending_confirmation';
+    if (filter === 'whatsapp') return awaitingWhatsApp(o) || justChecked.includes(o.id);
+    if (filter === 'transfer') return transferToCheck(o) || justChecked.includes(o.id);
+    if (filter === 'card') return o.paymentMethod === 'online_card';
     if (filter === 'confirmed') return o.status === 'confirmed';
     if (filter === 'dispatched') return o.status === 'dispatched';
     return true;
@@ -153,11 +242,17 @@ export const AdminOrdersTab: React.FC<AdminOrdersTabProps> = ({
         {[
           { id: 'all', label: 'All Orders' },
           { id: 'pending', label: 'Needs Confirmation' },
+          { id: 'whatsapp', label: 'Awaiting WhatsApp' },
+          { id: 'transfer', label: 'Transfer to check' },
+          { id: 'card', label: 'Card payments' },
           { id: 'confirmed', label: 'Confirmed & AWB Ready' },
           { id: 'dispatched', label: 'Dispatched / In Transit' },
-        ].map((tab) => {
+        ].filter((tab) => (tab.id !== 'whatsapp' || orders.some((o) => o.whatsappCheck)) && (tab.id !== 'transfer' || orders.some((o) => o.bankTransfer)) && (tab.id !== 'card' || orders.some((o) => o.paymentMethod === 'online_card'))).map((tab) => {
           const count = orders.filter((o) => {
             if (tab.id === 'pending') return o.status === 'pending_confirmation';
+            if (tab.id === 'whatsapp') return awaitingWhatsApp(o);
+            if (tab.id === 'transfer') return transferToCheck(o);
+            if (tab.id === 'card') return o.paymentMethod === 'online_card';
             if (tab.id === 'confirmed') return o.status === 'confirmed';
             if (tab.id === 'dispatched') return o.status === 'dispatched';
             return true;
@@ -194,6 +289,10 @@ export const AdminOrdersTab: React.FC<AdminOrdersTabProps> = ({
           filteredOrders.map((order) => {
             const isPending = order.status === 'pending_confirmation';
             const isCod = order.paymentMethod === 'cod';
+            const isCard = order.paymentMethod === 'online_card';
+            const card = cardBadge(order);
+            const cardPaid = order.card?.state === 'paid';
+            const cardUnpaid = order.card?.state === 'pending' || order.card?.state === 'failed';
 
             return (
               <div
@@ -246,11 +345,15 @@ export const AdminOrdersTab: React.FC<AdminOrdersTabProps> = ({
                           : 'bg-success-soft text-success border border-success-line'
                       }`}
                     >
-                      {isCod ? <Banknote className="w-3 h-3" /> : <Building2 className="w-3 h-3" />}
-                      <span>{isCod ? 'Cash on Delivery' : 'Bank Transfer'}</span>
+                      {isCod ? <Banknote className="w-3 h-3" /> : isCard ? <CreditCard className="w-3 h-3" /> : <Building2 className="w-3 h-3" />}
+                      <span>{isCod ? 'Cash on Delivery' : isCard ? 'Card (Stripe)' : 'Bank Transfer'}</span>
                     </span>
                   </div>
                 </div>
+
+                {/* Confirm on WhatsApp, and the bank transfer: first, so the owner sees them on the phone */}
+                <OrderWhatsAppCheck order={order} onOrderChanged={whatsappChecked} />
+                {bank && <OrderBankTransfer order={order} bank={bank} shopName={shopName} onOrderChanged={whatsappChecked} />}
 
                 {/* Items & Delivery Info */}
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 text-xs">
@@ -305,9 +408,30 @@ export const AdminOrdersTab: React.FC<AdminOrdersTabProps> = ({
                   </div>
                 </div>
 
+                {/* Something the owner must look at (a refund that failed, a booking after a cancel…) */}
+                {order.attention && (
+                  <div data-testid="order-attention" role="alert" className="flex flex-wrap items-start gap-2 rounded-xl border border-danger-line bg-danger-soft p-2.5 text-[11px] text-danger">
+                    <AlertCircle className="w-4 h-4 shrink-0" aria-hidden="true" />
+                    <span className="flex-1 min-w-0 font-semibold break-anywhere">{order.attention.text}</span>
+                    <button
+                      type="button"
+                      disabled={busyOrderId === order.id}
+                      onClick={() => void handled(order)}
+                      className="px-2 py-1 rounded-lg font-semibold border border-danger-line bg-surface text-danger hover:bg-ivory disabled:opacity-50"
+                    >
+                      Mark as handled
+                    </button>
+                  </div>
+                )}
+
                 {/* Payment & progress */}
                 <div className="flex flex-wrap items-center gap-2 text-[11px]">
-                  {!isCod && (
+                  {card && (
+                    <span data-testid="card-badge" className={`px-2 py-1 rounded-lg font-semibold border break-anywhere ${TONES[card.tone]}`}>
+                      {card.text}
+                    </span>
+                  )}
+                  {!isCod && !isCard && !(bank && order.bankTransfer) && (
                     <>
                       <span
                         className={`px-2 py-1 rounded-lg font-semibold border ${
@@ -333,7 +457,7 @@ export const AdminOrdersTab: React.FC<AdminOrdersTabProps> = ({
                         <button
                           type="button"
                           disabled={busyOrderId === order.id}
-                          onClick={() => patchOrder(order, { paymentStatus: 'verified' }, `Confirm that AED ${order.total} for ${order.id} has arrived in the bank account?`)}
+                          onClick={() => void bankReceived(order)}
                           className="px-2 py-1 rounded-lg font-semibold border border-success-line bg-success-soft text-success hover:bg-success-soft disabled:opacity-50"
                         >
                           Mark payment received
@@ -341,7 +465,7 @@ export const AdminOrdersTab: React.FC<AdminOrdersTabProps> = ({
                       )}
                     </>
                   )}
-                  {(NEXT_ACTIONS[order.status] || []).map((action) => (
+                  {(heldForWhatsApp(order) ? [] : NEXT_ACTIONS[order.status] || []).map((action) => (
                     <button
                       key={action.to}
                       type="button"
@@ -352,7 +476,16 @@ export const AdminOrdersTab: React.FC<AdminOrdersTabProps> = ({
                       {action.label}
                     </button>
                   ))}
-                  {order.status !== 'cancelled' && order.status !== 'delivered' && (
+                  {isCard && cardPaid && order.status !== 'delivered' && !order.card?.refundOutsideAt ? (
+                    <button
+                      type="button"
+                      disabled={busyOrderId === order.id}
+                      onClick={() => void refundOrder(order)}
+                      className="px-2 py-1 rounded-lg font-semibold border border-danger-line bg-surface text-danger hover:bg-danger-soft disabled:opacity-50 ml-auto"
+                    >
+                      {order.status === 'cancelled' ? `Refund AED ${cardLeft(order)} to the card` : `Cancel & refund AED ${cardLeft(order)} to the card`}
+                    </button>
+                  ) : order.status !== 'cancelled' && order.status !== 'delivered' && order.card?.state !== 'refund_pending' && (
                     <button
                       type="button"
                       disabled={busyOrderId === order.id}
@@ -362,6 +495,8 @@ export const AdminOrdersTab: React.FC<AdminOrdersTabProps> = ({
                           { status: 'cancelled' },
                           (['dispatched', 'out_for_delivery'].includes(order.status)
                             ? `Cancel order ${order.id}? It has left with the courier, so its pieces are NOT put back on sale: add them back in Inventory (+) when the parcel returns. This cannot be undone.`
+                            : cardUnpaid
+                            ? `Cancel order ${order.id}? Its card payment is stopped at Stripe (nothing was charged) and its items go back into stock. This cannot be undone.`
                             : `Cancel order ${order.id}? Its items go back into stock. This cannot be undone.`) +
                             (order.courier.awbNumber && !order.courier.simulated
                               ? `\n\nIt is booked with the courier (AWB ${order.courier.awbNumber}): cancel that booking in the carrier's portal too.`
@@ -374,6 +509,8 @@ export const AdminOrdersTab: React.FC<AdminOrdersTabProps> = ({
                     </button>
                   )}
                 </div>
+
+                <OrderTimeline orderId={order.id} />
 
                 {/* Action Buttons */}
                 <div className="flex items-center justify-between gap-2 pt-1">
@@ -402,7 +539,11 @@ export const AdminOrdersTab: React.FC<AdminOrdersTabProps> = ({
                   </div>
 
                   {/* Confirm Order Action (Primary) */}
-                  {isPending ? (
+                  {isCard && cardUnpaid ? (
+                    <span className="text-[11px] text-warning font-semibold text-right">Not paid yet: nothing to confirm until Stripe says paid</span>
+                  ) : isPending && heldForWhatsApp(order) ? (
+                    <span className="text-[11px] text-warning font-semibold text-right">Held until confirmed on WhatsApp</span>
+                  ) : isPending ? (
                     <button
                       onClick={() => openConfirmationModal(order)}
                       className="flex items-center gap-1.5 bg-ink hover:bg-ink text-white font-bold text-xs px-4 py-2 rounded-xl transition-all shadow active:scale-95"
@@ -459,6 +600,8 @@ export const AdminOrdersTab: React.FC<AdminOrdersTabProps> = ({
                   <span>
                     {selectedOrderForConfirm.paymentMethod === 'cod'
                       ? 'Payment: Cash on Delivery (COD)'
+                      : selectedOrderForConfirm.paymentMethod === 'online_card'
+                      ? 'Payment: Paid by card (Prepaid)'
                       : 'Payment: Direct Bank Transfer (Prepaid)'}
                   </span>
                 </span>

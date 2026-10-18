@@ -1,19 +1,22 @@
 'use client';
 
-import React, { useState, useEffect } from 'react';
-import { BankTransferDetails, CartItem, Emirate, Order, PaymentMethod, PhoneVerificationConfig } from '@/types';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
+import dynamic from 'next/dynamic';
+import { CartItem, Emirate, Order, PaymentMethod, PhoneVerificationConfig } from '@/types';
 import { UAE_EMIRATES } from '@/data/initialData';
-import { searchAreas, type UAEArea } from '@/data/uaeAreas';
+import { resolveArea, searchAreas, type UAEArea } from '@/data/uaeAreas';
 import { cartFils, formatAed, toFils } from '@/lib/money';
 import { useShop } from '@/lib/client/shop';
 import { postJson } from '@/lib/apiClient';
 import { formatAccuracy, suggestAreaFromGps, UAE_KEY_LOCATIONS } from '@/lib/uaeLocations';
 import { deliveryCheck } from '@/lib/delivery';
+import { emirateFrom, walletAddress } from '@/lib/walletAddress';
+import type { CardPay, CardResult, StartedCardOrder, WalletPayment } from './StripeCheckout';
 import { AreaCombobox } from './AreaCombobox';
+import { WhatsAppConfirm } from './WhatsAppConfirm';
 import { 
   X, 
   CheckCircle2, 
-  Copy, 
   Check, 
   Upload, 
   MessageCircle, 
@@ -26,18 +29,30 @@ import {
   Crosshair, 
   Sparkles, 
   AlertCircle,
-  Truck
+  Truck,
+  CreditCard,
+  Loader2
 } from 'lucide-react';
 import confetti from 'canvas-confetti';
 import { PALETTE } from '@/lib/design/tokens';
 import { classifyPhone, PhoneVerification } from './PhoneVerification';
 
+// Stripe's fields: their own chunk, fetched only when checkout offers cards (never on the shop's first load).
+const CardFields = dynamic(() => import('./StripeCheckout').then((m) => m.CardFields), {
+  ssr: false,
+  loading: () => <p className="text-[11px] text-ink-muted py-2">Loading the secure card form…</p>,
+});
+const ExpressCheckout = dynamic(() => import('./StripeCheckout').then((m) => m.ExpressCheckout), { ssr: false });
+
 interface CheckoutModalProps {
   isOpen: boolean;
   onClose: () => void;
   items: CartItem[];
-  /** The shop's bank details for transfers (from the server). */
-  bank: BankTransferDetails;
+  /**
+   * Checkout offers bank transfer (the shop's account is saved). The account itself is never on the
+   * website: it is sent to the customer privately after the order (src/lib/server/bankPay.ts).
+   */
+  bankTransfer: boolean;
   /** The server stored the order (it is shown confirmed only after that). */
   onOrderPlaced: (order: Order) => void;
   /** Reload the catalogue and the bag (prices changed on the server). */
@@ -48,7 +63,18 @@ interface CheckoutModalProps {
   landing?: { source: string; campaign?: string } | null;
   /** How phones are verified: the shop's own SMS (default) or Firebase. */
   phoneVerification?: PhoneVerificationConfig;
+  /**
+   * Card payments through the shop's Stripe account (Settings → Payments), when switched on.
+   * phoneCheck: an SMS gateway is on, so a card order proves the phone with a code like any order.
+   */
+  card?: { publishableKey: string; phoneCheck?: boolean } | null;
 }
+
+/** Stripe.js's error types that mean the payment was refused, so nothing was charged (anything else: not known). */
+const surelyNotCharged = (errorType?: string) => errorType === 'card_error' || errorType === 'validation_error';
+
+/** A card order on the confirmation screen: paid only once the server has Stripe's word. */
+type CardShown = { state: string; label?: string };
 
 /** The customer's details from last time (this browser only; never the phone check). */
 interface Draft {
@@ -101,15 +127,17 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
   isOpen,
   onClose,
   items,
-  bank,
+  bankTransfer,
   onOrderPlaced,
   onPricesChanged,
   supportEmail,
   landing,
   phoneVerification,
+  card,
 }) => {
-  // One checkout attempt = one order, even if "Confirm" is sent twice (double tap, retry).
-  const [idempotencyKey] = useState(() => crypto.randomUUID());
+  // One checkout attempt = one order, even if "Confirm" is sent twice (double tap, retry). A card
+  // attempt that didn't go through is closed (its pieces back on sale), and the next one is new.
+  const [idempotencyKey, setIdempotencyKey] = useState(() => crypto.randomUUID());
   // Proof from the server that the phone passed SMS verification.
   const [phoneToken, setPhoneToken] = useState('');
   // Form State: what the customer typed last time is filled back in, so they carry on where they left off.
@@ -163,16 +191,31 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
   const setDeliveryOption = (option: 'standard' | 'same_day') => setDeliveryChoice({ option, key: `${emirate}|${area}` });
   const [locationProblem, setLocationProblem] = useState(false);
 
-  // Payment Method & Bank Transfer
+  // Payment Method
   const [paymentMethod, setPaymentMethod] = useState<PaymentMethod>('cod');
-  const [bankRef, setBankRef] = useState('');
-  const [receiptUrl, setReceiptUrl] = useState<string | null>(null);
-  const [copiedIban, setCopiedIban] = useState(false);
 
   // Submission State
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [confirmedOrder, setConfirmedOrder] = useState<Order | null>(null);
   const [submitError, setSubmitError] = useState('');
+
+  // Card payments: Stripe's fields say when they can pay; the confirmation screen asks the server
+  // (which asks Stripe) until the payment is confirmed.
+  const cardPay = useRef<CardPay | null>(null);
+  // The card order the server made for this attempt (shown once Stripe has the payment).
+  const placed = useRef<Order | null>(null);
+  const [cardReady, setCardReady] = useState(false);
+  const onCardReady = useCallback((pay: CardPay | null) => {
+    cardPay.current = pay;
+    setCardReady(Boolean(pay));
+  }, []);
+  const [cardSecret, setCardSecret] = useState('');
+  const [cardShown, setCardShown] = useState<CardShown | null>(null);
+  const [walletNotice, setWalletNotice] = useState('');
+  // A card try whose outcome is unknown (the connection dropped): kept, so "Check again" can ask the
+  // server (which asks Stripe), and paying again continues the same order (never a second charge).
+  const [cardCheck, setCardCheck] = useState<{ order: Order; secret: string } | null>(null);
+  const [checkingCard, setCheckingCard] = useState(false);
 
   // Financial Calculations
   // In fils, like the server. Standard delivery and COD are free (same day adds Settings → Delivery's charge); the server is the source of truth and
@@ -182,8 +225,33 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
   const deliveryFils = sameDayChosen ? toFils(delivery.sameDay.fee) : 0;
   const totalFils = cartFils(items) + deliveryFils;
   const grandTotal = formatAed(totalFils);
-  const bankReady = Boolean(bank.iban && bank.accountName && bank.bankName);
+  const bankReady = bankTransfer;
   const shopWhatsApp = useShop().store.whatsappNumber.replace(/\D/g, '');
+  const byCard = paymentMethod === 'online_card' && Boolean(card);
+  // With an SMS gateway on, a card order needs the phone code too (once per checkout).
+  const cardNeedsCode = byCard && Boolean(card?.phoneCheck);
+  const phoneOk = classifyPhone(phone).kind === 'uae';
+
+  // The confirmation screen of a card order: ask the server until Stripe has confirmed (or not).
+  const confirmedId = confirmedOrder?.id;
+  const waitingForCard = Boolean(confirmedId && cardSecret && cardShown && (cardShown.state === 'pending' || cardShown.state === 'failed'));
+  useEffect(() => {
+    if (!waitingForCard || !confirmedId) return;
+    let tries = 0;
+    let stopped = false;
+    const ask = async () => {
+      if (stopped) return;
+      const { ok, data } = await postJson<{ card?: CardShown }>('/api/orders/payment', { orderId: confirmedId, clientSecret: cardSecret, action: 'check' });
+      if (stopped) return;
+      if (ok && data.card) setCardShown(data.card);
+      if (++tries < 40 && !(ok && data.card && data.card.state !== 'pending' && data.card.state !== 'failed')) timer = setTimeout(ask, tries < 10 ? 1500 : 4000);
+    };
+    let timer = setTimeout(ask, 800);
+    return () => {
+      stopped = true;
+      clearTimeout(timer);
+    };
+  }, [waitingForCard, confirmedId, cardSecret]);
 
 
 
@@ -281,91 +349,189 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
         .filter((l): l is (typeof UAE_KEY_LOCATIONS)[number] => Boolean(l))
     : [...UAE_KEY_LOCATIONS.filter((l) => l.emirate === emirate), ...UAE_KEY_LOCATIONS.filter((l) => l.emirate !== emirate)];
 
-  // Copy IBAN
-  const handleCopyIban = () => {
-    navigator.clipboard.writeText(bank.iban.replace(/\s+/g, ''));
-    setCopiedIban(true);
-    setTimeout(() => setCopiedIban(false), 2500);
+
+  /** The order body as checkout has it now, with any details the wallet gave instead. */
+  const orderBody = (method: PaymentMethod, over: { customer?: Partial<Record<'fullName' | 'phone' | 'email' | 'emirate' | 'area' | 'streetAddress' | 'buildingVilla' | 'flatVillaNo', string>>; deliveryOption?: 'standard' | 'same_day' } = {}) => ({
+    idempotencyKey,
+    // Card without an SMS gateway: no code needed (a verified number is still sent when there is one).
+    verificationToken: method === 'online_card' && !card?.phoneCheck && !(isPhoneVerified && phoneToken) ? undefined : phoneToken,
+    customer: {
+      fullName,
+      email: email || undefined,
+      emirate,
+      area,
+      streetAddress,
+      buildingVilla,
+      flatVillaNo,
+      landmark: landmark || undefined,
+      gpsCoordinates: gpsCoordinates || undefined,
+      ...(method === 'online_card' ? { phone: classifyPhone(phone).e164 || phone } : {}),
+      ...over.customer,
+    },
+    items: items.map((item) => ({
+      productId: item.product.id,
+      profileId: item.selectedProfile.id,
+      color: item.selectedColor,
+      quantity: item.quantity,
+    })),
+    paymentMethod: method,
+    deliveryOption: over.deliveryOption ?? (sameDayChosen ? 'same_day' : 'standard'),
+    expectedTotal: totalFils / 100,
+    source: landing ?? undefined,
+  });
+
+  /** A refused order: reload prices or delivery if that was why, and say what happened. */
+  const orderRefused = async (status: number, data: { message?: string; code?: string }) => {
+    if (status === 401) {
+      // The phone check expired (30 minutes): verify again.
+      setIsPhoneVerified(false);
+      setPhoneToken('');
+    }
+    // A price changed since the bag was filled: reload it, so the new total is shown before confirming.
+    if (status === 409 && data.code === 'price_changed') await onPricesChanged();
+    // Same-day closed while they were at checkout (past the cut-off): back to standard, total shown again.
+    if (status === 409 && data.code === 'same_day_unavailable') setDeliveryOption('standard');
+    return data.message || 'We could not place your order. Nothing was charged. Please try again.';
   };
 
-  const handleReceiptUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (file && file.size > 5 * 1024 * 1024) {
-      alert('That file is larger than 5 MB. Please upload a smaller screenshot or PDF.');
-      e.target.value = '';
-      return;
-    }
-    if (file) {
-      const reader = new FileReader();
-      reader.onload = (event) => {
-        setReceiptUrl(event.target?.result as string);
-      };
-      reader.readAsDataURL(file);
-    }
-  };
-
-  // Submit Order: the server checks the phone proof, prices, stock and totals.
-  const handleSubmitOrder = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (isSubmitting) return;
-    if (!fullName || !phone || !area || !streetAddress || !buildingVilla || !flatVillaNo) {
-      alert('Please fill in all mandatory delivery address fields.');
-      return;
-    }
-
-    // Orders are only taken from a verified UAE mobile number.
-    if (!isPhoneVerified || !phoneToken) {
-      document.getElementById('checkout-phone')?.focus();
-      alert('Please verify your UAE mobile number with the SMS code before placing your order.');
-      return;
-    }
-
-    setSubmitError('');
-    setIsSubmitting(true);
-    const { ok, status, data } = await postJson<{ order?: Order; message?: string }>('/api/orders', {
-      idempotencyKey,
-      verificationToken: phoneToken,
-      customer: {
-        fullName,
-        email: email || undefined,
-        emirate,
-        area,
-        streetAddress,
-        buildingVilla,
-        flatVillaNo,
-        landmark: landmark || undefined,
-        gpsCoordinates: gpsCoordinates || undefined,
-      },
-      items: items.map((item) => ({
-        productId: item.product.id,
-        profileId: item.selectedProfile.id,
-        color: item.selectedColor,
-        quantity: item.quantity,
-      })),
-      paymentMethod,
-      deliveryOption: sameDayChosen ? 'same_day' : 'standard',
-      expectedTotal: totalFils / 100,
-      source: landing ?? undefined,
-      bankTransferRef: paymentMethod === 'bank_transfer' ? bankRef || undefined : undefined,
-      receipt: paymentMethod === 'bank_transfer' ? receiptUrl || undefined : undefined,
-    });
-    setIsSubmitting(false);
-
+  /** Create the card order on the server (its prices, its total) and get Stripe's client secret for it. */
+  const startCardOrder = async (over: Parameters<typeof orderBody>[1] = {}): Promise<StartedCardOrder> => {
+    const { ok, status, data } = await postJson<{ order?: Order; payment?: { clientSecret?: string }; message?: string; code?: string }>('/api/orders', orderBody('online_card', over));
     if (!ok || !data.order) {
-      if (status === 401) {
-        // The phone check expired (30 minutes): verify again.
-        setIsPhoneVerified(false);
-        setPhoneToken('');
+      const message = await orderRefused(status, data);
+      // Stripe could not be reached: that attempt is closed on the server, so the next is a new one.
+      if (data.code === 'card_start_failed') setIdempotencyKey(crypto.randomUUID());
+      return { ok: false, message };
+    }
+    placed.current = data.order;
+    setCardCheck(null);
+    if (data.order.card?.state === 'paid') return { ok: false, paid: true, orderId: data.order.id };
+    if (data.order.card?.state === 'canceled' || data.order.status === 'cancelled') {
+      // That attempt timed out and was closed (never paid): the next tap is a new one.
+      setIdempotencyKey(crypto.randomUUID());
+      return { ok: false, message: 'That payment attempt was closed and nothing was charged. Please tap Pay again.' };
+    }
+    return { ok: true, orderId: data.order.id, clientSecret: data.payment?.clientSecret };
+  };
+
+  /** Stripe has the payment (or it didn't go through): show the confirmation, or close that attempt. */
+  const cardFinished = async (result: CardResult) => {
+    const order = placed.current && placed.current.id === result.orderId ? placed.current : null;
+    if (!result.ok && order && result.clientSecret) {
+      // Declined, the customer closed 3-D Secure, or the connection dropped: stop that payment so its
+      // pieces go back on sale (if Stripe says it was paid after all, it counts as paid).
+      const declined = surelyNotCharged(result.errorType);
+      const { ok, data } = await postJson<{ card?: CardShown; status?: string }>('/api/orders/payment', { orderId: order.id, clientSecret: result.clientSecret, action: 'abandon' });
+      if (ok && data.card?.state === 'paid') return showConfirmed(order, result.clientSecret, data.card);
+      if (ok && (data.card?.state === 'canceled' || data.status === 'cancelled')) {
+        // Stopped at Stripe: this attempt is over, the next one is new.
+        setIdempotencyKey(crypto.randomUUID());
+        setCardCheck(null);
+        setSubmitError(declined ? `${result.message || 'The payment did not go through.'} Nothing was charged.` : `${result.message || 'The payment did not go through.'} It was stopped, so you can try again.`);
+        return;
       }
-      // A price changed since the bag was filled: reload it, so the new total is shown before confirming.
-      if (status === 409 && (data as { code?: string }).code === 'price_changed') await onPricesChanged();
-      // Same-day closed while they were at checkout (past the cut-off): back to standard, total shown again.
-      if (status === 409 && (data as { code?: string }).code === 'same_day_unavailable') setDeliveryOption('standard');
-      setSubmitError(data.message || 'We could not place your order. Nothing was charged. Please try again.');
+      // Not known whether it went through (offline, or Stripe still busy with it): keep this attempt,
+      // so paying again continues the same order and the same payment, never a second one.
+      setCardCheck({ order, secret: result.clientSecret });
+      setSubmitError(
+        declined
+          ? `${result.message || 'The payment did not go through.'} Nothing was charged.`
+          : 'We couldn’t confirm the payment. Please check your connection; if your card was charged, your order is safe.'
+      );
       return;
     }
-    setConfirmedOrder(data.order);
-    onOrderPlaced(data.order);
+    if (!result.ok && order && order.card?.state === 'paid') return showConfirmed(order, '', order.card);
+    if (!result.ok || !order) {
+      if (result.message) setSubmitError(result.message);
+      return;
+    }
+    showConfirmed(order, result.clientSecret || '', order.card ?? { state: 'pending' });
+  };
+
+  /** "Check again": the server asks Stripe what happened to the payment that could not be confirmed. */
+  const checkCardAgain = async () => {
+    if (!cardCheck || checkingCard) return;
+    setCheckingCard(true);
+    const { ok, data } = await postJson<{ card?: CardShown; status?: string }>('/api/orders/payment', { orderId: cardCheck.order.id, clientSecret: cardCheck.secret, action: 'check' });
+    setCheckingCard(false);
+    if (!ok || !data.card) return setSubmitError('We still couldn’t reach the shop. Please check your connection, then tap Check again.');
+    if (data.card.state === 'paid') return showConfirmed(cardCheck.order, cardCheck.secret, data.card);
+    if (data.card.state === 'canceled' || data.status === 'cancelled') {
+      setIdempotencyKey(crypto.randomUUID());
+      setCardCheck(null);
+      return setSubmitError('That payment was not taken: nothing was charged. Please try again.');
+    }
+    setSubmitError('Stripe has not confirmed a payment for this order yet. You can tap Pay again: it continues the same order, so you are never charged twice.');
+  };
+
+  const showConfirmed = (order: Order, secret: string, shown: CardShown | null) => {
+    setCardCheck(null);
+    setSubmitError('');
+    setConfirmedOrder(order);
+    setCardSecret(secret);
+    setCardShown(shown);
+    onOrderPlaced(order);
+    celebrate();
+  };
+
+  /** Apple Pay / Google Pay gave the customer's details: fill checkout with them, and pay if nothing is missing. */
+  const payFromWallet = async ({ contact, deliveryOption }: WalletPayment): Promise<StartedCardOrder & { reason?: 'invalid_shipping_address' | 'address_unserviceable' | 'fail' }> => {
+    const w = walletAddress(contact);
+    setWalletNotice('');
+    setSubmitError('');
+    // What the wallet gave fills checkout (the customer sees it, and can correct it).
+    if (w.fullName) setFullName(w.fullName);
+    if (w.email) setEmail(w.email);
+    if (w.streetAddress) setStreetAddress(w.streetAddress);
+    if (w.buildingVilla) setBuildingVilla(w.buildingVilla);
+    if (w.flatVillaNo) setFlatVillaNo(w.flatVillaNo);
+    const walletEmirate = w.emirate ?? emirate;
+    if (w.emirate) setEmirate(w.emirate);
+    // The area: the wallet's, or the one chosen in checkout for the same emirate. Never a guess.
+    const typed = area.trim() ? resolveArea(area, walletEmirate) : null;
+    const chosenArea = w.area ?? (typed && typed.emirate === walletEmirate ? typed.name : null);
+    if (w.area) setArea(w.area);
+    if (!chosenArea) {
+      setWalletNotice('Your wallet gave us your address, but not an area we know. Please choose your area below, then tap the button again.');
+      setTimeout(() => document.getElementById('checkout-area')?.focus(), 50);
+      return { ok: false, reason: 'invalid_shipping_address', message: 'Please choose your area in checkout, then try again.' };
+    }
+    // The phone: the wallet's if it is a UAE mobile, else the one typed in checkout.
+    const walletPhone = classifyPhone(w.phone);
+    const mobile = walletPhone.kind === 'uae' ? walletPhone.e164 : classifyPhone(phone).kind === 'uae' ? classifyPhone(phone).e164 : '';
+    if (walletPhone.kind === 'uae') setPhone(walletPhone.e164);
+    if (!mobile) {
+      setWalletNotice('Couriers need a UAE mobile number: your wallet gave another one. Please type a UAE mobile below, then tap the button again.');
+      setTimeout(() => document.getElementById('checkout-phone')?.focus(), 50);
+      return { ok: false, reason: 'fail', message: 'Please add a UAE mobile number in checkout, then try again.' };
+    }
+    if (!deliveryCheck({ emirate: walletEmirate, area: chosenArea }, deliverySettings).serviceable) {
+      return { ok: false, reason: 'address_unserviceable', message: 'Sorry, we don’t deliver to that address yet.' };
+    }
+    // With an SMS gateway on, the phone is proved with a code first (once: a number already verified
+    // in this checkout is used as it is).
+    const verified = card?.phoneCheck ? (isPhoneVerified && phoneToken ? classifyPhone(phone).e164 : '') : mobile;
+    if (!verified) {
+      setWalletNotice('Please verify your UAE mobile number below (we send a code), then tap the button again.');
+      setTimeout(() => document.getElementById('checkout-phone')?.focus(), 50);
+      return { ok: false, reason: 'fail', message: 'Please verify your mobile number in checkout, then try again.' };
+    }
+    return startCardOrder({
+      customer: {
+        fullName: w.fullName || fullName,
+        email: w.email || email || '',
+        phone: verified,
+        emirate: walletEmirate,
+        area: chosenArea,
+        streetAddress: w.streetAddress || streetAddress,
+        buildingVilla: w.buildingVilla || buildingVilla,
+        flatVillaNo: w.flatVillaNo || flatVillaNo,
+      },
+      deliveryOption,
+    });
+  };
+
+  const celebrate = () => {
     try {
       // A light shower of gold (none for people who asked their device for less motion).
       confetti({
@@ -382,10 +548,72 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
     }
   };
 
+  // Submit Order: the server checks the phone proof, prices, stock and totals.
+  const handleSubmitOrder = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (isSubmitting) return;
+    if (!fullName || !phone || !area || !streetAddress || !buildingVilla || !flatVillaNo) {
+      alert('Please fill in all mandatory delivery address fields.');
+      return;
+    }
+
+    // Card switched off while checkout was open: say so (never quietly another way to pay).
+    if (paymentMethod === 'online_card' && !card) {
+      setSubmitError('Card payment is not available right now. Please choose another way to pay.');
+      return;
+    }
+    // Card: the courier still needs a UAE mobile, but no SMS code (paying is the proof).
+    if (byCard) {
+      if (!phoneOk) {
+        document.getElementById('checkout-phone')?.focus();
+        alert('Please enter your UAE mobile number for the courier.');
+        return;
+      }
+      if (cardNeedsCode && !(isPhoneVerified && phoneToken)) {
+        document.getElementById('checkout-phone')?.focus();
+        alert('Please verify your UAE mobile number with the SMS code before paying.');
+        return;
+      }
+      if (!cardPay.current) return;
+      setSubmitError('');
+      setIsSubmitting(true);
+      const result = await cardPay.current(() => startCardOrder());
+      await cardFinished(result);
+      setIsSubmitting(false);
+      return;
+    }
+
+    // Orders are only taken from a verified UAE mobile number.
+    if (!isPhoneVerified || !phoneToken) {
+      document.getElementById('checkout-phone')?.focus();
+      alert('Please verify your UAE mobile number with the SMS code before placing your order.');
+      return;
+    }
+
+    setSubmitError('');
+    setIsSubmitting(true);
+    const { ok, status, data } = await postJson<{ order?: Order; message?: string; code?: string }>('/api/orders', orderBody(paymentMethod));
+    setIsSubmitting(false);
+
+    if (!ok || !data.order) {
+      setSubmitError(await orderRefused(status, data));
+      return;
+    }
+    setConfirmedOrder(data.order);
+    onOrderPlaced(data.order);
+    celebrate();
+  };
+
   // SUCCESS CONFIRMATION SCREEN
   if (confirmedOrder) {
+    const askWhatsApp = Boolean(confirmedOrder.whatsappCheck && shopWhatsApp);
+    const paidByCard = confirmedOrder.paymentMethod === 'online_card';
+    const cardPaid = paidByCard && cardShown?.state === 'paid';
+    const cardOver = paidByCard && (cardShown?.state === 'canceled' || cardShown?.state === 'refunded');
+    const byTransfer = confirmedOrder.paymentMethod === 'bank_transfer';
+    const payPath = confirmedOrder.bankTransfer?.payPath;
     const whatsappMessage = encodeURIComponent(
-      `Hello Beautiful UAE Home! I have placed Order #${confirmedOrder.id} (${confirmedOrder.customer.fullName}) for AED ${confirmedOrder.total}. Payment method: ${confirmedOrder.paymentMethod === 'cod' ? 'Cash on Delivery' : 'Bank Transfer'}. Please confirm dispatch.`
+      `Hello Beautiful UAE Home! I have placed Order #${confirmedOrder.id} (${confirmedOrder.customer.fullName}) for AED ${confirmedOrder.total}. Payment method: ${confirmedOrder.paymentMethod === 'cod' ? 'Cash on Delivery' : paidByCard ? 'Card' : 'Bank Transfer'}. ${byTransfer ? 'Please send me the bank details.' : 'Please confirm dispatch.'}`
     );
 
     return (
@@ -397,7 +625,7 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
           </div>
 
           <div>
-            <span className="label-caps text-gold-deep">Order confirmed</span>
+            <span className="label-caps text-gold-deep">{cardOver ? 'Payment not taken' : paidByCard && !cardPaid ? 'Order received' : askWhatsApp && confirmedOrder.whatsappCheck?.hold ? 'Order received' : 'Order confirmed'}</span>
             <h2 id="order-confirmed-title" className="font-serif text-3xl text-ink mt-2">
               Thank you for your order
             </h2>
@@ -405,6 +633,29 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
               Your linens are being prepared with care in Dubai. We will send a tracking link as soon as they ship.
             </p>
           </div>
+
+          {/* Confirm on WhatsApp (Settings → Store & contact): one message from the customer's own WhatsApp. */}
+          {askWhatsApp && <WhatsAppConfirm orderId={confirmedOrder.id} phone={confirmedOrder.customer.phone} check={confirmedOrder.whatsappCheck!} bankDetails={byTransfer} />}
+
+          {/* Bank transfer: the details come privately (email, WhatsApp, the order's own page), never on the website. */}
+          {byTransfer && payPath && (
+            <section aria-labelledby="transfer-next" className="rounded-2xl border border-line bg-ivory p-4 space-y-3 text-left">
+              <h3 id="transfer-next" className="text-sm font-semibold text-ink">Paying by bank transfer</h3>
+              <p className="text-xs text-ink-soft leading-relaxed">
+                {confirmedOrder.customer.email ? 'We’ve sent our bank details to your email' : 'We’ll send you our bank details on WhatsApp'}, with a private link to upload your transfer screenshot. They are also on your order’s private page:
+              </p>
+              <a
+                href={payPath}
+                target="_blank"
+                rel="noopener"
+                className="w-full min-h-12 bg-ink hover:bg-ink-2 text-ivory font-semibold text-sm py-3 px-4 rounded-xl flex items-center justify-center gap-2 transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-gold focus-visible:ring-offset-2"
+              >
+                <Upload className="w-4 h-4 shrink-0" aria-hidden="true" />
+                <span>Upload your transfer screenshot</span>
+              </a>
+              <p className="text-[11px] text-ink-muted text-center">Please use <span className="font-mono">{confirmedOrder.id}</span> as the transfer reference.</p>
+            </section>
+          )}
 
           {/* Order Details Card */}
           <div className="bg-ivory rounded-2xl p-4 text-left border border-line space-y-2 text-xs">
@@ -435,15 +686,29 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
             </div>
 
 
-            <div className="flex justify-between items-center">
+            <div className="flex justify-between items-center gap-3">
               <span className="text-ink-muted font-medium">Payment Mode</span>
-              <span className="font-semibold text-ink capitalize">
-                {confirmedOrder.paymentMethod === 'cod' ? `Cash on Delivery (AED ${confirmedOrder.total})` : 'Direct Bank Transfer'}
-              </span>
+              {paidByCard ? (
+                <span data-testid="card-payment-status" role="status" aria-live="polite" className={`font-semibold text-right break-anywhere ${cardPaid ? 'text-success' : cardOver ? 'text-danger' : 'text-ink'}`}>
+                  {cardPaid ? (
+                    `Paid by card${cardShown?.label ? ` · ${cardShown.label}` : ''}`
+                  ) : cardOver ? (
+                    'The card payment did not go through: nothing was charged'
+                  ) : (
+                    <span className="inline-flex items-center gap-1">
+                      <Loader2 className="w-3.5 h-3.5 animate-spin" aria-hidden="true" /> Payment is being confirmed…
+                    </span>
+                  )}
+                </span>
+              ) : (
+                <span className="font-semibold text-ink capitalize">
+                  {confirmedOrder.paymentMethod === 'cod' ? `Cash on Delivery (AED ${confirmedOrder.total})` : 'Direct Bank Transfer'}
+                </span>
+              )}
             </div>
 
             <div className="flex justify-between items-center pt-2 border-t border-line">
-              <span className="font-semibold text-ink">Total Payable</span>
+              <span className="font-semibold text-ink">{cardPaid ? 'Total Paid' : 'Total Payable'}</span>
               <span className="font-semibold text-base text-ink">AED {confirmedOrder.total}</span>
             </div>
           </div>
@@ -452,7 +717,7 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
           {/* WhatsApp Direct Notification, and Done: always on the screen */}
           <div className="shrink-0 border-t border-line bg-surface p-4 pb-[max(1rem,env(safe-area-inset-bottom))] flex flex-col sm:flex-row gap-2">
             {/* The shop's WhatsApp number from Settings → Store & contact (hidden when none is set). */}
-            {shopWhatsApp && (
+            {shopWhatsApp && !askWhatsApp && (
               <a
                 href={`https://wa.me/${shopWhatsApp}?text=${whatsappMessage}`}
                 target="_blank"
@@ -487,7 +752,7 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
               Checkout
             </h2>
             <p className="text-[11px] text-ink-muted tracking-[0.02em]">
-              Free delivery across the UAE · Cash on delivery or bank transfer
+              {card ? 'Free delivery across the UAE · Card, Apple Pay, Google Pay or cash on delivery' : 'Free delivery across the UAE · Cash on delivery or bank transfer'}
             </p>
           </div>
           <button
@@ -518,13 +783,35 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
             </div>
           </div>
 
+          {/* Apple Pay / Google Pay / Link: the wallet fills in name, phone and address (only with card payments on) */}
+          {card && (
+            <ExpressCheckout
+              publishableKey={card.publishableKey}
+              amountFils={totalFils}
+              shippingRate={sameDayChosen ? { id: 'same_day', displayName: 'Same-day delivery', amount: deliveryFils } : { id: 'standard', displayName: `Free delivery in ${deliverySettings.standardDays}`, amount: 0 }}
+              servesEmirate={(state, city) => {
+                const em = emirateFrom(state) ?? emirateFrom(city);
+                return !em || deliverySettings.emirates.includes(em);
+              }}
+              onWallet={payFromWallet}
+              onDone={(r) => void cardFinished(r)}
+            />
+          )}
+          {walletNotice && (
+            <p role="alert" className="text-[11px] p-2.5 rounded-xl border bg-warning-soft text-warning border-warning-line font-semibold">
+              {walletNotice}
+            </p>
+          )}
+
           {/* Section 1: Contact Details & Customer OTP Verification */}
           <div className="space-y-3">
             <div className="flex items-center justify-between border-b border-line pb-1.5">
               <h3 className="label-caps text-ink flex items-center gap-1.5">
                 <span>1. Your details</span>
               </h3>
-              {isPhoneVerified ? (
+              {byCard && !cardNeedsCode && !isPhoneVerified ? (
+                <span className="text-[10px] text-ink-soft bg-sand px-2 py-0.5 rounded-full border border-line">Card: no SMS code needed</span>
+              ) : isPhoneVerified ? (
                 <span className="text-[10px] font-semibold text-success bg-success-soft px-2.5 py-0.5 rounded-full flex items-center gap-1 border border-success-line">
                   <Check className="w-3 h-3 text-success" />
                   <span>Mobile Verified</span>
@@ -562,6 +849,7 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
               <PhoneVerification
                 supportEmail={supportEmail}
                 verification={phoneVerification}
+                codeOptional={byCard && !cardNeedsCode}
                 phone={phone}
                 onPhoneChange={setPhone}
                 verified={isPhoneVerified}
@@ -874,93 +1162,56 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
                   {paymentMethod === 'bank_transfer' && <Check className="w-4 h-4 shrink-0 text-ink" />}
                 </span>
                 <span className="block text-[11px] leading-relaxed text-ink-soft break-anywhere">
-                  Transfer to our {bank.bankName} account; we dispatch as soon as it arrives.
+                  Transfer to our UAE bank account; we dispatch as soon as it arrives.
+                </span>
+              </button>}
+
+              {/* Option 3: Card through Stripe (only when switched on in Settings → Payments) */}
+              {card && <button
+                type="button"
+                role="radio"
+                aria-checked={paymentMethod === 'online_card'}
+                onClick={() => setPaymentMethod('online_card')}
+                className={`text-left p-3.5 rounded-2xl border transition-colors min-w-0 ${
+                  paymentMethod === 'online_card'
+                    ? 'border-ink bg-ivory ring-1 ring-ink text-ink'
+                    : 'border-line bg-surface text-ink hover:border-line-strong'
+                }`}
+              >
+                <span className="flex items-center justify-between gap-2 mb-1.5">
+                  <span className="flex items-center gap-2 min-w-0">
+                    <CreditCard className="w-5 h-5 shrink-0 text-gold-deep" strokeWidth={1.5} />
+                    <span className="text-sm">Card</span>
+                  </span>
+                  {paymentMethod === 'online_card' && <Check className="w-4 h-4 shrink-0 text-ink" />}
+                </span>
+                <span className="block text-[11px] leading-relaxed text-ink-soft">
+                  Visa, Mastercard and more, paid securely through Stripe.{card.phoneCheck ? '' : ' No SMS code needed.'}
                 </span>
               </button>}
             </div>
 
-            {/* If Bank Transfer Selected: Show UAE Bank Details & Receipt Uploader */}
+            {/* Card: Stripe's own fields (the number never touches this shop) */}
+            {byCard && card && (
+              <div className="rounded-2xl border border-line bg-surface p-3 min-w-0">
+                <CardFields publishableKey={card.publishableKey} amountFils={totalFils} onReady={onCardReady} />
+                <p className="mt-2 text-[10px] text-ink-muted flex items-center gap-1">
+                  <ShieldCheck className="w-3 h-3 text-gold" aria-hidden="true" /> Secured by Stripe. Your card details go straight to Stripe, never to us.
+                </p>
+              </div>
+            )}
+
+            {/* Bank transfer: the account is never shown on the website; it is sent privately after the order. */}
             {paymentMethod === 'bank_transfer' && bankReady && (
-              <div className="bg-warning-soft/70 rounded-2xl p-4 border border-warning-line/90 space-y-3 animate-in fade-in-50 text-xs">
-                <div className="flex items-center justify-between">
-                  <span className="font-semibold text-ink flex items-center gap-1.5">
-                    <ShieldCheck className="w-4 h-4 text-gold" />
-                    <span>{bank.bankName} Bank Details</span>
-                  </span>
-                  <button
-                    type="button"
-                    onClick={handleCopyIban}
-                    className="flex items-center gap-1 text-[11px] text-ink font-semibold bg-surface border border-line-strong px-2.5 py-1 rounded-lg hover:bg-ivory transition-colors"
-                  >
-                    {copiedIban ? <Check className="w-3.5 h-3.5 text-success" /> : <Copy className="w-3.5 h-3.5" />}
-                    <span>{copiedIban ? 'IBAN Copied!' : 'Copy IBAN'}</span>
-                  </button>
-                </div>
-
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 bg-surface p-3 rounded-xl border border-warning-line text-[11px]">
-                  <div>
-                    <span className="text-ink-muted block">Bank Name</span>
-                    <strong className="text-ink">{bank.bankName}</strong>
-                  </div>
-                  <div>
-                    <span className="text-ink-muted block">Account Name</span>
-                    <strong className="text-ink break-anywhere">{bank.accountName}</strong>
-                  </div>
-                  <div className="sm:col-span-2">
-                    <span className="text-ink-muted block">IBAN Number</span>
-                    <strong className="font-mono text-ink text-xs break-anywhere">{bank.iban}</strong>
-                  </div>
-                  <div>
-                    <span className="text-ink-muted block">Account Number</span>
-                    <strong className="font-mono text-ink">{bank.accountNumber}</strong>
-                  </div>
-                  <div>
-                    <span className="text-ink-muted block">SWIFT Code</span>
-                    <strong className="font-mono text-ink">{bank.swiftCode}</strong>
-                  </div>
-                </div>
-
-                {bank.instructions && <p className="text-[11px] text-ink-soft leading-relaxed">{bank.instructions}</p>}
-
-                {/* Optional Reference or Receipt Upload */}
-                <div className="space-y-2 pt-1">
-                  <div>
-                    <label className="block text-ink font-semibold mb-1">
-                      Bank Transfer Reference / Transaction ID:
-                    </label>
-                    <input
-                      type="text"
-                      placeholder="e.g. ENBD-TX-849201948"
-                      value={bankRef}
-                      onChange={(e) => setBankRef(e.target.value)}
-                      className="w-full px-3.5 py-2.5 rounded-xl border border-line-strong bg-surface text-ink placeholder:text-ink-muted font-medium focus:outline-none focus:ring-1 focus:ring-gold text-xs"
-                    />
-                  </div>
-
-                  <div>
-                    <label className="block text-ink font-semibold mb-1">
-                      Attach Transfer Receipt / Screenshot:
-                    </label>
-                    <div className="flex items-center gap-3">
-                      <label className="flex items-center gap-1.5 px-3 py-2 bg-surface border border-line-strong rounded-xl cursor-pointer hover:bg-ivory text-ink-soft text-xs font-semibold">
-                        <Upload className="w-3.5 h-3.5 text-gold" />
-                        <span>Upload Screenshot</span>
-                        <input
-                          type="file"
-                          accept="image/png,image/jpeg,image/webp,application/pdf"
-                          onChange={handleReceiptUpload}
-                          className="hidden"
-                        />
-                      </label>
-                      {receiptUrl && (
-                        <span className="text-success font-semibold text-xs flex items-center gap-1">
-                          <Check className="w-3.5 h-3.5" />
-                          Receipt Attached
-                        </span>
-                      )}
-                    </div>
-                  </div>
-                </div>
+              <div data-testid="bank-transfer-note" className="bg-ivory rounded-2xl p-4 border border-line space-y-1.5 animate-in fade-in-50 text-xs">
+                <p className="font-semibold text-ink flex items-center gap-1.5">
+                  <ShieldCheck className="w-4 h-4 shrink-0 text-gold" aria-hidden="true" />
+                  <span>How bank transfer works</span>
+                </p>
+                <p className="text-ink-soft leading-relaxed">
+                  After you order, we&apos;ll send our bank details by email and WhatsApp, with a private link to upload your transfer screenshot.
+                </p>
+                {!email && <p className="text-[11px] text-ink-muted leading-relaxed">Add your email above to get them by email too.</p>}
               </div>
             )}
           </div>
@@ -973,13 +1224,28 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
                 {submitError}
               </p>
             )}
+            {cardCheck && (
+              <button
+                type="button"
+                onClick={() => void checkCardAgain()}
+                disabled={checkingCard}
+                className="w-full text-xs font-semibold text-ink border border-line-strong bg-surface hover:bg-sand rounded-xl py-2 disabled:opacity-60"
+              >
+                {checkingCard ? 'Checking with Stripe…' : 'Check again'}
+              </button>
+            )}
             <button
               type="submit"
-              disabled={isSubmitting || !delivery.serviceable || !isPhoneVerified}
+              disabled={isSubmitting || !delivery.serviceable || (byCard ? !cardReady || (cardNeedsCode && !isPhoneVerified) : !isPhoneVerified)}
               className="w-full bg-ink hover:bg-ink-2 text-ivory font-medium tracking-[0.03em] text-sm py-3.5 px-3 rounded-xl flex items-center justify-center gap-2 transition-colors disabled:opacity-50 text-center"
             >
               {isSubmitting ? (
-                <span>Placing your order…</span>
+                <span>{byCard ? 'Paying securely…' : 'Placing your order…'}</span>
+              ) : byCard ? (
+                <>
+                  <CreditCard className="w-4 h-4 text-gold-light" />
+                  <span>Pay AED {grandTotal}</span>
+                </>
               ) : !isPhoneVerified ? (
                 <>
                   <ShieldCheck className="w-4 h-4 text-gold-light" />

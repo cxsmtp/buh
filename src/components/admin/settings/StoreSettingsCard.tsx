@@ -90,6 +90,24 @@ export function StoreSettingsCard({ value, onSave, auto }: { value: StoreSetting
         <p className="text-ink-muted">The chat assistant has its own section (Settings → Chat assistant).</p>
       </fieldset>
 
+      <fieldset className="space-y-1.5 text-xs">
+        <legend className={label}>Confirm orders on WhatsApp (free: no WhatsApp API or other service)</legend>
+        <label className="flex items-start gap-2">
+          <input type="checkbox" className="mt-0.5" checked={d.confirmOrdersOnWhatsApp} onChange={(e) => set('confirmOrdersOnWhatsApp', e.target.checked)} />
+          <span>
+            Ask customers to confirm their order on WhatsApp {!d.whatsappNumber && <span className="text-ink-muted">(add the number above)</span>}
+            <span className="block text-ink-muted">After checkout they tap one button and send you &ldquo;Confirm my order BUH-… · code 1234&rdquo; from their own WhatsApp. In Orders, check the sender is the number on the order and tap &ldquo;Confirmed on WhatsApp&rdquo;.</span>
+          </span>
+        </label>
+        <label className="flex items-start gap-2 pl-5">
+          <input type="checkbox" className="mt-0.5" checked={d.holdUntilWhatsAppConfirmed} disabled={!d.confirmOrdersOnWhatsApp} onChange={(e) => set('holdUntilWhatsAppConfirmed', e.target.checked)} />
+          <span>
+            Hold orders until confirmed on WhatsApp
+            <span className="block text-ink-muted">Off: orders go through as usual and simply show &ldquo;not yet confirmed&rdquo;. On: an order can&apos;t be confirmed or booked with a courier until you mark the message received (you can still cancel it).</span>
+          </span>
+        </label>
+      </fieldset>
+
       <section>
         <label className={label} htmlFor="st-addr">Store address (footer)</label>
         <input id="st-addr" className={field} placeholder="Dubai, United Arab Emirates" value={d.storeAddress} maxLength={300} onChange={(e) => set('storeAddress', e.target.value)} />

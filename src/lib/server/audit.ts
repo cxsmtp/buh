@@ -74,6 +74,23 @@ function resync(file: string) {
   }
 }
 
+/**
+ * Fields kept as they are: who acted (the admin's sign-in email, or "stripe", "customer"…) and the
+ * order number. The audit file is the owner's own record (0600, and only in encrypted backups), so
+ * it must say exactly who did what to which order. Everything else is redacted as in the logs:
+ * secrets by key name, customer phones and emails in free text.
+ */
+const VERBATIM = ['by', 'orderId'] as const;
+
+function auditDetails(details: Record<string, unknown>): Record<string, unknown> {
+  const out = redact(details) as Record<string, unknown>;
+  for (const k of VERBATIM) {
+    const v = details[k];
+    if (typeof v === 'string') out[k] = v.replace(/\p{Cc}/gu, '').slice(0, 254);
+  }
+  return out;
+}
+
 /** Append an entry. Never throws; returns false when it could not be written (see logs). */
 export function audit(action: string, details: Record<string, unknown> = {}): boolean {
   try {
@@ -84,7 +101,7 @@ export function audit(action: string, details: Record<string, unknown> = {}): bo
       id: crypto.randomUUID(),
       at: new Date().toISOString(),
       action,
-      details: redact(details),
+      details: auditDetails(details),
       prev: lastMac,
     };
     const mac = macOf(body, lastMac);

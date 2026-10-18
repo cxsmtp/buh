@@ -79,7 +79,7 @@ The Admin Hub has no button or address on the shop: addresses like `/admin` are 
   - Checkout needs a working SMS gateway: customers cannot order without verifying their number.
   - At start-up, the log warns if none is configured.
 - [ ] **Settings → Store & contact:** your WhatsApp number, support email and Instagram account.
-- [ ] **Settings → Branding & bank → Bank transfer details:** enter the bank name, account name and real IBAN, and check every digit. Bank transfer is hidden at checkout until they are saved.
+- [ ] **Settings → Branding & bank → Bank transfer details:** enter the bank name, account name and real IBAN, and check every digit. Bank transfer is hidden at checkout until they are saved, and the account is never shown on the website: each customer who chooses it gets it privately (email, WhatsApp, their order's private page).
 - [ ] **Settings → Couriers:**
   - enter the keys;
   - press **Test connection**;
@@ -102,7 +102,7 @@ The Admin Hub has no button or address on the shop: addresses like `/admin` are 
 
 The shop backs itself up every 12 hours, and straight after a restart if one is due. It emails the backup to `BACKUP_EMAIL` and keeps the newest 14 on the server. Each backup contains:
 
-- **The full database** (`shop.db`): every order, product, setting and booking. Courier and SMS keys are blanked: re-enter them after a restore.
+- **The full database** (`shop.db`): every order, product, setting and booking. Courier, SMS and Stripe keys are blanked: re-enter them after a restore.
 - **Flat files you can open in Excel:** `orders.csv`, `order_items.csv`, `customers.csv`, `products.csv`, `chats.csv`, `stock_moves.csv` (every stock change: who, why, old → new).
 - **Bank-transfer receipts and product photos.**
 - **The audit log.**
@@ -248,6 +248,10 @@ Automatic: a new version that does not become healthy is never switched to (abov
 
 Without automatic updates, use `docker compose run --rm updater rollback` the same way. A rolled-back version is not re-installed automatically; the next published one is.
 
+**Card payments and versions before BUH-02.09.00.** Those versions don't know card orders, so nothing checks or times them out there: switch card payments off in Settings → Payments before rolling back below BUH-02.09.00. Stripe keeps resending its webhooks (for up to 3 days) until a version that knows them is back.
+
+**Bank transfer and versions before BUH-02.09.00.** Rolling back below BUH-02.09.00 republishes the bank account through the old public settings (the IBAN shows at checkout again): clear the IBAN in Settings → Branding & bank first if it must stay private.
+
 Without the updater at all: start the copy that is not running from the last good image, wait until `docker compose ps` shows it `healthy`, then stop the other one (here green was running):
 
 ```bash
@@ -350,7 +354,7 @@ It changes nothing, and says why, when:
   ```bat
   podman exec beautifuluaehome-updater update-now
   ```
-- Roll back to the version before (it was kept as the stopped container `beautifuluaehome-previous`):
+- Roll back to the version before (it was kept as the stopped container `beautifuluaehome-previous`); below BUH-02.09.00, switch card payments off first (Settings → Payments), and know that the bank account is shown publicly again (clear the IBAN first to keep it private):
   ```bat
   podman exec beautifuluaehome-updater rollback
   ```

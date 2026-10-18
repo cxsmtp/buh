@@ -22,12 +22,27 @@ export const FIREBASE_PHONE_AUTH_SOURCES = {
   connect: ['https://identitytoolkit.googleapis.com', 'https://securetoken.googleapis.com', 'https://www.google.com/recaptcha/'],
 };
 
+/**
+ * Card payments (Settings → Payments) use Stripe's own script and frames, so card numbers are typed
+ * into Stripe, never into this shop (PCI SAQ A). Stripe.js is only loaded at checkout, when card
+ * payments are on; like Firebase, the hosts are always listed because the policy is fixed at build
+ * time. These are the hosts Stripe documents for Elements: Apple Pay and Google Pay run inside
+ * Stripe's frames (js.stripe.com; hooks.stripe.com for 3-D Secure), which next.config.ts also lets
+ * use the browser's payment sheet (Permissions-Policy payment), with Google Pay's own pay.google.com.
+ */
+export const STRIPE_SOURCES = {
+  script: ['https://js.stripe.com', 'https://*.js.stripe.com'],
+  frame: ['https://js.stripe.com', 'https://*.js.stripe.com', 'https://hooks.stripe.com'],
+  connect: ['https://api.stripe.com'],
+};
+
 export function contentSecurityPolicy(): string {
   const isDev = process.env.NODE_ENV === 'development';
   const fb = FIREBASE_PHONE_AUTH_SOURCES;
+  const st = STRIPE_SOURCES;
   return [
     "default-src 'self'",
-    `script-src 'self' 'unsafe-inline'${isDev ? " 'unsafe-eval'" : ''} ${fb.script.join(' ')}`,
+    `script-src 'self' 'unsafe-inline'${isDev ? " 'unsafe-eval'" : ''} ${fb.script.join(' ')} ${st.script.join(' ')}`,
     // React style attributes need inline styles.
     "style-src 'self' 'unsafe-inline'",
     // Product photos come from https hosts; admin uploads are data:/blob: URLs.
@@ -38,8 +53,8 @@ export function contentSecurityPolicy(): string {
     "worker-src 'self' blob:",
     // The installable app's manifest (/manifest.webmanifest), from this site only.
     "manifest-src 'self'",
-    `connect-src 'self'${isDev ? ' ws: wss:' : ''} ${fb.connect.join(' ')}`,
-    `frame-src 'self' ${fb.frame.join(' ')}`,
+    `connect-src 'self'${isDev ? ' ws: wss:' : ''} ${fb.connect.join(' ')} ${st.connect.join(' ')}`,
+    `frame-src 'self' ${fb.frame.join(' ')} ${st.frame.join(' ')}`,
     "object-src 'none'",
     "base-uri 'none'",
     "form-action 'self'",

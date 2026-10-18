@@ -1,5 +1,19 @@
 # Changelog
 
+## BUH-02.09.00 — 2026-10-18 18:08 UTC · [#25](https://github.com/cxsmtp/buh/pull/25)
+
+- **Confirm on WhatsApp, free.** After ordering, the customer taps one button to send you a prefilled WhatsApp message with the order number and a short code; you compare the number and tap "Confirmed on WhatsApp" in the hub, then "Reply on WhatsApp". You can also hold orders until they are confirmed (off by default).
+- **Card, Apple Pay and Google Pay through your Stripe account.** Off until you add your Stripe keys in Settings → Payments; the wallet fills in name, phone, email and address; an order counts as paid only when Stripe confirms the exact amount, and a refund is one tap from the hub.
+- **Bank transfer without your account on the website.** Customers who choose bank transfer get your bank details privately: by email straight away, and by a one-tap "Send bank details on WhatsApp" in the hub. Each order has its own private page to upload the transfer screenshot; you tap "Payment received" to confirm it.
+- **Audit log keeps order numbers whole.** Order numbers and the person who acted are now recorded exactly in the audit log (some order numbers were partly hidden before); customers' phones and emails stay masked.
+- **A shorter top of the shop.** The announcement bar and header stay pinned at the top while scrolling, and the shop's name and logo are no longer repeated, so products start on the first screen.
+- **Hub fixes.** The backup card fits a phone, and if anything in the hub ever breaks it now says what went wrong and writes it to the server log.
+- **Status.**
+  - **Benchmark:** same host, main (BUH-02.08.00) vs the final branch, 5 alternating rounds (3 branch-first, 2 main-first), 0 failed requests. Storefront main 911 / 954 / 820 / 821 / 915 req/s, branch 942 / 885 / 866 / 881 / 896 (p95 102–136 vs 82–152 ms); courier check main 642 / 733 / 681 / 700 / 747, branch 769 / 739 / 701 / 647 / 734; catalogue main 802 / 858 / 850 / 776 / 766, branch 840 / 853 / 720 / 730 / 853 (p95 125–161 vs 135–179 ms). Level: each side is faster in some rounds and slower in others.
+  - **Tests:** 580 passed, including bank transfer (no account details anywhere public, private links, uploads, Payment received, emails), the review fixes, the WhatsApp confirmation (unit, routes and browser at 375 and 1280 px), card payments against a stand-in for Stripe (amounts from the server, one payment per order, signed webhooks, replays, refunds, abandoned orders), the pinned bar and the backup card.
+  - **Dependency audit:** production 0 vulnerabilities; new packages stripe, @stripe/stripe-js and @stripe/react-stripe-js (pinned).
+  - **Security scan:** two independent reviews (card payments and WhatsApp; bank transfer): 3 medium and 5 low payment findings, 2 medium and 5 low bank-transfer findings, all fixed with tests. Apple Pay and Google Pay are not yet tried on a real iPhone or Android.
+
 ## BUH-02.08.00 — 2026-10-17 19:36 UTC · [#24](https://github.com/cxsmtp/buh/pull/24)
 
 - **The Admin Hub is off the shop.** The public site has no admin button, tab or address: /admin, /login, /wp-admin and every admin address answer exactly like a page that doesn't exist, byte for byte, so nobody can find it by guessing or scanning.

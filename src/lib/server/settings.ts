@@ -1,5 +1,5 @@
 import net from 'node:net';
-import type { AssistantSettings, BankTransferDetails, DeliverySettings, Emirate, BedProfileMeasurement, BrandSettings, CatalogSettings, CourierSettings, EmailSettings, FirebaseWebConfig, PhoneVerificationConfig, SmsGatewaySettings, StoreSettings, ThemeSettings } from '@/types';
+import type { AssistantSettings, BankTransferDetails, DeliverySettings, Emirate, BedProfileMeasurement, BrandSettings, CatalogSettings, CourierSettings, EmailSettings, FirebaseWebConfig, PaymentSettings, PhoneVerificationConfig, SmsGatewaySettings, StoreSettings, ThemeSettings } from '@/types';
 import { FESTIVALS } from '@/lib/festivals/catalog';
 import { marqueeItems, marqueeProblem, stripEmoji } from '@/lib/marquee';
 import { DEFAULT_ASSISTANT, DEFAULT_CATALOG, DEFAULT_DELIVERY, DEFAULT_EMAIL_SETTINGS, DEFAULT_STORE, DEFAULT_THEME_SETTINGS } from '@/data/catalogDefaults';
@@ -35,6 +35,7 @@ export interface SettingsMap {
   email: EmailSettings;
   assistant: AssistantSettings;
   delivery: DeliverySettings;
+  payments: PaymentSettings;
 }
 export type SettingsKey = keyof SettingsMap;
 
@@ -63,6 +64,8 @@ const DEFAULTS: SettingsMap = {
   email: DEFAULT_EMAIL_SETTINGS,
   assistant: DEFAULT_ASSISTANT,
   delivery: DEFAULT_DELIVERY,
+  // Off, and no keys: checkout offers cash on delivery (and bank transfer) until the owner adds them.
+  payments: { cardEnabled: false, stripePublishableKey: '', stripeSecretKey: '', stripeWebhookSecret: '' },
 };
 
 /** Where customers are asked to email: Settings → Store first, then NEXT_PUBLIC_SUPPORT_EMAIL. */
@@ -82,6 +85,7 @@ const SECRETS: Record<SettingsKey, string[]> = {
   email: ['smtpPass', 'imapPass'],
   assistant: [],
   delivery: [],
+  payments: ['stripeSecretKey', 'stripeWebhookSecret'],
 };
 
 const cache = new Map<SettingsKey, unknown>();
@@ -258,6 +262,14 @@ export async function updateSettings<K extends SettingsKey>(key: K, input: unkno
         : true;
     if (sms.isEnabled && missing) throw new HttpError(400, 'Fill in every field for the chosen SMS gateway before switching it on.');
   }
+  // Card payments switched on means checkout takes cards: all three keys, from the same mode.
+  if (key === 'payments') {
+    const p = next as unknown as PaymentSettings;
+    if (p.cardEnabled && !cardKeysComplete(p)) throw new HttpError(400, 'Add the publishable key, the secret key and the webhook signing secret before switching card payments on.');
+    if (p.stripePublishableKey && p.stripeSecretKey && stripeMode(p.stripePublishableKey) !== stripeMode(p.stripeSecretKey)) {
+      throw new HttpError(400, 'The publishable key and the secret key are from different modes (one test, one live). Use the pair from the same Stripe page.');
+    }
+  }
   if (options.beforeSave) await options.beforeSave(next as SettingsMap[K], current);
   save(key, next as SettingsMap[K], { keepHistory: options.keepHistory, auto: options.auto, expectUpdatedAt: currentAt });
 }
@@ -298,6 +310,7 @@ const SECRET_HOSTS: Record<SettingsKey, Record<string, string>> = {
   email: {},
   assistant: {},
   delivery: {},
+  payments: {},
 };
 
 /**
@@ -333,6 +346,25 @@ export function validUaeIban(compact: string): boolean {
   for (const d of rearranged) rest = (rest * 10 + Number(d)) % 97;
   return rest === 1;
 }
+
+/** "test" or "live", from a Stripe key's prefix (pk_test_…, sk_live_…, rk_test_…). */
+export function stripeMode(key: string): 'test' | 'live' | null {
+  const m = /^(?:pk|sk|rk)_(test|live)_/.exec(key);
+  return m ? (m[1] as 'test' | 'live') : null;
+}
+
+export function cardKeysComplete(p: PaymentSettings): boolean {
+  return Boolean(p.stripePublishableKey && p.stripeSecretKey && p.stripeWebhookSecret);
+}
+
+/** Card payments are offered at checkout: switched on, with every key. */
+export function cardPaymentsReady(p: PaymentSettings = getSettings('payments')): boolean {
+  return p.cardEnabled && cardKeysComplete(p);
+}
+
+const STRIPE_PUBLISHABLE = /^pk_(test|live)_[A-Za-z0-9]{10,240}$/;
+const STRIPE_SECRET = /^(sk|rk)_(test|live)_[A-Za-z0-9]{10,240}$/;
+const STRIPE_WEBHOOK_SECRET = /^whsec_[A-Za-z0-9+/=_-]{10,240}$/;
 
 /** Bank transfer is offered only once the real account is entered. */
 export function bankTransferReady(bank: BankTransferDetails): boolean {
@@ -527,6 +559,8 @@ const VALIDATORS: { [K in SettingsKey]: (input: Obj, current: SettingsMap[K]) =>
       showLocalCurrency: bool(input.showLocalCurrency, current.showLocalCurrency),
       askOnWhatsApp: bool(input.askOnWhatsApp, current.askOnWhatsApp),
       askOnInstagram: bool(input.askOnInstagram, current.askOnInstagram),
+      confirmOrdersOnWhatsApp: bool(input.confirmOrdersOnWhatsApp, current.confirmOrdersOnWhatsApp),
+      holdUntilWhatsAppConfirmed: bool(input.holdUntilWhatsAppConfirmed, current.holdUntilWhatsAppConfirmed),
     };
   },
 
@@ -587,6 +621,20 @@ const VALIDATORS: { [K in SettingsKey]: (input: Obj, current: SettingsMap[K]) =>
       sameDayCutoff: cutoff,
       sameDayEmirates,
     };
+  },
+
+  async payments(input, current) {
+    const pk = text(input.stripePublishableKey, 'Publishable key', 250, current.stripePublishableKey);
+    if (pk && !STRIPE_PUBLISHABLE.test(pk)) throw new HttpError(400, 'The publishable key starts with pk_test_ or pk_live_ (Stripe → Developers → API keys).');
+    // The secrets are kept or replaced after this (write-only); only their shape is checked here.
+    const sk = input.stripeSecretKey;
+    if (typeof sk === 'string' && sk.trim() && !STRIPE_SECRET.test(sk.trim())) throw new HttpError(400, 'The secret key starts with sk_test_, sk_live_ or rk_ (a restricted key); not the publishable pk_ key.');
+    const wh = input.stripeWebhookSecret;
+    if (typeof wh === 'string' && wh.trim() && !STRIPE_WEBHOOK_SECRET.test(wh.trim())) throw new HttpError(400, 'The webhook signing secret starts with whsec_ (Stripe → Developers → Webhooks → your endpoint → Signing secret).');
+    for (const [k, v] of Object.entries({ stripeSecretKey: sk, stripeWebhookSecret: wh })) {
+      if (v !== undefined && v !== null && typeof v !== 'string') throw new HttpError(400, `${k === 'stripeSecretKey' ? 'Secret key' : 'Webhook signing secret'} must be text.`);
+    }
+    return { cardEnabled: bool(input.cardEnabled, current.cardEnabled), stripePublishableKey: pk, stripeSecretKey: '', stripeWebhookSecret: '' };
   },
 
   async assistant(input, current) {
@@ -680,6 +728,14 @@ export function phoneVerificationConfig(): PhoneVerificationConfig {
   if (!sms.isEnabled || sms.provider !== 'firebase' || !firebaseConfigComplete(sms.firebase) || hasEnvGateway()) return { method: 'server' };
   const { apiKey, authDomain, projectId, appId } = sms.firebase;
   return { method: 'firebase', firebase: { apiKey, authDomain, projectId, appId } };
+}
+
+/**
+ * An SMS gateway (or Firebase) is switched on, so checkout can send phone codes: card orders then
+ * prove their phone like every other order. Saved settings can only be on when complete.
+ */
+export function phoneCodesOn(): boolean {
+  return hasEnvGateway() || getSettings('sms').isEnabled;
 }
 
 function hasEnvGateway(): boolean {

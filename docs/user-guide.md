@@ -67,8 +67,16 @@ The shop can sit on the home screen of a phone or tablet and open full screen, w
    - After 5 wrong tries the code stops working; request a new one.
    - **Outside the UAE?** As soon as a non-UAE number is typed, checkout shows **Email orders@…**, which opens an email with the bag already listed.
    - **SMS not arriving?** If the shop's SMS service is down, checkout says so and offers the shop's email.
-3. Fill in the delivery address (or **Use My GPS**), choose Cash on Delivery or bank transfer (with an optional receipt screenshot or PDF), and **Confirm & Raise Order**. The button stays locked until the phone is verified.
-4. **Track Order:** enter the order number (shown on the confirmation and pre-filled on the same phone) and the mobile number used for the order.
+3. Fill in the delivery address (or **Use My GPS**), choose Cash on Delivery or bank transfer, and **Confirm & Raise Order**. The button stays locked until the phone is verified.
+   - **Paying by bank transfer:** the shop's bank account is never shown on the website. After you order, you get it privately:
+     - by email (if you gave one): "Bank details for your order BUH-…", with the amount, the reference to use (your order number) and your order's private link; you can also just reply to that email with your screenshot;
+     - on WhatsApp: the **Confirm on WhatsApp** message also asks for the bank details, and the shop replies with them;
+     - on your order's private page: the confirmation screen's **Upload your transfer screenshot** opens it (Track Order shows the same button). It has the account (with **Copy** buttons), the amount and the reference, and an upload for a screenshot or PDF of the transfer (up to 5 MB). After uploading: "Thank you, we'll confirm your order once we see the transfer." Uploading again replaces it. The page works until the order is paid or cancelled, or for 14 days; please don't share its link.
+   - **Paying by card** (when the shop has switched it on): choose **Card**, type the card in Stripe's secure field and tap **Pay AED …**. No SMS code is needed (paying is the proof), but the UAE mobile is still asked for the courier. A bank's own check (3-D Secure) opens on the same page.
+   - **Apple Pay / Google Pay** (top of checkout, on an iPhone or Mac with Safari, or Chrome on Android or a computer): one tap pays and fills in your name, email, phone and delivery address. If the shop can't tell your area from the wallet's address, checkout fills in the rest, asks you to choose the area and tap the button again; nothing is charged until then. The phone must be a UAE mobile (if the wallet's isn't, type one in checkout).
+   - The confirmation says **Payment is being confirmed…** until Stripe has told the shop, then **Paid by card · Apple Pay · Visa •••• 4242** (usually within seconds). A declined card is not charged and nothing is kept: try another card or choose cash on delivery.
+4. **One last step: Confirm on WhatsApp** (when the shop has switched it on). The confirmation screen shows a large green **Confirm on WhatsApp** button. Tap it: WhatsApp opens with "Confirm my order BUH-… · code 1234" to the shop already typed; tap **Send**. That message, from your own WhatsApp, shows the shop the number is yours. Your order is placed either way (unless the shop holds orders until the message comes: then the screen says "We'll start your order once we get your message"). The same button is in **Track Order** until the shop has confirmed it.
+5. **Track Order:** enter the order number (shown on the confirmation and pre-filled on the same phone) and the mobile number used for the order.
 - **Picking up where you left off.** The bag and your delivery details are kept on your phone (**Not you? Clear them** at checkout forgets the details). **Save or send this bag as a link** carries it to another browser, e.g. from Instagram's built-in browser to Safari or Chrome.
 - **Most designs are one or two pieces.** A size shows **Only 1 left** or **Sold out**; you can't add more than there are, and a sold-out size offers **Ask us** (WhatsApp or email) instead.
 - Prices are in AED. Visitors outside the UAE also see an approximate price in their own currency; you always pay in AED.
@@ -119,6 +127,8 @@ Set these up once, in **Settings → Passkeys & recovery codes**, so you can alw
 - If your password is set on the server (`ADMIN_PASSWORD_HASH` in .env.production), a recovery code still signs you in, but the password can only be changed there: `npm run hash-password`, put the new hash in .env.production, restart the shop. In that setup **a recovery code is a full key to the Admin Hub for 30 minutes**, so keep the codes as safe as the password.
 - **After restoring a backup:** the backup may be older than a passkey you removed or your newest codes, so restored recovery codes stop working and restored passkeys are switched off. Sign in with the password, then follow the banner (**Review now**): press **Keep** (password needed) on each passkey you still have, **Remove** the others, and create new recovery codes. Press **Done, hide this** when finished.
 - The version (BUH-xx.xx.xx) shows bottom left on every page (in the shop it is only text). In the Admin Hub, tap it for **Settings → Versions**: every release with what changed, and (with automatic updates on) **Switch to this version** for any release from BUH-02.00.00, or **Update to the latest**. The shop stays open while it switches, and the database is saved first.
+- **Going back below BUH-02.09.00 with card payments on** leaves card orders unchecked (older versions don't know them): switch card payments off in Settings → Payments first. Stripe keeps resending its webhooks until a version that knows them is back.
+- **Going back below BUH-02.09.00 republishes your bank account** through the old public settings (older versions show the IBAN at checkout): clear the IBAN in Settings → Branding & bank first if it must stay private.
 - **Updates** (with the updater turned on, see the deployment guide) install themselves without closing the shop or signing you out. If a new version does not start properly, the shop stays on the one before and an alert is written. A customer in the middle of checkout carries on: their bag, details and SMS code are kept.
 - **One Podman container (a Windows laptop or a Linux server):** paste the one-line `setup` command once (Settings → Versions shows it, one line for Command Prompt and one for PowerShell; deployment guide, "One Podman container"). The images are private, so Podman must be logged in to `ghcr.io` first (deployment guide, "Private images"); when that login expires, Settings → Versions says so in red and updates wait until you log in again. The page also has a switch, **Install new versions automatically** (on by default): off, nothing is checked or installed by itself, but "Update to the latest", switching versions and restarting a stopped shop still work; it says when the last check ran and what it found. Under **Installed on this server** you see each version installed, with its digest, when, and why; a release marked "verified" runs exactly the contents it was first published with. If a version ever comes back with other contents, it is refused and the page warns you in red. Nothing is downloaded or kept on the computer but the images. The same then happens, with one difference: at the switch the shop is closed for a few seconds. The new version is tried first beside the running one, and if it does not answer, the old one is put back. Settings → Versions then says "Automatic updates: Podman (one container)". The shop keeps its own settings and port. From then on, update with **Update to the latest**, not with the old Podman commands (stop the updater first if you must). Without it, the page shows the two Podman commands to update by hand. The updater also keeps itself up to date. After the computer restarts, start Podman (`podman machine start`, or let Podman Desktop start it); the shop and the updater come back if Podman's restart service is on (the set-up prints the one line for it), otherwise run `podman start beautifuluaehome-updater` and it starts the shop.
 
@@ -128,12 +138,36 @@ New orders appear under **Orders & Dispatches** within seconds, with a notice at
 
 - **Confirm & Assign Courier** books Jeebly or Eco Express and prints the label.
 - **Mark dispatched**, then **Out for delivery** or **Mark delivered**, as the parcel moves.
-- **Bank transfers:**
-  - **View receipt** opens what the customer uploaded.
-  - **Mark payment received** once the money is in the account.
+- **Bank transfers** (filter **Transfer to check**, with a count of screenshots waiting): each order shows where it stands: **Waiting for bank transfer** → **Transfer screenshot received** → **Payment received**.
+  - **View transfer screenshot** opens what the customer uploaded (hub only); earlier ones stay under **Earlier: #1, #2…**.
+  - **Payment received** once the money is in the account (it asks you to confirm the amount). The order is marked paid, its private page closes, and **Tell the customer on WhatsApp** opens WhatsApp with "We've received your payment for order BUH-…, thank you ✓" ready to send. Tapping it twice changes nothing.
+  - **Not received yet** if it isn't in the account: the customer can upload again, and **Tell the customer on WhatsApp** has a polite message with their link.
+  - **Send bank details on WhatsApp** opens WhatsApp to the customer with the bank details, amount, reference and the order's private link already typed (for customers without email, or who asked on WhatsApp). The private link is also shown with a **Copy** button.
+  - The order says whether the details were emailed. **History** shows each step (link made, emailed, screenshot uploaded, received).
+  - The daily summary email counts the transfers to check and those not received yet.
+- **Card payments** (filter **Card payments**) show how they were paid: **Paid by card · Apple Pay · Visa •••• 4242**, or **Waiting for the card payment** (not confirmed or booked until Stripe says paid; an order left unpaid for 10 minutes cancels itself and its items go back on sale). Only Stripe marks a card order paid: there is no "payment received" button for it.
+  - **Cancel & refund AED … to the card** cancels a paid card order and refunds the full amount through Stripe (it reaches the customer's card in 5–10 working days). It happens once, even if tapped twice; it shows **Refund … on its way** until Stripe confirms, then **Refunded**.
+  - A full refund you make in the Stripe dashboard instead also shows here.
+  - **Cancel & refund AED X** refunds what is left of the payment: after a partial refund made in the Stripe dashboard it offers only the rest. A refund Stripe later reports as failed puts the order back to **Paid by card**, with a red note.
+  - **Switched Stripe keys between test and live** (or removed the secret key) with card orders still open: Settings → Payments warns when you save. Unpaid ones cancel themselves (their items go back on sale). A paid one can't be refunded through the shop with the other keys: **Cancel & refund** then offers **Cancel without Stripe refund**, and you refund it in the Stripe dashboard of the account it was paid to.
+- **A red note on an order** means it needs you: a refund that failed, a courier booking that came back after the order was cancelled or refunded (cancel that pickup in the carrier's portal), or a card order to refund in the Stripe dashboard. You also get an email (when email is set up) and Settings → System & backups lists it. Tap **Mark as handled** once done.
 - **Cancel order** returns the items to stock. It cannot be undone.
+- **History** shows the order's timeline: placed, WhatsApp confirmation asked, customer opened WhatsApp, confirmed (by whom, when), status changes.
 
 Every change is recorded with who made it and when.
+
+#### Confirm on WhatsApp (free, no WhatsApp API)
+
+Customers confirm their number with one WhatsApp message they send you; nothing to sign up for or pay.
+
+- **Settings → Store & contact:**
+  - **Ask customers to confirm their order on WhatsApp**: on as soon as the shop's WhatsApp number is set. With no number, nothing changes.
+  - **Hold orders until confirmed on WhatsApp**: off by default. Off, orders go through as usual and simply show "not yet confirmed". On, an order can't be confirmed or booked with a courier until you mark the message received (you can always cancel it).
+- **In Orders** (phone view first), an order shows **Awaiting WhatsApp confirmation · code 1234** with the customer's phone number. When "Confirm my order BUH-… · code 1234" arrives in your WhatsApp, check it comes from that number, then tap:
+  - **Confirmed on WhatsApp**; then **Reply on WhatsApp** opens a thank-you to the customer, ready to send;
+  - or **Number didn't match** (from another number: call the customer or cancel). You can still tap **Confirmed on WhatsApp** later.
+- The **Awaiting WhatsApp** filter lists the ones still waiting, and the daily summary counts them. A second tap changes nothing; each answer is in the audit log with who and when.
+- The shop's own SMS / Firebase code check at checkout is separate and works as before.
 
 ### Inventory
 
@@ -198,6 +232,7 @@ On each product, customers see **Ask in chat**, **Ask on WhatsApp** and **Ask on
 - **Catalogue:** the size presets offered when adding a product (name, measurements, price difference, pieces in the set), the categories shown in the shop (each category with pieces in it is a round story chip at the top of the shop, in this order, with its first piece's photo; **New in** and **On sale** chips come from each product's **New arrival** tick and its **Was (AED)** price), and the **Only N left** level.
 - **Branding & bank:** the shop's name, tagline and logo (the logo's letters sit on one of the palette's tones: champagne gold, antique gold, ink or dusty rose), and bank-transfer details.
 - **Festival themes:** see below.
+- **Payments:** card, Apple Pay and Google Pay through your Stripe account (see "Card payments" above).
 - **Phone verification:** the SMS gateway (see below).
 - **Couriers:** see below.
 - **System & backups:** health (disk, database, backups, SMS), backups, and **Settings history**: every save keeps the version it replaced (keys excepted); **Restore** puts an earlier one back and can itself be undone.
@@ -236,14 +271,39 @@ The greeting is a short, gracious line (for example *Eid Mubarak* with *Fresh li
 
 ### Daily summary and alerts
 
-Every morning at 8:00 (UAE) an email to the backup address lists yesterday's orders and sales, orders waiting for you, what is sold out or low, and anything needing attention. A problem (low disk space, a database or backup failure, no SMS gateway) is emailed when it starts, daily while it lasts, and when it is resolved.
+Every morning at 8:00 (UAE) an email to the backup address lists yesterday's orders and sales, orders waiting for you (and for the customer's WhatsApp message), what is sold out or low, and anything needing attention. A problem (low disk space, a database or backup failure, no SMS gateway) is emailed when it starts, daily while it lasts, and when it is resolved.
+
+### Card payments, Apple Pay and Google Pay (Stripe)
+
+Customers pay by card, Apple Pay or Google Pay into **your own Stripe account**; cash on delivery and bank transfer stay as they are. Off until you switch it on in **Settings → Payments**. Card numbers go straight to Stripe and never reach the shop.
+
+1. **Stripe account.** Sign up at stripe.com (business in the UAE, currency AED) and finish **Activate payments** so the account can take real payments. Until then use test mode.
+2. **API keys.** Stripe → **Developers → API keys** (test mode first: the toggle at the top right of Stripe). Copy the **Publishable key** (`pk_test_…`) and the **Secret key** (`sk_test_…`; a restricted `rk_…` key with write access to PaymentIntents, Refunds and Payment method domains, and read access to Account, also works) into **Settings → Payments**.
+3. **Webhook.** Stripe → **Developers → Webhooks → Add endpoint**:
+   - **Endpoint URL:** the address shown in Settings → Payments (**Copy**), e.g. `https://beautifuluaehome.com/api/stripe/webhook`;
+   - **Events:** `payment_intent.succeeded`, `payment_intent.payment_failed`, `payment_intent.canceled`, `charge.refunded`, `charge.refund.updated`;
+   - then open the endpoint, **Signing secret → Reveal**, and paste it (`whsec_…`) into **Webhook signing secret**.
+4. Tick **Take card payments at checkout** and **Save payment settings**. Saving needs all three keys, from the same mode. **Check the connection** shows your Stripe account's name and whether it can take payments. The badge says **Test mode: no real money** or **Live mode: real payments**.
+5. **Apple Pay:** tap **Register this domain for Apple Pay** (once in test mode and once in live mode; Stripe hosts the verification file for you). It shows "Apple Pay ready". Google Pay needs nothing more.
+6. **Try it in test mode:** at checkout choose **Card** and use `4242 4242 4242 4242`, any future date, any CVC; `4000 0000 0000 9995` is declined; `4000 0027 6000 3184` asks for 3-D Secure. The order shows **Paid by card · Visa •••• 4242** in Orders.
+7. **Go live:** in Stripe switch off test mode, add the live webhook endpoint (same address and events) and copy the live keys (`pk_live_…`, `sk_live_…`) and the live signing secret into Settings → Payments, **Save**, then **Register this domain for Apple Pay** again.
+
+- Prices, totals and the same-day charge are worked out by the shop, never by the phone; Stripe is asked for exactly the order's total in AED.
+- An order counts as paid only when Stripe says so (its signed webhook, or the shop asking Stripe). A card order not paid within 10 minutes is cancelled and its pieces go back on sale.
+- **Phone codes:** with an SMS gateway switched on (Settings → SMS), card customers verify their mobile with a code too, like every order (once per checkout, also with Apple Pay and Google Pay). Without a gateway, card orders need no code, and are limited to 2 of each item and 5 different items.
+- If a customer's connection drops while paying, checkout never says "nothing was charged" unless Stripe refused the card: it says to check the connection and offers **Check again**; paying again continues the same order, so nobody is charged twice.
+- The daily summary email counts yesterday's card takings and refunds.
+- **Keys are not in backups:** after restoring a backup, enter the secret key and webhook signing secret again.
 
 ### Bank details
 
-Under **Settings → Branding & bank → Bank transfer details**. Customers paying by transfer see exactly these at checkout, with your instructions.
+Under **Settings → Branding & bank → Bank transfer details**. These are **never shown on the website**: each customer who chooses bank transfer gets them privately (the email, your WhatsApp message, and their order's private page), with your note. **Preview what customers receive** shows the email and the WhatsApp message exactly.
 
 - **Bank transfer only appears at checkout once the bank name, account name and IBAN are saved.**
+- The email is sent automatically when the customer gives an email address and **Settings → Email** is set up; replies (with screenshots) come to your support email.
 - The IBAN is checked (AE plus 21 digits, with its check digits), so most typos are caught.
+- The order's private link goes into emails and WhatsApp messages only when the shop's address is set (`NEXT_PUBLIC_APP_URL` in the settings file); without it, customers are asked to reply with the screenshot instead.
+- Each order keeps its latest 5 screenshots (older ones are deleted). If the server is short of space (under 1 GB free, or 2 GB of screenshots), the customer is asked to send it on WhatsApp instead, you get an email, and Settings → System & backups says so.
 
 ### Backups
 
@@ -253,7 +313,7 @@ The line at the top of the Admin Hub shows when the last backup ran:
 - **amber:** taken but not emailed (check the `SMTP_*` settings), or emailed without a `BACKUP_PASSPHRASE`;
 - **red:** failed or overdue.
 
-**Back up now** runs one immediately. Backups run every 12 hours on their own. Courier and SMS keys are not in backups: after a restore, enter them again. Restoring: see HOSTINGER_DEPLOYMENT_GUIDE.md.
+**Back up now** runs one immediately. Backups run every 12 hours on their own. Courier, SMS and Stripe keys are not in backups: after a restore, enter them again. Restoring: see HOSTINGER_DEPLOYMENT_GUIDE.md.
 
 ### Phone verification (SMS)
 

@@ -2,7 +2,7 @@ import { createJeeblyShipment } from '@/lib/jeebly';
 import { createEchoShipment } from '@/lib/echo';
 import type { Order } from '@/types';
 import { HttpError } from './http';
-import { getOrder, recordBooking } from './orders';
+import { assertNotHeld, getOrder, recordBooking } from './orders';
 import { getSettings } from './settings';
 
 export interface DispatchOutcome {
@@ -36,6 +36,12 @@ export async function dispatchOrder(input: {
   if (!order) throw new HttpError(404, 'Order not found.');
   if (order.status === 'cancelled' || order.status === 'delivered') {
     throw new HttpError(409, `This order is ${order.status} and cannot be booked.`);
+  }
+  // Held until the customer confirms on WhatsApp (Settings → Store & contact): nothing goes to a carrier.
+  assertNotHeld(order);
+  // A card order goes to a carrier only once Stripe has said it is paid.
+  if (order.paymentMethod === 'online_card' && order.card?.state !== 'paid') {
+    throw new HttpError(409, `${order.id} is not paid by card yet, so it cannot be booked.`, {}, { code: 'card_unpaid' });
   }
   // Eco Express books next-day only: a same-day order (the customer paid for it) goes with Jeebly Express.
   if (order.deliveryOption === 'same_day' && provider === 'echo') {

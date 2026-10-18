@@ -69,24 +69,28 @@ export const BackupStatus: React.FC = () => {
       : `Emailed ${ago(health.lastEmailedAt)}${health.encrypted ? ', encrypted' : ''}.`;
 
   return (
-    <div className={`rounded-2xl border px-3.5 py-2.5 text-xs flex flex-wrap items-center gap-x-3 gap-y-1.5 ${tone}`} role="status">
-      <DatabaseBackup className="w-4 h-4 shrink-0" />
-      <span className="font-bold flex items-center gap-1">
-        <Icon className="w-3.5 h-3.5" />
-        Backup {ago(health.lastSuccessAt)}
-      </span>
-      <span className="opacity-80 min-w-0 flex-1">
+    <div className={`rounded-2xl border px-3.5 py-2.5 text-xs space-y-1.5 ${tone}`} role="status">
+      {/* The status and the button on one line; the explanation below at full width, so a long notice
+          (an unencrypted backup, say) never squeezes into a narrow column on a phone. */}
+      <div className="flex flex-wrap items-center gap-x-3 gap-y-1.5">
+        <DatabaseBackup className="w-4 h-4 shrink-0" />
+        <span className="font-bold flex items-center gap-1 min-w-0">
+          <Icon className="w-3.5 h-3.5 shrink-0" />
+          Backup {ago(health.lastSuccessAt)}
+        </span>
+        <button
+          type="button"
+          onClick={runNow}
+          disabled={running}
+          className="ml-auto px-2.5 py-1 rounded-lg border border-current/30 bg-surface/70 hover:bg-surface font-semibold flex items-center gap-1 disabled:opacity-60"
+        >
+          {running && <Loader2 className="w-3 h-3 animate-spin" />}
+          {running ? 'Backing up…' : 'Back up now'}
+        </button>
+      </div>
+      <p data-testid="backup-detail" className="opacity-80 break-words">
         {detail} Every {health.intervalHours} h{health.lastSummary ? ` • ${health.lastSummary}` : ''}.
-      </span>
-      <button
-        type="button"
-        onClick={runNow}
-        disabled={running}
-        className="ml-auto px-2.5 py-1 rounded-lg border border-current/30 bg-surface/70 hover:bg-surface font-semibold flex items-center gap-1 disabled:opacity-60"
-      >
-        {running && <Loader2 className="w-3 h-3 animate-spin" />}
-        {running ? 'Backing up…' : 'Back up now'}
-      </button>
+      </p>
     </div>
   );
 };

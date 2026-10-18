@@ -39,7 +39,7 @@ export function BrandLogo({ brand, className = 'w-9 h-9 text-base' }: { brand?: 
 export const Header: React.FC<HeaderProps> = ({ cartCount, onOpenCart, onOpenSearch, onOpenTrack, brandSettings, onHome }) => {
   const name = brandSettings?.storeName || 'Beautiful UAE Home';
   return (
-    <header className="sticky top-0 z-40 bg-ivory/95 backdrop-blur-md border-b border-line pt-safe">
+    <header className="bg-ivory/95 backdrop-blur-md border-b border-line">
       <div className="max-w-7xl mx-auto px-4 sm:px-6 h-14 flex items-center justify-between gap-3">
         <button
           type="button"

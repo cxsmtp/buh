@@ -65,6 +65,8 @@ interface PhoneVerificationProps {
   supportEmail?: string;
   /** 'server' (default): the shop texts the code. 'firebase': Firebase Phone Authentication does. */
   verification?: PhoneVerificationConfig;
+  /** Paying by card: the number is still needed for the courier, but no SMS code (paying is the proof). */
+  codeOptional?: boolean;
 }
 
 type VerifyResponse = { valid?: boolean; message?: string; verificationToken?: string };
@@ -77,6 +79,7 @@ export const PhoneVerification: React.FC<PhoneVerificationProps> = ({
   orderSummary,
   supportEmail = DEFAULT_SUPPORT_EMAIL,
   verification,
+  codeOptional = false,
 }) => {
   const firebase = verification?.method === 'firebase' ? verification.firebase : undefined;
   // Firebase: the pending sign-in for the code that was sent, and where its invisible reCAPTCHA renders.
@@ -269,8 +272,8 @@ export const PhoneVerification: React.FC<PhoneVerificationProps> = ({
       <div className="flex items-center gap-2.5 px-3.5 py-2.5 bg-gradient-to-r from-ink to-ink-2 text-white">
         <ShieldCheck className="w-4 h-4 text-gold" />
         <div className="flex-1">
-          <p className="text-[11px] font-semibold tracking-wide">Verify your UAE mobile to place your order</p>
-          <p className="text-[10px] text-sand">Free • takes 30 seconds • protects your delivery</p>
+          <p className="text-[11px] font-semibold tracking-wide">{codeOptional ? 'Your UAE mobile, for the courier' : 'Verify your UAE mobile to place your order'}</p>
+          <p className="text-[10px] text-sand">{codeOptional ? 'Paying by card: no SMS code needed' : 'Free • takes 30 seconds • protects your delivery'}</p>
         </div>
         <span className="text-[10px] font-semibold bg-gold text-ink px-2 py-0.5 rounded-full">Required</span>
       </div>
@@ -311,7 +314,7 @@ export const PhoneVerification: React.FC<PhoneVerificationProps> = ({
                     setError('');
                   }}
                   onKeyDown={(e) => {
-                    if (e.key === 'Enter') {
+                    if (e.key === 'Enter' && !codeOptional) {
                       e.preventDefault();
                       void sendCode();
                     }
@@ -319,7 +322,7 @@ export const PhoneVerification: React.FC<PhoneVerificationProps> = ({
                   className="flex-1 min-w-0 px-3 py-2.5 bg-transparent text-ink placeholder:text-ink-muted font-medium text-xs tracking-wide focus:outline-none"
                 />
               </div>
-              <button
+              {!codeOptional && <button
                 type="button"
                 onClick={sendCode}
                 disabled={sending || info.kind !== 'uae' || wait > 0}
@@ -327,12 +330,12 @@ export const PhoneVerification: React.FC<PhoneVerificationProps> = ({
               >
                 {sending ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <MessageSquareText className="w-3.5 h-3.5 text-gold-light" />}
                 {sending ? 'Sending…' : wait > 0 ? `Wait ${wait}s` : 'Send code'}
-              </button>
+              </button>}
             </div>
 
             {info.kind === 'uae' && (
               <p className="text-[11px] text-success font-medium flex items-center gap-1">
-                <Smartphone className="w-3 h-3" /> +971 {formatLocal(info.local)} — we&apos;ll text you a 6-digit code.
+                <Smartphone className="w-3 h-3" /> +971 {formatLocal(info.local)}{codeOptional ? '' : <> — we&apos;ll text you a 6-digit code.</>}
               </p>
             )}
             {info.kind === 'invalid' && (

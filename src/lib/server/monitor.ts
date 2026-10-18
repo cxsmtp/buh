@@ -6,6 +6,7 @@ import { dataDir } from './dataDir';
 import { getDb } from './db';
 import { kvGet, kvSet } from './kv';
 import { logEvent } from './log';
+import { awaitingWhatsAppCount, cardTakings, ordersNeedingAttention, receiptsNoRoom, transfersAwaitedCount, transfersToCheckCount } from './orders';
 import { listProducts } from './products';
 import { getSettings } from './settings';
 
@@ -68,6 +69,12 @@ export function currentProblems(now = Date.now()): Problem[] {
   if (process.env.NODE_ENV === 'production' && !sms.isEnabled && !envGateway && process.env.OTP_DEV_MODE !== 'true') {
     problems.push({ id: 'sms', level: 'failing', text: 'No SMS gateway is switched on: customers cannot verify their phone, so they cannot order.' });
   }
+  // A transfer screenshot refused in the last day: the disk, or the receipts folder, is too full.
+  const noRoom = receiptsNoRoom();
+  if (noRoom) problems.push({ id: 'receipts', level: 'warning', text: `Transfer screenshots can’t be uploaded: ${noRoom.why}. Customers are asked to send them on WhatsApp. Free some space on the server.` });
+  // A refund that failed, a booking after a cancel, a card order to refund in Stripe's dashboard.
+  const attention = ordersNeedingAttention();
+  if (attention) problems.push({ id: 'orders', level: 'warning', text: `${attention} order${attention === 1 ? ' needs' : 's need'} your attention (Orders: the red notes). Mark each as handled once done.` });
   return problems;
 }
 
@@ -116,6 +123,11 @@ export function dailySummary(now = new Date()): { subject: string; text: string 
   const kept = rows.filter((r) => r.status !== 'cancelled');
   const sales = kept.reduce((n, r) => n + r.total_fils, 0) / 100;
   const pending = (getDb().prepare("SELECT COUNT(*) AS n FROM orders WHERE status = 'pending_confirmation'").get() as { n: number }).n;
+  const awaitingWhatsApp = awaitingWhatsAppCount();
+  const transfersToCheck = transfersToCheckCount();
+  const transfersAwaited = transfersAwaitedCount();
+  // Card takings: what Stripe confirmed paid yesterday (and what went back to cards).
+  const card = cardTakings(from, to);
   const threshold = getSettings('catalog').lowStockThreshold;
   const products = listProducts();
   const soldOut = products.filter((p) => p.stockCount === 0).map((p) => p.title);
@@ -124,6 +136,12 @@ export function dailySummary(now = new Date()): { subject: string; text: string 
   const lines = [
     `Yesterday (${day}): ${kept.length} order${kept.length === 1 ? '' : 's'}, AED ${sales.toFixed(2)}${rows.length - kept.length ? ` (${rows.length - kept.length} cancelled)` : ''}.`,
     `Waiting for your confirmation: ${pending}.`,
+    ...(awaitingWhatsApp ? [`Waiting for the customer's WhatsApp message: ${awaitingWhatsApp}.`] : []),
+    ...(transfersToCheck ? [`Bank transfers to check (screenshot received): ${transfersToCheck}. Open Orders → Transfer to check.`] : []),
+    ...(transfersAwaited ? [`Bank transfers not received yet: ${transfersAwaited}.`] : []),
+    ...(card.paid || card.refunded
+      ? [`Paid by card (Stripe): ${card.paid}, AED ${(card.paidFils / 100).toFixed(2)}${card.refunded ? `; refunded to cards: ${card.refunded}, AED ${(card.refundedFils / 100).toFixed(2)}` : ''}.`]
+      : []),
     '',
     soldOut.length ? `Sold out (${soldOut.length}): ${soldOut.slice(0, 20).join('; ')}` : 'Nothing is sold out.',
     low.length ? `Low (${low.length}): ${low.slice(0, 30).join('; ')}` : 'Nothing is running low.',
