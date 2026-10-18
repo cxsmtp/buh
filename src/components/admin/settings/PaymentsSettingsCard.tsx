@@ -47,7 +47,8 @@ export function PaymentsSettingsCard({
 }: {
   value: PaymentSettings;
   secretsSet: Record<string, boolean>;
-  onSave: (v: PaymentSettings) => Promise<string | null>;
+  /** Saves; a warning from the server (keys of another mode while card orders are open) is passed on. */
+  onSave: (v: PaymentSettings, onWarning: (warning: string) => void) => Promise<string | null>;
   auto?: AutoSaveHooks;
 }) {
   const [d, setD] = useState<PaymentSettings>(value);
@@ -55,6 +56,7 @@ export function PaymentsSettingsCard({
   const autosave = useAutoSave({ settingsKey: 'payments', value: { ...d, stripeSecretKey: '', stripeWebhookSecret: '' }, enabled: Boolean(auto), ...auto });
   const [saving, setSaving] = useState(false);
   const [status, setStatus] = useState<{ ok: boolean; text: string } | null>(null);
+  const [warning, setWarning] = useState('');
   const [info, setInfo] = useState<Info | null>(null);
   const [account, setAccount] = useState<{ ok: boolean; text: string; account?: Account } | null>(null);
   const [checking, setChecking] = useState(false);
@@ -77,7 +79,8 @@ export function PaymentsSettingsCard({
     autosave.cancel();
     setSaving(true);
     setStatus(null);
-    const problem = await onSave(d);
+    setWarning('');
+    const problem = await onSave(d, setWarning);
     setSaving(false);
     if (!problem) setD((x) => ({ ...x, stripeSecretKey: '', stripeWebhookSecret: '' }));
     setStatus(problem ? { ok: false, text: problem } : { ok: true, text: d.cardEnabled ? 'Saved. Checkout now offers card, Apple Pay and Google Pay.' : 'Saved. Card payments are off.' });
@@ -194,6 +197,7 @@ export function PaymentsSettingsCard({
         </button>
         {auto && autosave.bar}
         {status && <p role="status" className={`text-xs font-semibold ${status.ok ? 'text-success' : 'text-danger'}`}>{status.text}</p>}
+        {warning && <p data-testid="payments-warning" role="alert" className="basis-full text-xs font-semibold text-warning break-anywhere">{warning}</p>}
       </div>
     </div>
   );

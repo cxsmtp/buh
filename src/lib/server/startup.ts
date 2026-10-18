@@ -28,7 +28,7 @@ export async function onStartup() {
     startFestivalRefresh();
     startMonitor();
     startChat();
-    // Card orders not paid within 30 minutes: stopped at Stripe, cancelled, pieces back on sale.
+    // Card orders not paid within 10 minutes: stopped at Stripe, cancelled, pieces back on sale.
     startCardSweep();
   } catch (err) {
     logEvent('error', 'startup_failed', { error: err instanceof Error ? err.message : String(err) });

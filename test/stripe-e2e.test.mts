@@ -14,6 +14,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { after, before, test } from 'node:test';
 import { hasBuild, rawFetch, startServer, type RunningServer } from './server.mjs';
+import { openAdminSection } from './helpers.mjs';
 import { startStripeMock, TEST_KEYS, type StripeMock } from './stripe-mock.mjs';
 
 type PW = typeof import('playwright');
@@ -85,7 +86,7 @@ test('Settings → Payments: off by default; keys saved write-only; check the co
   const info = await (await api('GET', '/api/admin/payments')).json();
   assert.equal(info.mode, 'test');
   assert.match(info.webhookUrl, /^https:\/\/127\.0\.0\.1:\d+\/api\/stripe\/webhook$/);
-  assert.deepEqual(info.events, ['payment_intent.succeeded', 'payment_intent.payment_failed', 'payment_intent.canceled', 'charge.refunded']);
+  assert.deepEqual(info.events, ['payment_intent.succeeded', 'payment_intent.payment_failed', 'payment_intent.canceled', 'charge.refunded', 'charge.refund.updated']);
   const check = await (await api('POST', '/api/admin/payments', { action: 'check' })).json();
   assert.equal(check.account.name, 'Beautiful UAE Home (test)');
   assert.equal(check.account.chargesEnabled, true);
@@ -173,6 +174,75 @@ test('a card checkout through the real routes: the server’s amount, paid by th
   assert.ok(!server.log().includes(TEST_KEYS.secret) && !server.log().includes(TEST_KEYS.webhook) && !server.log().includes(pi.client_secret));
 });
 
+test('keys of another mode: the save warns about open card orders; a paid one is cancelled without a Stripe refund only with the explicit confirmation', { skip }, async () => {
+  const [p] = await products();
+  const res = await post('/api/orders', {
+    idempotencyKey: crypto.randomUUID(),
+    customer: { fullName: 'Reem Switch', phone: '0507002468', emirate: 'Dubai', area: 'Dubai Marina', streetAddress: 'Marina Walk', buildingVilla: 'Tower', flatVillaNo: '7' },
+    items: [{ productId: p.id, profileId: p.profiles[0].id, quantity: 1 }],
+    paymentMethod: 'online_card',
+  });
+  assert.equal(res.status, 201);
+  const placed = await res.json();
+  const pi = mock.succeed([...mock.intents.values()].find((x) => x.metadata.orderId === placed.order.id)!.id);
+  const ev = mock.event('payment_intent.succeeded', pi);
+  assert.equal((await hook(ev.body, ev.signature)).status, 200);
+  const live = { publishable: 'pk_live_51BuhLivePublishable0000000000', secret: 'sk_live_51BuhLiveSecretKey000000000000' };
+  try {
+    const saved = await api('PUT', '/api/admin/settings/payments', { settings: { cardEnabled: true, stripePublishableKey: live.publishable, stripeSecretKey: live.secret, stripeWebhookSecret: TEST_KEYS.webhook } });
+    assert.equal(saved.status, 200, 'saved, not blocked');
+    assert.match((await saved.json()).warning, /still open from test mode/);
+    const order = (await (await api('GET', `/api/admin/orders/${placed.order.id}`)).json()).order;
+    const refund = await api('POST', `/api/admin/orders/${placed.order.id}/refund`, { amount: order.total });
+    assert.equal(refund.status, 409);
+    const r = await refund.json();
+    assert.equal(r.code, 'card_unreachable');
+    assert.doesNotMatch(r.message, /Cash on Delivery/);
+    assert.equal((await api('POST', `/api/admin/orders/${placed.order.id}/refund`, { amount: order.total, withoutStripeRefund: true })).status, 400, 'the confirmation is required');
+    assert.equal((await api('POST', `/api/admin/orders/${placed.order.id}/refund`, { amount: order.total, withoutStripeRefund: true, confirm: 'yes' })).status, 400);
+    const done = await api('POST', `/api/admin/orders/${placed.order.id}/refund`, { amount: order.total, withoutStripeRefund: true, confirm: 'refund-in-stripe-dashboard' });
+    assert.equal(done.status, 200, await done.clone().text());
+    const d = await done.json();
+    assert.equal(d.outcome, 'cancelled_without_refund');
+    assert.equal(d.order.status, 'cancelled');
+    assert.ok(d.order.card.refundOutsideAt);
+    assert.equal(d.order.attention.kind, 'refund_outside_stripe');
+    assert.ok(auditLines().some((l) => l.includes('"action":"payment.cancelled_without_refund"')));
+    // The hub shows the red note (375 and 1280 px, no sideways scroll); "Mark as handled" with the keyboard.
+    if (!skipBrowser) {
+      for (const width of [375, 1280]) {
+        const hub = await browser.newContext({ viewport: { width, height: 860 } });
+        const eq = cookie.indexOf('=');
+        await hub.addCookies([{ name: cookie.slice(0, eq), value: cookie.slice(eq + 1), url: server.base }]);
+        const hp = await hub.newPage();
+        const hubErrors: string[] = [];
+        hp.on('pageerror', (e) => hubErrors.push(e.message));
+        await hp.goto(server.adminUrl, { waitUntil: 'domcontentloaded' });
+        await openAdminSection(hp, /^Orders/);
+        const note = hp.getByTestId('order-attention').filter({ hasText: 'Cancelled without a refund through the shop' });
+        await note.waitFor();
+        assert.match((await hp.getByTestId('card-badge').filter({ hasText: 'cancelled without a Stripe refund' }).first().textContent()) || '', /refund AED [\d.]+ in the Stripe dashboard/);
+        assert.equal(await overflow(hp), false, `no sideways scroll at ${width}px`);
+        await hp.screenshot({ path: path.join(server.dataDir, `attention-${width}.png`) });
+        if (width === 1280) {
+          await note.getByRole('button', { name: 'Mark as handled' }).focus();
+          await hp.keyboard.press('Enter');
+          await note.waitFor({ state: 'detached' });
+        }
+        assert.deepEqual(hubErrors, []);
+        await hub.close();
+      }
+    }
+    // Mark as handled (again: nothing more to clear).
+    const handled = await api('PATCH', `/api/admin/orders/${placed.order.id}`, { clearAttention: true });
+    assert.equal(handled.status, 200);
+    assert.equal((await handled.json()).order.attention, undefined);
+  } finally {
+    const back = await api('PUT', '/api/admin/settings/payments', { settings: { cardEnabled: true, stripePublishableKey: TEST_KEYS.publishable, stripeSecretKey: TEST_KEYS.secret, stripeWebhookSecret: TEST_KEYS.webhook } });
+    assert.equal(back.status, 200);
+  }
+});
+
 test('the shop’s first load carries no Stripe code (it comes only with checkout)', { skip }, async () => {
   const html = await (await rawFetch(`${server.base}/`)).text();
   const scripts = [...html.matchAll(/<script[^>]+src="([^"]+)"/g)].map((m) => m[1]);
@@ -237,7 +307,13 @@ const STRIPE_JS_STUB = `
         calls.push(['elements', options.amount, options.currency]);
         return { create: (type) => element(type), update(o) { calls.push(['update', o.amount]); }, submit: async () => ({}), getElement: () => null };
       },
-      confirmPayment: async (p) => { calls.push(['confirmPayment', p.clientSecret, p.redirect]); return window.__confirmError ? { error: { message: window.__confirmError } } : { paymentIntent: { status: 'processing' } }; },
+      // __confirmError: a message (a decline: card_error), or a whole error ({ type, message }).
+      confirmPayment: async (p) => {
+        calls.push(['confirmPayment', p.clientSecret, p.redirect]);
+        const e = window.__confirmError;
+        if (!e) return { paymentIntent: { status: 'processing' } };
+        return { error: typeof e === 'string' ? { type: 'card_error', code: 'card_declined', message: e } : e };
+      },
     };
   };
   window.Stripe.version = 'basil';
@@ -340,23 +416,28 @@ test('at 375px: Apple Pay fills checkout; an area we don’t know is asked for b
   await ctx.close();
 });
 
-test('at 1280px: a typed card pays; a declined try frees the pieces and the next try is a new order', { skip: skip || skipBrowser }, async () => {
-  const { ctx, page, errors } = await openCheckout(1280);
+/** Card chosen, and the delivery details typed in. */
+async function fillCardCheckout(page: Page, name: string, phone: string) {
   await page.getByRole('radio', { name: /^Card/ }).click();
   await page.locator('[data-testid="card-element"] input[data-stub-card]').waitFor();
-  await page.locator('input[placeholder="e.g. Fatima Al Mansoori"]').fill('Mona Typed');
-  await page.locator('#checkout-phone').fill('0509876543');
+  await page.locator('input[placeholder="e.g. Fatima Al Mansoori"]').fill(name);
+  await page.locator('#checkout-phone').fill(phone);
   await page.getByRole('combobox', { name: /Area \/ Neighborhood/ }).fill('Dubai Marina');
   await page.keyboard.press('Escape');
   await page.locator('input[placeholder="Street name, road, or community number"]').fill('Marina Walk');
   await page.locator('input[placeholder="e.g. Marina Gate 1 or Villa 24"]').fill('Marina Gate 1');
   await page.locator('input[placeholder="e.g. Apt 1402 or Villa 24"]').fill('Apt 1402');
+}
+
+test('at 1280px: a typed card pays; a declined try frees the pieces and the next try is a new order', { skip: skip || skipBrowser }, async () => {
+  const { ctx, page, errors } = await openCheckout(1280);
+  await fillCardCheckout(page, 'Mona Typed', '0509876543');
   const count = () => [...mock.intents.values()].filter((x) => x.client_secret).length;
   const start = count();
 
   await page.evaluate(() => ((window as unknown as { __confirmError: string }).__confirmError = 'Your card was declined.'));
   await page.getByRole('button', { name: /^Pay AED/ }).click();
-  await page.getByRole('alert').filter({ hasText: 'Your card was declined.' }).waitFor();
+  await page.getByRole('alert').filter({ hasText: 'Your card was declined. Nothing was charged.' }).waitFor();
   assert.equal(count(), start + 1);
   const declined = [...mock.intents.values()].at(-1)!;
   for (let i = 0; i < 50 && declined.status !== 'canceled'; i++) await new Promise((r) => setTimeout(r, 50));
@@ -372,6 +453,56 @@ test('at 1280px: a typed card pays; a declined try frees the pieces and the next
   // Stripe's signed webhook says paid.
   const ev = mock.event('payment_intent.succeeded', mock.succeed(second.id, { wallet: null, brand: 'mastercard', last4: '5454' }));
   assert.equal((await hook(ev.body, ev.signature)).status, 200);
+  await page.getByText(/^Paid by card/).waitFor({ timeout: 15_000 });
+  assert.equal(await overflow(page), false);
+  assert.deepEqual(errors, []);
+  await ctx.close();
+});
+
+test('at 1280px: the connection drops while paying and leaving fails too: nothing is claimed, “Check again” asks the server, and paying again is the same order (one order, one intent)', { skip: skip || skipBrowser }, async () => {
+  const { ctx, page, errors } = await openCheckout(1280);
+  await fillCardCheckout(page, 'Noor Offline', '0505550123');
+  const known = new Set(mock.intents.keys());
+  const fresh = () => [...mock.intents.values()].filter((x) => !known.has(x.id));
+  // Stripe.js loses the connection (the card may or may not have been charged), and the shop's
+  // "leave card checkout" call fails as well (offline).
+  await page.evaluate(() => ((window as unknown as { __confirmError: unknown }).__confirmError = { type: 'api_connection_error', message: 'A network error has occurred.' }));
+  let abandons = 0;
+  await page.route('**/api/orders/payment', (route) => {
+    if ((route.request().postData() || '').includes('"abandon"')) {
+      abandons++;
+      return route.abort('internetdisconnected');
+    }
+    return route.continue();
+  });
+  await page.getByRole('button', { name: /^Pay AED/ }).click();
+  const alert = page.getByRole('alert').filter({ hasText: /couldn.t confirm the payment/ });
+  await alert.waitFor();
+  assert.match((await alert.textContent()) || '', /if your card was charged, your order is safe/);
+  assert.doesNotMatch((await alert.textContent()) || '', /Nothing was charged/, 'never said when it is not known');
+  assert.equal(abandons, 1);
+  assert.equal(fresh().length, 1);
+  const pi = fresh()[0];
+  assert.equal((await (await api('GET', `/api/admin/orders/${pi.metadata.orderId}`)).json()).order.status, 'pending_payment', 'the order is kept');
+
+  // "Check again": the server asks Stripe (not paid yet).
+  await page.getByRole('button', { name: 'Check again' }).click();
+  await page.getByRole('alert').filter({ hasText: /has not confirmed a payment for this order yet/ }).waitFor();
+
+  // Back online: paying again continues the same order and the same PaymentIntent.
+  await page.evaluate(() => ((window as unknown as { __confirmError: unknown }).__confirmError = ''));
+  await page.getByRole('button', { name: /^Pay AED/ }).click();
+  await page.getByTestId('card-payment-status').waitFor();
+  assert.equal(fresh().length, 1, 'one PaymentIntent');
+  assert.equal([...mock.intents.values()].filter((x) => x.metadata.orderId === pi.metadata.orderId).length, 1);
+  const all = (await (await api('GET', '/api/admin/orders')).json()).orders as Array<{ customer: { fullName: string } }>;
+  assert.equal(all.filter((o) => o.customer.fullName === 'Noor Offline').length, 1, 'one order');
+  const confirms = await page.evaluate(() => (window as unknown as { __stripeCalls: unknown[][] }).__stripeCalls.filter((c) => c[0] === 'confirmPayment'));
+  assert.deepEqual(confirms, [
+    ['confirmPayment', pi.client_secret, 'if_required'],
+    ['confirmPayment', pi.client_secret, 'if_required'],
+  ]);
+  mock.succeed(pi.id);
   await page.getByText(/^Paid by card/).waitFor({ timeout: 15_000 });
   assert.equal(await overflow(page), false);
   assert.deepEqual(errors, []);

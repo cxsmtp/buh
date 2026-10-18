@@ -23,3 +23,18 @@ export async function emailAdmin(to: string, subject: string, text: string): Pro
 export function readableUtc(date = new Date()): string {
   return `${date.toLocaleString('en-GB', { timeZone: 'UTC', day: 'numeric', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' })} UTC`;
 }
+
+/**
+ * Something on an order needs the owner (a refund that failed, a booking that came back after a
+ * cancel): emailed to the admin's sign-in address when mail is set up, and logged. Never throws.
+ */
+export async function alertOwner(subject: string, text: string): Promise<boolean> {
+  logEvent('warn', 'owner_alert', { subject });
+  try {
+    const { adminAccountInfo } = await import('./adminAuth');
+    return await emailAdmin((await adminAccountInfo()).email, subject, text);
+  } catch (err) {
+    logEvent('warn', 'owner_alert_failed', { subject, error: err instanceof Error ? err.message : String(err) });
+    return false;
+  }
+}

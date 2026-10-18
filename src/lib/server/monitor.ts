@@ -6,7 +6,7 @@ import { dataDir } from './dataDir';
 import { getDb } from './db';
 import { kvGet, kvSet } from './kv';
 import { logEvent } from './log';
-import { awaitingWhatsAppCount, cardTakings, transfersAwaitedCount, transfersToCheckCount } from './orders';
+import { awaitingWhatsAppCount, cardTakings, ordersNeedingAttention, transfersAwaitedCount, transfersToCheckCount } from './orders';
 import { listProducts } from './products';
 import { getSettings } from './settings';
 
@@ -69,6 +69,9 @@ export function currentProblems(now = Date.now()): Problem[] {
   if (process.env.NODE_ENV === 'production' && !sms.isEnabled && !envGateway && process.env.OTP_DEV_MODE !== 'true') {
     problems.push({ id: 'sms', level: 'failing', text: 'No SMS gateway is switched on: customers cannot verify their phone, so they cannot order.' });
   }
+  // A refund that failed, a booking after a cancel, a card order to refund in Stripe's dashboard.
+  const attention = ordersNeedingAttention();
+  if (attention) problems.push({ id: 'orders', level: 'warning', text: `${attention} order${attention === 1 ? ' needs' : 's need'} your attention (Orders: the red notes). Mark each as handled once done.` });
   return problems;
 }
 

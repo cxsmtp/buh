@@ -1,5 +1,5 @@
 import { handleRouteError, json } from '@/lib/server/http';
-import { bankTransferReady, cardPaymentsReady, contactEmail, getSettings, phoneVerificationConfig } from '@/lib/server/settings';
+import { bankTransferReady, cardPaymentsReady, contactEmail, getSettings, phoneCodesOn, phoneVerificationConfig } from '@/lib/server/settings';
 import { storefrontTheme } from '@/lib/server/theme';
 
 /**
@@ -35,10 +35,13 @@ export function GET() {
   }
 }
 
-/** Card payments: only switched on with every key; the publishable key only (never the secret ones). */
+/**
+ * Card payments: only switched on with every key; the publishable key only (never the secret ones).
+ * phoneCheck: an SMS gateway is on, so card orders prove the phone with a code too.
+ */
 function paymentsView() {
   const p = getSettings('payments');
-  return cardPaymentsReady(p) ? { card: true, publishableKey: p.stripePublishableKey } : { card: false };
+  return cardPaymentsReady(p) ? { card: true, publishableKey: p.stripePublishableKey, ...(phoneCodesOn() ? { phoneCheck: true } : {}) } : { card: false };
 }
 
 function chatView() {
