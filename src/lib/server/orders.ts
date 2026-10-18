@@ -199,7 +199,8 @@ export function placeOrder(input: unknown): PlaceOrderResult {
   const card = paymentMethod === 'online_card';
   if (card && !cardPaymentsReady()) throw new HttpError(400, 'Card payment is not available right now. Please choose Cash on Delivery.', {}, { code: 'card_unavailable' });
   // A card order needs no SMS code: the card holder pays before it counts (a code, if given, still wins).
-  const phone = verifyPhoneToken(body.verificationToken) ?? (card && body.verificationToken === undefined ? validatePhone((body.customer as Obj | undefined)?.phone) : null);
+  const provenPhone = verifyPhoneToken(body.verificationToken);
+  const phone = provenPhone ?? (card && body.verificationToken === undefined ? validatePhone((body.customer as Obj | undefined)?.phone) : null);
   if (!phone) throw new HttpError(401, 'Please verify your UAE mobile number again (the code check has expired).');
 
   const idempotencyKey = text(body.idempotencyKey, 'Checkout reference', 64, { required: true });
@@ -230,7 +231,8 @@ export function placeOrder(input: unknown): PlaceOrderResult {
     flatVillaNo: text(c.flatVillaNo, 'Flat / villa number', 40, { required: true }),
     landmark: text(c.landmark, 'Landmark', 200) || undefined,
     gpsCoordinates: lat !== undefined && lng !== undefined ? { lat, lng } : undefined,
-    phoneVerified: true,
+    // Proven by an SMS code; a card order without one is proven by its payment instead.
+    phoneVerified: Boolean(provenPhone),
   };
 
   // Where we deliver comes from the address, never the GPS reading (often a network location far away).

@@ -214,7 +214,8 @@ test('migration 8 only adds (columns and an index); an older shop’s orders upg
   const seven = run(`const m = await import('@/lib/server/db'); const db = (m.getDb ?? m.default.getDb)(); console.log(db.pragma('user_version', { simple: true }));`);
   assert.equal(seven.status, 0, seven.stderr);
   const db = new Database(path.join(old, 'shop.db'));
-  // Recreate the version-7 orders table (drop the new columns) and put an old order in.
+  // Recreate the version-7 orders table (drop the columns of migrations 8 and 9) and put an old order in.
+  db.exec(`DROP INDEX orders_by_payment_ref; DROP INDEX orders_card_open; DROP TABLE stripe_events; ${['card_state', 'payment_ref', 'card_secret_hash', 'paid_fils', 'paid_at', 'card_label', 'refund_ref', 'refunded_at'].map((c) => `ALTER TABLE orders DROP COLUMN ${c};`).join(' ')}`);
   db.exec(`DROP INDEX orders_awaiting_whatsapp; ${['wa_code', 'phone_check', 'wa_hold', 'wa_opened_at', 'phone_checked_at', 'phone_checked_by'].map((c) => `ALTER TABLE orders DROP COLUMN ${c};`).join(' ')}`);
   db.prepare("INSERT INTO orders (id, created_at, updated_at, phone, status, payment_method, payment_status, total_fils, data) VALUES ('BUH-OLD-1', '2026-01-01', '2026-01-01', '+971501234567', 'delivered', 'cod', 'paid', 100, '{\"id\":\"BUH-OLD-1\"}')").run();
   db.pragma('user_version = 7');
@@ -222,7 +223,7 @@ test('migration 8 only adds (columns and an index); an older shop’s orders upg
   const up = run(`const m = await import('@/lib/server/db'); const db = (m.getDb ?? m.default.getDb)(); console.log(JSON.stringify({ v: db.pragma('user_version', { simple: true }), row: db.prepare("SELECT id, status, data, phone_check, wa_code, wa_hold FROM orders WHERE id = 'BUH-OLD-1'").get() }));`);
   assert.equal(up.status, 0, up.stderr);
   const out = JSON.parse(up.stdout.trim().split('\n').pop()!);
-  assert.equal(out.v, 8);
+  assert.equal(out.v, 9, 'migrations 8 and 9 both ran');
   assert.deepEqual(out.row, { id: 'BUH-OLD-1', status: 'delivered', data: '{"id":"BUH-OLD-1"}', phone_check: 'none', wa_code: null, wa_hold: 0 });
 });
 

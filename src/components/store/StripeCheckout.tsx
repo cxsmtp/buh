@@ -24,9 +24,23 @@ import type { WalletContact } from '@/lib/walletAddress';
  */
 
 const stripes = new Map<string, Promise<Stripe | null>>();
+/** Stripe.js for this key, once per page. Blocked or offline: null (checkout then says so). */
 function stripeFor(publishableKey: string): Promise<Stripe | null> {
-  if (!stripes.has(publishableKey)) stripes.set(publishableKey, loadStripe(publishableKey));
+  if (!stripes.has(publishableKey)) stripes.set(publishableKey, loadStripe(publishableKey).catch(() => null));
   return stripes.get(publishableKey)!;
+}
+
+/** Did Stripe.js fail to load (an ad blocker, no connection)? */
+function useStripeFailed(publishableKey: string): boolean {
+  const [failed, setFailed] = useState(false);
+  useEffect(() => {
+    let live = true;
+    void stripeFor(publishableKey).then((s) => live && setFailed(!s));
+    return () => {
+      live = false;
+    };
+  }, [publishableKey]);
+  return failed;
 }
 
 /** What checkout's server call gives back for a card order. */
@@ -74,6 +88,13 @@ async function confirm(stripe: Stripe, elements: StripeElements, clientSecret: s
 // ── Card typed in ───────────────────────────────────────────────────────────
 
 export function CardFields({ publishableKey, amountFils, onReady }: { publishableKey: string; amountFils: number; onReady: (pay: CardPay | null) => void }) {
+  if (useStripeFailed(publishableKey)) {
+    return (
+      <p role="alert" className="text-[11px] text-danger py-2">
+        The secure card form could not load (a blocker, or no connection). Please choose cash on delivery, or try again later.
+      </p>
+    );
+  }
   return (
     <Elements stripe={stripeFor(publishableKey)} options={options(amountFils)}>
       <CardFieldsInner onReady={onReady} />
@@ -133,6 +154,7 @@ export function ExpressCheckout({
   onWallet: (p: WalletPayment) => Promise<StartedCardOrder & { reason?: 'invalid_shipping_address' | 'address_unserviceable' | 'fail' }>;
   onDone: (result: { ok: boolean; message?: string; orderId?: string; clientSecret?: string }) => void;
 }) {
+  if (useStripeFailed(publishableKey)) return null;
   return (
     <Elements stripe={stripeFor(publishableKey)} options={options(amountFils)}>
       <ExpressInner shippingRate={shippingRate} servesEmirate={servesEmirate} onWallet={onWallet} onDone={onDone} />

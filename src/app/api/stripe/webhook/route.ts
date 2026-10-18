@@ -25,7 +25,13 @@ export async function POST(req: Request) {
     if (type === 'payment_intent.succeeded' && outcome === 'paid') {
       // How it was paid (Apple Pay, Visa •••• 4242) needs one more call to Stripe: after answering.
       const orderId = (JSON.parse(raw.toString('utf8')) as { data?: { object?: { metadata?: { orderId?: string } } } }).data?.object?.metadata?.orderId;
-      if (orderId) after(() => fillPaymentLabel(orderId));
+      if (orderId) {
+        try {
+          after(() => fillPaymentLabel(orderId));
+        } catch {
+          void fillPaymentLabel(orderId); // outside a request (called directly): just start it
+        }
+      }
     }
     return json({ received: true });
   } catch (err) {
