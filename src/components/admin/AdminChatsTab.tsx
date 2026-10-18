@@ -137,7 +137,11 @@ function Conversation({ thread, refreshKey, onBack, onChanged }: { thread: ChatT
     });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [thread.id, refreshKey]);
-  useEffect(() => end.current?.scrollIntoView({ block: 'nearest' }), [messages]);
+  // A block, not an expression: newer browsers return a Promise from scrollIntoView, and an
+  // effect that returns anything but a function makes React crash ("… is not a function").
+  useEffect(() => {
+    end.current?.scrollIntoView({ block: 'nearest' });
+  }, [messages]);
 
   const send = async (e: React.FormEvent) => {
     e.preventDefault();

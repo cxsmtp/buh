@@ -1,5 +1,14 @@
 # Changelog
 
+## BUH-02.09.01 — 2026-10-18 20:17 UTC · [#26](https://github.com/cxsmtp/buh/pull/26)
+
+- **Chats open again in the Admin Hub.** Reported: tapping a chat showed "Something went wrong… i is not a function". Newer Chrome on phones answers a scroll request in a way the chat screen didn't expect; the screen now ignores that answer, and a test plays that newer Chrome to keep it fixed.
+- **Status.**
+  - **Benchmark:** a one-line change in the hub's chat screen (no server or shop code changed); see the pull request.
+  - **Tests:** full suite passed, including the new chat test (fails before the fix, passes after) and a check that no screen in the shop or hub has the same pattern.
+  - **Dependency audit:** production 0 vulnerabilities; no package changes.
+  - **Security scan:** not applicable (no new input, route or data).
+
 ## BUH-02.09.00 — 2026-10-18 18:08 UTC · [#25](https://github.com/cxsmtp/buh/pull/25)
 
 - **Confirm on WhatsApp, free.** After ordering, the customer taps one button to send you a prefilled WhatsApp message with the order number and a short code; you compare the number and tap "Confirmed on WhatsApp" in the hub, then "Reply on WhatsApp". You can also hold orders until they are confirmed (off by default).
