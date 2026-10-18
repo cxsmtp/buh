@@ -398,7 +398,7 @@ export function ShopApp({ initialProductId }: { initialProductId?: string } = {}
         </div>
       )}
       {/* The announcement bar and the header stay at the top together while the page scrolls. */}
-      <div className="sticky top-0 z-40 pt-safe bg-ink">
+      <div data-testid="shop-top" className="sticky top-0 z-40 pt-safe bg-ink">
         <MarqueeBar brandSettings={brandSettings} />
         <Header
           cartCount={totalCartCount}

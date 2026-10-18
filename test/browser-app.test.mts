@@ -331,7 +331,9 @@ test('safe areas: the header, tab bar, sheets and footer buttons keep clear of a
   await cdp.send('Emulation.setSafeAreaInsetsOverride' as never, { insets: { top: 44, bottom: 34, left: 0, right: 0 } } as never);
   await page.waitForTimeout(100);
   const pad = (sel: string, side: string) => page.evaluate(([s, p]) => getComputedStyle(document.querySelector(s)!).getPropertyValue(p), [sel, side]);
-  assert.equal(await pad('header', 'padding-top'), '44px');
+  // The announcement bar and header stay on top together: the pair keeps clear of the notch.
+  assert.equal(await pad('[data-testid=shop-top]', 'padding-top'), '44px');
+  assert.ok((await page.locator('.marquee').boundingBox())!.y >= 44, 'the announcement bar below the status bar');
   assert.equal(await pad('nav[aria-label=Shop]', 'padding-bottom'), '34px');
   // The tab bar's buttons sit above the home bar.
   const nav = (await page.getByRole('navigation', { name: 'Shop' }).boundingBox())!;
