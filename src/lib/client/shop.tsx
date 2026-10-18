@@ -15,6 +15,7 @@ export interface FestivalView {
   showMarquee: boolean;
 }
 import { DEFAULT_CATALOG, DEFAULT_DELIVERY, DEFAULT_STORE } from '@/data/catalogDefaults';
+import { waMeLink } from '@/lib/whatsappConfirm';
 
 /** Shop-wide public settings for storefront components (from /api/settings/public). */
 export interface ShopInfo {
@@ -46,9 +47,7 @@ export function piecesLeft(product: Product, sizeId: string): number {
 
 /** A wa.me link to the shop's WhatsApp with a message, or null when no number is set. */
 export function whatsappLink(store: StoreSettings, message: string): string | null {
-  const digits = store.whatsappNumber.replace(/\D/g, '');
-  if (!digits) return null;
-  return `https://wa.me/${digits}?text=${encodeURIComponent(message)}`;
+  return waMeLink(store.whatsappNumber, message);
 }
 
 /** "Ask on WhatsApp": only when switched on in Settings → Store & contact and a number is set. */

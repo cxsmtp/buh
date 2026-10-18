@@ -527,6 +527,8 @@ const VALIDATORS: { [K in SettingsKey]: (input: Obj, current: SettingsMap[K]) =>
       showLocalCurrency: bool(input.showLocalCurrency, current.showLocalCurrency),
       askOnWhatsApp: bool(input.askOnWhatsApp, current.askOnWhatsApp),
       askOnInstagram: bool(input.askOnInstagram, current.askOnInstagram),
+      confirmOrdersOnWhatsApp: bool(input.confirmOrdersOnWhatsApp, current.confirmOrdersOnWhatsApp),
+      holdUntilWhatsAppConfirmed: bool(input.holdUntilWhatsAppConfirmed, current.holdUntilWhatsAppConfirmed),
     };
   },
 

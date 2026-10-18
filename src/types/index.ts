@@ -159,6 +159,25 @@ export interface Order {
   adminNotes?: string;
   /** Where the customer came from (first visit in the last 30 days). */
   source?: { source: string; campaign?: string };
+  /**
+   * "Confirm on WhatsApp": the customer sends the shop one message from their own WhatsApp
+   * (order number + this code), which shows the owner the number really is theirs. Absent
+   * when the order was not asked (no WhatsApp number, or switched off). Kept in the orders
+   * table's own columns, not in the order's JSON.
+   */
+  whatsappCheck?: WhatsAppCheck;
+}
+
+export interface WhatsAppCheck {
+  status: 'awaiting' | 'confirmed' | 'mismatch';
+  /** 4 digits, made by the server. Ties the message to the order; not a password. */
+  code: string;
+  /** Settings → Store & contact "Hold orders until confirmed": not confirmed or booked until then. */
+  hold: boolean;
+  /** The customer tapped the button (their WhatsApp opened). */
+  openedAt?: string;
+  checkedAt?: string;
+  checkedBy?: string;
 }
 
 export interface Customer {
@@ -242,6 +261,10 @@ export interface StoreSettings {
   askOnWhatsApp: boolean;
   /** "Ask on Instagram" (opens a direct message to instagramHandle). */
   askOnInstagram: boolean;
+  /** Ask each customer to confirm their order with one WhatsApp message (needs the number). */
+  confirmOrdersOnWhatsApp: boolean;
+  /** Don't confirm or book an order until that message has come (off: it goes through, marked "not yet confirmed"). */
+  holdUntilWhatsAppConfirmed: boolean;
 }
 
 /** Settings → Delivery: where we deliver, how fast, and the optional same-day service. */

@@ -2,7 +2,7 @@ import { createJeeblyShipment } from '@/lib/jeebly';
 import { createEchoShipment } from '@/lib/echo';
 import type { Order } from '@/types';
 import { HttpError } from './http';
-import { getOrder, recordBooking } from './orders';
+import { assertNotHeld, getOrder, recordBooking } from './orders';
 import { getSettings } from './settings';
 
 export interface DispatchOutcome {
@@ -37,6 +37,8 @@ export async function dispatchOrder(input: {
   if (order.status === 'cancelled' || order.status === 'delivered') {
     throw new HttpError(409, `This order is ${order.status} and cannot be booked.`);
   }
+  // Held until the customer confirms on WhatsApp (Settings → Store & contact): nothing goes to a carrier.
+  assertNotHeld(order);
   // Eco Express books next-day only: a same-day order (the customer paid for it) goes with Jeebly Express.
   if (order.deliveryOption === 'same_day' && provider === 'echo') {
     throw new HttpError(400, 'This is a same-day order: Eco Express books next-day only. Book it with Jeebly (Express).');

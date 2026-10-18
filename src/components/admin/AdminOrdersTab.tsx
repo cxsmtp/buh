@@ -21,6 +21,7 @@ import {
   X,
 } from 'lucide-react';
 import { postJson, sendJson } from '@/lib/apiClient';
+import { awaitingWhatsApp, heldForWhatsApp, OrderTimeline, OrderWhatsAppCheck } from './OrderWhatsAppCheck';
 
 interface AdminOrdersTabProps {
   orders: Order[];
@@ -55,7 +56,7 @@ export const AdminOrdersTab: React.FC<AdminOrdersTabProps> = ({
     else alert(data.message || 'The order could not be updated.');
   };
 
-  const [filter, setFilter] = useState<'all' | 'pending' | 'confirmed' | 'dispatched'>('all');
+  const [filter, setFilter] = useState<'all' | 'pending' | 'whatsapp' | 'confirmed' | 'dispatched'>('all');
   const [selectedOrderForConfirm, setSelectedOrderForConfirm] = useState<Order | null>(null);
   const [labelOrder, setLabelOrder] = useState<Order | null>(null);
 
@@ -69,6 +70,7 @@ export const AdminOrdersTab: React.FC<AdminOrdersTabProps> = ({
 
   const filteredOrders = orders.filter((o) => {
     if (filter === 'pending') return o.status === 'pending_confirmation';
+    if (filter === 'whatsapp') return awaitingWhatsApp(o);
     if (filter === 'confirmed') return o.status === 'confirmed';
     if (filter === 'dispatched') return o.status === 'dispatched';
     return true;
@@ -153,11 +155,13 @@ export const AdminOrdersTab: React.FC<AdminOrdersTabProps> = ({
         {[
           { id: 'all', label: 'All Orders' },
           { id: 'pending', label: 'Needs Confirmation' },
+          { id: 'whatsapp', label: 'Awaiting WhatsApp' },
           { id: 'confirmed', label: 'Confirmed & AWB Ready' },
           { id: 'dispatched', label: 'Dispatched / In Transit' },
-        ].map((tab) => {
+        ].filter((tab) => tab.id !== 'whatsapp' || orders.some((o) => o.whatsappCheck)).map((tab) => {
           const count = orders.filter((o) => {
             if (tab.id === 'pending') return o.status === 'pending_confirmation';
+            if (tab.id === 'whatsapp') return awaitingWhatsApp(o);
             if (tab.id === 'confirmed') return o.status === 'confirmed';
             if (tab.id === 'dispatched') return o.status === 'dispatched';
             return true;
@@ -252,6 +256,9 @@ export const AdminOrdersTab: React.FC<AdminOrdersTabProps> = ({
                   </div>
                 </div>
 
+                {/* Confirm on WhatsApp: first, so the owner sees it on the phone */}
+                <OrderWhatsAppCheck order={order} onOrderChanged={onOrderChanged} />
+
                 {/* Items & Delivery Info */}
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 text-xs">
                   {/* Items */}
@@ -341,7 +348,7 @@ export const AdminOrdersTab: React.FC<AdminOrdersTabProps> = ({
                       )}
                     </>
                   )}
-                  {(NEXT_ACTIONS[order.status] || []).map((action) => (
+                  {(heldForWhatsApp(order) ? [] : NEXT_ACTIONS[order.status] || []).map((action) => (
                     <button
                       key={action.to}
                       type="button"
@@ -375,6 +382,8 @@ export const AdminOrdersTab: React.FC<AdminOrdersTabProps> = ({
                   )}
                 </div>
 
+                <OrderTimeline orderId={order.id} />
+
                 {/* Action Buttons */}
                 <div className="flex items-center justify-between gap-2 pt-1">
                   <div className="flex items-center gap-2">
@@ -402,7 +411,9 @@ export const AdminOrdersTab: React.FC<AdminOrdersTabProps> = ({
                   </div>
 
                   {/* Confirm Order Action (Primary) */}
-                  {isPending ? (
+                  {isPending && heldForWhatsApp(order) ? (
+                    <span className="text-[11px] text-warning font-semibold text-right">Held until confirmed on WhatsApp</span>
+                  ) : isPending ? (
                     <button
                       onClick={() => openConfirmationModal(order)}
                       className="flex items-center gap-1.5 bg-ink hover:bg-ink text-white font-bold text-xs px-4 py-2 rounded-xl transition-all shadow active:scale-95"

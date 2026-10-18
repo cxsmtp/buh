@@ -1,9 +1,10 @@
 'use client';
 
 import React, { useState } from 'react';
-import { Order } from '@/types';
+import type { Order, WhatsAppCheck } from '@/types';
 import { X, Search, Truck, ExternalLink, MapPin } from 'lucide-react';
 import { postJson, safeHref } from '@/lib/apiClient';
+import { WhatsAppConfirm } from './WhatsAppConfirm';
 
 interface OrderTrackerModalProps {
   isOpen: boolean;
@@ -23,6 +24,7 @@ interface TrackedOrder {
   area: string;
   items: Array<{ title: string; profileName: string; quantity: number; totalPrice: number }>;
   courier: { awbNumber: string; trackingUrl: string; status: string };
+  whatsappCheck?: Pick<WhatsAppCheck, 'status' | 'code' | 'hold'>;
 }
 
 export const OrderTrackerModal: React.FC<OrderTrackerModalProps> = ({
@@ -36,6 +38,8 @@ export const OrderTrackerModal: React.FC<OrderTrackerModalProps> = ({
   const [hasSearched, setHasSearched] = useState(false);
   const [message, setMessage] = useState('');
   const [searching, setSearching] = useState(false);
+  /** The phone the order was found with (for the "Confirm on WhatsApp" ping). */
+  const [foundPhone, setFoundPhone] = useState('');
 
   if (!isOpen) return null;
 
@@ -50,6 +54,7 @@ export const OrderTrackerModal: React.FC<OrderTrackerModalProps> = ({
     });
     setSearching(false);
     setSearchResult(data.found && data.order ? data.order : null);
+    setFoundPhone(phone.trim());
     setMessage(data.found ? '' : data.message || 'No order matches that order number and phone number.');
     setHasSearched(true);
   };
@@ -133,6 +138,10 @@ export const OrderTrackerModal: React.FC<OrderTrackerModalProps> = ({
                     {searchResult.status.replace(/_/g, ' ')}
                   </span>
                 </div>
+
+                {searchResult.whatsappCheck && searchResult.status !== 'cancelled' && (
+                  <WhatsAppConfirm orderId={searchResult.id} phone={foundPhone} check={searchResult.whatsappCheck} />
+                )}
 
                 {/* Courier Details */}
                 <div className="bg-surface p-3 rounded-xl border border-line space-y-2">

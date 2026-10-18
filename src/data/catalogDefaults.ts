@@ -27,6 +27,9 @@ export const DEFAULT_STORE: StoreSettings = {
   showLocalCurrency: true,
   askOnWhatsApp: true,
   askOnInstagram: true,
+  // Free and simple: on as soon as a WhatsApp number is set. Holding orders is opt-in.
+  confirmOrdersOnWhatsApp: true,
+  holdUntilWhatsAppConfirmed: false,
 };
 
 /** Settings → Themes before the owner changes anything: festivals picked automatically. */

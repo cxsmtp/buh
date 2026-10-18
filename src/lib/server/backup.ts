@@ -102,6 +102,7 @@ function csvFiles(): TarEntry[] {
     x.customer.buildingVilla, x.customer.flatVillaNo, x.customer.landmark ?? '', x.bankTransferRef ?? '',
     x.courier.provider, x.courier.awbNumber, x.courier.simulated ? 'yes' : '', x.courier.status, x.adminNotes ?? '',
     x.source?.source ?? '', x.source?.campaign ?? '', x.deliveryOption ?? 'standard',
+    x.whatsappCheck?.status ?? '', x.whatsappCheck?.checkedAt ?? '', x.whatsappCheck?.checkedBy ?? '',
   ];
   return [
     {
@@ -109,7 +110,8 @@ function csvFiles(): TarEntry[] {
       data: Buffer.from(toCsv(
         ['order_id', 'created_at', 'status', 'payment_method', 'payment_status', 'subtotal_aed', 'delivery_fee_aed', 'cod_fee_aed', 'discount_aed', 'total_aed',
           'customer_name', 'phone', 'email', 'emirate', 'area', 'street', 'building_villa', 'flat_villa_no', 'landmark', 'bank_transfer_ref',
-          'courier', 'awb', 'awb_simulated', 'courier_status', 'admin_notes', 'source', 'campaign', 'delivery'],
+          'courier', 'awb', 'awb_simulated', 'courier_status', 'admin_notes', 'source', 'campaign', 'delivery',
+          'whatsapp_check', 'whatsapp_checked_at', 'whatsapp_checked_by'],
         orders.map(o)
       )),
     },
