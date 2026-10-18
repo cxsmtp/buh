@@ -3,6 +3,7 @@ import { logEvent } from './log';
 import { mailConfig, ownerEmail, sender, transport } from './mail';
 import { bankEmailDone, claimBankEmail, getOrder, isCustomerEmail } from './orders';
 import { bankTransferReady, contactEmail, getSettings } from './settings';
+import { confirmLink } from '@/lib/whatsappConfirm';
 
 /**
  * The bank details, emailed to a customer who chose bank transfer and gave an email (when the
@@ -29,6 +30,9 @@ export async function emailBankDetails(orderId: string): Promise<'sent' | 'skipp
     link,
     firstName: order.customer.fullName,
     shopName: getSettings('brand').storeName,
+    // Still waiting for the customer's WhatsApp message: the email carries the same one-tap link.
+    ...(order.whatsappCheck?.status === 'awaiting' ? { confirmLink: confirmLink(getSettings('store').whatsappNumber, orderId, order.whatsappCheck.code) ?? undefined } : {}),
+    ...(order.whatsappCheck?.cancelAt ? { cancelHours: Math.round((Date.parse(order.whatsappCheck.cancelAt) - Date.parse(order.createdAt)) / 3600_000) } : {}),
   });
   try {
     const replyTo = contactEmail() || ownerEmail().split(',')[0]?.trim() || undefined;

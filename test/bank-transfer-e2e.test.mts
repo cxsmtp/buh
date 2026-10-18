@@ -15,7 +15,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { after, before, test } from 'node:test';
 import { SMTPServer } from 'smtp-server';
-import { freePort, hasBuild, rawFetch, startServer, type RunningServer } from './server.mjs';
+import { freePort, hasBuild, rawFetch, setPhoneCheck, startServer, type RunningServer } from './server.mjs';
 import { openAdminSection } from './helpers.mjs';
 
 type PW = typeof import('playwright');
@@ -57,6 +57,8 @@ before(async () => {
     { SMTP_HOST: '127.0.0.1', SMTP_PORT: port, SMTP_SECURE: 'false', SMTP_REQUIRE_TLS: 'false', SMTP_FROM: 'shop@test', BACKUP_EMAIL: 'owner@test', NEXT_PUBLIC_APP_URL: `http://127.0.0.1:${shopPort}` },
     { port: shopPort }
   );
+  // These tests drive the SMS-code checkout (Settings → Phone check "SMS code"; the default is WhatsApp).
+  await setPhoneCheck(server, 'sms_code');
   const h = { 'content-type': 'application/json', origin: server.base };
   await fetch(`${server.base}/api/admin/login`, { method: 'POST', headers: h, body: JSON.stringify({ email: 'x@y.z', password: 'x' }) });
   let once: string | undefined;

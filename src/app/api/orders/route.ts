@@ -7,8 +7,10 @@ import { customerView, getOrder, placeOrder } from '@/lib/server/orders';
 import { abandonUnstarted, startCardPayment } from '@/lib/server/payments';
 
 /**
- * Place an order. Needs the signed proof of SMS verification for the phone
- * number (a card order needs none: it counts once Stripe says it is paid);
+ * Place an order. With Settings → Phone check "SMS code", needs the signed proof of SMS
+ * verification for the phone number (a card order needs none: it counts once Stripe says it is
+ * paid); with "WhatsApp (free)", the number only (checked like checkout's), confirmed on WhatsApp
+ * afterwards, with caps per phone, per connection and overall (src/lib/server/orders.ts);
  * prices, stock and totals are worked out on the server. A card order also
  * gets its Stripe PaymentIntent here: only its client secret goes back. A bank-transfer order's
  * bank details are emailed to the customer after the answer (when they gave an email), with the

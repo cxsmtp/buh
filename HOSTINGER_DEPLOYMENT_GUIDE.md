@@ -74,11 +74,10 @@ The Admin Hub has no button or address on the shop: addresses like `/admin` are 
 ## 2. Go-live checklist (in the Admin Hub)
 
 - [ ] **Settings → Passkeys & recovery codes:** add a passkey on your phone, and create recovery codes (Download or Print them, keep them safe). They get you back in if you forget the password, even without email.
-- [ ] **Settings → Phone verification:** enter your Twilio or Infobip keys, **Send test** to your own mobile, then **Save**.
-  - Or choose **Firebase Phone Auth** (Blaze plan, billed per SMS; see docs/user-guide.md) and test with a checkout on your phone.
-  - Checkout needs a working SMS gateway: customers cannot order without verifying their number.
-  - At start-up, the log warns if none is configured.
-- [ ] **Settings → Store & contact:** your WhatsApp number, support email and Instagram account.
+- [ ] **Settings → Store & contact:** your WhatsApp number (needed: customers confirm their orders by WhatsApp), support email and Instagram account.
+- [ ] **Settings → Phone check:** **WhatsApp (free)** is already chosen: no SMS gateway or subscription is needed. Check the hours after which unconfirmed orders cancel themselves (24 by default).
+  - At start-up, the log warns if no WhatsApp number is set (orders then come in marked "call the customer").
+  - Only if you want SMS codes instead: choose **SMS code**, enter your Twilio or Infobip keys (or Firebase Phone Auth, billed per SMS; see docs/user-guide.md), **Send test** to your own mobile, then **Save**.
 - [ ] **Settings → Branding & bank → Bank transfer details:** enter the bank name, account name and real IBAN, and check every digit. Bank transfer is hidden at checkout until they are saved, and the account is never shown on the website: each customer who chooses it gets it privately (email, WhatsApp, their order's private page).
 - [ ] **Settings → Couriers:**
   - enter the keys;

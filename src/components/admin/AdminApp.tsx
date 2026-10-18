@@ -2,7 +2,7 @@
 
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Archive, Box, Copy, CreditCard, Feather, KeyRound, LayoutGrid, Laptop, Link2, Mail, MessageSquare, Palette, ShieldCheck, Smartphone, Store, Truck } from 'lucide-react';
-import type { AssistantSettings, BankTransferDetails, BrandSettings, CatalogSettings, CourierSettings, Customer, DeliverySettings, EmailSettings, Order, PaymentSettings, Product, SmsGatewaySettings, StoreSettings, ThemeSettings } from '@/types';
+import type { AssistantSettings, BankTransferDetails, BrandSettings, CatalogSettings, CourierSettings, Customer, DeliverySettings, EmailSettings, Order, PaymentSettings, PhoneCheckSettings, Product, SmsGatewaySettings, StoreSettings, ThemeSettings } from '@/types';
 import { DEFAULT_ASSISTANT, DEFAULT_CATALOG, DEFAULT_DELIVERY, DEFAULT_EMAIL_SETTINGS, DEFAULT_STORE, DEFAULT_THEME_SETTINGS } from '@/data/catalogDefaults';
 import { INITIAL_BANK_DETAILS, INITIAL_BRAND_SETTINGS, INITIAL_COURIER_SETTINGS, INITIAL_SMS_SETTINGS } from '@/data/initialData';
 import { getJson, postJson, sendJson, UNAUTHORIZED_EVENT, UNKNOWN_ADDRESS_EVENT } from '@/lib/apiClient';
@@ -29,6 +29,7 @@ import { EmailSettingsCard } from './settings/EmailSettingsCard';
 import { MarqueeSettingsCard } from './settings/MarqueeSettingsCard';
 import { PaymentsSettingsCard } from './settings/PaymentsSettingsCard';
 import { SettingsConsole } from './settings/SettingsConsole';
+import { DEFAULT_PHONE_CHECK, PhoneCheckCard } from './settings/PhoneCheckCard';
 import { SettingsHistoryCard } from './settings/SettingsHistoryCard';
 import { SignInRecoveryCard } from './settings/SignInRecoveryCard';
 import { StoreSettingsCard } from './settings/StoreSettingsCard';
@@ -52,6 +53,7 @@ interface AdminSettings {
   assistant: AdminSetting<AssistantSettings>;
   delivery: AdminSetting<DeliverySettings>;
   payments: AdminSetting<PaymentSettings>;
+  phoneCheck: AdminSetting<PhoneCheckSettings>;
 }
 
 const NO_PAYMENTS: PaymentSettings = { cardEnabled: false, stripePublishableKey: '', stripeSecretKey: '', stripeWebhookSecret: '' };
@@ -126,6 +128,7 @@ export function AdminApp() {
     assistant: { value: DEFAULT_ASSISTANT, secretsSet: {} },
     delivery: { value: DEFAULT_DELIVERY, secretsSet: {} },
     payments: { value: NO_PAYMENTS, secretsSet: {} },
+    phoneCheck: { value: DEFAULT_PHONE_CHECK, secretsSet: {} },
   });
   const [adminLoadError, setAdminLoadError] = useState('');
   const [adminSettingsLoaded, setAdminSettingsLoaded] = useState(false);
@@ -189,7 +192,7 @@ export function AdminApp() {
     if (p.ok) setAdminProducts(p.data.products);
     if (st.ok) {
       if (st.data.bank) setBankDetails(st.data.bank.value);
-      setAdminSettings({ courier: st.data.courier, sms: st.data.sms, catalog: st.data.catalog, store: st.data.store, theme: st.data.theme, email: st.data.email, assistant: st.data.assistant, delivery: st.data.delivery, payments: st.data.payments ?? { value: NO_PAYMENTS, secretsSet: {} } });
+      setAdminSettings({ courier: st.data.courier, sms: st.data.sms, catalog: st.data.catalog, store: st.data.store, theme: st.data.theme, email: st.data.email, assistant: st.data.assistant, delivery: st.data.delivery, payments: st.data.payments ?? { value: NO_PAYMENTS, secretsSet: {} }, phoneCheck: st.data.phoneCheck ?? { value: DEFAULT_PHONE_CHECK, secretsSet: {} } });
       setAdminSettingsLoaded(true);
     }
     setAdminLoadError(o.ok && c.ok && p.ok && st.ok ? '' : 'Some admin data could not be loaded. Check your connection and refresh.');
@@ -235,7 +238,7 @@ export function AdminApp() {
   });
 
   /** Save one settings group on the server; resolves to an error message or null. */
-  const saveSettings = async (key: 'brand' | 'bank' | 'courier' | 'sms' | 'catalog' | 'store' | 'theme' | 'email' | 'assistant' | 'delivery' | 'payments', settings: unknown, onWarning?: (warning: string) => void): Promise<string | null> => {
+  const saveSettings = async (key: 'brand' | 'bank' | 'courier' | 'sms' | 'catalog' | 'store' | 'theme' | 'email' | 'assistant' | 'delivery' | 'payments' | 'phoneCheck', settings: unknown, onWarning?: (warning: string) => void): Promise<string | null> => {
     const { ok, data } = await sendJson<{ message?: string; warning?: string }>('PUT', `/api/admin/settings/${key}`, { settings });
     if (!ok) return data.message || 'Could not save. Please try again.';
     if (data.warning) onWarning?.(data.warning);
@@ -469,10 +472,19 @@ export function AdminApp() {
                 },
                 {
                   id: 'sms',
-                  label: 'Phone verification',
+                  label: 'Phone check',
                   icon: <Smartphone />,
-                  hint: 'The SMS gateway that sends checkout codes.',
+                  hint: 'How checkout makes sure the number is the customer’s: WhatsApp (free), or an SMS code through a gateway.',
                   content: (
+                    <div className="space-y-6">
+                    <PhoneCheckCard
+                      key={`phonecheck-${adminSettingsLoaded}-${settingsEpoch}-${undone['phoneCheck'] ?? 0}`}
+                      value={adminSettings.phoneCheck.value}
+                      shopWhatsApp={adminSettings.store.value.whatsappNumber}
+                      onSave={(v) => saveSettings('phoneCheck', v)}
+                      auto={autoSaveHooks}
+                    />
+                    <h3 className="font-serif font-bold text-base text-ink border-t border-line pt-4">SMS gateway <span className="font-sans text-xs font-normal text-ink-muted">(used only with &ldquo;SMS code&rdquo;)</span></h3>
                     <AdminSmsTab
                       key={`sms-${adminSettingsLoaded}-${settingsEpoch}-${undone['sms'] ?? 0}`}
                       smsSettings={adminSettings.sms.value}
@@ -480,6 +492,7 @@ export function AdminApp() {
                       onUpdateSmsSettings={(s: SmsGatewaySettings) => saveSettings('sms', s)}
                       auto={autoSaveHooks}
                     />
+                    </div>
                   ),
                 },
                 {

@@ -11,7 +11,7 @@ import { parseReceiptDataUrl } from './imageInput';
 import { verifyPhoneToken } from './phoneToken';
 import { getProduct, invalidateProducts, listProducts } from './products';
 import { bump } from './live';
-import { bankTransferReady, cardPaymentsReady, getSettings, phoneCodesOn } from './settings';
+import { bankTransferReady, cardPaymentsReady, getSettings, phoneCheckMode, phoneCodesOn } from './settings';
 import { audit } from './audit';
 import { kvGet, kvSet } from './kv';
 import { logEvent as logEvent_ } from './log';
@@ -24,9 +24,13 @@ import { validatePhone } from '@/lib/otpService';
  * is computed here from the catalogue, never taken from the browser:
  *  - prices come from the product and the chosen bed size;
  *  - stock is reserved in the same transaction (no overselling the last set);
- *  - the phone number is the one proven by an SMS code (a signed token), or, for a
- *    card order, the one the card holder gave (paying is the proof; the order waits
- *    for Stripe's word before it counts, and "Confirm on WhatsApp" still applies);
+ *  - the phone number is the one proven by an SMS code (a signed token); with Settings →
+ *    Phone check "WhatsApp (free)" (the default), the one typed at checkout, confirmed by the
+ *    customer's one WhatsApp message afterwards (an order still unconfirmed after the set hours
+ *    is cancelled, its pieces back on sale), and with caps per phone, per connection and in
+ *    total (no code costs an attacker anything now); for a card order, the one the card
+ *    holder gave (paying is the proof; the order waits for Stripe's word before it counts,
+ *    and "Confirm on WhatsApp" still applies);
  *  - one checkout attempt (idempotency key) creates at most one order.
  * A bank-transfer order gets a private page (src/lib/server/bankPay.ts) where the customer sees
  * the bank details and uploads the transfer screenshot; the account is never on the website.
@@ -48,6 +52,15 @@ export const MAX_UNVERIFIED_CARD_LINES = 5;
 /** An unpaid card order is cancelled (its pieces back on sale) after this long. */
 export const CARD_PAYMENT_TTL_MS = 10 * 60 * 1000;
 export const CARD_PAYMENT_TTL_MINUTES = CARD_PAYMENT_TTL_MS / 60_000;
+/**
+ * Settings → Phone check "WhatsApp (free)": orders no code proved and not yet confirmed hold
+ * pieces, so they can't pile up: per phone, per connection and across the shop. (Changeable by
+ * tests only.)
+ */
+export const UNCONFIRMED_LIMITS = { perPhone: 2, perIp: 4, shop: 60 };
+/** An order no code proved and not yet confirmed (on WhatsApp or by phone call), still waiting. */
+const UNCONFIRMED_OPEN =
+  "status = 'pending_confirmation' AND phone_check <> 'confirmed' AND COALESCE(json_extract(data, '$.customer.phoneVerified'), 0) = 0 AND card_state NOT IN ('paid', 'refund_pending', 'refunded')";
 
 const ORDER_SOURCES = ['instagram', 'whatsapp', 'facebook', 'tiktok', 'google', 'email', 'direct', 'other'];
 const EMIRATES: Emirate[] = ['Dubai', 'Abu Dhabi', 'Sharjah', 'Ajman', 'Ras Al Khaimah', 'Fujairah', 'Umm Al Quwain'];
@@ -121,6 +134,8 @@ interface Row {
   bank_emailed_at: string | null;
   bank_checked_at: string | null;
   bank_checked_by: string | null;
+  phone_check_method: string | null;
+  wa_cancel_at: string | null;
 }
 /**
  * The order's JSON, the WhatsApp confirmation (migration 8), the card payment (migration 9) and the
@@ -128,8 +143,9 @@ interface Row {
  */
 const COLUMNS =
   'data, wa_code, phone_check, wa_hold, wa_opened_at, phone_checked_at, phone_checked_by, card_state, payment_ref, paid_fils, paid_at, card_label, refund_ref, refunded_at, card_livemode, refunded_fils, refund_outside_at, needs_attention, ' +
-  'id, status, payment_status, pay_nonce, pay_expires_at, bank_state, transfer_uploads, transfer_uploaded_at, bank_emailed_at, bank_checked_at, bank_checked_by';
-const ATTENTION_KINDS: OrderAttention['kind'][] = ['refund_failed', 'booked_after_cancel', 'refund_outside_stripe', 'card_unreachable'];
+  'id, status, payment_status, pay_nonce, pay_expires_at, bank_state, transfer_uploads, transfer_uploaded_at, bank_emailed_at, bank_checked_at, bank_checked_by, ' +
+  'phone_check_method, wa_cancel_at';
+const ATTENTION_KINDS: OrderAttention['kind'][] = ['refund_failed', 'booked_after_cancel', 'refund_outside_stripe', 'card_unreachable', 'call_customer'];
 const CARD_STATES: CardState[] = ['pending', 'failed', 'paid', 'refund_pending', 'refunded', 'canceled'];
 const BANK_STATES: BankState[] = ['awaiting', 'uploaded', 'not_received', 'paid'];
 
@@ -212,6 +228,8 @@ function fromRow(r: Row): Order {
       ...(r.wa_opened_at ? { openedAt: r.wa_opened_at } : {}),
       ...(r.phone_checked_at ? { checkedAt: r.phone_checked_at } : {}),
       ...(r.phone_checked_by ? { checkedBy: r.phone_checked_by } : {}),
+      ...(r.phone_check === 'confirmed' ? { method: r.phone_check_method === 'call' ? ('call' as const) : ('whatsapp' as const) } : {}),
+      ...(r.wa_cancel_at && r.phone_check !== 'confirmed' ? { cancelAt: r.wa_cancel_at } : {}),
     };
   }
   return order;
@@ -302,11 +320,23 @@ export function placeOrder(input: unknown, context: PlaceOrderContext = {}): Pla
   const paymentMethod = text(body.paymentMethod, 'Payment method', 20, { required: true });
   const card = paymentMethod === 'online_card';
   if (card && !cardPaymentsReady()) throw new HttpError(400, 'Card payment is not available right now. Please choose Cash on Delivery.', {}, { code: 'card_unavailable' });
-  // With an SMS gateway switched on, a card order proves its phone like any order. Without one, a
-  // card order needs no code: the card holder pays before it counts (a code, if given, still wins).
+  // Settings → Phone check "WhatsApp (free)": no code; the number typed (UAE mobile rules) is
+  // confirmed by the customer's WhatsApp message afterwards. "SMS code": with an SMS gateway
+  // switched on, a card order proves its phone like any order. Without one, a card order needs no
+  // code: the card holder pays before it counts. A code, if given, always wins.
+  const whatsappMode = phoneCheckMode() === 'whatsapp';
   const provenPhone = verifyPhoneToken(body.verificationToken);
-  const phone = provenPhone ?? (card && !phoneCodesOn() && body.verificationToken === undefined ? validatePhone((body.customer as Obj | undefined)?.phone) : null);
+  const typedPhone = (body.customer as Obj | undefined)?.phone;
+  const phone =
+    provenPhone ??
+    (whatsappMode && typedPhone !== undefined
+      ? validatePhone(typedPhone)
+      : card && !phoneCodesOn() && body.verificationToken === undefined
+        ? validatePhone(typedPhone)
+        : null);
   if (!phone) throw new HttpError(401, 'Please verify your UAE mobile number again (the code check has expired).');
+  // No code proved it: the WhatsApp message (or the owner's call) will.
+  const unproven = !provenPhone;
 
   const idempotencyKey = text(body.idempotencyKey, 'Checkout reference', 64, { required: true });
   if (!/^[A-Za-z0-9-]{16,64}$/.test(idempotencyKey)) throw new HttpError(400, 'Checkout reference is invalid.');
@@ -404,13 +434,22 @@ export function placeOrder(input: unknown, context: PlaceOrderContext = {}): Pla
       throw new HttpError(400, `Paying by card, at most ${MAX_UNVERIFIED_CARD_QTY} of each item per order. For more, choose Cash on Delivery, or contact us.`, {}, { code: 'card_bag_limit' });
     }
   }
-  // The connection's address is kept only as a hash (enough to count, not to know it).
-  const ipHash = card && context.ip ? sha256(`card-ip:${context.ip}`) : null;
+  // The connection's address is kept only as a hash (enough to count, not to know it); in card_ip
+  // (migration 9) for every order, for the caps on card orders and on orders not yet confirmed.
+  const ipHash = context.ip ? sha256(`card-ip:${context.ip}`) : null;
 
   const courierSettings = getSettings('courier');
   const store = getSettings('store');
-  // "Confirm on WhatsApp" (Settings → Store & contact): only with the shop's number set.
-  const askWhatsApp = Boolean(store.confirmOrdersOnWhatsApp && waMeLink(store.whatsappNumber, ''));
+  // "Confirm on WhatsApp": only with the shop's number set (Settings → Store & contact). With Phone
+  // check "WhatsApp (free)" it is how every order is confirmed; otherwise Store & contact's switch.
+  const shopNumber = Boolean(waMeLink(store.whatsappNumber, ''));
+  const askWhatsApp = shopNumber && ((whatsappMode && unproven) || store.confirmOrdersOnWhatsApp);
+  // WhatsApp mode, no code, not a card: cancelled if still not confirmed after the set hours (a card
+  // order is cancelled in 10 minutes if unpaid, and a paid one is trusted).
+  const cancelAt = whatsappMode && unproven && !card && askWhatsApp ? new Date(Date.now() + getSettings('phoneCheck').unconfirmedCancelHours * 3600_000).toISOString() : null;
+  // WhatsApp mode without the shop's number: nothing can confirm the order. Still taken, never
+  // treated as verified, and flagged for the owner to call the customer.
+  const callCustomer = whatsappMode && unproven && !shopNumber && !card;
   listProducts({ includeHidden: true }); // load (and seed) the catalogue before the transaction
   // A screenshot sent with the order (a checkout page from before this version) is the first upload:
   // written beside its place first (if that fails, no order), moved there once the order is saved.
@@ -429,6 +468,19 @@ export function placeOrder(input: unknown, context: PlaceOrderContext = {}): Pla
       const open = (getDb().prepare("SELECT COUNT(*) AS n FROM orders WHERE phone = ? AND status = 'pending_confirmation'").get(phone) as { n: number }).n;
       if (open >= MAX_OPEN_PER_PHONE) {
         throw new HttpError(429, `You already have ${open} orders waiting for confirmation. We'll call you shortly, or contact us to add to them.`);
+      }
+      if (whatsappMode && unproven && !card) {
+        // No code cost anything: orders not yet confirmed are capped per phone, per connection and overall.
+        const count = (where: string, ...args: unknown[]) => getDb().prepare(`SELECT COUNT(*) FROM orders WHERE ${UNCONFIRMED_OPEN}${where}`).pluck().get(...args) as number;
+        if (count(' AND phone = ?', phone) >= UNCONFIRMED_LIMITS.perPhone) {
+          throw new HttpError(429, `You already have ${UNCONFIRMED_LIMITS.perPhone} orders waiting for your WhatsApp confirmation. Please confirm them first (tap “Confirm on WhatsApp”), or contact us.`, {}, { code: 'unconfirmed_limit' });
+        }
+        if (ipHash && count(' AND card_ip = ?', ipHash) >= UNCONFIRMED_LIMITS.perIp) {
+          throw new HttpError(429, 'Several orders from this connection are waiting for their WhatsApp confirmation. Please confirm them first, or contact us.', {}, { code: 'unconfirmed_limit' });
+        }
+        if (count('') >= UNCONFIRMED_LIMITS.shop) {
+          throw new HttpError(429, 'We’re receiving a lot of orders right now, sorry. Please try again in a little while, or message us on WhatsApp.', {}, { code: 'shop_busy' });
+        }
       }
       if (card) {
         // Unpaid card orders hold pieces, so they can't pile up: per phone, per connection, and overall.
@@ -529,17 +581,22 @@ export function placeOrder(input: unknown, context: PlaceOrderContext = {}): Pla
       };
       writeOrder(created, idempotencyKey);
       logEvent(id, 'customer', 'created', { total: created.total, paymentMethod });
+      if (ipHash) getDb().prepare('UPDATE orders SET card_ip = ? WHERE id = ?').run(ipHash, id);
       if (card) {
-        getDb().prepare("UPDATE orders SET card_state = 'pending', card_ip = ? WHERE id = ?").run(ipHash, id);
+        getDb().prepare("UPDATE orders SET card_state = 'pending' WHERE id = ?").run(id);
         created.card = { state: 'pending' };
       }
       if (askWhatsApp) {
         // 4 random digits, made here (never by the browser); not a secret from the customer.
         const code = String(crypto.randomInt(0, 10_000)).padStart(4, '0');
         const hold = store.holdUntilWhatsAppConfirmed;
-        getDb().prepare("UPDATE orders SET wa_code = ?, phone_check = 'awaiting', wa_hold = ? WHERE id = ?").run(code, hold ? 1 : 0, id);
-        created.whatsappCheck = { status: 'awaiting', code, hold };
-        logEvent(id, 'shop', 'whatsapp_asked', { hold });
+        getDb().prepare("UPDATE orders SET wa_code = ?, phone_check = 'awaiting', wa_hold = ?, wa_cancel_at = ? WHERE id = ?").run(code, hold ? 1 : 0, cancelAt, id);
+        created.whatsappCheck = { status: 'awaiting', code, hold, ...(cancelAt ? { cancelAt } : {}) };
+        logEvent(id, 'shop', 'whatsapp_asked', { hold, ...(cancelAt ? { cancelAt } : {}) });
+      }
+      if (callCustomer) {
+        setAttention(id, 'call_customer', `No WhatsApp number is set (Settings → Store & contact), so this customer could not confirm on WhatsApp: call them on ${phone} before shipping.`);
+        logEvent(id, 'shop', 'call_customer');
       }
       if (paymentMethod === 'bank_transfer') {
         // The private page with the bank details and the screenshot upload (the account is never on the website).
@@ -820,6 +877,11 @@ export function updateOrderByAdmin(id: string, patch: unknown, actor: string): O
         throw new HttpError(409, `An order that is ${order.status.replace(/_/g, ' ')} cannot become ${status.replace(/_/g, ' ')}.`);
       }
       if (status !== 'cancelled') assertNotHeld(order);
+      if (status !== 'cancelled' && unconfirmedCod(order)) {
+        // Not confirmed on WhatsApp yet: only with the owner's explicit "ship anyway" (recorded).
+        if (p.shipUnconfirmed !== true) throw shipAnywayQuestion(order);
+        noteShipAnyway(order, actor, `status:${status}`);
+      }
       assertCardAllows(order, status);
       releaseStock(order, status);
       if (status === 'delivered') order.courier.deliveredAt = new Date().toISOString();
@@ -904,30 +966,157 @@ export function assertNotHeld(order: Order): void {
   }
 }
 
-export type WhatsAppResult = 'confirmed' | 'mismatch';
+export type WhatsAppResult = 'confirmed' | 'mismatch' | 'call' | 'use_sender';
 
 /**
  * The owner's one tap: the customer's WhatsApp message came from the number on the order
- * (confirmed), or from another number (mismatch). Idempotent: the same answer again changes
- * nothing. Written to the audit log inside the same transaction, so it is never reported done
- * (or saved) without its audit entry. A mismatch can still be corrected to confirmed.
+ * (confirmed), or from another number (mismatch); "Confirmed by phone call" (call: the owner
+ * rang the customer, also for an order that could not be asked on WhatsApp); or "Use the number it
+ * came from" (use_sender: the order's phone becomes the sender's, validated like checkout's, the
+ * old number kept in the order's history, then confirmed). Idempotent: the same answer again
+ * changes nothing. Written to the audit log inside the same transaction, so it is never reported
+ * done (or saved) without its audit entry. A mismatch can still be corrected to confirmed.
+ * Confirming stops the auto-cancel (Settings → Phone check).
  */
-export function checkWhatsApp(id: string, result: WhatsAppResult, actor: string): { order: Order; changed: boolean } {
-  return inTransaction(() => {
+export function checkWhatsApp(id: string, result: WhatsAppResult, actor: string, opts: { phone?: string } = {}): { order: Order; changed: boolean } {
+  return auditedTransaction((auditOrThrow) => {
     const order = getOrder(id);
     if (!order) throw new HttpError(404, 'Order not found.');
     const check = order.whatsappCheck;
-    if (!check) throw new HttpError(409, 'This order was not asked to confirm on WhatsApp.');
-    if (check.status === result) return { order, changed: false };
+    if (!check && result !== 'call') throw new HttpError(409, 'This order was not asked to confirm on WhatsApp.');
     const at = new Date().toISOString();
-    getDb().prepare('UPDATE orders SET phone_check = ?, phone_checked_at = ?, phone_checked_by = ?, updated_at = ? WHERE id = ?').run(result, at, actor, at, id);
-    logEvent(id, actor, result === 'confirmed' ? 'whatsapp_confirmed' : 'whatsapp_mismatch', { from: check.status });
-    if (!audit(result === 'confirmed' ? 'order.whatsapp_confirmed' : 'order.whatsapp_mismatch', { by: actor, orderId: id, from: check.status, held: check.hold })) {
-      throw new HttpError(503, 'The audit log could not be written, so nothing was changed. Please try again.');
+    if (result === 'mismatch') {
+      if (check!.status === 'mismatch') return { order, changed: false };
+      if (check!.status === 'confirmed') throw new HttpError(409, `${order.id} is already confirmed.`);
+      getDb().prepare("UPDATE orders SET phone_check = 'mismatch', phone_checked_at = ?, phone_checked_by = ?, updated_at = ? WHERE id = ?").run(at, actor, at, id);
+      logEvent(id, actor, 'whatsapp_mismatch', { from: check!.status });
+      auditOrThrow('order.whatsapp_mismatch', { by: actor, orderId: id, from: check!.status, held: check!.hold });
+      bump('orders');
+      return { order: getOrder(id)!, changed: true };
     }
+
+    let from = order.customer.phone;
+    if (result === 'use_sender') {
+      if (order.status === 'cancelled' || order.status === 'delivered') throw new HttpError(409, `${order.id} is ${order.status}: its phone number can't be changed.`);
+      if (!opts.phone) throw new HttpError(400, 'Type the number the message came from.');
+      const to = validatePhone(opts.phone);
+      if (check!.status === 'confirmed' && to === order.customer.phone) return { order, changed: false };
+      if (check!.status === 'confirmed') throw new HttpError(409, `${order.id} is already confirmed: its phone number stays as it is.`);
+      if (to !== order.customer.phone) {
+        order.customer.phone = to;
+        writeOrder(order);
+        getDb().prepare('UPDATE orders SET phone = ? WHERE id = ?').run(to, id);
+        logEvent(id, actor, 'phone_changed', { from, to });
+        auditOrThrow('order.phone_changed', { by: actor, orderId: id, from, to, why: 'whatsapp_sender' });
+      }
+    } else if (check?.status === 'confirmed') {
+      return { order, changed: false };
+    }
+    from = check?.status ?? 'none';
+    const method = result === 'call' ? 'call' : 'whatsapp';
+    // An order never asked (no shop number) gets its code now, so every version shows it confirmed.
+    const code = check?.code ?? String(crypto.randomInt(0, 10_000)).padStart(4, '0');
+    getDb()
+      .prepare("UPDATE orders SET wa_code = ?, phone_check = 'confirmed', phone_check_method = ?, phone_checked_at = ?, phone_checked_by = ?, updated_at = ? WHERE id = ?")
+      .run(code, method, at, actor, at, id);
+    if (order.attention?.kind === 'call_customer') getDb().prepare('UPDATE orders SET needs_attention = NULL WHERE id = ?').run(id);
+    logEvent(id, actor, method === 'call' ? 'phone_call_confirmed' : 'whatsapp_confirmed', { from, ...(result === 'use_sender' ? { numberChanged: true } : {}) });
+    auditOrThrow(method === 'call' ? 'order.phone_call_confirmed' : 'order.whatsapp_confirmed', { by: actor, orderId: id, from, held: Boolean(check?.hold), method });
     bump('orders');
     return { order: getOrder(id)!, changed: true };
   });
+}
+
+/**
+ * A cash-on-delivery order whose phone no code proved and that is not yet confirmed (on WhatsApp
+ * or by phone call). Shipping it takes the owner's explicit "ship anyway" (they may have called).
+ */
+export function unconfirmedCod(order: Order): boolean {
+  return order.paymentMethod === 'cod' && order.status === 'pending_confirmation' && !order.customer.phoneVerified && order.whatsappCheck?.status !== 'confirmed';
+}
+
+function shipAnywayQuestion(order: Order): HttpError {
+  return new HttpError(409, `This customer hasn't confirmed ${order.id} on WhatsApp yet — ship anyway?`, {}, { code: 'whatsapp_unconfirmed' });
+}
+
+/** Inside the caller's transaction: the owner chose to ship an unconfirmed order (history and audit, or nothing happens). */
+function noteShipAnyway(order: Order, actor: string, via: string, auditFn: (action: string, details: Record<string, unknown>) => void = auditOrThrow): void {
+  logEvent(order.id, actor, 'ship_unconfirmed', { via, check: order.whatsappCheck?.status ?? 'none' });
+  auditFn('order.ship_unconfirmed', { by: actor, orderId: order.id, via, check: order.whatsappCheck?.status ?? 'none' });
+}
+
+/**
+ * Before a courier is booked (dispatch): an unconfirmed COD order needs `shipUnconfirmed` (the
+ * owner's "ship anyway"), recorded in the order's history and the audit log before the booking.
+ */
+export function assertShipAllowed(orderId: string, actor: string, shipUnconfirmed: boolean): void {
+  const order = getOrder(orderId);
+  if (!order || !unconfirmedCod(order)) return;
+  if (!shipUnconfirmed) throw shipAnywayQuestion(order);
+  auditedTransaction((auditFn) => noteShipAnyway(order, actor, 'courier', auditFn));
+}
+
+/**
+ * Settings → Phone check "WhatsApp (free)": orders still not confirmed when their time is up
+ * (wa_cancel_at, set at checkout) are cancelled and their pieces put back on sale, exactly once
+ * (the order is claimed with one conditional UPDATE, so two copies of the shop can't both do it),
+ * audited before it counts. Not cancelled: a confirmed order (WhatsApp or phone call), a paid card
+ * order, and a bank transfer whose screenshot is uploaded or that is paid (its time is cleared, so
+ * the owner decides). Returns how many were cancelled.
+ */
+export function sweepUnconfirmedOrders(now = Date.now()): number {
+  const due = getDb()
+    .prepare("SELECT id, wa_cancel_at FROM orders WHERE wa_cancel_at IS NOT NULL AND wa_cancel_at <= ? AND phone_check IN ('awaiting', 'mismatch') ORDER BY wa_cancel_at LIMIT 100")
+    .all(new Date(now).toISOString()) as Array<{ id: string; wa_cancel_at: string }>;
+  let cancelled = 0;
+  for (const { id, wa_cancel_at: dueAt } of due) {
+    try {
+      const done = auditedTransaction((auditOrThrow) => {
+        const claimed = getDb().prepare("UPDATE orders SET wa_cancel_at = NULL WHERE id = ? AND wa_cancel_at = ? AND phone_check IN ('awaiting', 'mismatch')").run(id, dueAt).changes === 1;
+        if (!claimed) return false;
+        const order = getOrder(id)!;
+        const paidCard = order.card?.state === 'paid' || order.card?.state === 'refund_pending' || order.card?.state === 'refunded';
+        const transferIn = order.paymentMethod === 'bank_transfer' && (order.bankTransfer?.state === 'uploaded' || order.bankTransfer?.state === 'paid' || order.paymentStatus === 'verified' || order.paymentStatus === 'paid');
+        if (order.status !== 'pending_confirmation' || paidCard || transferIn) {
+          if (transferIn && order.status === 'pending_confirmation') logEvent(id, 'shop', 'auto_cancel_skipped', { why: 'transfer' });
+          return false;
+        }
+        releaseStock(order, 'cancelled');
+        order.status = 'cancelled';
+        writeOrder(order);
+        const hours = Math.round((Date.parse(dueAt) - Date.parse(order.createdAt)) / 3600_000);
+        logEvent(id, 'shop', 'auto_cancelled_unconfirmed', { hours, check: order.whatsappCheck?.status });
+        auditOrThrow('order.auto_cancelled_unconfirmed', { orderId: id, hours, check: order.whatsappCheck?.status, amountFils: fils(order.total), by: 'shop' });
+        return true;
+      });
+      if (done) cancelled++;
+    } catch (err) {
+      logEvent_('warn', 'unconfirmed_sweep_order_failed', { orderId: id, error: err instanceof Error ? err.message : String(err) });
+    }
+  }
+  if (cancelled) {
+    invalidateProducts();
+    bump('orders');
+  }
+  return cancelled;
+}
+
+let unconfirmedTimer: NodeJS.Timeout | null = null;
+
+/** Start the sweep of unconfirmed orders (every 5 minutes, and once soon after start). Off with UNCONFIRMED_SWEEP_DISABLED=1. */
+export function startUnconfirmedSweep(): void {
+  if (unconfirmedTimer || process.env.UNCONFIRMED_SWEEP_DISABLED === '1') return;
+  const tick = () => {
+    try {
+      const n = sweepUnconfirmedOrders();
+      if (n) logEvent_('info', 'unconfirmed_orders_cancelled', { orders: n });
+    } catch (err) {
+      logEvent_('warn', 'unconfirmed_sweep_failed', { error: err instanceof Error ? err.message : String(err) });
+    }
+  };
+  setTimeout(tick, 45_000).unref();
+  unconfirmedTimer = setInterval(tick, 5 * 60_000);
+  unconfirmedTimer.unref();
 }
 
 /**
@@ -1364,7 +1553,7 @@ export function cardView(card: CardPayment): Pick<CardPayment, 'state' | 'label'
 
 /** The customer's side of the WhatsApp confirmation (not who confirmed it). */
 function whatsAppView(check: NonNullable<Order['whatsappCheck']>) {
-  return { status: check.status, code: check.code, hold: check.hold };
+  return { status: check.status, code: check.code, hold: check.hold, ...(check.cancelAt ? { cancelAt: check.cancelAt } : {}) };
 }
 
 function trackingView(order: Order) {

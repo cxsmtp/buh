@@ -14,6 +14,7 @@ import { emirateFrom, walletAddress } from '@/lib/walletAddress';
 import type { CardPay, CardResult, StartedCardOrder, WalletPayment } from './StripeCheckout';
 import { AreaCombobox } from './AreaCombobox';
 import { WhatsAppConfirm } from './WhatsAppConfirm';
+import { cancelHoursOf } from '@/lib/whatsappConfirm';
 import { 
   X, 
   CheckCircle2, 
@@ -61,7 +62,10 @@ interface CheckoutModalProps {
   supportEmail?: string;
   /** Where the customer came from (Instagram, WhatsApp…), recorded on the order. */
   landing?: { source: string; campaign?: string } | null;
-  /** How phones are verified: the shop's own SMS (default) or Firebase. */
+  /**
+   * How phones are checked: Settings → Phone check "WhatsApp (free)" (check 'whatsapp': no code, the
+   * customer confirms on WhatsApp after ordering), or an SMS code (the shop's own SMS, or Firebase).
+   */
   phoneVerification?: PhoneVerificationConfig;
   /**
    * Card payments through the shop's Stripe account (Settings → Payments), when switched on.
@@ -69,6 +73,9 @@ interface CheckoutModalProps {
    */
   card?: { publishableKey: string; phoneCheck?: boolean } | null;
 }
+
+/** A card order (paying is its own proof of the number). */
+const paidByCardOrder = (order: Order) => order.paymentMethod === 'online_card';
 
 /** Stripe.js's error types that mean the payment was refused, so nothing was charged (anything else: not known). */
 const surelyNotCharged = (errorType?: string) => errorType === 'card_error' || errorType === 'validation_error';
@@ -231,6 +238,10 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
   // With an SMS gateway on, a card order needs the phone code too (once per checkout).
   const cardNeedsCode = byCard && Boolean(card?.phoneCheck);
   const phoneOk = classifyPhone(phone).kind === 'uae';
+  // Settings → Phone check "WhatsApp (free)": no code at all; the number (UAE mobile rules) is enough
+  // to order, and the customer confirms with one WhatsApp message afterwards.
+  const whatsappCheck = phoneVerification?.check === 'whatsapp';
+  const phoneReady = whatsappCheck ? phoneOk : isPhoneVerified;
 
   // The confirmation screen of a card order: ask the server until Stripe has confirmed (or not).
   const confirmedId = confirmedOrder?.id;
@@ -353,8 +364,8 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
   /** The order body as checkout has it now, with any details the wallet gave instead. */
   const orderBody = (method: PaymentMethod, over: { customer?: Partial<Record<'fullName' | 'phone' | 'email' | 'emirate' | 'area' | 'streetAddress' | 'buildingVilla' | 'flatVillaNo', string>>; deliveryOption?: 'standard' | 'same_day' } = {}) => ({
     idempotencyKey,
-    // Card without an SMS gateway: no code needed (a verified number is still sent when there is one).
-    verificationToken: method === 'online_card' && !card?.phoneCheck && !(isPhoneVerified && phoneToken) ? undefined : phoneToken,
+    // WhatsApp check, or a card without an SMS gateway: no code needed (a verified number is still sent when there is one).
+    verificationToken: whatsappCheck || (method === 'online_card' && !card?.phoneCheck && !(isPhoneVerified && phoneToken)) ? undefined : phoneToken,
     customer: {
       fullName,
       email: email || undefined,
@@ -365,7 +376,7 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
       flatVillaNo,
       landmark: landmark || undefined,
       gpsCoordinates: gpsCoordinates || undefined,
-      ...(method === 'online_card' ? { phone: classifyPhone(phone).e164 || phone } : {}),
+      ...(method === 'online_card' || whatsappCheck ? { phone: classifyPhone(phone).e164 || phone } : {}),
       ...over.customer,
     },
     items: items.map((item) => ({
@@ -583,10 +594,10 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
       return;
     }
 
-    // Orders are only taken from a verified UAE mobile number.
-    if (!isPhoneVerified || !phoneToken) {
+    // WhatsApp check: a UAE mobile is enough (no code). Otherwise only a verified UAE mobile number.
+    if (whatsappCheck ? !phoneOk : !isPhoneVerified || !phoneToken) {
       document.getElementById('checkout-phone')?.focus();
-      alert('Please verify your UAE mobile number with the SMS code before placing your order.');
+      alert(whatsappCheck ? 'Please enter your UAE mobile number (e.g. 50 123 4567).' : 'Please verify your UAE mobile number with the SMS code before placing your order.');
       return;
     }
 
@@ -607,6 +618,11 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
   // SUCCESS CONFIRMATION SCREEN
   if (confirmedOrder) {
     const askWhatsApp = Boolean(confirmedOrder.whatsappCheck && shopWhatsApp);
+    // WhatsApp check: the message is the order's confirmation (with the hours before an unconfirmed one is cancelled).
+    const cancelHours = cancelHoursOf(confirmedOrder.createdAt, confirmedOrder.whatsappCheck?.cancelAt) ?? (whatsappCheck && confirmedOrder.whatsappCheck?.cancelAt ? phoneVerification?.cancelHours ?? null : null);
+    const awaitingConfirmation = askWhatsApp && confirmedOrder.whatsappCheck?.status !== 'confirmed' && (Boolean(confirmedOrder.whatsappCheck?.hold) || Boolean(cancelHours));
+    // WhatsApp check without the shop's number: nothing to tap, the shop calls instead.
+    const weCall = whatsappCheck && !askWhatsApp && !confirmedOrder.customer.phoneVerified && !paidByCardOrder(confirmedOrder);
     const paidByCard = confirmedOrder.paymentMethod === 'online_card';
     const cardPaid = paidByCard && cardShown?.state === 'paid';
     const cardOver = paidByCard && (cardShown?.state === 'canceled' || cardShown?.state === 'refunded');
@@ -625,7 +641,7 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
           </div>
 
           <div>
-            <span className="label-caps text-gold-deep">{cardOver ? 'Payment not taken' : paidByCard && !cardPaid ? 'Order received' : askWhatsApp && confirmedOrder.whatsappCheck?.hold ? 'Order received' : 'Order confirmed'}</span>
+            <span className="label-caps text-gold-deep">{cardOver ? 'Payment not taken' : paidByCard && !cardPaid ? 'Order received' : awaitingConfirmation || weCall ? 'Order received' : 'Order confirmed'}</span>
             <h2 id="order-confirmed-title" className="font-serif text-3xl text-ink mt-2">
               Thank you for your order
             </h2>
@@ -635,7 +651,12 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
           </div>
 
           {/* Confirm on WhatsApp (Settings → Store & contact): one message from the customer's own WhatsApp. */}
-          {askWhatsApp && <WhatsAppConfirm orderId={confirmedOrder.id} phone={confirmedOrder.customer.phone} check={confirmedOrder.whatsappCheck!} bankDetails={byTransfer} />}
+          {askWhatsApp && <WhatsAppConfirm orderId={confirmedOrder.id} phone={confirmedOrder.customer.phone} check={confirmedOrder.whatsappCheck!} bankDetails={byTransfer} cancelHours={cancelHours} />}
+          {weCall && (
+            <p role="status" className="text-xs text-ink-soft bg-ivory border border-line rounded-xl px-3 py-2">
+              We&rsquo;ll call you on <span className="font-mono">{confirmedOrder.customer.phone}</span> to confirm your order.
+            </p>
+          )}
 
           {/* Bank transfer: the details come privately (email, WhatsApp, the order's own page), never on the website. */}
           {byTransfer && payPath && (
@@ -809,7 +830,7 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
               <h3 className="label-caps text-ink flex items-center gap-1.5">
                 <span>1. Your details</span>
               </h3>
-              {byCard && !cardNeedsCode && !isPhoneVerified ? (
+              {whatsappCheck ? null : byCard && !cardNeedsCode && !isPhoneVerified ? (
                 <span className="text-[10px] text-ink-soft bg-sand px-2 py-0.5 rounded-full border border-line">Card: no SMS code needed</span>
               ) : isPhoneVerified ? (
                 <span className="text-[10px] font-semibold text-success bg-success-soft px-2.5 py-0.5 rounded-full flex items-center gap-1 border border-success-line">
@@ -850,6 +871,7 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
                 supportEmail={supportEmail}
                 verification={phoneVerification}
                 codeOptional={byCard && !cardNeedsCode}
+                whatsapp={whatsappCheck}
                 phone={phone}
                 onPhoneChange={setPhone}
                 verified={isPhoneVerified}
@@ -1236,7 +1258,7 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
             )}
             <button
               type="submit"
-              disabled={isSubmitting || !delivery.serviceable || (byCard ? !cardReady || (cardNeedsCode && !isPhoneVerified) : !isPhoneVerified)}
+              disabled={isSubmitting || !delivery.serviceable || (byCard ? !cardReady || (cardNeedsCode && !isPhoneVerified) : !phoneReady)}
               className="w-full bg-ink hover:bg-ink-2 text-ivory font-medium tracking-[0.03em] text-sm py-3.5 px-3 rounded-xl flex items-center justify-center gap-2 transition-colors disabled:opacity-50 text-center"
             >
               {isSubmitting ? (
@@ -1246,10 +1268,10 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
                   <CreditCard className="w-4 h-4 text-gold-light" />
                   <span>Pay AED {grandTotal}</span>
                 </>
-              ) : !isPhoneVerified ? (
+              ) : !phoneReady ? (
                 <>
                   <ShieldCheck className="w-4 h-4 text-gold-light" />
-                  <span>Verify your UAE mobile to place order</span>
+                  <span>{whatsappCheck ? 'Enter your UAE mobile to place order' : 'Verify your UAE mobile to place order'}</span>
                 </>
               ) : (
                 <>

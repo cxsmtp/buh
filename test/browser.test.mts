@@ -6,7 +6,7 @@
  */
 import assert from 'node:assert/strict';
 import { after, before, test } from 'node:test';
-import { hasBuild, startServer, type RunningServer } from './server.mjs';
+import { hasBuild, setPhoneCheck, startServer, type RunningServer } from './server.mjs';
 
 type PW = typeof import('playwright');
 async function loadPlaywright(): Promise<PW | null> {
@@ -24,6 +24,8 @@ let browser: import('playwright').Browser;
 before(async () => {
   if (skip) return;
   server = await startServer();
+  // These screens go through the SMS-code checkout (Settings → Phone check "SMS code"; the default, WhatsApp, is test/phone-check-e2e.test.mts).
+  await setPhoneCheck(server, 'sms_code');
   browser = await pw!.chromium.launch();
 });
 after(async () => {
@@ -405,12 +407,12 @@ test('regression: every admin tab and settings section fits a 375 px phone, SMS 
   await nav.getByRole('button', { name: 'More' }).click();
   await page.getByRole('dialog', { name: 'More' }).getByRole('button', { name: /^Settings/ }).click();
   // Every settings section fits too, including the SMS gateway.
-  for (const section of ['Store & contact', 'Catalogue', 'Branding & bank', 'Festival themes', 'Phone verification', 'Couriers', 'System & backups']) {
+  for (const section of ['Store & contact', 'Catalogue', 'Branding & bank', 'Festival themes', 'Phone check', 'Couriers', 'System & backups']) {
     await page.getByRole('navigation', { name: 'Settings sections' }).getByRole('button', { name: section }).click();
     await page.waitForTimeout(200);
     assert.deepEqual(await overflow(page), [], `${section} settings`);
   }
-  await page.getByRole('navigation', { name: 'Settings sections' }).getByRole('button', { name: 'Phone verification' }).click();
+  await page.getByRole('navigation', { name: 'Settings sections' }).getByRole('button', { name: 'Phone check' }).click();
   await page.getByText('Choose SMS Gateway Provider').waitFor();
   await ctx.close();
 });

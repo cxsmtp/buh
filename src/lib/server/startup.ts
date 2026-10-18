@@ -5,7 +5,7 @@ import { ensureAdminLink } from './adminLinkSetup';
 import { MIN_PASSPHRASE_LENGTH, emailConfigured, startBackupSchedule } from './backup';
 import { refreshPayHashes } from './bankPay';
 import { getDb } from './db';
-import { normalizeBankStates } from './orders';
+import { normalizeBankStates, startUnconfirmedSweep } from './orders';
 import { startMonitor } from './monitor';
 import { startCardSweep } from './payments';
 import { startFestivalRefresh } from './theme';
@@ -29,6 +29,8 @@ export async function onStartup() {
   step('chat', startChat);
   // Card orders not paid within 10 minutes: stopped at Stripe, cancelled, pieces back on sale.
   step('card_sweep', startCardSweep);
+  // Settings → Phone check "WhatsApp (free)": orders not confirmed in time are cancelled, pieces back on sale.
+  step('unconfirmed_sweep', startUnconfirmedSweep);
   // Restored onto a server with another key: the bank-transfer orders' private links follow it.
   // Bank orders an older version wrote after migration 10 (an update's overlap, a rollback) get
   // their state. Both retried every minute until they work, and then kept up (both are cheap).
@@ -52,7 +54,28 @@ export async function onStartup() {
   }
 
   const gateways = await liveGateways().catch(() => ({}) as Awaited<ReturnType<typeof liveGateways>>);
-  const { phoneVerificationConfig } = await import('./settings');
+  const { phoneCheckMode, phoneVerificationConfig, getSettings } = await import('./settings');
+  const whatsappMode = (() => {
+    try {
+      return phoneCheckMode() === 'whatsapp';
+    } catch {
+      return false;
+    }
+  })();
+  if (whatsappMode) {
+    // No codes are sent: the customer's WhatsApp message confirms the order, so the shop's number is needed.
+    const number = (() => {
+      try {
+        return getSettings('store').whatsappNumber;
+      } catch {
+        return 'unknown';
+      }
+    })();
+    if (process.env.NODE_ENV === 'production' && !number) {
+      console.error('!! Phone check is "WhatsApp (free)" but no WhatsApp number is set (Admin Hub → Settings → Store & contact): orders cannot be confirmed on WhatsApp; call each customer.');
+    }
+    return;
+  }
   const firebaseOn = (() => {
     try {
       return phoneVerificationConfig().method === 'firebase';

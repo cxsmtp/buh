@@ -221,7 +221,7 @@ export interface CardPayment {
 
 /** Something on an order the owner must look at (a refund that failed, a booking after a cancel…). Admin only. */
 export interface OrderAttention {
-  kind: 'refund_failed' | 'booked_after_cancel' | 'refund_outside_stripe' | 'card_unreachable';
+  kind: 'refund_failed' | 'booked_after_cancel' | 'refund_outside_stripe' | 'card_unreachable' | 'call_customer';
   text: string;
   at: string;
 }
@@ -266,6 +266,13 @@ export interface WhatsAppCheck {
   openedAt?: string;
   checkedAt?: string;
   checkedBy?: string;
+  /** How it was confirmed: the customer's WhatsApp message, or the owner's phone call. */
+  method?: 'whatsapp' | 'call';
+  /**
+   * Settings → Phone check "WhatsApp (free)": when an order still not confirmed is cancelled
+   * (its pieces back on sale). Absent: never cancelled for this (an SMS-verified or older order).
+   */
+  cancelAt?: string;
 }
 
 export interface Customer {
@@ -480,6 +487,23 @@ export interface FirebaseWebConfig {
 export interface PhoneVerificationConfig {
   method: 'server' | 'firebase';
   firebase?: FirebaseWebConfig;
+  /**
+   * Settings → Phone check. 'whatsapp' (the default): no code is sent; the customer confirms the
+   * order with one WhatsApp message. Absent (pages from before) or 'sms_code': the SMS code.
+   */
+  check?: PhoneCheckMode;
+  /** WhatsApp mode: orders not confirmed within this many hours are cancelled. */
+  cancelHours?: number;
+}
+
+export type PhoneCheckMode = 'whatsapp' | 'sms_code';
+
+/** Settings → Phone check: how checkout makes sure the phone number is the customer's. */
+export interface PhoneCheckSettings {
+  /** 'whatsapp' (free, the default): one WhatsApp message after ordering. 'sms_code': a code by SMS gateway or Firebase. */
+  mode: PhoneCheckMode;
+  /** WhatsApp mode: an order not confirmed within this many hours (2 to 168) is cancelled, its pieces back on sale. */
+  unconfirmedCancelHours: number;
 }
 
 export interface SmsGatewaySettings {

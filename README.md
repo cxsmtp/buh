@@ -10,7 +10,7 @@
 | **Backed up every 12 hours** | The shop emails itself to you: the full database, Excel-ready CSVs of orders and customers, and receipts, optionally encrypted. Status and **Back up now** in the Admin Hub; tested restore. |
 | **Bank transfer, privately** | Your bank account is never on the website: each customer who chooses bank transfer gets it by email and WhatsApp with a private link to upload the transfer screenshot; you tap **Payment received** in the Admin Hub ([user guide](docs/user-guide.md#bank-details)). |
 | **Card, Apple Pay and Google Pay** | Through your own Stripe account, beside cash on delivery and bank transfer: Apple Pay and Google Pay fill in the customer's address and phone, the shop works out the amount, and an order counts as paid only on Stripe's word; refunds in one tap ([user guide](docs/user-guide.md#card-payments-apple-pay-and-google-pay-stripe)). Off until you add your keys. |
-| **Verified orders only** | Customers confirm their UAE mobile with a 6-digit SMS code (through the shop's SMS gateway or Firebase Phone Auth) before they can order. Other countries are invited to email the shop instead. |
+| **Confirmed orders, no subscription** | Checkout takes a UAE mobile and sends no code: the customer confirms with one free WhatsApp message, and an order not confirmed in 24 hours cancels itself (Settings → Phone check; SMS codes through a gateway or Firebase stay available). Other countries are invited to email the shop instead. |
 | **Confirmed on WhatsApp, for free** | After checkout, one tap sends you "Confirm my order BUH-… · code 1234" from the customer's own WhatsApp (no WhatsApp API); you confirm in one tap in Orders, optionally holding orders until then ([user guide](docs/user-guide.md#confirm-on-whatsapp-free-no-whatsapp-api)). |
 | **An admin hub only you can open** | Not on the shop at all: only at your own private link (you bookmark it on your phone and laptop; every other address, /admin included, is an ordinary "not found"). Server-checked sign-in with lockout, a one-time first password you replace at first sign-in, passkeys and one-time recovery codes if you forget it, and an audit log of every sign-in and courier booking. |
 | **Inventory from your phone** | Stock per size as coloured chips, big − / + with Undo, Received stock, low and sold-out lists with a badge; two devices never overwrite each other and every change is logged (who, why, old → new). A step-by-step editor: camera photos first, then price, sizes and publish, saved as a draft as you go. |
@@ -31,7 +31,7 @@ Node 20+:
 npm ci && npm run dev
 ```
 
-Open <http://localhost:3000>. The terminal prints the first admin password and the private **admin link** once (the Admin Hub is only there); open the link, sign in and choose your own password. Without an SMS gateway, checkout runs in test mode and shows the code on screen.
+Open <http://localhost:3000>. The terminal prints the first admin password and the private **admin link** once (the Admin Hub is only there); open the link, sign in and choose your own password. Checkout confirms orders on WhatsApp by default (no SMS gateway needed); with Phone check "SMS code" and no gateway, it runs in test mode and shows the code on screen.
 
 **Production:** a Hostinger KVM VPS with Docker Compose. The shop runs behind Caddy, which provides automatic HTTPS. Step by step: [HOSTINGER_DEPLOYMENT_GUIDE.md](HOSTINGER_DEPLOYMENT_GUIDE.md).
 

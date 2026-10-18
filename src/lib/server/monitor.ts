@@ -8,7 +8,7 @@ import { kvGet, kvSet } from './kv';
 import { logEvent } from './log';
 import { awaitingWhatsAppCount, cardTakings, ordersNeedingAttention, receiptsNoRoom, transfersAwaitedCount, transfersToCheckCount } from './orders';
 import { listProducts } from './products';
-import { getSettings } from './settings';
+import { getSettings, phoneCheckMode } from './settings';
 
 /**
  * Keeps an eye on the shop so the owner doesn't have to:
@@ -64,10 +64,17 @@ export function currentProblems(now = Date.now()): Problem[] {
   const backup = backupHealth(now);
   if (backup.level === 'failing') problems.push({ id: 'backup', level: 'failing', text: backup.lastError ? `Backups are failing: ${backup.lastError}` : 'No backup in the last day.' });
   else if (backup.level === 'warning') problems.push({ id: 'backup', level: 'warning', text: backup.lastEmailError || backup.notice || 'Backups need attention.' });
-  const sms = getSettings('sms');
-  const envGateway = Boolean(process.env.TWILIO_ACCOUNT_SID || process.env.INFOBIP_API_KEY || process.env.SMS_WEBHOOK_URL);
-  if (process.env.NODE_ENV === 'production' && !sms.isEnabled && !envGateway && process.env.OTP_DEV_MODE !== 'true') {
-    problems.push({ id: 'sms', level: 'failing', text: 'No SMS gateway is switched on: customers cannot verify their phone, so they cannot order.' });
+  if (phoneCheckMode() === 'whatsapp') {
+    // Settings → Phone check "WhatsApp (free)": no gateway needed, but the shop's WhatsApp number is.
+    if (!getSettings('store').whatsappNumber) {
+      problems.push({ id: 'whatsapp', level: 'warning', text: 'No WhatsApp number is set (Settings → Store & contact): customers can’t confirm their orders on WhatsApp, so call each one before shipping.' });
+    }
+  } else {
+    const sms = getSettings('sms');
+    const envGateway = Boolean(process.env.TWILIO_ACCOUNT_SID || process.env.INFOBIP_API_KEY || process.env.SMS_WEBHOOK_URL);
+    if (process.env.NODE_ENV === 'production' && !sms.isEnabled && !envGateway && process.env.OTP_DEV_MODE !== 'true') {
+      problems.push({ id: 'sms', level: 'failing', text: 'No SMS gateway is switched on: customers cannot verify their phone, so they cannot order (or choose Settings → Phone check “WhatsApp (free)”).' });
+    }
   }
   // A transfer screenshot refused in the last day: the disk, or the receipts folder, is too full.
   const noRoom = receiptsNoRoom();

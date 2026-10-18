@@ -1,5 +1,5 @@
 import net from 'node:net';
-import type { AssistantSettings, BankTransferDetails, DeliverySettings, Emirate, BedProfileMeasurement, BrandSettings, CatalogSettings, CourierSettings, EmailSettings, FirebaseWebConfig, PaymentSettings, PhoneVerificationConfig, SmsGatewaySettings, StoreSettings, ThemeSettings } from '@/types';
+import type { AssistantSettings, BankTransferDetails, DeliverySettings, Emirate, BedProfileMeasurement, BrandSettings, CatalogSettings, CourierSettings, EmailSettings, FirebaseWebConfig, PaymentSettings, PhoneCheckMode, PhoneCheckSettings, PhoneVerificationConfig, SmsGatewaySettings, StoreSettings, ThemeSettings } from '@/types';
 import { FESTIVALS } from '@/lib/festivals/catalog';
 import { marqueeItems, marqueeProblem, stripEmoji } from '@/lib/marquee';
 import { DEFAULT_ASSISTANT, DEFAULT_CATALOG, DEFAULT_DELIVERY, DEFAULT_EMAIL_SETTINGS, DEFAULT_STORE, DEFAULT_THEME_SETTINGS } from '@/data/catalogDefaults';
@@ -36,6 +36,7 @@ export interface SettingsMap {
   assistant: AssistantSettings;
   delivery: DeliverySettings;
   payments: PaymentSettings;
+  phoneCheck: PhoneCheckSettings;
 }
 export type SettingsKey = keyof SettingsMap;
 
@@ -66,6 +67,8 @@ const DEFAULTS: SettingsMap = {
   delivery: DEFAULT_DELIVERY,
   // Off, and no keys: checkout offers cash on delivery (and bank transfer) until the owner adds them.
   payments: { cardEnabled: false, stripePublishableKey: '', stripeSecretKey: '', stripeWebhookSecret: '' },
+  // WhatsApp (free) for every shop, new or existing, until the owner chooses SMS codes.
+  phoneCheck: { mode: 'whatsapp', unconfirmedCancelHours: 24 },
 };
 
 /** Where customers are asked to email: Settings → Store first, then NEXT_PUBLIC_SUPPORT_EMAIL. */
@@ -86,6 +89,7 @@ const SECRETS: Record<SettingsKey, string[]> = {
   assistant: [],
   delivery: [],
   payments: ['stripeSecretKey', 'stripeWebhookSecret'],
+  phoneCheck: [],
 };
 
 const cache = new Map<SettingsKey, unknown>();
@@ -311,6 +315,7 @@ const SECRET_HOSTS: Record<SettingsKey, Record<string, string>> = {
   assistant: {},
   delivery: {},
   payments: {},
+  phoneCheck: {},
 };
 
 /**
@@ -564,6 +569,16 @@ const VALIDATORS: { [K in SettingsKey]: (input: Obj, current: SettingsMap[K]) =>
     };
   },
 
+  async phoneCheck(input, current) {
+    const mode = input.mode === undefined ? current.mode : input.mode;
+    if (!PHONE_CHECK_MODES.includes(mode as PhoneCheckMode)) throw new HttpError(400, 'Phone check: choose WhatsApp or SMS code.');
+    const hours = input.unconfirmedCancelHours === undefined ? current.unconfirmedCancelHours : Number(input.unconfirmedCancelHours);
+    if (!Number.isInteger(hours) || hours < MIN_CANCEL_HOURS || hours > MAX_CANCEL_HOURS) {
+      throw new HttpError(400, `Cancel unconfirmed orders after: a whole number of hours from ${MIN_CANCEL_HOURS} to ${MAX_CANCEL_HOURS}.`);
+    }
+    return { mode: mode as PhoneCheckMode, unconfirmedCancelHours: hours };
+  },
+
   async email(input, current) {
     const host = text(input.smtpHost, 'Mail server', 253, current.smtpHost).toLowerCase();
     if (host && !net.isIPv4(host) && !/^(?=.{3,253}$)(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z]{2,63}$/.test(host)) throw new HttpError(400, 'Mail server: a host name such as smtp.gmail.com.');
@@ -724,18 +739,31 @@ const HOSTNAME = /^(?=.{4,253}$)(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z]
  * environment (which, as for every other gateway, takes precedence).
  */
 export function phoneVerificationConfig(): PhoneVerificationConfig {
+  // WhatsApp mode: no code at all ('server' keeps pages from before on their own path).
+  if (phoneCheckMode() === 'whatsapp') return { method: 'server', check: 'whatsapp', cancelHours: getSettings('phoneCheck').unconfirmedCancelHours };
   const sms = getSettings('sms');
-  if (!sms.isEnabled || sms.provider !== 'firebase' || !firebaseConfigComplete(sms.firebase) || hasEnvGateway()) return { method: 'server' };
+  if (!sms.isEnabled || sms.provider !== 'firebase' || !firebaseConfigComplete(sms.firebase) || hasEnvGateway()) return { method: 'server', check: 'sms_code' };
   const { apiKey, authDomain, projectId, appId } = sms.firebase;
-  return { method: 'firebase', firebase: { apiKey, authDomain, projectId, appId } };
+  return { method: 'firebase', firebase: { apiKey, authDomain, projectId, appId }, check: 'sms_code' };
 }
 
 /**
- * An SMS gateway (or Firebase) is switched on, so checkout can send phone codes: card orders then
- * prove their phone like every other order. Saved settings can only be on when complete.
+ * Checkout sends phone codes: Settings → Phone check is "SMS code" and an SMS gateway (or Firebase)
+ * is switched on, so card orders prove their phone like every other order. With "WhatsApp (free)"
+ * no code is ever sent, as if there were no gateway. Saved settings can only be on when complete.
  */
 export function phoneCodesOn(): boolean {
-  return hasEnvGateway() || getSettings('sms').isEnabled;
+  return phoneCheckMode() === 'sms_code' && (hasEnvGateway() || getSettings('sms').isEnabled);
+}
+
+export const PHONE_CHECK_MODES: readonly PhoneCheckMode[] = ['whatsapp', 'sms_code'];
+export const MIN_CANCEL_HOURS = 2;
+export const MAX_CANCEL_HOURS = 168;
+
+/** Settings → Phone check: 'whatsapp' (the default, free) or 'sms_code' (the gateways, unchanged). */
+export function phoneCheckMode(): PhoneCheckMode {
+  const mode = getSettings('phoneCheck').mode;
+  return mode === 'sms_code' ? 'sms_code' : 'whatsapp';
 }
 
 function hasEnvGateway(): boolean {

@@ -67,6 +67,8 @@ interface PhoneVerificationProps {
   verification?: PhoneVerificationConfig;
   /** Paying by card: the number is still needed for the courier, but no SMS code (paying is the proof). */
   codeOptional?: boolean;
+  /** Settings → Phone check "WhatsApp (free)": the number only, no code; the order is confirmed on WhatsApp. */
+  whatsapp?: boolean;
 }
 
 type VerifyResponse = { valid?: boolean; message?: string; verificationToken?: string };
@@ -79,8 +81,10 @@ export const PhoneVerification: React.FC<PhoneVerificationProps> = ({
   orderSummary,
   supportEmail = DEFAULT_SUPPORT_EMAIL,
   verification,
-  codeOptional = false,
+  codeOptional: cardNoCode = false,
+  whatsapp = false,
 }) => {
+  const codeOptional = cardNoCode || whatsapp;
   const firebase = verification?.method === 'firebase' ? verification.firebase : undefined;
   // Firebase: the pending sign-in for the code that was sent, and where its invisible reCAPTCHA renders.
   const confirmation = useRef<ConfirmationResult | null>(null);
@@ -272,8 +276,8 @@ export const PhoneVerification: React.FC<PhoneVerificationProps> = ({
       <div className="flex items-center gap-2.5 px-3.5 py-2.5 bg-gradient-to-r from-ink to-ink-2 text-white">
         <ShieldCheck className="w-4 h-4 text-gold" />
         <div className="flex-1">
-          <p className="text-[11px] font-semibold tracking-wide">{codeOptional ? 'Your UAE mobile, for the courier' : 'Verify your UAE mobile to place your order'}</p>
-          <p className="text-[10px] text-sand">{codeOptional ? 'Paying by card: no SMS code needed' : 'Free • takes 30 seconds • protects your delivery'}</p>
+          <p className="text-[11px] font-semibold tracking-wide">{whatsapp ? 'Your UAE mobile number' : codeOptional ? 'Your UAE mobile, for the courier' : 'Verify your UAE mobile to place your order'}</p>
+          <p className="text-[10px] text-sand">{whatsapp ? 'We confirm orders over WhatsApp.' : codeOptional ? 'Paying by card: no SMS code needed' : 'Free • takes 30 seconds • protects your delivery'}</p>
         </div>
         <span className="text-[10px] font-semibold bg-gold text-ink px-2 py-0.5 rounded-full">Required</span>
       </div>

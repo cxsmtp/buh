@@ -2,7 +2,7 @@ import { createJeeblyShipment } from '@/lib/jeebly';
 import { createEchoShipment } from '@/lib/echo';
 import type { Order } from '@/types';
 import { HttpError } from './http';
-import { assertNotHeld, getOrder, recordBooking } from './orders';
+import { assertNotHeld, assertShipAllowed, getOrder, recordBooking } from './orders';
 import { getSettings } from './settings';
 
 export interface DispatchOutcome {
@@ -30,6 +30,8 @@ export async function dispatchOrder(input: {
   adminNotes?: string;
   rebook: boolean;
   actor: string;
+  /** The owner's "ship anyway" for a COD order not yet confirmed on WhatsApp (asked first, then recorded). */
+  shipUnconfirmed?: boolean;
 }): Promise<DispatchOutcome> {
   const { orderId, provider, rebook, actor } = input;
   const order = getOrder(orderId);
@@ -90,6 +92,10 @@ export async function dispatchOrder(input: {
       pieces: input.pieces ?? order.courier.pieces,
     },
   };
+
+  // Not confirmed on WhatsApp yet (cash on delivery, no code): the owner's explicit "ship anyway",
+  // in the order's history and the audit log before anything goes to a carrier.
+  assertShipAllowed(order.id, actor, input.shipUnconfirmed === true);
 
   inFlight.add(order.id);
   try {

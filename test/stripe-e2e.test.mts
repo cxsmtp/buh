@@ -13,7 +13,7 @@ import crypto from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
 import { after, before, test } from 'node:test';
-import { hasBuild, rawFetch, startServer, type RunningServer } from './server.mjs';
+import { hasBuild, rawFetch, setPhoneCheck, startServer, type RunningServer } from './server.mjs';
 import { openAdminSection } from './helpers.mjs';
 import { startStripeMock, TEST_KEYS, type StripeMock } from './stripe-mock.mjs';
 
@@ -32,6 +32,8 @@ before(async () => {
   if (skip) return;
   mock = await startStripeMock();
   server = await startServer({ BUH_TEST_STRIPE_API: mock.url, CARD_SWEEP_DISABLED: '1', NEXT_PUBLIC_APP_URL: '' });
+  // These tests drive the SMS-code checkout (Settings → Phone check "SMS code"; the default is WhatsApp).
+  await setPhoneCheck(server, 'sms_code');
   const h = { 'content-type': 'application/json', origin: server.base };
   await fetch(`${server.base}/api/admin/login`, { method: 'POST', headers: h, body: JSON.stringify({ email: 'x@y.z', password: 'x' }) });
   let once: string | undefined;

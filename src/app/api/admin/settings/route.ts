@@ -18,6 +18,7 @@ export async function GET(req: Request) {
       assistant: adminView('assistant'),
       delivery: adminView('delivery'),
       payments: adminView('payments'),
+      phoneCheck: adminView('phoneCheck'),
     });
   } catch (err) {
     return handleRouteError(err, 'admin/settings');

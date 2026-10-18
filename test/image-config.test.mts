@@ -5,13 +5,15 @@
  */
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { hasBuild, startServer } from './server.mjs';
+import { hasBuild, setPhoneCheck, startServer } from './server.mjs';
 
 test('regression: support email and shop address are read at start-up, not frozen into the build', { skip: !hasBuild }, async () => {
   const server = await startServer({ NEXT_PUBLIC_SUPPORT_EMAIL: 'help@myshop.example', NEXT_PUBLIC_APP_URL: 'https://myshop.example' });
   try {
     const settings = await (await fetch(`${server.base}/api/settings/public`)).json();
     assert.equal(settings.supportEmail, 'help@myshop.example');
+    // The SMS-code checkout (Settings → Phone check), where international numbers are sent to the email.
+    await setPhoneCheck(server, 'sms_code');
 
     const post = (origin: string) =>
       fetch(`${server.base}/api/otp/send`, { method: 'POST', headers: { 'content-type': 'application/json', origin }, body: JSON.stringify({ phone: '+44 7700 900123' }) });

@@ -17,6 +17,10 @@ export interface BankMessageInput {
   link?: string;
   firstName?: string;
   shopName?: string;
+  /** The order's "Confirm on WhatsApp" link (wa.me), while it still waits for that message. */
+  confirmLink?: string;
+  /** Hours before an order still not confirmed is cancelled (Settings → Phone check, WhatsApp mode). */
+  cancelHours?: number;
 }
 
 /**
@@ -65,7 +69,7 @@ export function bankDetailsWhatsApp({ orderId, total, bank, link, firstName: nam
 }
 
 /** The automatic email to the customer. */
-export function bankDetailsEmail({ orderId, total, bank, link, firstName: name, shopName }: BankMessageInput): { subject: string; text: string } {
+export function bankDetailsEmail({ orderId, total, bank, link, firstName: name, shopName, confirmLink, cancelHours }: BankMessageInput): { subject: string; text: string } {
   const firstName = safeFirstName(name);
   const shop = shopName || 'Beautiful UAE Home';
   return {
@@ -84,6 +88,14 @@ export function bankDetailsEmail({ orderId, total, bank, link, firstName: name, 
       '',
       'We will confirm your order as soon as we see the transfer.',
       '',
+      ...(confirmLink
+        ? [
+            'To confirm your order, tap to send us a WhatsApp message (it is already typed, just tap Send):',
+            confirmLink,
+            ...(cancelHours ? [`Orders not confirmed within ${cancelHours} hours are cancelled.`] : []),
+            '',
+          ]
+        : []),
       `${shop}`,
       '',
       'This link and these details are only for you: please don’t share them.',

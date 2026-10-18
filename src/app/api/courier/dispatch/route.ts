@@ -30,6 +30,8 @@ export async function POST(request: Request) {
       // true once the owner has checked the carrier portal after an unanswered attempt
       rebook: body.rebook === true,
       actor: session.email,
+      // true once the owner has answered "ship anyway" for an order not confirmed on WhatsApp
+      shipUnconfirmed: body.shipUnconfirmed === true,
     });
     if (outcome.attempt) {
       audit('courier.dispatch', { by: session.email, orderId, provider, rebook: body.rebook === true, ...outcome.attempt });

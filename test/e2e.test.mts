@@ -4,7 +4,7 @@
  */
 import assert from 'node:assert/strict';
 import { after, before, test } from 'node:test';
-import { hasBuild, startServer, type RunningServer } from './server.mjs';
+import { hasBuild, setPhoneCheck, startServer, type RunningServer } from './server.mjs';
 
 let server: RunningServer;
 let BASE = '';
@@ -13,6 +13,8 @@ const log = () => server.log();
 before(async () => {
   if (!hasBuild) return;
   server = await startServer();
+  // These tests drive the SMS-code checkout (Settings → Phone check "SMS code"; the default is WhatsApp).
+  await setPhoneCheck(server, 'sms_code');
   BASE = server.base;
 });
 after(() => server?.stop());

@@ -62,12 +62,13 @@ The shop can sit on the home screen of a phone or tablet and open full screen, w
 ## For customers: placing an order
 
 1. Choose a set, a bed size and a colour, then **Add to Bag** and **Proceed to Checkout**.
-2. **Verify your UAE mobile.** Type the number (50 123 4567, 050…, +971… all work) and tap **Send code**. Enter the 6-digit code from the SMS; it is checked as soon as the sixth digit is in. Pasting the code or using the phone's autofill works too.
+2. **Your UAE mobile.** Type the number (50 123 4567, 050…, +971… all work). Checkout says **We confirm orders over WhatsApp.** and sends no code (Settings → Phone check "WhatsApp (free)", the default): the WhatsApp message after ordering is the confirmation (step 4). Only UAE mobiles (50, 52, 54, 55, 56, 58) are taken.
+   - **When the shop uses SMS codes** (Settings → Phone check "SMS code"): tap **Send code** and enter the 6-digit code from the SMS; it is checked as soon as the sixth digit is in. Pasting the code or using the phone's autofill works too.
    - The code is valid for 10 minutes, and a new one can be requested after 30 seconds.
    - After 5 wrong tries the code stops working; request a new one.
    - **Outside the UAE?** As soon as a non-UAE number is typed, checkout shows **Email orders@…**, which opens an email with the bag already listed.
    - **SMS not arriving?** If the shop's SMS service is down, checkout says so and offers the shop's email.
-3. Fill in the delivery address (or **Use My GPS**), choose Cash on Delivery or bank transfer, and **Confirm & Raise Order**. The button stays locked until the phone is verified.
+3. Fill in the delivery address (or **Use My GPS**), choose Cash on Delivery or bank transfer, and **Place order**. The button stays locked until a UAE mobile is typed (with SMS codes: until it is verified).
    - **Paying by bank transfer:** the shop's bank account is never shown on the website. After you order, you get it privately:
      - by email (if you gave one): "Bank details for your order BUH-…", with the amount, the reference to use (your order number) and your order's private link; you can also just reply to that email with your screenshot;
      - on WhatsApp: the **Confirm on WhatsApp** message also asks for the bank details, and the shop replies with them;
@@ -75,7 +76,7 @@ The shop can sit on the home screen of a phone or tablet and open full screen, w
    - **Paying by card** (when the shop has switched it on): choose **Card**, type the card in Stripe's secure field and tap **Pay AED …**. No SMS code is needed (paying is the proof), but the UAE mobile is still asked for the courier. A bank's own check (3-D Secure) opens on the same page.
    - **Apple Pay / Google Pay** (top of checkout, on an iPhone or Mac with Safari, or Chrome on Android or a computer): one tap pays and fills in your name, email, phone and delivery address. If the shop can't tell your area from the wallet's address, checkout fills in the rest, asks you to choose the area and tap the button again; nothing is charged until then. The phone must be a UAE mobile (if the wallet's isn't, type one in checkout).
    - The confirmation says **Payment is being confirmed…** until Stripe has told the shop, then **Paid by card · Apple Pay · Visa •••• 4242** (usually within seconds). A declined card is not charged and nothing is kept: try another card or choose cash on delivery.
-4. **One last step: Confirm on WhatsApp** (when the shop has switched it on). The confirmation screen shows a large green **Confirm on WhatsApp** button. Tap it: WhatsApp opens with "Confirm my order BUH-… · code 1234" to the shop already typed; tap **Send**. That message, from your own WhatsApp, shows the shop the number is yours. Your order is placed either way (unless the shop holds orders until the message comes: then the screen says "We'll start your order once we get your message"). The same button is in **Track Order** until the shop has confirmed it.
+4. **Confirm on WhatsApp.** The confirmation screen shows a large green **Confirm on WhatsApp** button: "To confirm your order, tap to send us a WhatsApp message. Orders not confirmed within 24 hours are cancelled." (the shop's hours). Tap it: WhatsApp opens with "Confirm my order BUH-… · code 1234" to the shop already typed; tap **Send**. That message, from your own WhatsApp, shows the shop the number is yours. The same button is in **Track Order** and in the bank-details email until the shop has confirmed it. With SMS codes the step is optional ("Your order is placed either way", unless the shop holds orders until the message comes). If the shop has no WhatsApp number set, the screen says the shop will call you to confirm.
 5. **Track Order:** enter the order number (shown on the confirmation and pre-filled on the same phone) and the mobile number used for the order.
 - **Picking up where you left off.** The bag and your delivery details are kept on your phone (**Not you? Clear them** at checkout forgets the details). **Save or send this bag as a link** carries it to another browser, e.g. from Instagram's built-in browser to Safari or Chrome.
 - **Most designs are one or two pieces.** A size shows **Only 1 left** or **Sold out**; you can't add more than there are, and a sold-out size offers **Ask us** (WhatsApp or email) instead.
@@ -136,7 +137,7 @@ Set these up once, in **Settings → Passkeys & recovery codes**, so you can alw
 
 New orders appear under **Orders & Dispatches** within seconds, with a notice at the top. An order shows **via Instagram** (or WhatsApp, TikTok…) when that is where the customer came from. For each order:
 
-- **Confirm & Assign Courier** books Jeebly or Eco Express and prints the label.
+- **Confirm & Assign Courier** books Jeebly or Eco Express and prints the label. For a cash-on-delivery order the customer hasn't confirmed on WhatsApp yet, it first asks **"This customer hasn't confirmed on WhatsApp yet — ship anyway?"** (you may have confirmed by phone call): **OK** books it and the "ship anyway" is kept in the order's **History** and the audit log; **Cancel** books nothing. With **Hold orders until confirmed on WhatsApp** on, it can't be booked at all until confirmed.
 - **Mark dispatched**, then **Out for delivery** or **Mark delivered**, as the parcel moves.
 - **Bank transfers** (filter **Transfer to check**, with a count of screenshots waiting): each order shows where it stands: **Waiting for bank transfer** → **Transfer screenshot received** → **Payment received**.
   - **View transfer screenshot** opens what the customer uploaded (hub only); earlier ones stay under **Earlier: #1, #2…**.
@@ -158,16 +159,22 @@ Every change is recorded with who made it and when.
 
 #### Confirm on WhatsApp (free, no WhatsApp API)
 
-Customers confirm their number with one WhatsApp message they send you; nothing to sign up for or pay.
+Customers confirm their number with one WhatsApp message they send you; nothing to sign up for or pay. With **Settings → Phone check** "WhatsApp (free)" (the default) this message is how every order is confirmed: no SMS code is sent at checkout.
 
+- **Settings → Phone check:**
+  - **WhatsApp (free)** (default, for new and existing shops) or **SMS code** (the SMS gateway or Firebase below; checkout as before, the WhatsApp step optional).
+  - **Cancel orders not confirmed after (hours)**: 24 by default, 2 to 168. An order still not confirmed by then is cancelled by itself, its pieces back on sale (once), and the cancellation is in its **History** and the audit log. Never cancelled: orders confirmed on WhatsApp or by phone call, paid card orders, and bank transfers with a screenshot uploaded (or marked paid). A new value applies to new orders.
+  - **No WhatsApp number set** (Settings → Store & contact): the section says so in red. Orders are still taken, never treated as confirmed, and marked **Not confirmed: no WhatsApp number set — call the customer**; they are not cancelled by themselves.
 - **Settings → Store & contact:**
-  - **Ask customers to confirm their order on WhatsApp**: on as soon as the shop's WhatsApp number is set. With no number, nothing changes.
+  - **Ask customers to confirm their order on WhatsApp**: on as soon as the shop's WhatsApp number is set (with Phone check "WhatsApp (free)" every order is asked anyway). With no number, nothing is asked.
   - **Hold orders until confirmed on WhatsApp**: off by default. Off, orders go through as usual and simply show "not yet confirmed". On, an order can't be confirmed or booked with a courier until you mark the message received (you can always cancel it).
-- **In Orders** (phone view first), an order shows **Awaiting WhatsApp confirmation · code 1234** with the customer's phone number. When "Confirm my order BUH-… · code 1234" arrives in your WhatsApp, check it comes from that number, then tap:
+- **In Orders** (phone view first), an order shows **Awaiting WhatsApp — auto-cancels in 13 h · code 1234** with the customer's phone number. When "Confirm my order BUH-… · code 1234" arrives in your WhatsApp, check it comes from that number, then tap:
   - **Confirmed on WhatsApp**; then **Reply on WhatsApp** opens a thank-you to the customer, ready to send;
-  - or **Number didn't match** (from another number: call the customer or cancel). You can still tap **Confirmed on WhatsApp** later.
+  - **Confirmed by phone call** when you rang the customer instead (shown as "Confirmed by phone call by … at …"; it stops the auto-cancel);
+  - **Ask to confirm** opens WhatsApp to the customer with "Hello Salma, please confirm your order BUH-… from Beautiful UAE Home by replying YES. Thank you!" ready to send;
+  - or **Number didn't match** (from another number). Then either call the customer, cancel, or type the number it came from and tap **Use the number it came from**: the order's phone becomes that number (checked like checkout's: a UAE mobile), the old one stays in the order's **History**, and the order is confirmed. You can still tap **Confirmed on WhatsApp** later.
 - The **Awaiting WhatsApp** filter lists the ones still waiting, and the daily summary counts them. A second tap changes nothing; each answer is in the audit log with who and when.
-- The shop's own SMS / Firebase code check at checkout is separate and works as before.
+- With Phone check "SMS code", the SMS / Firebase code check at checkout works as before and this step is optional.
 
 ### Inventory
 
@@ -236,7 +243,7 @@ On each product, customers see **Ask in chat**, **Ask on WhatsApp** and **Ask on
 - **Branding & bank:** the shop's name, tagline and logo (the logo's letters sit on one of the palette's tones: champagne gold, antique gold, ink or dusty rose), and bank-transfer details.
 - **Festival themes:** see below.
 - **Payments:** card, Apple Pay and Google Pay through your Stripe account (see "Card payments" above).
-- **Phone verification:** the SMS gateway (see below).
+- **Phone check:** WhatsApp (free, the default) or SMS code, the hours before unconfirmed orders cancel, and the SMS gateway (see below).
 - **Couriers:** see below.
 - **System & backups:** health (disk, database, backups, SMS), backups, and **Settings history**: every save keeps the version it replaced (keys excepted); **Restore** puts an earlier one back and can itself be undone.
 
@@ -318,7 +325,9 @@ The line at the top of the Admin Hub shows when the last backup ran:
 
 **Back up now** runs one immediately. Backups run every 12 hours on their own. Courier, SMS and Stripe keys are not in backups: after a restore, enter them again. Restoring: see HOSTINGER_DEPLOYMENT_GUIDE.md.
 
-### Phone verification (SMS)
+### Phone check and the SMS gateway
+
+**Settings → Phone check** chooses how checkout checks the number: **WhatsApp (free)** (the default; see [Confirm on WhatsApp](#confirm-on-whatsapp-free-no-whatsapp-api)) or **SMS code**. The SMS gateway below is used only with **SMS code**; with WhatsApp a saved gateway sends nothing.
 
 Enter the gateway's details, tap **Send test** to try it on your own mobile, then **Save Gateway Credentials**. Checkout then sends codes through it (a gateway set in `.env.production` takes priority). Keys are kept on the server and never shown again: leave a key field blank to keep the saved one. Webhook and Infobip URLs must be public https addresses.
 
@@ -328,7 +337,7 @@ Enter the gateway's details, tap **Send test** to try it on your own mobile, the
 2. Authentication → Sign-in method: turn on **Phone**.
 3. Authentication → Settings → Authorized domains: add your shop's domain.
 4. Upgrade to the **Blaze** plan. Firebase only sends phone codes on Blaze, and Google bills every SMS; set a budget alert.
-5. Project settings → add a Web app, copy `apiKey`, `authDomain`, `projectId` and `appId` into **Settings → Phone verification**, choose **Firebase Phone Auth** and save.
+5. Project settings → add a Web app, copy `apiKey`, `authDomain`, `projectId` and `appId` into **Settings → Phone check** (SMS gateway), choose **Firebase Phone Auth** and save, and set Phone check to **SMS code**.
 
 There is no **Send test** for Firebase: try a checkout on your own phone (a billed SMS). A gateway in `.env.production` still takes priority.
 
