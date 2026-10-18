@@ -34,7 +34,8 @@ export function PhoneCheckCard({
 }) {
   const [d, setD] = useState<PhoneCheckSettings>(value);
   const [hours, setHours] = useState(String(value.unconfirmedCancelHours));
-  const [unopened, setUnopened] = useState(String(value.unopenedCancelHours ?? DEFAULT_PHONE_CHECK.unopenedCancelHours));
+  // Never later than the main hours (a shop saved before this field shows what applies).
+  const [unopened, setUnopened] = useState(String(Math.min(value.unopenedCancelHours ?? DEFAULT_PHONE_CHECK.unopenedCancelHours, value.unconfirmedCancelHours)));
   const [saving, setSaving] = useState(false);
   const [status, setStatus] = useState<{ ok: boolean; text: string } | null>(null);
   const hoursNumber = Number(hours);
