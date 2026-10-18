@@ -152,6 +152,7 @@ test('an edit keeps the earlier version, needs the version seen, and is audited 
   assert.deepEqual(entry.details.changes, { amountFils: { from: 12_550, to: 13_000 }, note: { from: '', to: 'corrected total' } });
   assert.equal(entry.details.before.amountFils, 12_550);
   assert.equal(entry.details.after.amountFils, 13_000);
+  assert.equal(entry.details.after.date, '2026-09-03', 'a date is kept as it is (it is not a phone number)');
   assert.equal(entry.details.by, 'other@shop.test');
 });
 
@@ -347,13 +348,13 @@ test('backups keep the expenses (every version, removed ones too) and every bill
   const names = entries.map((x) => x.name);
   assert.ok(names.includes(`expenses/${bill.id}.png`) && names.includes(`expenses/${old.id}.pdf`), 'both bills, the one taken off too');
   const csv = entries.find((x) => x.name === 'expenses.csv')!.data.toString('utf8');
-  assert.ok(csv.startsWith('﻿'));
+  assert.ok(csv.startsWith('\ufeff'));
   assert.ok(csv.includes(`"'=HYPERLINK(""http://x"")"`), 'formula-safe');
   assert.ok(csv.includes('42.42'));
   assert.match(csv, new RegExp(`${gone.id},.*,removed,`));
   assert.ok(entries.find((x) => x.name === 'expense_bills.csv')!.data.toString().includes(old.id));
   // The orders CSV is unchanged by this release.
-  assert.match(entries.find((x) => x.name === 'orders.csv')!.data.toString(), /^﻿order_id,created_at,status,payment_method,/);
+  assert.match(entries.find((x) => x.name === 'orders.csv')!.data.toString(), /^\ufefforder_id,created_at,status,payment_method,/);
 
   const target = path.join(os.tmpdir(), `buh-restore-expenses-${Date.now()}`);
   const out = execFileSync(process.execPath, ['scripts/restore-backup.mjs', result.file, target]).toString();

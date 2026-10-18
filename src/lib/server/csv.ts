@@ -12,7 +12,7 @@ function cell(v: unknown): string {
 
 export function toCsv(headers: string[], rows: unknown[][]): string {
   // BOM so Excel reads Arabic names as UTF-8.
-  return '﻿' + [headers, ...rows].map((r) => r.map(cell).join(',')).join('\r\n') + '\r\n';
+  return '\ufeff' + [headers, ...rows].map((r) => r.map(cell).join(',')).join('\r\n') + '\r\n';
 }
 
 /** Fils as a plain AED decimal with two places ("1250.50", "-3.05"), from whole numbers only (no float rounding). */

@@ -233,6 +233,41 @@ On each product, customers see **Ask in chat**, **Ask on WhatsApp** and **Ask on
 
 **Customers** (under **More** on a phone) is built from the orders: one line per phone number, with the number of orders and the total spent.
 
+### Money: expenses, reports and the audit log
+
+On a phone: **More → Money**; on a laptop: the **Money** tab. Three parts: **Expenses**, **Reports** and **Audit log**.
+
+**Expenses (with a photo of the bill)**
+
+1. Tap **Add expense**.
+2. Check the date (today is filled in), type the amount in AED (`125.50`), pick the category, who you paid and how (cash, card, bank transfer, other). Add a note if it helps.
+3. Tap **Take photo** to photograph the bill with the camera, or **Photo or PDF** to pick one (a PDF invoice from an email works too). Add more than one if the bill has several pages.
+4. Tap **Save expense**.
+
+- **Categories:** Stock & fabric, Packaging, Courier & delivery, Marketing & ads, Rent, Utilities, Software & fees, Bank & card charges, Other. **New** next to the list adds your own.
+- **Photos are made smaller** (they stay readable) and their location and camera details are removed before they are stored. Each bill can be up to 10 MB.
+- **Edit** keeps the earlier version: **History** shows every version, who changed it and when. If you edited the same expense on another device meanwhile, you are asked to refresh first.
+- **Remove** asks why. The expense leaves the totals but is never deleted: **Show removed** lists it with who removed it, when and why. A bill taken off (the **×** next to it) is kept the same way.
+- Stripe's fees: add them each month as an expense (Bank & card charges) from Stripe's statement.
+
+**Reports and the export for your accountant**
+
+1. Pick **Month**, **Quarter**, **Year** or **Dates** (any dates). Dates are UAE time.
+2. The totals appear: net sales, expenses and profit; gross sales, refunds and what is not marked paid yet; each payment method (cash on delivery, bank transfer, card); expenses by category.
+3. Tap **Export for my accountant (ZIP)** and send the file to your accountant (WhatsApp, email or a drive).
+
+- **Your financial year starts in:** January (the calendar year) unless you choose another month; quarters and years follow it.
+- **What counts as a sale:** every order placed in the period, except orders cancelled before any money was taken, card orders still waiting for payment, and Stripe test payments. A card payment refunded later shows as a sale (when placed) and a refund (when refunded).
+- **The ZIP** holds `summary.html` (open and print, or Print → Save as PDF), `summary.csv`, `sales.csv` (one row per order: date, number, customer name, emirate, items, amounts, payment method and reference, refund, status, courier and AWB), `order-items.csv`, `expenses.csv`, every bill in `bills/` (named date_category_amount_expense), the period's audit log with its check, and a `README.txt` explaining each file. The CSVs open in Excel (Arabic names included).
+- **VAT:** the shop is not VAT-registered and no VAT is added. Reports show your sales of the last 12 months against the AED 375,000 mandatory registration threshold; from 80% it turns amber (Settings → System & backups shows it too, and you get an email). Talk to your accountant then.
+
+**Audit log**
+
+A read-only list of everything that changes money or the shop, newest first: orders placed and changed (status, cash collected, notes), payments, refunds and declines, transfers checked, stock moves, products and prices (before → after), settings, the admin link, sign-ins (and refused ones), passwords, passkeys and recovery codes, backups and restores, updates asked for, expenses and their bills, and every export.
+
+- Filter by dates, **What** (for example "All payment" or `expense.created`), **Who** and an order or expense number; **CSV** and **JSONL** download what is shown (each download is itself recorded).
+- The green line **"The log is intact"** means every entry's signature and its link to the one before were checked. If anything was changed, removed or reordered it turns red and says where (file and line). After restoring onto a new server, it says the older months were signed with that server's key and can't be checked here.
+
 ### Settings
 
 **Settings** holds every option, in sections. Changes **save themselves** a moment after you stop typing ("Saved automatically · Undo"); **Undo** puts back what was there before your current round of changes, and Settings → System & backups → history keeps earlier versions. A change that isn't valid is not saved, and new mail settings are tried first: if they can't connect, the working ones stay. Passwords and keys are saved only when you press **Save**.
@@ -330,7 +365,7 @@ The line at the top of the Admin Hub shows when the last backup ran:
 - **amber:** taken but not emailed (check the `SMTP_*` settings), or emailed without a `BACKUP_PASSPHRASE`;
 - **red:** failed or overdue.
 
-**Back up now** runs one immediately. Backups run every 12 hours on their own. Courier, SMS and Stripe keys are not in backups: after a restore, enter them again. Restoring: see HOSTINGER_DEPLOYMENT_GUIDE.md.
+**Back up now** runs one immediately. Backups run every 12 hours on their own, with your expenses and every bill photo. Courier, SMS and Stripe keys are not in backups: after a restore, enter them again. Restoring: see HOSTINGER_DEPLOYMENT_GUIDE.md.
 
 ### Phone check and the SMS gateway
 
@@ -357,6 +392,6 @@ Enter the Jeebly and Eco Express keys and use **Test connection**. Keys are kept
 - **Booking the same order again** shows the AWB already issued; it never books twice.
 - **"No answer from the carrier"** means the shipment may or may not have been created. Check the carrier portal for the order number first. The next attempt asks you to confirm before booking again.
 
-### Audit log
+### Audit log files
 
-`DATA_DIR/audit-YYYY-MM.jsonl` lists sign-ins (by password, passkey or recovery code), refused sign-ins, password changes, passkeys added or removed, new recovery codes, admin link changes (never the link), courier bookings and tests, SMS tests, and every stock change made in the Admin Hub (who, why, old → new). Each line is chained to the one before, so edits are detectable.
+The log is kept in `DATA_DIR/audit-YYYY-MM.jsonl` (one file a month, in backups too); read it in **Money → Audit log**. Each line is chained to the one before, so edits are detectable.

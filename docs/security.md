@@ -182,10 +182,23 @@ Carrier endpoints are fixed in code.
 
 ## Audit log
 
-`DATA_DIR/audit-YYYY-MM.jsonl` records sign-ins, refusals, password changes, admin link changes (never the link), courier dispatches and tests, SMS tests, and stock moves (who, reason, old → new). Each line carries an HMAC over the previous line, so editing, deleting or reordering a line is detected (`verifyAuditLog`).
+`DATA_DIR/audit-YYYY-MM.jsonl` records every action that moves money, stock or the shop's state: orders placed and changed by the owner (status, payment status, notes, with before → after), card payments started, paid, declined, cancelled and refunded (in full or in part, from Stripe's word), bank transfers uploaded and checked, WhatsApp confirmations, courier bookings and tests, stock moves (who, reason, old → new), products created, changed (price and sizes' charges before → after), duplicated, archived, reordered, drafts discarded, settings saved and restored (and the financial year's start), the admin link, sign-ins and refusals, sign-outs, password changes and resets, passkeys and recovery codes, backups taken, failed and restored, updates and rollbacks asked for, SMS and email tests, monitor alerts, expenses and their bills, and every export (the accountant's ZIP, the audit CSV/JSONL). Each line carries an HMAC over the previous line, so editing, deleting or reordering a line is detected (`verifyAuditLog`).
+
+- **Audited before it counts:** order changes, payments, refunds, bank checks, stock moves, price changes, expenses, bills and exports are written to the log inside their transaction (or before the export is built); if the log can't be written, nothing is saved or sent (503).
+- **The viewer** (Money → Audit log, `GET /api/admin/audit`) is read-only, signed-in only, and checks every month's chain: it names the file and line where it breaks, and tells a log signed by another server's key (after a restore onto a new server; the key never leaves the server, and `restore-backup.mjs --replace` keeps the server's own) from tampering.
+- Not audited on purpose: what a customer does before an order exists (browsing, SMS codes beyond the global limit, opening WhatsApp), product drafts saved as the owner types (the published change is), and reads.
 
 - Who acted (`by`: the admin's sign-in email, or `stripe`, `customer`…) and the order number (`orderId`) are kept exactly: the file is the owner's own record (0600, and only in encrypted backups). Everything else is redacted as in the server log: secrets by field name, customers' phones and emails in free text masked. Order numbers and dates are never mistaken for phone numbers (digits inside an identifier are left alone), in the audit or the server log.
 - A change audited inside its transaction whose save then fails (a full disk, a busy database) gets an `audit.rolled_back` line straight after, so the log never claims a change the database doesn't have.
+
+## Expenses, bills and the accountant's export (BUH-02.10)
+
+- **Routes** (`/api/admin/expenses…`, `/api/admin/reports…`, `/api/admin/audit…`): the door and a session (`requireAdmin`), same-site for every change and for the downloads, size-capped JSON bodies (8 KB; a bill 10 MB as base64), allow-listed fields, `handleRouteError`.
+- **Money in fils:** amounts are parsed from the text the owner typed into whole fils (no floating point), 0.01 to AED 10,000,000. Categories and payment methods come from server-side lists.
+- **Never overwritten:** every state of an expense is a row in `expense_versions`; "Remove" marks it (who, when, why); a bill taken off keeps its file. Edits must name the version the owner saw (409 otherwise).
+- **Bills** are checked by their bytes (JPEG, PNG, WebP, HEIC or PDF; SVG, HTML and anything else refused, whatever the browser called it), 10 MB each, 20 per expense. Photos are re-encoded in the browser (2000 px JPEG) and the server strips EXIF/GPS, XMP, IPTC, comments and PNG text chunks again; HEIC (no safe decoder here) and PDFs are stored as they are. Files live in `DATA_DIR/expenses/` (0600) under random names, refused (507) with under 1 GB free or 2 GB of bills, and are served only to the signed-in hub: their own content type, `nosniff`, `no-store`, `inline`, under the API's `default-src 'none'` policy.
+- **The ZIP** is built on the server's disk one file at a time (`DATA_DIR/exports/`, never in backups, removed once sent or after an hour) and holds only what the accountant needs: customer name and emirate (no phones, emails or addresses), amounts, payment references, the period's audit lines (already redacted) and the chain check. CSVs are UTF-8 with a BOM and formula-safe. Who exported which period is audited first.
+- **Backups** include the expense tables, `expenses.csv`, `expense_bills.csv` and every bill; the restore script accepts the `expenses/` folder and says if a bill is missing.
 
 ## Headers
 
@@ -309,7 +322,7 @@ Every 12 hours (see the deployment guide) the shop backs itself up:
 
 - **A consistent database snapshot**, integrity-checked before it is used.
 - **CSV flat files.** A cell starting with `= + - @` is prefixed with `'`, so Excel never runs it as a formula.
-- **Receipts, photos and the audit log**, with a SHA-256 manifest. The stock ledger and product drafts are tables in the database copy; `stock_moves.csv` lists the ledger for Excel.
+- **Receipts, photos, expense bills and the audit log**, with a SHA-256 manifest. The stock ledger and product drafts are tables in the database copy; `stock_moves.csv` lists the ledger for Excel.
 - **Encryption (strongly recommended):** AES-256-GCM, with the key derived by scrypt (cost 2^17) from `BACKUP_PASSPHRASE`. The Admin Hub turns amber, and the log warns, while backups are emailed unencrypted or the passphrase is shorter than 12 characters.
 - **Courier and SMS keys are blanked** in the backup's copy of the database (and the copy is vacuumed, so the old values are not left in free pages). Re-enter them after a restore.
 - **A failure is emailed** when it starts, when the error changes and then once a day; the shop retries hourly.

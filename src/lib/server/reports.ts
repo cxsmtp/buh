@@ -10,6 +10,7 @@ import { billFile, EXPENSE_CSV_HEADERS, expenseCsvRow, listExpenses, type Expens
 import { HttpError } from './http';
 import { kvGet, kvSet } from './kv';
 import { allOrders } from './orders';
+import { PALETTE } from '@/lib/design/tokens';
 import { ZipWriter } from './zip';
 
 /**
@@ -322,10 +323,10 @@ function summaryHtml(r: Report, shop: string): string {
 <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
 <title>${esc(shop)} — accounts ${esc(r.from)} to ${esc(r.to)}</title>
 <style>
-body{font:14px/1.45 system-ui,-apple-system,Segoe UI,Roboto,sans-serif;color:#1f1a14;margin:24px;max-width:860px}
-h1{font-size:20px;margin:0 0 4px}p{margin:4px 0 12px;color:#5b5247}
-table{border-collapse:collapse;width:100%}td,th{border-bottom:1px solid #ddd;padding:6px 8px;text-align:left;vertical-align:top}
-th{background:#f4efe7}.n{text-align:right;white-space:nowrap;font-variant-numeric:tabular-nums}
+body{font:14px/1.45 system-ui,-apple-system,Segoe UI,Roboto,sans-serif;color:${PALETTE.ink};margin:24px;max-width:860px}
+h1{font-size:20px;margin:0 0 4px}p{margin:4px 0 12px;color:${PALETTE['ink-soft']}}
+table{border-collapse:collapse;width:100%}td,th{border-bottom:1px solid ${PALETTE.line};padding:6px 8px;text-align:left;vertical-align:top}
+th{background:${PALETTE.sand}}.n{text-align:right;white-space:nowrap;font-variant-numeric:tabular-nums}
 @media print{body{margin:0}}
 </style></head><body>
 <h1>${esc(shop)}: sales and expenses</h1>

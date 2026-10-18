@@ -11,6 +11,9 @@ const SAFE_KEYS = new Set(['stripeCode', 'declineCode']);
 // A phone number: 9+ digits (spaces and dashes allowed), not inside an identifier, so an order
 // number like BUH-261018-123456 or a date like 2026-10-18T09:00 stays readable.
 const PHONE = /(?<![\w-])\+?\d[\d\s-]{7,}\d(?![\w-]*\w)/g;
+// A calendar date (2026-10-18) has 8 digits and dashes too: it is not a phone number (audit entries
+// carry report periods and the dates on bills).
+const ISO_DATE = /^(?:19|20)\d\d-(?:0[1-9]|1[0-2])-(?:0[1-9]|[12]\d|3[01])$/;
 const EMAIL = /([A-Za-z0-9._%+-])[A-Za-z0-9._%+-]*@([A-Za-z0-9.-]+\.[A-Za-z]{2,})/g;
 // A long random path segment: the private admin link (32 characters) or a password-reset
 // email's single-reset path (43). Only its first 4 characters are ever logged.
@@ -33,7 +36,7 @@ function scrubString(s: string): string {
   return maskSecretPaths(s)
     .replace(STRIPE_SECRET, (_m, key: string | undefined, intent: string | undefined) => (key ? `${key}[redacted]` : `${intent}_[redacted]`))
     .replace(EMAIL, '$1***@$2')
-    .replace(PHONE, (m) => maskPhone(m))
+    .replace(PHONE, (m) => (ISO_DATE.test(m) ? m : maskPhone(m)))
     .slice(0, 500);
 }
 

@@ -256,12 +256,17 @@ test('the old PATCH {paymentStatus} can’t mark a bank transfer paid (use "Paym
     }
   }
   assert.equal(orders.getOrder(o.id)!.bankTransfer!.state, 'awaiting');
+  assert.equal(auditEntries().length, start, 'nothing recorded for the refusals');
   const c = place();
   orders.updateOrderByAdmin(c.id, { status: 'cancelled' }, 'owner@shop.test');
+  // The cancel itself is audited (BUH-02.10: order changes, before → after); the refusals after it are not.
+  assert.equal(auditEntries().length, start + 1);
+  assert.equal(auditEntries().pop()!.action, 'order.updated');
+  const afterCancel = auditEntries().length;
   assert.equal(await status(() => orders.updateOrderByAdmin(c.id, { paymentStatus: 'verified' }, 'owner@shop.test')), 409);
   assert.equal(await status(() => orders.checkBankTransfer(c.id, 'received', 'owner@shop.test')), 409);
   assert.equal(orders.getOrder(c.id)!.paymentStatus, 'pending');
-  assert.equal(auditEntries().length, start, 'nothing recorded');
+  assert.equal(auditEntries().length, afterCancel, 'nothing recorded');
   // Cash on delivery keeps its payment status by hand.
   const cod = place({ paymentMethod: 'cod' });
   assert.equal(orders.updateOrderByAdmin(cod.id, { paymentStatus: 'paid' }, 'owner@shop.test').paymentStatus, 'paid');

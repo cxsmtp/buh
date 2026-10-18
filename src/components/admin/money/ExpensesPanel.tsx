@@ -127,7 +127,9 @@ function ExpenseForm({
 
   const addFiles = (list: FileList | null) => {
     if (!list) return;
-    setFiles((f) => [...f, ...Array.from(list)].slice(0, 20));
+    // Copied now: the input is cleared right after (so the same photo can be picked again), which empties the list.
+    const picked = Array.from(list);
+    setFiles((f) => [...f, ...picked].slice(0, 20));
   };
 
   const addCategory = async () => {
