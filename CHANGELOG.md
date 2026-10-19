@@ -1,6 +1,6 @@
 # Changelog
 
-## BUH-02.17.00 — 2026-10-19 21:00 UTC · [#NN](https://github.com/cxsmtp/buh/pull/NN)
+## BUH-02.17.00 — 2026-10-19 21:00 UTC · [#35](https://github.com/cxsmtp/buh/pull/35)
 
 - **Read-only access for your accountant.** Invite them from Settings → Security. They see only Money (reports, expenses with bills, VAT and the audit log) and can change nothing. Removing access, or "sign out everywhere", ends their access at once, and restoring a backup never brings it back.
 - **UAE VAT when you register (off until then).** Enter your TRN and a start date, and from that date orders carry 5% VAT. Tax invoices are numbered with no gaps, credit notes follow refunds, and Money → VAT gives the quarterly return for your accountant. Reports show figures with and without VAT.
