@@ -450,6 +450,75 @@ const MIGRATIONS: Array<(db: DB) => void> = [
       db.prepare("INSERT INTO settings (key, data, updated_at) VALUES ('look', ?, ?)").run(JSON.stringify(now), at);
     }
   },
+  // 14: the accountant's read-only sign-in, and UAE VAT (opt-in, off by default). Add-only: an older
+  //     version ignores these tables and columns (src/lib/server/staffAuth.ts, src/lib/server/vat.ts).
+  //     staff_accounts: people the owner invited (role 'accountant' only); the setup link is kept as
+  //     hashes, single use, 72 h. order_vat: an order's VAT breakdown in fils, written once when it is
+  //     placed while VAT is on (from the effective date); never for an older order, never rewritten.
+  //     vat_invoices / vat_credit_notes: the gap-free numbered series (seq 1, 2, 3…, taken inside an
+  //     IMMEDIATE transaction). Expenses gain the VAT on the bill and the supplier's TRN (input VAT).
+  (db) => {
+    db.exec(`
+      CREATE TABLE staff_accounts (
+        id                TEXT PRIMARY KEY,
+        email             TEXT NOT NULL UNIQUE COLLATE NOCASE,
+        role              TEXT NOT NULL CHECK (role IN ('accountant')),
+        name              TEXT NOT NULL DEFAULT '',
+        password_hash     TEXT,
+        status            TEXT NOT NULL CHECK (status IN ('invited', 'active', 'revoked')),
+        setup_hash        TEXT,
+        setup_grant_hash  TEXT,
+        setup_expires_at  INTEGER,
+        session_gen       INTEGER NOT NULL DEFAULT 1,
+        invited_at        TEXT NOT NULL,
+        invited_by        TEXT NOT NULL,
+        activated_at      TEXT,
+        last_sign_in_at   TEXT,
+        revoked_at        TEXT,
+        revoked_by        TEXT
+      );
+      CREATE UNIQUE INDEX staff_by_setup ON staff_accounts(setup_hash) WHERE setup_hash IS NOT NULL;
+      CREATE UNIQUE INDEX staff_by_grant ON staff_accounts(setup_grant_hash) WHERE setup_grant_hash IS NOT NULL;
+      CREATE TABLE order_vat (
+        order_id    TEXT PRIMARY KEY REFERENCES orders(id),
+        rate_bp     INTEGER NOT NULL,          -- 500 = 5%
+        inclusive   INTEGER NOT NULL,          -- 1: the prices included VAT
+        net_fils    INTEGER NOT NULL,
+        vat_fils    INTEGER NOT NULL,
+        total_fils  INTEGER NOT NULL,
+        lines       TEXT NOT NULL,             -- JSON [{ kind, label, quantity, totalFils, netFils, vatFils }]
+        supplier    TEXT NOT NULL,             -- JSON { name, address, trn } when it was placed
+        created_at  TEXT NOT NULL
+      );
+      CREATE TABLE vat_invoices (
+        seq         INTEGER PRIMARY KEY,       -- 1, 2, 3… with no gaps
+        number      TEXT NOT NULL UNIQUE,      -- INV-000001
+        order_id    TEXT NOT NULL UNIQUE REFERENCES orders(id),
+        issued_at   TEXT NOT NULL,
+        issued_on   TEXT NOT NULL,             -- the UAE date
+        net_fils    INTEGER NOT NULL,
+        vat_fils    INTEGER NOT NULL,
+        total_fils  INTEGER NOT NULL
+      );
+      CREATE INDEX vat_invoices_by_date ON vat_invoices(issued_on);
+      CREATE TABLE vat_credit_notes (
+        seq          INTEGER PRIMARY KEY,      -- 1, 2, 3… with no gaps
+        number       TEXT NOT NULL UNIQUE,     -- CN-000001
+        invoice_seq  INTEGER NOT NULL REFERENCES vat_invoices(seq),
+        order_id     TEXT NOT NULL REFERENCES orders(id),
+        reason       TEXT NOT NULL,            -- refund | cancelled | refund_reversed
+        issued_at    TEXT NOT NULL,
+        issued_on    TEXT NOT NULL,
+        net_fils     INTEGER NOT NULL,         -- negative: a refund that failed afterwards (the credit comes back)
+        vat_fils     INTEGER NOT NULL,
+        total_fils   INTEGER NOT NULL CHECK (total_fils <> 0)
+      );
+      CREATE INDEX vat_credit_notes_by_order ON vat_credit_notes(order_id);
+      CREATE INDEX vat_credit_notes_by_date ON vat_credit_notes(issued_on);
+      ALTER TABLE expenses ADD COLUMN vat_fils INTEGER;
+      ALTER TABLE expenses ADD COLUMN supplier_trn TEXT;
+    `);
+  },
 ];
 
 let db: DB | null = null;

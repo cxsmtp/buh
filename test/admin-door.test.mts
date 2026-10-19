@@ -113,7 +113,8 @@ test('every admin route checks the door (requireAdmin or requireDoor), found by 
     const src = fs.readFileSync(f, 'utf8');
     // A file's own helper that calls requireAdmin (e.g. owner(req)) counts too.
     const helpers = [...src.matchAll(/(?:async )?function (\w+)\([^)]*\)[^{]*\{([\s\S]*?)\n\}/g)].filter(([, , b]) => /requireAdmin\(req|requireDoor\(req/.test(b)).map(([, name]) => name);
-    const checks = new RegExp(`(?:requireAdmin|requireDoor${helpers.map((h) => `|${h}`).join('')})\\(req`);
+    // requireReader is requireAdmin for the accountant's read-only routes (guard.ts).
+    const checks = new RegExp(`(?:requireAdmin|requireReader|requireDoor${helpers.map((h) => `|${h}`).join('')})\\(req`);
     const handlers = [...src.matchAll(/export async function (GET|POST|PUT|PATCH|DELETE)\(([^)]*)\)\s*\{([\s\S]*?)\n\}/g)];
     assert.ok(handlers.length, `${f} has handlers`);
     for (const [, method, params, body] of handlers) {
@@ -122,6 +123,7 @@ test('every admin route checks the door (requireAdmin or requireDoor), found by 
     }
   }
   const guard = fs.readFileSync('src/lib/server/guard.ts', 'utf8');
+  assert.match(guard, /export function requireReader\(req: Request\)[^{]*\{\s*return requireAdmin\(req,/, 'requireReader is requireAdmin');
   const requireAdmin = guard.slice(guard.indexOf('export async function requireAdmin'));
   assert.match(requireAdmin.split('\n').slice(0, 3).join('\n'), /requireDoor\(req\)/, 'requireAdmin checks the door first');
 });

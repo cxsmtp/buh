@@ -14,7 +14,7 @@ import { applyUpdate, checkForUpdate, registerServiceWorker, useUpdateWaiting } 
 async function fetchCatalog() {
   const [products, settings] = await Promise.all([
     getJson<{ products: Product[] }>('/api/products'),
-    getJson<{ brand: BrandSettings; bankTransfer?: boolean; bankTransferMode?: 'send_details' | 'ask_whatsapp' | null; supportEmail?: string; store?: StoreSettings; catalog?: { categories: CatalogSettings['categories']; lowStockThreshold: number }; festival?: FestivalView | null; phoneVerification?: PhoneVerificationConfig; chat?: { name: string; greeting: string } | null; delivery?: DeliverySettings; payments?: { card: boolean; publishableKey?: string; phoneCheck?: boolean; cardFeePercent?: number } }>('/api/settings/public'),
+    getJson<{ brand: BrandSettings; bankTransfer?: boolean; bankTransferMode?: 'send_details' | 'ask_whatsapp' | null; supportEmail?: string; store?: StoreSettings; catalog?: { categories: CatalogSettings['categories']; lowStockThreshold: number }; festival?: FestivalView | null; phoneVerification?: PhoneVerificationConfig; chat?: { name: string; greeting: string } | null; delivery?: DeliverySettings; vat?: { addedPercent?: number }; payments?: { card: boolean; publishableKey?: string; phoneCheck?: boolean; cardFeePercent?: number } }>('/api/settings/public'),
   ]);
   return { products, settings };
 }
@@ -118,6 +118,7 @@ export function ShopApp({ initialProductId }: { initialProductId?: string } = {}
   const [festival, setFestival] = useState<FestivalView | null>(null);
   const [chatInfo, setChatInfo] = useState<{ name: string; greeting: string } | null>(null);
   const [delivery, setDelivery] = useState<DeliverySettings>(DEFAULT_DELIVERY);
+  const [vatAddedPercent, setVatAddedPercent] = useState(0);
   // Card payments (Settings → Payments): Stripe's publishable key when switched on.
   const [cardPayments, setCardPayments] = useState<{ publishableKey: string; phoneCheck?: boolean; cardFeePercent?: number } | null>(null);
   // Where this visitor first came from (Instagram, WhatsApp…), sent with the order.
@@ -160,6 +161,7 @@ export function ShopApp({ initialProductId }: { initialProductId?: string } = {}
       setFestival(settings.data.festival ?? null);
       setChatInfo(settings.data.chat ?? null);
       if (settings.data.delivery) setDelivery(settings.data.delivery);
+      setVatAddedPercent(Number(settings.data.vat?.addedPercent) || 0);
       const pay = settings.data.payments;
       setCardPayments(pay?.card && pay.publishableKey ? { publishableKey: pay.publishableKey, cardFeePercent: Number(pay.cardFeePercent) || 0, ...(pay.phoneCheck ? { phoneCheck: true } : {}) } : null);
       if (settings.data.catalog) {
@@ -323,8 +325,8 @@ export function ShopApp({ initialProductId }: { initialProductId?: string } = {}
   };
 
   const shopInfo = useMemo<ShopInfo>(
-    () => ({ store: storeSettings, lowStockThreshold, supportEmail: supportEmail || 'orders@beautifuluaehome.com', festival, chat: chatInfo, delivery }),
-    [storeSettings, lowStockThreshold, supportEmail, festival, chatInfo, delivery]
+    () => ({ store: storeSettings, lowStockThreshold, supportEmail: supportEmail || 'orders@beautifuluaehome.com', festival, chat: chatInfo, delivery, ...(vatAddedPercent ? { vatAddedPercent } : {}) }),
+    [storeSettings, lowStockThreshold, supportEmail, festival, chatInfo, delivery, vatAddedPercent]
   );
 
   // The storefront: what the search, filters and sort leave, and the round "story" chips.

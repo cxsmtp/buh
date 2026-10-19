@@ -15,6 +15,7 @@ import { logEvent } from './log';
 import { allOrders, backfillRefundLedger, refundLedger, type RefundRow } from './orders';
 import { PALETTE } from '@/lib/design/tokens';
 import { ZipWriter } from './zip';
+import { vatInUse, vatReturnCsv, vatSettings } from './vat';
 
 /**
  * Money → Reports: sales, refunds, expenses and profit for a period (UAE dates), and the ZIP for
@@ -100,7 +101,8 @@ export interface MethodTotals {
 }
 
 export interface VatStatus {
-  registered: false;
+  /** Settings → Payments → VAT is on (the shop says it is VAT-registered). */
+  registered: boolean;
   from: string;
   to: string;
   salesFils: number;
@@ -155,6 +157,11 @@ export function vatStatus(now = Date.now(), orders: Order[] = allOrders(), refun
   const ratio = salesFils / VAT_THRESHOLD_FILS;
   const level = ratio >= 1 ? 'over' : ratio >= VAT_WARN_RATIO ? 'near' : 'ok';
   const pct = Math.floor(ratio * 100);
+  const vat = vatSettings();
+  if (vat.enabled) {
+    const text = `VAT-registered (TRN ${vat.trn}) from ${vat.effectiveFrom}: orders from then carry 5% VAT (Money → VAT return). Sales in the last 12 months: AED ${aedText(salesFils)}.`;
+    return { registered: true, from, to, salesFils, thresholdFils: VAT_THRESHOLD_FILS, ratio, level: 'ok', text };
+  }
   const text =
     level === 'over'
       ? `Sales in the last 12 months (AED ${aedText(salesFils)}) are over AED 375,000: VAT registration is mandatory. Talk to your accountant now (registration is due within 30 days).`
@@ -360,7 +367,9 @@ function summaryRows(r: Report): Array<[string, string, string | number, string]
     ['Not counted', 'Cancelled orders', r.excluded.cancelled, ''],
     ['Not counted', 'Waiting for card payment', r.excluded.awaitingCard, ''],
     ['Not counted', 'Stripe test mode', r.excluded.testMode, ''],
-    ['VAT', `Not VAT-registered. Sales ${r.vat.from} to ${r.vat.to}`, `${Math.floor(r.vat.ratio * 100)}% of AED 375,000`, aedText(r.vat.salesFils)],
+    r.vat.registered
+      ? ['VAT', `VAT-registered. Sales ${r.vat.from} to ${r.vat.to}`, '', aedText(r.vat.salesFils)]
+      : ['VAT', `Not VAT-registered. Sales ${r.vat.from} to ${r.vat.to}`, `${Math.floor(r.vat.ratio * 100)}% of AED 375,000`, aedText(r.vat.salesFils)],
   );
   for (const n of r.notes) rows.push(['Note', n, '', '']);
   return rows;
@@ -425,7 +434,9 @@ function readme(r: Report, shop: string, bills: number, auditCount: number, veri
     '',
     'VAT',
     `  ${r.vat.text}`,
-    '  No VAT is charged or included in these figures.',
+    ...(r.vat.registered
+      ? ['  Order totals include VAT. vat-return.csv: tax invoices, credit notes and expenses with VAT for the period, with the totals.']
+      : ['  No VAT is charged or included in these figures.']),
     '',
     'Audit log check',
     ...verification.map((l) => `  ${l}`),
@@ -512,6 +523,8 @@ export async function writeAccountantZip(from: string, to: string, shop = 'Beaut
     await zip.add('sales.csv', Buffer.from(salesCsv(orders, bookedRefunds(all))));
     await zip.add('order-items.csv', Buffer.from(orderItemsCsv(orders)));
     await zip.add('refunds.csv', Buffer.from(refundsCsv(refunds)));
+    // With VAT on (or tax invoices issued before): the VAT return helper for the period.
+    if (vatInUse()) await zip.add('vat-return.csv', Buffer.from(vatReturnCsv(from, to)));
     await zip.addStream(
       'expenses.csv',
       (function* () {

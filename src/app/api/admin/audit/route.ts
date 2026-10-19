@@ -1,4 +1,4 @@
-import { requireAdmin } from '@/lib/server/guard';
+import { requireReader } from '@/lib/server/guard';
 import { handleRouteError, json } from '@/lib/server/http';
 import { auditPage, verificationText } from '@/lib/server/auditView';
 
@@ -9,7 +9,7 @@ import { auditPage, verificationText } from '@/lib/server/auditView';
  */
 export async function GET(req: Request) {
   try {
-    await requireAdmin(req);
+    await requireReader(req);
     const q = new URL(req.url).searchParams;
     const page = auditPage({
       from: q.get('from') ?? undefined,

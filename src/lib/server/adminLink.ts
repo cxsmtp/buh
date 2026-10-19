@@ -209,7 +209,18 @@ export function resetGrantExpiry(segment: string, now = Date.now()): number {
     // Every entry is compared (no early exit), so the time taken says nothing.
     if (typeof l?.grant === 'string' && typeof l.expires === 'number' && l.expires > now && sameDigest(given, l.grant)) found = l.expires;
   }
-  return found;
+  return found || staffGrantExpiry(segment, now);
+}
+
+/**
+ * An accountant's setup email opens the hub the same way (src/lib/server/staffAuth.ts): its own
+ * grant, valid while that invite is open (72 hours, ended by choosing a password or by a revoke).
+ */
+function staffGrantExpiry(segment: string, now: number): number {
+  const row = getDb()
+    .prepare("SELECT setup_grant_hash AS hash, setup_expires_at AS expires FROM staff_accounts WHERE setup_grant_hash = ? AND status = 'invited'")
+    .get(hashSegment(segment, 'buh-staff-grant')) as { hash: string; expires: number | null } | undefined;
+  return row && Number(row.expires) > now && sameDigest(hashSegment(segment, 'buh-staff-grant'), row.hash) ? Number(row.expires) : 0;
 }
 
 export function matchesResetGrant(segment: string, now = Date.now()): boolean {

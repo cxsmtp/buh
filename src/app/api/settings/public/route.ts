@@ -1,6 +1,7 @@
 import { handleRouteError, json } from '@/lib/server/http';
 import { bankTransferMode, cardFeePercent, cardPaymentsReady, contactEmail, getSettings, phoneCodesOn, phoneVerificationConfig } from '@/lib/server/settings';
 import { storefrontTheme } from '@/lib/server/theme';
+import { vatAddedPercent } from '@/lib/server/vat';
 
 /**
  * What every visitor sees: branding, whether checkout offers bank transfer (never
@@ -31,6 +32,8 @@ export function GET() {
       chat: chatView(),
       delivery: getSettings('delivery'),
       payments: paymentsView(),
+      // UAE VAT added on top at checkout: only when it is on with prices excluding VAT (nothing otherwise).
+      ...(vatAddedPercent() ? { vat: { addedPercent: vatAddedPercent() } } : {}),
     });
   } catch (err) {
     return handleRouteError(err, 'settings/public');

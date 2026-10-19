@@ -182,7 +182,8 @@ async function revealFor(cookieHeader: string): Promise<string | null> {
   if (!hasPendingReveal()) return null;
   const token = /(?:^|;\s*)buh_admin=([^;]+)/.exec(cookieHeader)?.[1];
   const session = await verifySessionToken(token);
-  if (!session || session.mustChangePassword) return null;
+  // Only the owner: an accountant's session never sees the link.
+  if (!session || session.mustChangePassword || session.role !== 'owner') return null;
   // Only a session from before the link was made (signed in when the update came): one made
   // since came through the link already.
   const made = Date.parse(currentLink()?.createdAt ?? '');

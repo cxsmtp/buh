@@ -1,6 +1,7 @@
 import type { NextConfig } from "next";
 import path from "path";
 import { BILL_CSP, contentSecurityPolicy } from "./src/lib/csp";
+import { DOCUMENT_CSP } from "./src/lib/server/documentHeaders";
 import pkg from "./package.json";
 
 // Shown in the admin hub as BUH-xx.xx.xx, so "which build is this?" has one answer.
@@ -59,6 +60,20 @@ const nextConfig: NextConfig = {
         // policy above, so this one is sent; the route sets the same).
         source: "/api/admin/expenses/:id/bills/:bill",
         headers: [{ key: "Content-Security-Policy", value: BILL_CSP }],
+      },
+      {
+        // An order's printable receipt or tax invoice (the hub's, and the customer's private one):
+        // its own inline style, no scripts at all (src/lib/server/documentHeaders.ts).
+        source: "/api/admin/orders/:id/invoice",
+        headers: [{ key: "Content-Security-Policy", value: DOCUMENT_CSP }],
+      },
+      {
+        source: "/invoice/:token",
+        headers: [
+          { key: "Content-Security-Policy", value: DOCUMENT_CSP },
+          { key: "Referrer-Policy", value: "no-referrer" },
+          { key: "Cache-Control", value: "private, no-store" },
+        ],
       },
     ];
   },

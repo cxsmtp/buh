@@ -26,6 +26,8 @@ export interface ShopInfo {
   /** The shop's chat (Settings → Chat assistant), null when switched off. */
   chat: { name: string; greeting: string } | null;
   delivery: DeliverySettings;
+  /** UAE VAT added on top at checkout (Settings → Payments → VAT, prices excluding VAT); absent otherwise. */
+  vatAddedPercent?: number;
 }
 
 const ShopContext = createContext<ShopInfo>({

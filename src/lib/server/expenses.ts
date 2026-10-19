@@ -59,6 +59,10 @@ export interface Expense {
   payee: string;
   method: ExpenseMethod;
   note: string;
+  /** The VAT on the bill (input VAT, for the VAT return), when the owner typed it. */
+  vatFils?: number;
+  /** The supplier's TRN from their tax invoice. */
+  supplierTrn?: string;
   version: number;
   createdAt: string;
   createdBy: string;
@@ -85,6 +89,8 @@ interface Snapshot {
   payee: string;
   method: ExpenseMethod;
   note: string;
+  vatFils?: number;
+  supplierTrn?: string;
   removed?: { at: string; by: string; why: string };
 }
 
@@ -187,6 +193,8 @@ interface Row {
   payee: string;
   method: string;
   note: string;
+  vat_fils: number | null;
+  supplier_trn: string | null;
   version: number;
   created_at: string;
   created_by: string;
@@ -240,6 +248,8 @@ function fromRow(r: Row, bills: BillRow[]): Expense {
     payee: r.payee,
     method: r.method as ExpenseMethod,
     note: r.note,
+    ...(r.vat_fils ? { vatFils: r.vat_fils } : {}),
+    ...(r.supplier_trn ? { supplierTrn: r.supplier_trn } : {}),
     version: r.version,
     createdAt: r.created_at,
     createdBy: r.created_by,
@@ -251,7 +261,7 @@ function fromRow(r: Row, bills: BillRow[]): Expense {
 }
 
 function snapshot(e: Expense): Snapshot {
-  return { date: e.date, amountFils: e.amountFils, categoryId: e.categoryId, category: e.category, payee: e.payee, method: e.method, note: e.note, ...(e.removed ? { removed: e.removed } : {}) };
+  return { date: e.date, amountFils: e.amountFils, categoryId: e.categoryId, category: e.category, payee: e.payee, method: e.method, note: e.note, ...(e.vatFils ? { vatFils: e.vatFils } : {}), ...(e.supplierTrn ? { supplierTrn: e.supplierTrn } : {}), ...(e.removed ? { removed: e.removed } : {}) };
 }
 
 export function getExpense(id: string): Expense | undefined {
@@ -369,22 +379,37 @@ function keepVersion(e: Expense, change: ExpenseVersion['change'], actor: string
   getDb().prepare('INSERT INTO expense_versions (expense_id, version, change, data, at, by) VALUES (?, ?, ?, ?, ?, ?)').run(e.id, e.version, change, JSON.stringify(snapshot(e)), e.updatedAt, actor);
 }
 
-const FIELDS = ['date', 'amount', 'categoryId', 'payee', 'method', 'note'] as const;
+const FIELDS = ['date', 'amount', 'categoryId', 'payee', 'method', 'note', 'vat', 'supplierTrn'] as const;
 
 function readFields(body: Record<string, unknown>, base?: Expense) {
   const has = (k: string) => body[k] !== undefined;
   const method = has('method') ? body.method : base?.method;
   if (!EXPENSE_METHODS.includes(method as ExpenseMethod)) throw new HttpError(400, 'Payment method must be cash, card, bank transfer or other.');
   const category = categoryName(has('categoryId') ? body.categoryId : base?.categoryId);
+  const amountFils = has('amount') || !base ? parseAmountFils(body.amount) : base.amountFils;
+  // The VAT on the bill (optional; empty clears it): at most the amount itself.
+  const vatFils = has('vat') ? (body.vat === '' || body.vat === null ? 0 : parseAmountFils(body.vat)) : (base?.vatFils ?? 0);
+  if (vatFils > amountFils) throw new HttpError(400, 'The VAT can’t be more than the amount.');
+  const supplierTrn = has('supplierTrn') ? (body.supplierTrn === '' || body.supplierTrn === null ? '' : supplierTrnOf(body.supplierTrn)) : (base?.supplierTrn ?? '');
   return {
     date: has('date') || !base ? parseDate(body.date) : base.date,
-    amountFils: has('amount') || !base ? parseAmountFils(body.amount) : base.amountFils,
+    amountFils,
     categoryId: category.id,
     category: category.name,
     payee: has('payee') ? plain(body.payee, 'Paid to', 120) : (base?.payee ?? ''),
     method: method as ExpenseMethod,
     note: has('note') ? plain(body.note, 'Note', 1000) : (base?.note ?? ''),
+    vatFils,
+    supplierTrn,
   };
+}
+
+/** A supplier's TRN: 15 digits (spaces and dashes between groups dropped). */
+function supplierTrnOf(value: unknown): string {
+  if (typeof value !== 'string') throw new HttpError(400, 'Supplier TRN must be text.');
+  const digits = value.replace(/[\s-]/g, '');
+  if (!/^\d{15}$/.test(digits)) throw new HttpError(400, 'Supplier TRN must be 15 digits (from their tax invoice).');
+  return digits;
 }
 
 function newExpenseId(date: string): string {
@@ -408,8 +433,8 @@ export function createExpense(body: Record<string, unknown>, actor: string, idem
     const id = newExpenseId(f.date);
     const now = new Date().toISOString();
     getDb()
-      .prepare('INSERT INTO expenses (id, spent_on, amount_fils, category_id, payee, method, note, version, idempotency_key, created_at, created_by, updated_at, updated_by) VALUES (?, ?, ?, ?, ?, ?, ?, 1, ?, ?, ?, ?, ?)')
-      .run(id, f.date, f.amountFils, f.categoryId, f.payee, f.method, f.note, key, now, actor, now, actor);
+      .prepare('INSERT INTO expenses (id, spent_on, amount_fils, category_id, payee, method, note, vat_fils, supplier_trn, version, idempotency_key, created_at, created_by, updated_at, updated_by) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?, ?, ?, ?)')
+      .run(id, f.date, f.amountFils, f.categoryId, f.payee, f.method, f.note, f.vatFils || null, f.supplierTrn || null, key, now, actor, now, actor);
     const expense = getExpense(id)!;
     keepVersion(expense, 'created', actor);
     auditOrThrow('expense.created', { by: actor, expenseId: id, after: snapshot(expense) });
@@ -432,14 +457,15 @@ export function updateExpense(id: string, body: Record<string, unknown>, actor: 
     if (before.version !== body.version) throw new HttpError(409, 'This expense was changed meanwhile (on another device?): refresh and try again.', {}, { code: 'expense_changed' });
     const f = readFields(changes, before);
     const was = snapshot(before);
+    const now_ = { ...f, vatFils: f.vatFils || undefined, supplierTrn: f.supplierTrn || undefined };
     const diff = Object.fromEntries(
-      (['date', 'amountFils', 'categoryId', 'payee', 'method', 'note'] as const).filter((k) => was[k] !== f[k]).map((k) => [k, { from: was[k], to: f[k] }])
+      (['date', 'amountFils', 'categoryId', 'payee', 'method', 'note', 'vatFils', 'supplierTrn'] as const).filter((k) => was[k] !== now_[k]).map((k) => [k, { from: was[k] ?? '', to: now_[k] ?? '' }])
     );
     if (!Object.keys(diff).length) return before;
     const now = new Date().toISOString();
     getDb()
-      .prepare('UPDATE expenses SET spent_on = ?, amount_fils = ?, category_id = ?, payee = ?, method = ?, note = ?, version = version + 1, updated_at = ?, updated_by = ? WHERE id = ? AND version = ?')
-      .run(f.date, f.amountFils, f.categoryId, f.payee, f.method, f.note, now, actor, id, before.version);
+      .prepare('UPDATE expenses SET spent_on = ?, amount_fils = ?, category_id = ?, payee = ?, method = ?, note = ?, vat_fils = ?, supplier_trn = ?, version = version + 1, updated_at = ?, updated_by = ? WHERE id = ? AND version = ?')
+      .run(f.date, f.amountFils, f.categoryId, f.payee, f.method, f.note, f.vatFils || null, f.supplierTrn || null, now, actor, id, before.version);
     const after = getExpense(id)!;
     keepVersion(after, 'edited', actor);
     auditOrThrow('expense.edited', { by: actor, expenseId: id, version: after.version, changes: diff, before: was, after: snapshot(after) });
@@ -687,13 +713,14 @@ export function billFile(bill: { id: string; ext: string }): string {
 
 // ── Flat files ──────────────────────────────────────────────────────────────
 
-export const EXPENSE_CSV_HEADERS = ['expense_id', 'date', 'category', 'paid_to', 'method', 'amount_aed', 'note', 'bills', 'status', 'removed_at', 'removed_by', 'removed_reason', 'version', 'created_at', 'created_by', 'updated_at', 'updated_by'];
+export const EXPENSE_CSV_HEADERS = ['expense_id', 'date', 'category', 'paid_to', 'method', 'amount_aed', 'note', 'bills', 'status', 'removed_at', 'removed_by', 'removed_reason', 'version', 'created_at', 'created_by', 'updated_at', 'updated_by', 'vat_aed', 'supplier_trn'];
 
 export function expenseCsvRow(e: Expense, billNames: string[] = e.bills.filter((b) => !b.removed).map((b) => `${b.id}.${b.ext}`)): unknown[] {
   return [
     e.id, e.date, e.category, e.payee, METHOD_LABELS[e.method], aedText(e.amountFils), e.note, billNames.join('; '),
     e.removed ? 'removed' : 'active', e.removed?.at ?? '', e.removed?.by ?? '', e.removed?.why ?? '',
     e.version, e.createdAt, e.createdBy, e.updatedAt, e.updatedBy,
+    e.vatFils ? aedText(e.vatFils) : '', e.supplierTrn ?? '',
   ];
 }
 

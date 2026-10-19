@@ -277,7 +277,7 @@ On a phone: **More → Money**; on a laptop: the **Money** tab. Three parts: **E
 - **Card fees:** the card payment fee customers pay is part of each card order's total and counts as your income: **Card fees** in the report and summary, `card_fee_aed` in `sales.csv` (Stripe's own fees are in your Stripe dashboard).
 - **What counts as a sale:** every order placed in the period, except orders cancelled before any money was taken, card orders still waiting for payment, and Stripe test payments. A card payment refunded later shows as a sale (when placed) and a refund on the day each refund was made: a part refunded in one month and the rest in the next appear in each month, and a refund that failed comes off on the day it failed. Refunds made before BUH-02.10 are dated as well as the shop knows (marked "approximate" in `refunds.csv`).
 - **The ZIP** holds `summary.html` (open and print, or Print → Save as PDF), `summary.csv`, `sales.csv` (one row per order: date, number, customer name, emirate, items, amounts, payment method and reference, refund, status, courier and AWB), `order-items.csv`, `refunds.csv` (one row per refund, by its date), `expenses.csv` (every expense of the period, however many), every bill in `bills/` (named date_category_amount_expense), the period's audit log with its check, and a `README.txt` explaining each file. The CSVs open in Excel (Arabic names included). One export is made at a time (a second one says to wait), and none is made when the server's disk is nearly full.
-- **VAT:** the shop is not VAT-registered and no VAT is added. Reports show your sales of the last 12 months against the AED 375,000 mandatory registration threshold; from 80% it turns amber (Settings → System & backups shows it too, and you get an email). Talk to your accountant then.
+- **VAT:** the shop is not VAT-registered and no VAT is added. Reports show your sales of the last 12 months against the AED 375,000 mandatory registration threshold; from 80% it turns amber (Settings → System & backups shows it too, and you get an email). Talk to your accountant then. Once you are registered, see **UAE VAT** below.
 
 **Audit log**
 
@@ -287,6 +287,40 @@ A read-only list of everything that changes money or the shop, newest first: ord
 - The green line **"The log is intact"** means every entry's signature and its link to the one before were checked, and no month is missing. If anything was changed, removed or reordered, or a month is missing or cut short, it turns red (**BROKEN**) and says where (file and line).
 - After restoring a backup onto a new server, a grey line says those entries were **signed by another server's key (fingerprint …): restored from a backup**: they are in order, but only that server could check their signatures. New entries start a fresh chain. That is normal after a restore, not a problem.
 - An amber **unverified** line means entries that can't be checked (made before key ids and not signed by this server's key): ask for help if you did not restore a backup.
+
+### Accountant access (read-only)
+
+Give your accountant their own sign-in that can only look at Money: reports and their ZIP, expenses with the bills, the VAT return and the audit log. They can't change orders, stock, prices or settings, see any keys, invite anyone, or read chats.
+
+1. **Settings → Security → Accountant access**: type their email (and a name if you like), tap **Invite**.
+2. They get an email with a one-time setup link (valid 72 hours) to choose their password. No email set up? The link is shown to you once: send it to them privately.
+3. Send them your **Admin Hub link** yourself (it is never in the email). They sign in there with their email and password and see only Money, marked "Read-only".
+
+- **Revoke access** signs them out at once, everywhere; their password stops working. **Send a new setup link** invites them again (an expired or revoked invite).
+- Every accountant sign-in and every export they download is in the audit log, with their email.
+- They have no passkeys, recovery codes or "forgot password": if they lose the password, send a new setup link.
+
+### UAE VAT (only once you are VAT-registered)
+
+VAT is **off** unless you turn it on. Off, nothing about VAT shows anywhere: receipts say "Receipt", with no TRN. **Talk to your accountant before turning this on.**
+
+To turn it on (Settings → Payments → VAT):
+
+1. Type your **TRN** (the 15 digits on your FTA registration certificate).
+2. Choose the date VAT starts (today or later; orders already placed never change).
+3. Check the **name** and **address** for your tax invoices (the shop's name and address are used when empty).
+4. Leave **Prices include VAT** ticked (UAE prices for consumers are shown with VAT; untick only if your accountant says so: 5% is then added at checkout).
+5. Type `TURN ON VAT` and tap **Turn VAT on**. It is recorded in the audit log.
+
+While VAT is on the TRN and the date are fixed; to change them, turn VAT off first.
+
+**Tax invoices.** From the start date every order carries 5% VAT, worked out on the server (inside the price: VAT = total × 5 ÷ 105, rounded to the fil; delivery and the card fee are taxed the same way). Each order gets a **Tax Invoice** with your name, address and TRN, its number (INV-000001, INV-000002…: one series with no gaps), the date, the items, the VAT and the total including VAT. The number is given when the order is confirmed (or, for a card, when the payment is taken). Open it from the order (**Receipt / invoice**); the customer has the same page from their order confirmation (**Tax invoice (printable)**). Print → Save as PDF keeps a copy.
+
+**Credit notes.** A refund after the invoice (or cancelling an invoiced order) gives a credit note (CN-000001…) against that invoice, shown on the invoice page. A refund that fails afterwards gives a negative one.
+
+**VAT return helper (Money → VAT).** Pick a quarter (or your FTA tax period's dates): sales excluding VAT and the VAT on them, the credit notes, input VAT from expenses, and the net VAT payable or refundable. **Download for my accountant (CSV)** has the totals and every invoice, credit note and expense behind them; the accountant's ZIP has it too (`vat-return.csv`). It is a helper, not a filed return: your accountant files it on EmaraTax.
+
+**Input VAT on expenses.** With VAT on, an expense has **VAT on the bill (AED)** and **Supplier TRN**. Fill them from the supplier's tax invoice; expenses with VAT but no supplier TRN are flagged in the VAT return.
 
 ### Settings
 

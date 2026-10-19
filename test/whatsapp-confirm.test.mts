@@ -12,7 +12,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { test } from 'node:test';
 import Database from 'better-sqlite3';
-import { tempDataDir } from './helpers.mjs';
+import { tempDataDir, LATEST_DB_VERSION, UNDO_MIGRATION_14 } from './helpers.mjs';
 
 const dir = tempDataDir();
 delete process.env.BACKUP_PASSPHRASE;
@@ -215,6 +215,7 @@ test('migration 8 only adds (columns and an index); an older shop’s orders upg
   assert.equal(seven.status, 0, seven.stderr);
   const db = new Database(path.join(old, 'shop.db'));
   // Recreate the version-7 orders table (drop migration 13's rows and 12's tables, then the columns of migrations 11, 10, 9 and 8) and put an old order in.
+  db.exec(UNDO_MIGRATION_14); // migration 14
   db.exec("DELETE FROM settings_history WHERE key = 'look'; DELETE FROM settings WHERE key = 'look'"); // migration 13
   db.exec('DROP TABLE card_refunds; DROP TABLE expense_bills; DROP TABLE expense_versions; DROP TABLE expenses; DROP TABLE expense_categories;'); // migration 12
   db.exec('DROP INDEX orders_unconfirmed_due; DROP INDEX orders_unopened_due; ALTER TABLE orders DROP COLUMN phone_check_method; ALTER TABLE orders DROP COLUMN wa_cancel_at; ALTER TABLE orders DROP COLUMN wa_unopened_cancel_at;'); // migration 11
@@ -227,7 +228,7 @@ test('migration 8 only adds (columns and an index); an older shop’s orders upg
   const up = run(`const m = await import('@/lib/server/db'); const db = (m.getDb ?? m.default.getDb)(); console.log(JSON.stringify({ v: db.pragma('user_version', { simple: true }), row: db.prepare("SELECT id, status, data, phone_check, wa_code, wa_hold FROM orders WHERE id = 'BUH-OLD-1'").get() }));`);
   assert.equal(up.status, 0, up.stderr);
   const out = JSON.parse(up.stdout.trim().split('\n').pop()!);
-  assert.equal(out.v, 13, 'migrations 8 to 13 all ran');
+  assert.equal(out.v, LATEST_DB_VERSION, 'migrations 8 to the latest all ran');
   assert.deepEqual(out.row, { id: 'BUH-OLD-1', status: 'delivered', data: '{"id":"BUH-OLD-1"}', phone_check: 'none', wa_code: null, wa_hold: 0 });
 });
 

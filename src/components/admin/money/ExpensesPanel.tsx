@@ -27,6 +27,8 @@ export interface ExpenseView {
   payee: string;
   method: 'cash' | 'card' | 'bank_transfer' | 'other';
   note: string;
+  vatFils?: number;
+  supplierTrn?: string;
   version: number;
   createdAt: string;
   createdBy: string;
@@ -92,17 +94,22 @@ interface FormState {
   payee: string;
   method: ExpenseView['method'];
   note: string;
+  vat: string;
+  supplierTrn: string;
 }
 
 function ExpenseForm({
   categories,
   editing,
+  vatOn,
   onCategories,
   onDone,
   onCancel,
 }: {
   categories: Category[];
   editing: ExpenseView | null;
+  /** VAT is on (Settings → Payments → VAT): the bill's VAT and the supplier's TRN, for the VAT return. */
+  vatOn: boolean;
   onCategories: (c: Category[]) => void;
   onDone: (message: string) => void;
   onCancel: () => void;
@@ -110,8 +117,8 @@ function ExpenseForm({
   const id = useId();
   const [form, setForm] = useState<FormState>(() =>
     editing
-      ? { date: editing.date, amount: (editing.amountFils / 100).toFixed(2), categoryId: editing.categoryId, payee: editing.payee, method: editing.method, note: editing.note }
-      : { date: dubaiToday(), amount: '', categoryId: categories[0]?.id ?? '', payee: '', method: 'cash', note: '' }
+      ? { date: editing.date, amount: (editing.amountFils / 100).toFixed(2), categoryId: editing.categoryId, payee: editing.payee, method: editing.method, note: editing.note, vat: editing.vatFils ? (editing.vatFils / 100).toFixed(2) : '', supplierTrn: editing.supplierTrn ?? '' }
+      : { date: dubaiToday(), amount: '', categoryId: categories[0]?.id ?? '', payee: '', method: 'cash', note: '', vat: '', supplierTrn: '' }
   );
   const [files, setFiles] = useState<File[]>([]);
   const [busy, setBusy] = useState(false);
@@ -150,7 +157,7 @@ function ExpenseForm({
     setError('');
     setBusy(true);
     try {
-      const fields = { date: form.date, amount: form.amount.trim(), categoryId: form.categoryId, payee: form.payee, method: form.method, note: form.note };
+      const fields = { date: form.date, amount: form.amount.trim(), categoryId: form.categoryId, payee: form.payee, method: form.method, note: form.note, ...(vatOn || editing?.vatFils || editing?.supplierTrn ? { vat: form.vat.trim(), supplierTrn: form.supplierTrn.trim() } : {}) };
       if (saved.current) {
         const { ok, data } = await sendJson<{ expense?: ExpenseView; message?: string }>('PATCH', `/api/admin/expenses/${saved.current.id}`, { version: saved.current.version, ...fields });
         if (!ok) throw new Error(data.message || 'Could not save the changes.');
@@ -240,6 +247,18 @@ function ExpenseForm({
           ))}
         </div>
       </fieldset>
+      {(vatOn || Boolean(editing?.vatFils)) && (
+        <div className="grid grid-cols-2 gap-3">
+          <div>
+            <label htmlFor={`${id}-vat`} className={labelClass}>VAT on the bill (AED)</label>
+            <input id={`${id}-vat`} type="text" inputMode="decimal" placeholder="0.00" autoComplete="off" value={form.vat} onChange={set('vat')} className={`${inputClass} tabular-nums`} />
+          </div>
+          <div>
+            <label htmlFor={`${id}-trn`} className={labelClass}>Supplier TRN</label>
+            <input id={`${id}-trn`} type="text" inputMode="numeric" maxLength={20} placeholder="15 digits" autoComplete="off" value={form.supplierTrn} onChange={set('supplierTrn')} className={inputClass} />
+          </div>
+        </div>
+      )}
       <div>
         <label htmlFor={`${id}-note`} className={labelClass}>Note (optional)</label>
         <textarea id={`${id}-note`} rows={2} maxLength={1000} value={form.note} onChange={set('note')} className={`${inputClass} py-2`} />
@@ -283,7 +302,7 @@ function ExpenseForm({
   );
 }
 
-function ExpenseCard({ e, onEdit, onChanged }: { e: ExpenseView; onEdit: () => void; onChanged: (message: string) => void }) {
+function ExpenseCard({ e, readOnly, onEdit, onChanged }: { e: ExpenseView; readOnly: boolean; onEdit: () => void; onChanged: (message: string) => void }) {
   const id = useId();
   const [removing, setRemoving] = useState(false);
   const [reason, setReason] = useState('');
@@ -320,6 +339,11 @@ function ExpenseCard({ e, onEdit, onChanged }: { e: ExpenseView; onEdit: () => v
               {niceDate(e.date)} · {e.category} · {methodLabel(e.method)}
             </p>
             {e.note && <p className="text-xs text-ink-soft mt-1 break-words">{e.note}</p>}
+            {Boolean(e.vatFils) && (
+              <p className="text-xs text-ink-soft mt-1" data-testid="expense-vat">
+                VAT AED {aed(e.vatFils ?? 0)}{e.supplierTrn ? ` · TRN ${e.supplierTrn}` : ' · no supplier TRN'}
+              </p>
+            )}
             {e.removed && (
               <p className="text-xs text-danger mt-1 break-words">
                 Removed {uaeTime(e.removed.at)} by {e.removed.by}: {e.removed.why}
@@ -336,7 +360,7 @@ function ExpenseCard({ e, onEdit, onChanged }: { e: ExpenseView; onEdit: () => v
                   <Paperclip className="w-3.5 h-3.5" aria-hidden="true" />
                   {`Bill ${i + 1}`} <span className="sr-only">of {e.id} ({b.ext.toUpperCase()})</span>
                 </a>
-                {!e.removed && (
+                {!e.removed && !readOnly && (
                   <button type="button" onClick={() => void removeBill(b)} className="min-h-9 min-w-9 inline-flex items-center justify-center text-ink-soft" aria-label={`Take bill ${i + 1} off`}>
                     <X className="w-3.5 h-3.5" aria-hidden="true" />
                   </button>
@@ -345,7 +369,7 @@ function ExpenseCard({ e, onEdit, onChanged }: { e: ExpenseView; onEdit: () => v
             ))}
           </ul>
         )}
-        {!e.removed && (
+        {!e.removed && !readOnly && (
           <div className="flex flex-wrap gap-2 mt-3">
             <button type="button" onClick={onEdit} className={secondaryButton}>
               <Pencil className="w-4 h-4" aria-hidden="true" />
@@ -361,7 +385,7 @@ function ExpenseCard({ e, onEdit, onChanged }: { e: ExpenseView; onEdit: () => v
             </button>
           </div>
         )}
-        {e.removed && (
+        {(e.removed || readOnly) && (
           <div className="mt-2">
             <button type="button" onClick={() => void toggleHistory()} aria-expanded={Boolean(history)} className={secondaryButton}>
               <History className="w-4 h-4" aria-hidden="true" />
@@ -392,8 +416,11 @@ function ExpenseCard({ e, onEdit, onChanged }: { e: ExpenseView; onEdit: () => v
   );
 }
 
-/** Money → Expenses: this month's expenses (any month), add one with a photo of the bill, edit, remove (kept), history. */
-export function ExpensesPanel() {
+/**
+ * Money → Expenses: this month's expenses (any month), add one with a photo of the bill, edit, remove
+ * (kept), history. readOnly (the accountant): the list, bills and history only.
+ */
+export function ExpensesPanel({ readOnly = false, vatOn = false }: { readOnly?: boolean; vatOn?: boolean }) {
   const id = useId();
   const [month, setMonth] = useState(() => dubaiToday().slice(0, 7));
   const [showRemoved, setShowRemoved] = useState(false);
@@ -430,7 +457,7 @@ export function ExpensesPanel() {
     <section aria-labelledby={`${id}-h`} className="space-y-3">
       <div className="flex items-center gap-2 flex-wrap">
         <h2 id={`${id}-h`} className="font-serif text-xl text-ink flex-1">Expenses</h2>
-        {!form && (
+        {!form && !readOnly && (
           <button type="button" className={primaryButton} onClick={() => { setNotice(''); setForm({ editing: null, n: Date.now() }); }}>
             <Plus className="w-4 h-4" aria-hidden="true" />
             <span>Add expense</span>
@@ -438,9 +465,9 @@ export function ExpensesPanel() {
         )}
       </div>
       {notice && <p role="status" className="text-xs text-success bg-success-soft border border-success-line rounded-xl px-3 py-2">{notice}</p>}
-      {form && (
+      {form && !readOnly && (
         <Card>
-          <ExpenseForm key={form.n} categories={categories} editing={form.editing} onCategories={setCategories} onDone={done} onCancel={() => setForm(null)} />
+          <ExpenseForm key={form.n} categories={categories} editing={form.editing} vatOn={vatOn} onCategories={setCategories} onDone={done} onCancel={() => setForm(null)} />
         </Card>
       )}
       <div className="flex items-end gap-3 flex-wrap">
@@ -459,10 +486,10 @@ export function ExpensesPanel() {
           <strong className="text-ink tabular-nums" data-testid="expenses-total">AED {aed(total)}</strong>
         </p>
       </Card>
-      {loaded && !expenses.length && <p className="text-sm text-ink-soft">No expenses this month yet. Tap “Add expense” and take a photo of the bill.</p>}
+      {loaded && !expenses.length && <p className="text-sm text-ink-soft">{readOnly ? 'No expenses this month.' : 'No expenses this month yet. Tap “Add expense” and take a photo of the bill.'}</p>}
       <ul className="space-y-2" aria-label="Expenses">
         {expenses.map((e) => (
-          <ExpenseCard key={`${e.id}-${e.version}`} e={e} onEdit={() => { setNotice(''); setForm({ editing: e, n: Date.now() }); window.scrollTo({ top: 0, behavior: 'smooth' }); }} onChanged={(m) => { setNotice(m); void load(); }} />
+          <ExpenseCard key={`${e.id}-${e.version}`} e={e} readOnly={readOnly} onEdit={() => { setNotice(''); setForm({ editing: e, n: Date.now() }); window.scrollTo({ top: 0, behavior: 'smooth' }); }} onChanged={(m) => { setNotice(m); void load(); }} />
         ))}
       </ul>
     </section>

@@ -5,7 +5,7 @@ import dynamic from 'next/dynamic';
 import { CartItem, Emirate, Order, PaymentMethod, PhoneVerificationConfig } from '@/types';
 import { UAE_EMIRATES } from '@/data/initialData';
 import { resolveArea, searchAreas, type UAEArea } from '@/data/uaeAreas';
-import { cardFeeFils, cartFils, formatAed, percentText, toFils } from '@/lib/money';
+import { cardFeeFils, cartFils, formatAed, percentText, toFils, vatOnTopFils } from '@/lib/money';
 import { useShop } from '@/lib/client/shop';
 import { postJson } from '@/lib/apiClient';
 import { formatAccuracy, suggestAreaFromGps, UAE_KEY_LOCATIONS } from '@/lib/uaeLocations';
@@ -199,7 +199,7 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
   const [isPhoneVerified, setIsPhoneVerified] = useState(false);
 
   // Delivery: decided by the address (the server checks again and charges any same-day fee).
-  const { delivery: deliverySettings } = useShop();
+  const { delivery: deliverySettings, vatAddedPercent = 0 } = useShop();
   // Same day is chosen for one address: changing the emirate or area goes back to standard.
   const [deliveryChoice, setDeliveryChoice] = useState<{ option: 'standard' | 'same_day'; key: string }>({ option: 'standard', key: '' });
   const setDeliveryOption = (option: 'standard' | 'same_day') => setDeliveryChoice({ option, key: `${emirate}|${area}` });
@@ -247,8 +247,13 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
   // does (whole fils, half up). The server works it out again and refuses a total that differs.
   const feePercent = feePercentNow ?? card?.cardFeePercent ?? 0;
   const cardFee = card ? cardFeeFils(totalFils, feePercent) : 0;
-  const cardTotalFils = totalFils + cardFee;
-  const shownTotalFils = byCard ? cardTotalFils : totalFils;
+  // UAE VAT added on top (only with VAT on and prices excluding VAT; the server works it out again).
+  const plainVatFils = vatAddedPercent ? vatOnTopFils(totalFils, vatAddedPercent) : 0;
+  const cardVatFils = vatAddedPercent ? vatOnTopFils(totalFils + cardFee, vatAddedPercent) : 0;
+  const cardTotalFils = totalFils + cardFee + cardVatFils;
+  const payTotalFils = totalFils + plainVatFils;
+  const shownVatFils = byCard ? cardVatFils : plainVatFils;
+  const shownTotalFils = byCard ? cardTotalFils : payTotalFils;
   const grandTotal = formatAed(shownTotalFils);
   // With an SMS gateway on, a card order needs the phone code too (once per checkout).
   const cardNeedsCode = byCard && Boolean(card?.phoneCheck);
@@ -403,7 +408,7 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
     paymentMethod: method,
     deliveryOption: over.deliveryOption ?? (sameDayChosen ? 'same_day' : 'standard'),
     // The total shown for this way of paying (a card order includes the card fee).
-    expectedTotal: (method === 'online_card' ? cardTotalFils : totalFils) / 100,
+    expectedTotal: (method === 'online_card' ? cardTotalFils : payTotalFils) / 100,
     source: landing ?? undefined,
   });
 
@@ -806,10 +811,22 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
               </div>
             )}
 
+            {Boolean(confirmedOrder.vatAdded) && (
+              <div data-testid="confirmed-vat" className="flex justify-between items-center">
+                <span className="text-ink-muted font-medium">VAT</span>
+                <span className="text-ink">AED {formatAed(toFils(confirmedOrder.vatAdded ?? 0))}</span>
+              </div>
+            )}
+
             <div className="flex justify-between items-center pt-2 border-t border-line">
               <span className="font-semibold text-ink">{cardPaid ? 'Total Paid' : 'Total Payable'}</span>
               <span className="font-semibold text-base text-ink">AED {formatAed(toFils(confirmedOrder.total))}</span>
             </div>
+            {confirmedOrder.documentPath && (
+              <a href={confirmedOrder.documentPath} target="_blank" rel="noopener noreferrer" data-testid="order-document-link" className="inline-flex min-h-11 items-center text-xs font-semibold text-ink underline">
+                {confirmedOrder.documentLabel || 'Receipt'} (printable)
+              </a>
+            )}
           </div>
 
           </div>
@@ -882,6 +899,11 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
                   Card payment fee ({percentText(feePercent)}%) AED {formatAed(cardFee)}
                 </span>
               )}
+              {shownVatFils > 0 && (
+                <span data-testid="vat-line" className="text-[11px] text-ink-soft block">
+                  VAT ({percentText(vatAddedPercent)}%) AED {formatAed(shownVatFils)}
+                </span>
+              )}
               <span className="text-[10px] text-ink-muted block">Total Due</span>
               <span id="checkout-total" className="text-base font-semibold text-ink">AED {grandTotal}</span>
               {sameDayChosen && <span className="text-[10px] text-ink-muted block">incl. same-day AED {formatAed(deliveryFils)}</span>}
@@ -894,7 +916,7 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
               publishableKey={card.publishableKey}
               amountFils={cardTotalFils}
               shippingRate={sameDayChosen ? { id: 'same_day', displayName: 'Same-day delivery', amount: deliveryFils } : { id: 'standard', displayName: `Free delivery in ${deliverySettings.standardDays}`, amount: 0 }}
-              lineItems={cardFee > 0 ? [{ name: 'Items', amount: totalFils - deliveryFils }, { name: `Card payment fee (${percentText(feePercent)}%)`, amount: cardFee }] : undefined}
+              lineItems={cardFee > 0 || cardVatFils > 0 ? [{ name: 'Items', amount: totalFils - deliveryFils }, ...(cardFee > 0 ? [{ name: `Card payment fee (${percentText(feePercent)}%)`, amount: cardFee }] : []), ...(cardVatFils > 0 ? [{ name: `VAT (${percentText(vatAddedPercent)}%)`, amount: cardVatFils }] : [])] : undefined}
               servesEmirate={(state, city) => {
                 const em = emirateFrom(state) ?? emirateFrom(city);
                 return !em || deliverySettings.emirates.includes(em);

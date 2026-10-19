@@ -178,6 +178,11 @@ export interface Order {
   cardFee?: number;
   /** The fee's percent when the order was placed. */
   cardFeePercent?: number;
+  /** UAE VAT added on top (Settings → Payments → VAT with prices excluding VAT), in AED. Part of total. */
+  vatAdded?: number;
+  /** Customer view only: the private address of the order's printable receipt or tax invoice, and its name. */
+  documentPath?: string;
+  documentLabel?: string;
   discount: number;
   total: number;
   paymentMethod: PaymentMethod;

@@ -14,7 +14,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { after, before, test } from 'node:test';
 import Database from 'better-sqlite3';
-import { jsonRequest, tempDataDir } from './helpers.mjs';
+import { jsonRequest, tempDataDir, LATEST_DB_VERSION, UNDO_MIGRATION_14 } from './helpers.mjs';
 import { startStripeMock, TEST_KEYS, type StripeMock } from './stripe-mock.mjs';
 
 const dir = tempDataDir();
@@ -773,6 +773,7 @@ test('migration 9 only adds (columns, indexes, a table); backups carry card paym
   const db = new Database(path.join(old, 'shop.db'));
   // Migration 10's columns go too (it runs again after 9).
   // Migrations 11 and 12 go too (they run again after 10): newest first.
+  db.exec(UNDO_MIGRATION_14); // migration 14
   db.exec("DELETE FROM settings_history WHERE key = 'look'; DELETE FROM settings WHERE key = 'look'"); // migration 13
   db.exec('DROP TABLE card_refunds; DROP TABLE expense_bills; DROP TABLE expense_versions; DROP TABLE expenses; DROP TABLE expense_categories;'); // migration 12
   db.exec('DROP INDEX orders_unconfirmed_due; DROP INDEX orders_unopened_due; ALTER TABLE orders DROP COLUMN phone_check_method; ALTER TABLE orders DROP COLUMN wa_cancel_at; ALTER TABLE orders DROP COLUMN wa_unopened_cancel_at;'); // migration 11
@@ -783,7 +784,7 @@ test('migration 9 only adds (columns, indexes, a table); backups carry card paym
   db.close();
   const up = run(`const m = await import('@/lib/server/db'); const db = (m.getDb ?? m.default.getDb)(); console.log(JSON.stringify({ v: db.pragma('user_version', { simple: true }), row: db.prepare("SELECT status, data, card_state, payment_ref FROM orders WHERE id = 'BUH-OLD-9'").get() }));`);
   assert.equal(up.status, 0, up.stderr);
-  assert.deepEqual(JSON.parse(up.stdout.trim().split('\n').pop()!), { v: 13, row: { status: 'pending_confirmation', data: '{"id":"BUH-OLD-9"}', card_state: 'none', payment_ref: null } });
+  assert.deepEqual(JSON.parse(up.stdout.trim().split('\n').pop()!), { v: LATEST_DB_VERSION, row: { status: 'pending_confirmation', data: '{"id":"BUH-OLD-9"}', card_state: 'none', payment_ref: null } });
 });
 
 test('wallet addresses: emirates by any name, areas from the shop’s list, nothing guessed', () => {

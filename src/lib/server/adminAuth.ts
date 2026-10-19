@@ -194,7 +194,7 @@ export type SignInMethod = 'password' | 'passkey' | 'recovery';
 const METHOD_CODES: Record<SignInMethod, string> = { password: 'pw', passkey: 'pk', recovery: 'rc' };
 export const RECOVERY_SESSION_TTL_MS = 30 * 60 * 1000;
 
-interface SessionPayload {
+export interface SessionPayload {
   e: string;
   g: number;
   h: string;
@@ -202,6 +202,23 @@ interface SessionPayload {
   exp: number;
   /** Sign-in method (absent in sessions from older builds: a password). */
   m?: string;
+  /** Role: absent for the owner; 'acc' for an accountant (src/lib/server/staffAuth.ts). */
+  r?: string;
+  /** The accountant's account id. */
+  a?: string;
+  /** The data folder's staff-session epoch (a restored folder starts a new one). */
+  x?: number;
+}
+
+/** A signed session token for this payload (the owner's, or an accountant's from staffAuth.ts). */
+export function signSessionPayload(payload: SessionPayload): string {
+  const body = Buffer.from(JSON.stringify(payload)).toString('base64url');
+  return `${body}.${sign(body)}`;
+}
+
+/** The fingerprint of a password hash that a session carries: a new password ends earlier sessions. */
+export function passwordFingerprint(passwordHash: string): string {
+  return hashFingerprint(passwordHash);
 }
 
 export function createSessionToken(account: { email: string; passwordHash: string }, now = Date.now(), method: SignInMethod = 'password'): string {
@@ -213,12 +230,20 @@ export function createSessionToken(account: { email: string; passwordHash: strin
     exp: now + (method === 'recovery' ? RECOVERY_SESSION_TTL_MS : SESSION_TTL_MS),
     m: METHOD_CODES[method],
   };
-  const body = Buffer.from(JSON.stringify(payload)).toString('base64url');
-  return `${body}.${sign(body)}`;
+  return signSessionPayload(payload);
 }
+
+/**
+ * Who a session is: the owner (everything), or an accountant the owner invited (read-only, the
+ * Money area only: requireAdmin refuses every other route, src/lib/server/guard.ts).
+ */
+export type AdminRole = 'owner' | 'accountant';
 
 export interface AdminSession {
   email: string;
+  role: AdminRole;
+  /** An accountant's account id (staff_accounts). */
+  staffId?: string;
   mustChangePassword: boolean;
   expiresAt: number;
   issuedAt: number;
@@ -244,6 +269,13 @@ export async function verifySessionToken(token: string | undefined, now = Date.n
     return null;
   }
   if (!Number.isFinite(payload.exp) || payload.exp <= now) return null;
+  if (payload.r !== undefined) {
+    // An accountant's session: checked against their account in the database on every request,
+    // so revoking it (or a new setup link) ends it at once.
+    if (payload.r !== 'acc') return null;
+    const { staffSessionFrom } = await import('./staffAuth');
+    return staffSessionFrom(payload);
+  }
 
   const account = await loadAccount();
   if (payload.e !== account.email) return null;
@@ -253,6 +285,7 @@ export async function verifySessionToken(token: string | undefined, now = Date.n
   const recoveryPending = method === 'recovery' && !account.managedByEnv;
   return {
     email: account.email,
+    role: 'owner',
     mustChangePassword: account.mustChangePassword || recoveryPending,
     expiresAt: payload.exp,
     issuedAt: Number(payload.iat) || 0,
@@ -372,8 +405,12 @@ export async function signIn(emailInput: string, password: string, options: { ip
   const email = emailInput.trim().toLowerCase();
   assertSignInNotPaused(email, options.ip, now);
 
+  // Not the owner: maybe an accountant the owner invited (one password check either way).
+  const staff = email === account.email ? undefined : (await import('./staffAuth')).activeStaffByEmail(email);
   const ok = email === account.email
     ? await verifyPassword(password, account.passwordHash)
+    : staff?.passwordHash
+    ? await verifyPassword(password, staff.passwordHash)
     : (await verifyPassword(password, await dummyPasswordHash()), false);
 
   if (!ok) {
@@ -382,7 +419,11 @@ export async function signIn(emailInput: string, password: string, options: { ip
   }
 
   clearAddressFailures(email, options.ip);
-  return { token: createSessionToken(account, now), mustChangePassword: account.mustChangePassword, email: account.email };
+  if (staff) {
+    const { staffSessionToken } = await import('./staffAuth');
+    return { token: staffSessionToken(staff, now), mustChangePassword: false, email: staff.email, role: 'accountant' as AdminRole };
+  }
+  return { token: createSessionToken(account, now), mustChangePassword: account.mustChangePassword, email: account.email, role: 'owner' as AdminRole };
 }
 
 // ── Recovery codes and passkeys ──────────────────────────────────────────────

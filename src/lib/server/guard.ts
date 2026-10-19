@@ -1,5 +1,5 @@
 import { cookies } from 'next/headers';
-import { SESSION_COOKIE, verifySessionToken, type AdminSession } from './adminAuth';
+import { SESSION_COOKIE, verifySessionToken, type AdminRole, type AdminSession } from './adminAuth';
 import { doorTokenFromCookieHeader, verifyDoorToken } from './adminLink';
 import { assertSameOrigin, clientIp, HttpError } from './http';
 import { rateLimit } from './rateLimit';
@@ -18,17 +18,32 @@ export function requireDoor(req: Request): void {
 /**
  * Gate for admin-only route handlers: the door, a valid session cookie, a
  * same-site request, and — until the first-run password is changed — nothing else.
+ *
+ * Roles: deny by default. Only the owner passes, unless the handler names the accountant in
+ * `allow` (the read-only Money routes: reports, expenses, bills, the audit log, the exports and
+ * VAT; test/accountant-routes.test.mts checks every admin route against that list). An accountant
+ * session anywhere else gets 403 and nothing runs.
  */
-export async function requireAdmin(req: Request, { allowPendingPasswordChange = false } = {}): Promise<AdminSession> {
+export async function requireAdmin(req: Request, { allowPendingPasswordChange = false, allow = OWNER_ONLY }: { allowPendingPasswordChange?: boolean; allow?: readonly AdminRole[] } = {}): Promise<AdminSession> {
   requireDoor(req);
   if (req.method !== 'GET' && req.method !== 'HEAD') assertSameOrigin(req);
   const token = (await cookies()).get(SESSION_COOKIE)?.value;
   const session = await verifySessionToken(token);
   if (!session) throw new HttpError(401, 'Please sign in to the admin hub.');
+  if (!allow.includes(session.role)) throw new HttpError(403, 'Your access is read-only: only the Money section is open to you.', {}, { code: 'role_refused' });
   if (session.mustChangePassword && !allowPendingPasswordChange) {
     throw new HttpError(403, 'Choose a new admin password before continuing.');
   }
   return session;
+}
+
+const OWNER_ONLY: readonly AdminRole[] = ['owner'];
+/** For the read-only Money routes: the owner, or an accountant the owner invited. */
+export const OWNER_OR_ACCOUNTANT: readonly AdminRole[] = ['owner', 'accountant'];
+
+/** requireAdmin for a read-only Money route (the owner or an accountant). */
+export function requireReader(req: Request): Promise<AdminSession> {
+  return requireAdmin(req, { allow: OWNER_OR_ACCOUNTANT });
 }
 
 /** Throw 429 with Retry-After when a limit is exceeded. */

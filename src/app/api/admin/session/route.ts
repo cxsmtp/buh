@@ -11,6 +11,8 @@ export async function GET(req: Request) {
     return json({
       authenticated: true,
       email: session.email,
+      // 'owner', or 'accountant' (read-only: the hub shows only Money; the server refuses the rest).
+      role: session.role,
       mustChangePassword: session.mustChangePassword,
       // Signed in with a recovery code: the next step is choosing a new password.
       recoveryPending: session.recoveryPending,

@@ -20,6 +20,9 @@ import { AdminSmsTab } from './AdminSmsTab';
 import { AdminChatsTab } from './AdminChatsTab';
 import { AdminMoneyTab } from './money/AdminMoneyTab';
 import { AdminLoginModal } from './AdminLoginModal';
+import { AccountantHub, AccountantSetupForm } from './AccountantHub';
+import { AccountantAccessCard } from './settings/AccountantAccessCard';
+import { VatSettingsCard } from './settings/VatSettingsCard';
 import { BackupStatus } from './BackupStatus';
 import { RestoreNotice } from './RestoreNotice';
 import { AdminLinkCard } from './settings/AdminLinkCard';
@@ -122,6 +125,11 @@ export function AdminApp() {
   const [view, setViewState] = useState<HubView>(initialView);
   // From a password-reset email link (#reset=…), read once and taken out of the address bar.
   const [resetToken, setResetToken] = useState<string | null>(() => new URLSearchParams(window.location.hash.slice(1)).get('reset'));
+  // From an accountant's setup email link (#setup=…), read once and taken out of the address bar.
+  const [setupToken, setSetupToken] = useState<string | null>(() => new URLSearchParams(window.location.hash.slice(1)).get('setup'));
+  // Who is signed in: the owner, or an accountant (read-only: only Money is shown, the server refuses the rest).
+  const [role, setRole] = useState<'owner' | 'accountant'>('owner');
+  const [signedInEmail, setSignedInEmail] = useState('');
   const [adminTab, setAdminTab] = useState<AdminTab>('orders');
   // The version badge opens Settings → Versions (re-creating the console on that section).
   const [settingsOpen, setSettingsOpen] = useState<{ id?: string; n: number }>({ n: 0 });
@@ -168,13 +176,15 @@ export function AdminApp() {
   };
 
   const checkSession = useCallback(async () => {
-    const { ok, data } = await getJson<{ authenticated?: boolean; mustChangePassword?: boolean }>('/api/admin/session');
+    const { ok, data } = await getJson<{ authenticated?: boolean; mustChangePassword?: boolean; role?: string; email?: string }>('/api/admin/session');
     const next = ok && data.authenticated === true && !data.mustChangePassword ? 'in' : 'out';
+    setRole(ok && data.role === 'accountant' ? 'accountant' : 'owner');
+    setSignedInEmail(ok && typeof data.email === 'string' ? data.email : '');
     setAuth((a) => (a === 'closed' ? a : next));
   }, []);
 
   useEffect(() => {
-    if (resetToken) window.history.replaceState(null, '', window.location.pathname);
+    if (resetToken || setupToken) window.history.replaceState(null, '', window.location.pathname);
     void Promise.resolve().then(checkSession);
     const onUnauthorized = (e: Event) => {
       const url = String((e as CustomEvent<{ url?: string }>).detail?.url || '');
@@ -219,16 +229,16 @@ export function AdminApp() {
     await Promise.all([loadAdminData(), loadPublic()]);
   }, [loadAdminData, loadPublic]);
 
-  // Signed in: the data, refreshed every minute, and the link notice.
+  // Signed in: the data, refreshed every minute, and the link notice (the owner's hub only).
   useEffect(() => {
-    if (auth !== 'in') return;
+    if (auth !== 'in' || role !== 'owner') return;
     void Promise.resolve().then(reloadAll);
     void getJson<{ notice?: string | null }>('/api/admin/link').then(({ ok, data }) => {
       if (ok && data.notice && onAdminLink()) setLinkNotice(data.notice);
     });
     const t = setInterval(() => void fetchAdminData().then(applyAdminData), 60_000);
     return () => clearInterval(t);
-  }, [auth, reloadAll, applyAdminData]);
+  }, [auth, role, reloadAll, applyAdminData]);
 
   // Several changes in a row (e.g. tapping + on stock) give one reload.
   const reloadTimers = useRef<Record<string, ReturnType<typeof setTimeout>>>({});
@@ -236,7 +246,7 @@ export function AdminApp() {
     clearTimeout(reloadTimers.current[key]);
     reloadTimers.current[key] = setTimeout(fn, 400);
   }, []);
-  useLiveUpdates(auth === 'in' ? '/api/admin/events' : null, {
+  useLiveUpdates(auth === 'in' && role === 'owner' ? '/api/admin/events' : null, {
     onCatalog: () => debounced('admin', () => void reloadAll()),
     onSettings: () => debounced('admin', () => void reloadAll()),
     onOrders: () => {
@@ -307,7 +317,16 @@ export function AdminApp() {
             <p className="mt-2 text-sm">The private link was changed. Open the new link (or your new bookmark) to carry on.</p>
           </div>
         )}
-        {auth === 'out' && (
+        {auth === 'out' && setupToken && (
+          <AccountantSetupForm
+            token={setupToken}
+            onDone={() => {
+              setSetupToken(null);
+              void checkSession();
+            }}
+          />
+        )}
+        {auth === 'out' && !setupToken && (
           <AdminLoginModal
             isOpen
             onClose={toShop}
@@ -319,6 +338,8 @@ export function AdminApp() {
       </div>
     );
   }
+
+  if (role === 'accountant') return <AccountantHub email={signedInEmail} brand={brandSettings} phone={phone} onLogout={handleLogout} />;
 
   const tabs: Array<{ id: AdminTab; label: string; badge?: number; badgeLabel?: string }> = [
     { id: 'orders', label: 'Orders & Dispatches', badge: pendingOrdersCount, badgeLabel: `${pendingOrdersCount} to confirm` },
@@ -576,17 +597,20 @@ export function AdminApp() {
                   id: 'payments',
                   label: 'Payments',
                   icon: <CreditCard />,
-                  hint: 'Card, Apple Pay and Google Pay through your Stripe account (off until you add the keys).',
+                  hint: 'Card, Apple Pay and Google Pay through your Stripe account (off until you add the keys), and UAE VAT (off unless you are VAT-registered).',
                   content: (
-                    <PaymentsSettingsCard
-                      key={`payments-${adminSettingsLoaded}-${settingsEpoch}-${undone['payments'] ?? 0}`}
-                      value={adminSettings.payments.value}
-                      secretsSet={adminSettings.payments.secretsSet}
-                      bankAccountSaved={bankDetailsSaved(bankDetails)}
-                      shopWhatsApp={adminSettings.store.value.whatsappNumber}
-                      onSave={(v, onWarning) => saveSettings('payments', v, onWarning)}
-                      auto={autoSaveHooks}
-                    />
+                    <div className="space-y-6">
+                      <PaymentsSettingsCard
+                        key={`payments-${adminSettingsLoaded}-${settingsEpoch}-${undone['payments'] ?? 0}`}
+                        value={adminSettings.payments.value}
+                        secretsSet={adminSettings.payments.secretsSet}
+                        bankAccountSaved={bankDetailsSaved(bankDetails)}
+                        shopWhatsApp={adminSettings.store.value.whatsappNumber}
+                        onSave={(v, onWarning) => saveSettings('payments', v, onWarning)}
+                        auto={autoSaveHooks}
+                      />
+                      <VatSettingsCard storeAddress={adminSettings.store.value.storeAddress} />
+                    </div>
                   ),
                 },
                 {
@@ -647,8 +671,13 @@ export function AdminApp() {
                   id: 'security',
                   label: 'Security',
                   icon: <Link2 />,
-                  hint: 'Your private admin link: change it if it may have been seen by someone else.',
-                  content: <AdminLinkCard />,
+                  hint: 'Your private admin link, and read-only access for your accountant.',
+                  content: (
+                    <div className="space-y-6">
+                      <AdminLinkCard />
+                      <AccountantAccessCard />
+                    </div>
+                  ),
                 },
                 {
                   id: 'signin',
