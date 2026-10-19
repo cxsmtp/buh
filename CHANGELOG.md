@@ -1,5 +1,17 @@
 # Changelog
 
+## BUH-02.15.00 — 2026-10-19 06:10 UTC · [#NN](https://github.com/cxsmtp/buh/pull/NN)
+
+- **Write name & descriptions from a photo.** In the product editor's Photos step, one tap reads the design in your photo (pattern, motif, colours, texture) and fills in the name, short description and full description. It never invents thread count, material, origin or care claims, and nothing is saved until you publish.
+- **Your text stays yours.** If you've already written something, you see both versions side by side with "Use these" or "Keep mine". Suggested colours and weave are added only when you tap them.
+- **Settings → AI writing.** Add your Anthropic key and choose the model (Claude Opus 5.5 is recommended; Sonnet 5.5 and Haiku 5.5 cost less). Test checks the key. The key stays on the shop's server, isn't kept in backups and never appears in logs.
+- **Weaves you can change.** Settings → Catalogue has a Weaves list: add, rename, reorder and remove. Renaming updates every product that uses the weave in one go, and a weave still in use can't be removed (the shop names the products).
+- **Status.**
+  - **Benchmark:** BENCH
+  - **Tests:** TESTS
+  - **Dependency audit:** production 0 vulnerabilities; no new packages.
+  - **Security scan:** the new owner routes (describe, AI test, weaves) check the session, cap and allow-list their input, rate-limit and audit. The only new outbound address is the fixed `https://api.anthropic.com/v1/messages`, through `safeFetch`. Not yet tried against Anthropic's real service: that needs the owner's key.
+
 ## BUH-02.14.00 — 2026-10-19 08:40 UTC · [#32](https://github.com/cxsmtp/buh/pull/32)
 
 - **Real Jeebly bookings.** Booking a courier now uses Jeebly's own API, exactly as documented and tested against Jeebly's demo system (create, label, tracking and cancel all passed). Before, the key labels and every booking field were wrong, so nothing ever reached Jeebly.

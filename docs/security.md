@@ -170,7 +170,7 @@ URLs an admin can type (SMS webhook, Infobip base URL) must be https, use port 4
 
 Carrier endpoints are fixed in code.
 
-**Anthropic (AI writing).** "Write from photo" (`POST /api/admin/products/describe`) and Settings → AI writing → Test (`POST /api/admin/ai/test`) call one fixed address, `https://api.anthropic.com/v1/messages`, through `safeFetch` (https, no redirects, public addresses only, 30-second deadline, 256 KB reply cap). Nothing a person types changes where it goes.
+**Anthropic (AI writing).** "Write from photo" (`POST /api/admin/products/describe`) and Settings → AI writing → Test (`POST /api/admin/ai/test`) call one fixed address, `https://api.anthropic.com/v1/messages`, through `safeFetch` (https, no redirects, public addresses only, 60-second deadline, 256 KB reply cap). Nothing a person types changes where it goes.
 
 - **Admin only:** both routes are behind the door, `requireAdmin` (same-site, signed in) and an allow-list of body fields; the describe body is capped at 9 MB and the photo must be PNG, JPEG or WebP by its real bytes (at most 3.5 MB), a stored product photo by its exact name, or an https address (sent to Anthropic as a link, never fetched by the shop).
 - **The key (`ai.anthropicApiKey`)** is a write-only setting: reads return it blank with "saved" and its last 4 characters; it is blanked in settings history and in every backup, sent only in the `x-api-key` header, and never in a reply or a log (`logEvent` also masks any `sk-ant-…`). Anthropic's error messages are passed on with any key removed.
