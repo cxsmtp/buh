@@ -1,10 +1,12 @@
 // Fetch a backup copy from Google Drive, for scripts/restore-backup.mjs --from-drive (the shop's
 // "Copy each backup to Google Drive", src/lib/server/driveBackup.ts, put it there).
 //
-// The service account and the folder come from, in this order:
-//   BUH_DRIVE_KEY (the JSON key's text) or BUH_DRIVE_KEY_FILE (a path to it), and BUH_DRIVE_FOLDER
-//   (the folder's id or link); otherwise the shop's own saved settings in DATA_DIR/shop.db (when
-//   run inside the running shop: podman exec beautifuluaehome …).
+// The connection and the folder come from, in this order:
+//   Connect my Google Drive: BUH_DRIVE_CLIENT_ID, BUH_DRIVE_CLIENT_SECRET and BUH_DRIVE_REFRESH_TOKEN
+//   (Admin Hub → Copy restore details), BUH_DRIVE_FOLDER optional (else the shop's own folder,
+//   found by name); a service account: BUH_DRIVE_KEY (the JSON key's text) or BUH_DRIVE_KEY_FILE
+//   (a path to it), and BUH_DRIVE_FOLDER (the folder's id or link); otherwise the shop's own saved
+//   settings in DATA_DIR/shop.db (when run inside the running shop: podman exec beautifuluaehome …).
 // Copies in Drive are always encrypted: BACKUP_PASSPHRASE opens them (restore-backup.mjs checks).
 // Only Google's fixed addresses are called (oauth2.googleapis.com, www.googleapis.com). The download
 // is streamed to disk and checked against Drive's size and MD5 before the restore reads it.
@@ -17,6 +19,7 @@ import path from 'node:path';
 const TOKEN_URL = 'https://oauth2.googleapis.com/token';
 const FILES_URL = 'https://www.googleapis.com/drive/v3/files';
 const SCOPE = 'https://www.googleapis.com/auth/drive';
+const APP_FOLDER = 'Beautiful UAE Home backups';
 const COPY_NAME = /^buh-backup-\d{8}-\d{4}\.tar\.gz\.enc$/;
 const DRIVE_ID = /^[A-Za-z0-9_-]{10,200}$/;
 
@@ -38,7 +41,7 @@ function open(url, { method = 'GET', headers = {}, body, timeoutMs = 30_000 } = 
   const real = new URL(url);
   if (real.protocol !== 'https:' || !['oauth2.googleapis.com', 'www.googleapis.com'].includes(real.hostname) || real.port) throw new Error('Not a Google API address.');
   const test = testApi();
-  const target = test ? new URL(`${real.hostname === 'oauth2.googleapis.com' ? '/token' : real.pathname}${real.search}`, test) : real;
+  const target = test ? new URL(`${real.pathname}${real.search}`, test) : real;
   const lib = test ? http : https;
   return new Promise((resolve, reject) => {
     const req = lib.request(target, { method, headers: { ...headers, ...(body !== undefined ? { 'Content-Length': String(Buffer.byteLength(body)) } : {}) }, timeout: timeoutMs }, (res) =>
@@ -102,6 +105,16 @@ function credentials(dataDir) {
 }
 
 function pick(saved) {
+  // Connect my Google Drive: the OAuth client and refresh token (env first: a brand-new server).
+  const envRefresh = process.env.BUH_DRIVE_REFRESH_TOKEN || '';
+  if (envRefresh || (!process.env.BUH_DRIVE_KEY && !process.env.BUH_DRIVE_KEY_FILE && saved?.mode === 'oauth')) {
+    const clientId = envRefresh ? process.env.BUH_DRIVE_CLIENT_ID || '' : String(saved?.oauthClientId ?? '');
+    const clientSecret = envRefresh ? process.env.BUH_DRIVE_CLIENT_SECRET || '' : String(saved?.oauthClientSecret ?? '');
+    const refreshToken = envRefresh || String(saved?.refreshToken ?? '');
+    if (!clientId || !clientSecret || !refreshToken) throw new Error('No Google Drive connection: set BUH_DRIVE_CLIENT_ID, BUH_DRIVE_CLIENT_SECRET and BUH_DRIVE_REFRESH_TOKEN (Admin Hub → Settings → System & backups → Copy restore details), or run this inside the shop that is connected.');
+    const folderId = process.env.BUH_DRIVE_FOLDER ? folderIdOf(process.env.BUH_DRIVE_FOLDER) : envRefresh ? '' : String(saved?.oauthFolderId ?? '');
+    return { mode: 'oauth', clientId, clientSecret, refreshToken, folderId, who: 'your Google account' };
+  }
   let keyText = process.env.BUH_DRIVE_KEY || '';
   if (!keyText && process.env.BUH_DRIVE_KEY_FILE) keyText = fs.readFileSync(process.env.BUH_DRIVE_KEY_FILE, 'utf8');
   let clientEmail = '';
@@ -122,13 +135,22 @@ function pick(saved) {
     privateKey = String(saved.privateKey);
     keyId = String(saved.keyId ?? '');
   }
-  if (!clientEmail || !privateKey) throw new Error('No Google service account: set BUH_DRIVE_KEY (the JSON key) or BUH_DRIVE_KEY_FILE, or run this inside the shop that has it saved.');
+  if (!clientEmail || !privateKey) throw new Error('No Google Drive connection: set BUH_DRIVE_CLIENT_ID, BUH_DRIVE_CLIENT_SECRET and BUH_DRIVE_REFRESH_TOKEN (Connect my Google Drive), or BUH_DRIVE_KEY / BUH_DRIVE_KEY_FILE (a service account), or run this inside the shop that has it saved.');
   const folderId = process.env.BUH_DRIVE_FOLDER ? folderIdOf(process.env.BUH_DRIVE_FOLDER) : String(saved?.folderId ?? '');
   if (!DRIVE_ID.test(folderId)) throw new Error('No Google Drive folder: set BUH_DRIVE_FOLDER (the folder’s id or link).');
-  return { clientEmail, privateKey, keyId, folderId };
+  return { mode: 'service_account', clientEmail, privateKey, keyId, folderId, who: clientEmail };
 }
 
-async function token({ clientEmail, privateKey, keyId }) {
+async function token(cred) {
+  if (cred.mode === 'oauth') {
+    const body = new URLSearchParams({ grant_type: 'refresh_token', client_id: cred.clientId, client_secret: cred.clientSecret, refresh_token: cred.refreshToken }).toString();
+    const reply = await open(TOKEN_URL, { method: 'POST', headers: { 'Content-Type': 'application/x-www-form-urlencoded' }, body });
+    const data = await readJson(reply);
+    if (data.error === 'invalid_grant') throw new Error('Google no longer accepts this Google Drive connection (removed, or expired). Reconnect Google Drive in the Admin Hub of the shop that has it, then Copy restore details again.');
+    if (reply.status !== 200 || typeof data.access_token !== 'string') throw new Error(`Google did not accept the Google Drive connection (${clean(data.error_description || data.error || reply.status)}).`);
+    return data.access_token;
+  }
+  const { clientEmail, privateKey, keyId } = cred;
   const now = Math.floor(Date.now() / 1000);
   const b64 = (o) => Buffer.from(JSON.stringify(o)).toString('base64url');
   const input = `${b64({ alg: 'RS256', typ: 'JWT', ...(keyId ? { kid: keyId } : {}) })}.${b64({ iss: clientEmail, scope: SCOPE, aud: TOKEN_URL, iat: now, exp: now + 3600 })}`;
@@ -139,21 +161,41 @@ async function token({ clientEmail, privateKey, keyId }) {
   return data.access_token;
 }
 
+/** Every page of a files.list query. */
+async function listAll(access, q, fields) {
+  const out = [];
+  let pageToken = '';
+  do {
+    const params = new URLSearchParams({ q, pageSize: '200', supportsAllDrives: 'true', includeItemsFromAllDrives: 'true', fields: `nextPageToken,files(${fields})`, ...(pageToken ? { pageToken } : {}) });
+    const reply = await open(`${FILES_URL}?${params}`, { headers: { Authorization: `Bearer ${access}` } });
+    const data = await readJson(reply, 8 * 1024 * 1024);
+    if (reply.status !== 200) throw new Error(`Google Drive could not list the files (HTTP ${reply.status}: ${clean(data.error?.message)}).`);
+    out.push(...(Array.isArray(data.files) ? data.files : []));
+    pageToken = typeof data.nextPageToken === 'string' ? data.nextPageToken : '';
+  } while (pageToken && out.length < 5000);
+  return out;
+}
+
 /** The backup copies in the folder, newest first (by the time in their name). */
 export async function listDriveCopies(dataDir) {
   const cred = await credentials(dataDir);
   const access = await token(cred);
+  // Connect my Google Drive on a new server without BUH_DRIVE_FOLDER: the shop's own folder(s), found
+  // by name (drive.file sees only what this OAuth client made, so another app's folder never matches).
+  let folders = cred.folderId ? [cred.folderId] : [];
+  if (!folders.length) {
+    const found = await listAll(access, `name = '${APP_FOLDER}' and mimeType = 'application/vnd.google-apps.folder' and trashed = false`, 'id');
+    folders = found.map((f) => String(f.id)).filter((id) => DRIVE_ID.test(id)).slice(0, 20);
+    if (!folders.length) throw new Error(`No “${APP_FOLDER}” folder made by this Google Drive connection was found.`);
+  }
   const out = [];
-  let pageToken = '';
-  do {
-    const q = `'${cred.folderId}' in parents and trashed = false and name contains 'buh-backup-'`;
-    const params = new URLSearchParams({ q, pageSize: '200', orderBy: 'name desc', supportsAllDrives: 'true', includeItemsFromAllDrives: 'true', fields: 'nextPageToken,files(id,name,size,md5Checksum,createdTime)', ...(pageToken ? { pageToken } : {}) });
-    const reply = await open(`${FILES_URL}?${params}`, { headers: { Authorization: `Bearer ${access}` } });
-    const data = await readJson(reply, 8 * 1024 * 1024);
-    if (reply.status !== 200) throw new Error(`Google Drive could not list the folder (HTTP ${reply.status}: ${clean(data.error?.message)}). Is it shared with ${cred.clientEmail}?`);
-    for (const f of Array.isArray(data.files) ? data.files : []) if (COPY_NAME.test(f.name) && DRIVE_ID.test(String(f.id))) out.push({ id: String(f.id), name: f.name, size: Number(f.size), md5: String(f.md5Checksum ?? ''), created: String(f.createdTime ?? '') });
-    pageToken = typeof data.nextPageToken === 'string' ? data.nextPageToken : '';
-  } while (pageToken && out.length < 5000);
+  let files;
+  try {
+    files = await listAll(access, `(${folders.map((f) => `'${f}' in parents`).join(' or ')}) and trashed = false and name contains 'buh-backup-'`, 'id,name,size,md5Checksum,createdTime');
+  } catch (err) {
+    throw new Error(`${err.message}${cred.mode === 'service_account' ? ` Is the folder shared with ${cred.who}?` : ''}`);
+  }
+  for (const f of files) if (COPY_NAME.test(f.name) && DRIVE_ID.test(String(f.id))) out.push({ id: String(f.id), name: f.name, size: Number(f.size), md5: String(f.md5Checksum ?? ''), created: String(f.createdTime ?? '') });
   // Newest first: by the time in the name, then (two backups in the same minute) by when Drive got it.
   const cmp = (x, y) => (x < y ? 1 : x > y ? -1 : 0);
   out.sort((a, b) => cmp(a.name, b.name) || cmp(a.created, b.created));

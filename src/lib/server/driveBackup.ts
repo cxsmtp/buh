@@ -11,7 +11,17 @@ import { safeRequest, type SafeResponse } from './outbound';
 
 /**
  * Off-server copies of every backup, in a Google Drive folder (Settings → System & backups →
- * "Copy each backup to Google Drive").
+ * "Copy each backup to Google Drive"), connected one of two ways:
+ *
+ * - "Connect my Google Drive" (recommended; any Google account, a personal Gmail too): the owner
+ *   makes an OAuth client of type "TVs and Limited Input devices", pastes its id and secret, and
+ *   enters the code the hub shows at google.com/device (the OAuth 2.0 device flow; the server asks
+ *   Google, the hub asks the server). Scope drive.file: the shop sees only the files it made, so it
+ *   makes its own folder "Beautiful UAE Home backups". The refresh token is a secret like the key
+ *   below; access tokens come from it (grant_type refresh_token); a refused one (invalid_grant)
+ *   raises the alert "Reconnect Google Drive".
+ * - A service account (shared drives in Google Workspace: Google gives a service account no storage
+ *   of its own, so a personal Drive folder refuses its uploads), as follows.
  *
  * The owner makes a Google Cloud service account, shares one Drive folder with its email (as
  * Editor) and pastes the service account's JSON key and the folder's link here. No consent screen
@@ -38,8 +48,13 @@ import { safeRequest, type SafeResponse } from './outbound';
 export const GOOGLE_TOKEN_URL = 'https://oauth2.googleapis.com/token';
 export const DRIVE_UPLOAD_URL = 'https://www.googleapis.com/upload/drive/v3/files';
 export const DRIVE_FILES_URL = 'https://www.googleapis.com/drive/v3/files';
+export const GOOGLE_DEVICE_CODE_URL = 'https://oauth2.googleapis.com/device/code';
 /** Full Drive scope: the service account only sees what is shared with it (the one folder). */
 export const DRIVE_SCOPE = 'https://www.googleapis.com/auth/drive';
+/** "Connect my Google Drive": the shop sees only the files it made itself (non-sensitive, allowed in the device flow). */
+export const DRIVE_FILE_SCOPE = 'https://www.googleapis.com/auth/drive.file';
+/** The folder the shop makes in the owner's Drive on first connect. */
+export const APP_FOLDER_NAME = 'Beautiful UAE Home backups';
 /** Resumable upload pieces: a multiple of 256 KiB, as Google asks. (Changeable by tests only.) */
 export const DRIVE_LIMITS = { chunkBytes: 8 * 1024 * 1024 };
 export const DRIVE_KEEP_DEFAULT = 30;
@@ -49,16 +64,43 @@ const BACKUP_MAGIC = 'BUHBK1\n'; // as in backup.ts: an encrypted backup's first
 const CONFIG_KEY = 'backup:drive';
 const STATE_KEY = 'backup:drive-state';
 const FILES_KEY = 'backup:drive-files';
+const DEVICE_KEY = 'backup:drive-device';
+
+/** service_account: a key and a folder shared with it (shared drives). oauth: the owner's own Drive, connected with a code. */
+export type DriveMode = 'oauth' | 'service_account';
 
 interface DriveConfig {
   enabled: boolean;
-  folderId: string;
+  mode: DriveMode;
   keep: number;
+  /** Service account: the folder shared with it, its email and key. */
+  folderId: string;
   clientEmail: string;
   privateKey: string;
   keyId: string;
+  /** Connect my Google Drive: the OAuth client ("TVs and Limited Input devices"), the refresh token, the shop's own folder. */
+  oauthClientId: string;
+  oauthClientSecret: string;
+  refreshToken: string;
+  oauthFolderId: string;
+  connectedAt?: string;
+  /** Google refused the refresh token (revoked, or expired): "Reconnect Google Drive". */
+  needsReconnect?: boolean;
   savedAt?: string;
   savedBy?: string;
+}
+
+/** A device sign-in in progress (the device code is a secret: never shown, never backed up). */
+interface DevicePending {
+  clientId: string;
+  clientSecret: string;
+  deviceCode: string;
+  userCode: string;
+  verificationUrl: string;
+  expiresAt: number;
+  interval: number;
+  nextPollAt: number;
+  by: string;
 }
 
 export interface DriveState {
@@ -77,10 +119,30 @@ interface DriveCopy {
   at: string;
 }
 
-const EMPTY: DriveConfig = { enabled: false, folderId: '', keep: DRIVE_KEEP_DEFAULT, clientEmail: '', privateKey: '', keyId: '' };
+const EMPTY: DriveConfig = { enabled: false, mode: 'oauth', keep: DRIVE_KEEP_DEFAULT, folderId: '', clientEmail: '', privateKey: '', keyId: '', oauthClientId: '', oauthClientSecret: '', refreshToken: '', oauthFolderId: '' };
 
 function config(): DriveConfig {
-  return { ...EMPTY, ...(kvGet<Partial<DriveConfig>>(CONFIG_KEY)?.data ?? {}) };
+  const saved = kvGet<Partial<DriveConfig>>(CONFIG_KEY)?.data ?? {};
+  // Saved before there were two ways: a service account.
+  const mode: DriveMode = saved.mode === 'oauth' || saved.mode === 'service_account' ? saved.mode : saved.clientEmail ? 'service_account' : 'oauth';
+  return { ...EMPTY, ...saved, mode };
+}
+
+/** The folder copies go to, and who Google sees, in the mode in use. */
+function activeFolder(cfg: DriveConfig): string {
+  return cfg.mode === 'oauth' ? cfg.oauthFolderId : cfg.folderId;
+}
+function who(cfg: DriveConfig): Who {
+  return cfg.mode === 'oauth' ? { mode: 'oauth', email: '' } : { mode: 'service_account', email: cfg.clientEmail };
+}
+interface Who {
+  mode: DriveMode;
+  email: string;
+}
+
+function pendingDevice(): DevicePending | null {
+  const d = kvGet<DevicePending>(DEVICE_KEY)?.data;
+  return d && typeof d.deviceCode === 'string' && d.deviceCode ? d : null;
 }
 
 function state(): DriveState {
@@ -96,9 +158,13 @@ function copies(): DriveCopy[] {
   return Array.isArray(list) ? list.filter((c) => c && typeof c.id === 'string' && DRIVE_ID.test(c.id)) : [];
 }
 
-/** Backups: the copy of the database keeps the folder and the switch, never the key. */
+/**
+ * Backups: the copy of the database keeps the folder, the mode and the switch, never the key, the
+ * OAuth client secret or the refresh token; a device sign-in in progress is left out.
+ */
 export function blankDriveKeyIn(db: import('better-sqlite3').Database): void {
-  db.prepare("UPDATE kv SET data = json_set(data, '$.privateKey', '', '$.keyId', '') WHERE key = ? AND json_valid(data)").run(CONFIG_KEY);
+  db.prepare("UPDATE kv SET data = json_set(data, '$.privateKey', '', '$.keyId', '', '$.oauthClientSecret', '', '$.refreshToken', '') WHERE key = ? AND json_valid(data)").run(CONFIG_KEY);
+  db.prepare('DELETE FROM kv WHERE key = ?').run(DEVICE_KEY);
 }
 
 // ── The key and the folder ──────────────────────────────────────────────────
@@ -150,7 +216,7 @@ export function parseServiceAccountKey(text: string): { clientEmail: string; pri
 
 /**
  * Tests only: BUH_TEST_GOOGLE_API=http://127.0.0.1:<port>/ sends every Google call to a stand-in
- * on the same machine (the token to /token, Drive to its own path). Anything but a plain-http
+ * on the same machine (each address by its path: /token, /device/code, /drive/v3/…). Anything but a plain-http
  * loopback address is ignored.
  */
 function testApi(): URL | null {
@@ -175,7 +241,7 @@ interface GoogleInit {
 }
 
 function loopback(base: URL, real: URL, init: GoogleInit): Promise<SafeResponse> {
-  const target = new URL(`${real.hostname === 'oauth2.googleapis.com' ? '/token' : real.pathname}${real.search}`, base);
+  const target = new URL(`${real.pathname}${real.search}`, base);
   const maxBytes = init.maxBytes ?? 256 * 1024;
   return new Promise((resolve, reject) => {
     const headers = { ...init.headers, ...(init.body !== undefined ? { 'Content-Length': String(Buffer.byteLength(init.body)) } : {}) };
@@ -268,6 +334,236 @@ export async function accessToken(cfg: Pick<DriveConfig, 'clientEmail' | 'privat
   return data.access_token;
 }
 
+// ── Connect my Google Drive (OAuth 2.0 device flow, drive.file) ─────────────
+
+const CLIENT_ID = /^[0-9]{6,30}-[a-z0-9]{10,64}\.apps\.googleusercontent\.com$/;
+const CLIENT_SECRET = /^[A-Za-z0-9_-]{10,100}$/;
+const REFRESH_TOKEN = /^[\x21-\x7e]{20,1024}$/;
+
+/** Google refused the refresh token: revoked by the owner, or expired (7 days while the app is in Testing). */
+export class DriveReconnectError extends Error {}
+const RECONNECT = 'Google no longer accepts the shop’s access to your Drive (it was removed, or it ran out: a Google app left in “Testing” is cut off after 7 days). Reconnect Google Drive in Settings → System & backups.';
+
+let cachedUserToken: { client: string; refresh: string; token: string; until: number } | null = null;
+
+/** An access token from the refresh token (grant_type refresh_token), kept until a minute before it runs out. */
+export async function oauthAccessToken(c: { clientId: string; clientSecret: string; refreshToken: string }): Promise<string> {
+  const refresh = crypto.createHash('sha256').update(c.refreshToken).digest('hex');
+  if (cachedUserToken && cachedUserToken.client === c.clientId && cachedUserToken.refresh === refresh && cachedUserToken.until > Date.now()) return cachedUserToken.token;
+  const body = new URLSearchParams({ grant_type: 'refresh_token', client_id: c.clientId, client_secret: c.clientSecret, refresh_token: c.refreshToken }).toString();
+  let res: SafeResponse;
+  try {
+    res = await google(GOOGLE_TOKEN_URL, { method: 'POST', headers: { 'Content-Type': 'application/x-www-form-urlencoded' }, body, timeoutMs: 20_000, maxBytes: 64 * 1024 });
+  } catch {
+    throw new Error('Could not reach Google (oauth2.googleapis.com). Check the server’s internet connection.');
+  }
+  const data = jsonOf(res);
+  if (data.error === 'invalid_grant') throw new DriveReconnectError(RECONNECT);
+  if (data.error === 'invalid_client' || data.error === 'unauthorized_client') throw new DriveReconnectError('Google no longer accepts the shop’s OAuth client (deleted, or its secret changed). Reconnect Google Drive with the current client ID and secret.');
+  if (!res.ok || typeof data.access_token !== 'string' || !data.access_token) throw new Error(`Google did not give an access token (${said(data.error_description || data.error || res.status)}).`);
+  const seconds = Number(data.expires_in);
+  cachedUserToken = { client: c.clientId, refresh, token: data.access_token, until: Date.now() + (Number.isFinite(seconds) && seconds > 120 ? seconds - 60 : 60) * 1000 };
+  return data.access_token;
+}
+
+/** The token for the mode in use. A refused refresh token marks the setting "Reconnect Google Drive". */
+async function tokenFor(cfg: DriveConfig): Promise<string> {
+  if (cfg.mode === 'service_account') return accessToken(cfg);
+  try {
+    return await oauthAccessToken({ clientId: cfg.oauthClientId, clientSecret: cfg.oauthClientSecret, refreshToken: cfg.refreshToken });
+  } catch (err) {
+    if (err instanceof DriveReconnectError) kvSet(CONFIG_KEY, { ...config(), needsReconnect: true });
+    throw err;
+  }
+}
+
+/**
+ * The shop's own folder in the owner's Drive: the saved one while it is there (drive.file sees it:
+ * the shop made it), otherwise a new "Beautiful UAE Home backups".
+ */
+export async function ensureAppFolder(token: string, existing: string): Promise<string> {
+  if (existing && DRIVE_ID.test(existing)) {
+    const res = await google(`${DRIVE_FILES_URL}/${existing}?supportsAllDrives=true&fields=id,trashed,mimeType`, { method: 'GET', headers: { Authorization: `Bearer ${token}` }, timeoutMs: 20_000, maxBytes: 64 * 1024 });
+    const meta = jsonOf(res);
+    if (res.ok && meta.trashed !== true && meta.mimeType === 'application/vnd.google-apps.folder') return existing;
+    if (res.status !== 404 && !res.ok) throw driveError(res, 'check the backup folder', '');
+  }
+  const res = await google(`${DRIVE_FILES_URL}?supportsAllDrives=true&fields=id`, {
+    method: 'POST',
+    headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json; charset=UTF-8' },
+    body: JSON.stringify({ name: APP_FOLDER_NAME, mimeType: 'application/vnd.google-apps.folder', appProperties: { buhBackupFolder: '1' } }),
+    timeoutMs: 20_000,
+    maxBytes: 64 * 1024,
+  });
+  const id = String(jsonOf(res).id ?? '');
+  if (!res.ok || !DRIVE_ID.test(id)) throw driveError(res, 'make the backup folder', '');
+  return id;
+}
+
+function deviceError(data: Record<string, unknown>, status: number): HttpError {
+  const e = String(data.error ?? data.error_code ?? '');
+  if (e === 'invalid_client' || e === 'unauthorized_client') return new HttpError(400, 'Google did not accept that client ID and secret. Make an OAuth client of type “TVs and Limited Input devices” and copy both from it.', {}, { code: 'drive_client_refused' });
+  if (e === 'invalid_scope') return new HttpError(400, 'Google refused the Drive permission for this client: use a “TVs and Limited Input devices” client and switch on the Google Drive API.', {}, { code: 'drive_scope_refused' });
+  if (e === 'rate_limit_exceeded') return new HttpError(429, 'Google asks to wait before trying again. Try again in a few minutes.');
+  return new HttpError(502, `Google could not start the connection (${said(data.error_description || e || status)}).`);
+}
+
+/**
+ * "Connect Google Drive", step 1: ask Google for a device code with the owner's OAuth client.
+ * The owner then enters the user code at the verification address on any phone or computer.
+ */
+export async function startDriveConnect(input: Record<string, unknown>, by = ''): Promise<DriveStatus> {
+  for (const k of Object.keys(input)) if (!['clientId', 'clientSecret'].includes(k)) throw new HttpError(400, `Unexpected field: ${k.slice(0, 40)}.`);
+  const cur = config();
+  const clientId = typeof input.clientId === 'string' && input.clientId.trim() ? input.clientId.trim() : cur.oauthClientId;
+  if (!CLIENT_ID.test(clientId)) throw new HttpError(400, 'Client ID: copy it from your OAuth client in Google Cloud (it ends with .apps.googleusercontent.com).');
+  const typedSecret = typeof input.clientSecret === 'string' ? input.clientSecret.trim() : '';
+  // A saved secret only goes with the client it was saved for.
+  const clientSecret = typedSecret || (clientId === cur.oauthClientId ? cur.oauthClientSecret : '');
+  if (!CLIENT_SECRET.test(clientSecret)) throw new HttpError(400, 'Client secret: copy it from the same OAuth client (it usually starts with GOCSPX-).');
+  let res: SafeResponse;
+  try {
+    res = await google(GOOGLE_DEVICE_CODE_URL, { method: 'POST', headers: { 'Content-Type': 'application/x-www-form-urlencoded' }, body: new URLSearchParams({ client_id: clientId, scope: DRIVE_FILE_SCOPE }).toString(), timeoutMs: 20_000, maxBytes: 64 * 1024 });
+  } catch {
+    throw new HttpError(502, 'Could not reach Google (oauth2.googleapis.com). Check the server’s internet connection.');
+  }
+  const data = jsonOf(res);
+  const deviceCode = typeof data.device_code === 'string' ? data.device_code : '';
+  const userCode = typeof data.user_code === 'string' ? data.user_code : '';
+  if (!res.ok || !deviceCode || !/^[\x21-\x7e]{4,40}$/.test(userCode)) throw deviceError(data, res.status);
+  // Shown to the owner as a link: Google's own address only.
+  let verificationUrl = 'https://www.google.com/device';
+  try {
+    const u = new URL(String(data.verification_url ?? data.verification_uri ?? ''));
+    if (u.protocol === 'https:' && !u.port && (u.hostname === 'google.com' || u.hostname.endsWith('.google.com'))) verificationUrl = u.href;
+  } catch {
+    // Google's usual address
+  }
+  const expiresIn = Math.min(3600, Math.max(60, Number(data.expires_in) || 1800));
+  const interval = Math.min(60, Math.max(1, Number(data.interval) || 5));
+  const now = Date.now();
+  const pending: DevicePending = { clientId, clientSecret, deviceCode, userCode, verificationUrl, expiresAt: now + expiresIn * 1000, interval, nextPollAt: now + interval * 1000, by };
+  kvSet(DEVICE_KEY, pending);
+  audit('backup.drive_connect_started', { by, clientId });
+  return driveStatus();
+}
+
+/** Stop a connection in progress. */
+export function cancelDriveConnect(by = ''): DriveStatus {
+  if (pendingDevice()) {
+    kvSet(DEVICE_KEY, null);
+    audit('backup.drive_connect_cancelled', { by });
+  }
+  return driveStatus();
+}
+
+export type ConnectOutcome = 'none' | 'pending' | 'connected' | 'denied' | 'expired';
+
+/**
+ * Step 2, asked by the hub every few seconds: the server asks Google whether the owner has
+ * approved, but never sooner than Google's interval (raised by 5 seconds on every slow_down), and
+ * stops when the device code expires. Approved: the refresh token is saved, the shop's folder is
+ * made (or the saved one kept), and copies are switched on when BACKUP_PASSPHRASE is set.
+ */
+export async function pollDriveConnect(by = '', now = Date.now()): Promise<{ outcome: ConnectOutcome; status: DriveStatus }> {
+  const p = pendingDevice();
+  if (!p) return { outcome: 'none', status: driveStatus() };
+  const end = (outcome: ConnectOutcome) => {
+    kvSet(DEVICE_KEY, null);
+    return { outcome, status: driveStatus() };
+  };
+  if (now >= p.expiresAt) {
+    audit('backup.drive_connect_expired', { by });
+    return end('expired');
+  }
+  if (now < p.nextPollAt) return { outcome: 'pending', status: driveStatus() };
+  // Claim this poll before asking (two hub tabs, two copies of the shop: one request per interval).
+  kvSet(DEVICE_KEY, { ...p, nextPollAt: now + p.interval * 1000 });
+  let res: SafeResponse;
+  try {
+    res = await google(GOOGLE_TOKEN_URL, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+      body: new URLSearchParams({ client_id: p.clientId, client_secret: p.clientSecret, device_code: p.deviceCode, grant_type: 'urn:ietf:params:oauth:grant-type:device_code' }).toString(),
+      timeoutMs: 20_000,
+      maxBytes: 64 * 1024,
+    });
+  } catch {
+    return { outcome: 'pending', status: driveStatus() };
+  }
+  const data = jsonOf(res);
+  const error = String(data.error ?? '');
+  if (error === 'authorization_pending') return { outcome: 'pending', status: driveStatus() };
+  if (error === 'slow_down') {
+    const interval = Math.min(60, p.interval + 5);
+    kvSet(DEVICE_KEY, { ...p, interval, nextPollAt: now + interval * 1000 });
+    return { outcome: 'pending', status: driveStatus() };
+  }
+  if (error === 'access_denied') {
+    audit('backup.drive_connect_denied', { by });
+    return end('denied');
+  }
+  if (error === 'expired_token') {
+    audit('backup.drive_connect_expired', { by });
+    return end('expired');
+  }
+  const refreshToken = typeof data.refresh_token === 'string' ? data.refresh_token : '';
+  const access = typeof data.access_token === 'string' ? data.access_token : '';
+  if (!res.ok || !REFRESH_TOKEN.test(refreshToken) || !access) {
+    kvSet(DEVICE_KEY, null);
+    throw new HttpError(502, `Google did not finish the connection (${said(data.error_description || error || res.status)}). Press Connect Google Drive to try again.`);
+  }
+  const scopes = String(data.scope ?? DRIVE_FILE_SCOPE).split(/\s+/);
+  if (!scopes.includes(DRIVE_FILE_SCOPE)) {
+    kvSet(DEVICE_KEY, null);
+    throw new HttpError(400, 'Google connected without the Drive permission (the box was unticked?). Press Connect Google Drive and allow access to the files the shop makes.');
+  }
+  const cur = config();
+  // The same client keeps its folder (it can still see it); another client can't, and gets a new one.
+  let folder: string;
+  try {
+    folder = await ensureAppFolder(access, p.clientId === cur.oauthClientId ? cur.oauthFolderId : '');
+  } catch (err) {
+    kvSet(DEVICE_KEY, null);
+    throw new HttpError(502, err instanceof Error ? err.message : String(err));
+  }
+  const at = new Date(now).toISOString();
+  const next: DriveConfig = {
+    ...cur,
+    mode: 'oauth',
+    oauthClientId: p.clientId,
+    oauthClientSecret: p.clientSecret,
+    refreshToken,
+    oauthFolderId: folder,
+    connectedAt: at,
+    needsReconnect: false,
+    // Connecting is the owner asking for copies: on, when they can be encrypted.
+    enabled: passphraseSet(),
+    savedAt: at,
+    savedBy: by,
+  };
+  if (activeFolder(cur) !== folder || cur.mode !== 'oauth') kvSet(FILES_KEY, []);
+  kvSet(CONFIG_KEY, next);
+  cachedUserToken = { client: p.clientId, refresh: crypto.createHash('sha256').update(refreshToken).digest('hex'), token: access, until: now + Math.max(60, (Number(data.expires_in) || 3600) - 60) * 1000 };
+  audit('backup.drive_connected', { by, clientId: p.clientId, folderId: folder, enabled: next.enabled });
+  return end('connected');
+}
+
+/** Tests: forget the OAuth access token in hand. */
+export function _resetDriveUserToken() {
+  cachedUserToken = null;
+}
+
+/**
+ * "Copy restore details" (the route asks for the password first, and audits it): what a brand-new
+ * server needs to find and open the copies, as lines for an env file.
+ */
+export function driveRestoreDetails(): string {
+  const cfg = config();
+  if (cfg.mode !== 'oauth' || !cfg.refreshToken) throw new HttpError(409, 'Connect Google Drive first.');
+  return [`BUH_DRIVE_CLIENT_ID=${cfg.oauthClientId}`, `BUH_DRIVE_CLIENT_SECRET=${cfg.oauthClientSecret}`, `BUH_DRIVE_REFRESH_TOKEN=${cfg.refreshToken}`, `BUH_DRIVE_FOLDER=${cfg.oauthFolderId}`].join('\n') + '\n';
+}
+
 /** A readable reason from a Drive error reply (never the token). */
 function driveError(res: SafeResponse, what: string, clientEmail: string): Error {
   const e = (jsonOf(res).error ?? {}) as { message?: string; errors?: Array<{ reason?: string }> };
@@ -275,6 +571,12 @@ function driveError(res: SafeResponse, what: string, clientEmail: string): Error
   const message = said(e.message);
   if (/storageQuotaExceeded/i.test(reasons) || /service accounts do not have storage quota/i.test(message)) {
     return new Error('Google does not let a service account store files in a personal Drive folder (it has no storage of its own). Use a folder in a shared drive (Google Workspace) and add the service account to that shared drive as Content manager.');
+  }
+  // Connect my Google Drive (no service account email): the shop's own folder, made by the shop.
+  if (!clientEmail) {
+    if (res.status === 404) return new Error(`Google Drive could not find the shop’s folder “${APP_FOLDER_NAME}” (deleted, or emptied from the bin?). Press Reconnect Google Drive to make a new one.`);
+    if (res.status === 401 || res.status === 403) return new Error(`Google Drive refused to ${what}${message ? `: ${message}` : ''}. Press Reconnect Google Drive in Settings → System & backups.`);
+    return new Error(`Google Drive could not ${what} (HTTP ${res.status}${message ? `: ${message}` : ''}).`);
   }
   if (res.status === 404) return new Error(`Google Drive could not find the folder. Share the folder with ${clientEmail} as Editor, and check the folder link.`);
   if (res.status === 401) return new Error('Google did not accept the access token. Press Test connection again; if it keeps failing, paste a new key.');
@@ -408,6 +710,19 @@ function isSealed(file: string): boolean {
 
 let running: Promise<DriveState> | null = null;
 
+/** What is missing for the mode in use, or '' when copies can be made. */
+function missingFor(cfg: DriveConfig): string {
+  if (cfg.mode === 'oauth') {
+    if (!cfg.refreshToken || !cfg.oauthClientId || !cfg.oauthClientSecret) return 'Google Drive is not connected (a restored shop has no connection): press Connect Google Drive in Settings → System & backups.';
+    if (cfg.needsReconnect) return RECONNECT;
+    if (!cfg.oauthFolderId) return 'The shop’s Google Drive folder is not set: press Reconnect Google Drive.';
+    return '';
+  }
+  if (!cfg.privateKey || !cfg.clientEmail) return 'The service account key is missing (a restored shop has none): paste it again in Settings → System & backups.';
+  if (!cfg.folderId) return 'No Google Drive folder is set.';
+  return '';
+}
+
 /**
  * Copy a backup just taken to Drive (when switched on), keep the newest `keep`, record the outcome.
  * Never throws: a failure is in the state (and the owner alert), the local backup stays as it is.
@@ -421,20 +736,22 @@ export function copyBackupToDrive(file: string, reason = 'backup'): Promise<Driv
     try {
       if (!passphraseSet()) throw new Error(NO_PASSPHRASE);
       if (!file.endsWith('.tar.gz.enc') || !isSealed(file)) throw new Error('This backup is not encrypted, so it was not copied to Google Drive.');
-      if (!cfg.privateKey || !cfg.clientEmail) throw new Error('The service account key is missing (a restored shop has none): paste it again in Settings → System & backups.');
-      if (!cfg.folderId) throw new Error('No Google Drive folder is set.');
-      const token = await accessToken(cfg);
+      const missing = missingFor(cfg);
+      if (missing) throw new Error(missing);
+      const token = await tokenFor(cfg);
+      const account = who(cfg).email;
+      const folder = activeFolder(cfg);
       const name = path.basename(file);
-      const up = await uploadToDrive(token, cfg.folderId, file, name, cfg.clientEmail);
+      const up = await uploadToDrive(token, folder, file, name, account);
       const before = copies();
       kvSet(FILES_KEY, [...before.filter((c) => c.id !== up.id), { id: up.id, name, size: up.size, at: new Date().toISOString() }]);
-      audit('backup.drive_copied', { reason, file: name, size: up.size, fileId: up.id });
+      audit('backup.drive_copied', { reason, mode: cfg.mode, file: name, size: up.size, fileId: up.id });
       setState({ lastAttemptAt: attemptAt, lastSuccessAt: new Date().toISOString(), lastFile: name, lastSize: up.size, lastError: undefined });
       logEvent('info', 'backup_drive_copied', { file: name, size: up.size });
       // An earlier copy with the same name (two backups in one minute: the local file was replaced) goes.
       for (const same of before.filter((c) => c.name === name && c.id !== up.id)) {
         try {
-          await deleteDriveFile(token, same.id, cfg.clientEmail);
+          await deleteDriveFile(token, same.id, account);
           kvSet(FILES_KEY, copies().filter((c) => c.id !== same.id));
         } catch (err) {
           logEvent('warn', 'backup_drive_prune_failed', { file: same.name, error: err instanceof Error ? err.message : String(err) });
@@ -446,7 +763,7 @@ export function copyBackupToDrive(file: string, reason = 'backup'): Promise<Driv
       while (kept.length > keep) {
         const old = kept[0];
         try {
-          await deleteDriveFile(token, old.id, cfg.clientEmail);
+          await deleteDriveFile(token, old.id, account);
         } catch (err) {
           logEvent('warn', 'backup_drive_prune_failed', { file: old.name, error: err instanceof Error ? err.message : String(err) });
           break;
@@ -458,7 +775,7 @@ export function copyBackupToDrive(file: string, reason = 'backup'): Promise<Driv
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
       setState({ lastAttemptAt: attemptAt, lastError: message });
-      audit('backup.drive_failed', { reason, error: message });
+      audit('backup.drive_failed', { reason, mode: cfg.mode, error: message });
       logEvent('error', 'backup_drive_failed', { error: message });
     }
     return state();
@@ -472,13 +789,25 @@ export function copyBackupToDrive(file: string, reason = 'backup'): Promise<Driv
 
 export interface DriveStatus {
   enabled: boolean;
-  folderId: string;
+  mode: DriveMode;
   keep: number;
-  clientEmail: string;
-  keySaved: boolean;
   passphraseSet: boolean;
   copies: number;
   level: 'off' | 'ok' | 'failing';
+  /** Service account. */
+  folderId: string;
+  clientEmail: string;
+  keySaved: boolean;
+  /** Connect my Google Drive (never the secret or the tokens). */
+  oauthClientId: string;
+  oauthSecretSaved: boolean;
+  connected: boolean;
+  connectedAt?: string;
+  needsReconnect: boolean;
+  oauthFolderId: string;
+  folderName: string;
+  /** A connection in progress: the code to enter and where (never the device code). */
+  connecting: { userCode: string; verificationUrl: string; expiresAt: string; interval: number } | null;
   lastAttemptAt?: string;
   lastSuccessAt?: string;
   lastFile?: string;
@@ -486,20 +815,31 @@ export interface DriveStatus {
   lastError?: string;
 }
 
-/** What the hub may see: never the key (its service account's email says which key is saved). */
+/** What the hub may see: never a key, secret or token (the service account's email, the OAuth client id). */
 export function driveStatus(): DriveStatus {
   const cfg = config();
   const s = state();
-  const failing = cfg.enabled && (!passphraseSet() || !cfg.privateKey || Boolean(s.lastError && (!s.lastSuccessAt || Date.parse(s.lastAttemptAt || '') > Date.parse(s.lastSuccessAt))));
+  const p = pendingDevice();
+  const lastFailed = Boolean(s.lastError && (!s.lastSuccessAt || Date.parse(s.lastAttemptAt || '') > Date.parse(s.lastSuccessAt)));
+  const failing = cfg.enabled && (!passphraseSet() || Boolean(missingFor(cfg)) || lastFailed);
   return {
     enabled: cfg.enabled,
-    folderId: cfg.folderId,
+    mode: cfg.mode,
     keep: cfg.keep,
-    clientEmail: cfg.clientEmail,
-    keySaved: Boolean(cfg.privateKey),
     passphraseSet: passphraseSet(),
     copies: copies().length,
     level: !cfg.enabled ? 'off' : failing ? 'failing' : 'ok',
+    folderId: cfg.folderId,
+    clientEmail: cfg.clientEmail,
+    keySaved: Boolean(cfg.privateKey),
+    oauthClientId: cfg.oauthClientId,
+    oauthSecretSaved: Boolean(cfg.oauthClientSecret),
+    connected: Boolean(cfg.refreshToken),
+    connectedAt: cfg.connectedAt,
+    needsReconnect: Boolean(cfg.needsReconnect),
+    oauthFolderId: cfg.oauthFolderId,
+    folderName: APP_FOLDER_NAME,
+    connecting: p && p.expiresAt > Date.now() ? { userCode: p.userCode, verificationUrl: p.verificationUrl, expiresAt: new Date(p.expiresAt).toISOString(), interval: p.interval } : null,
     lastAttemptAt: s.lastAttemptAt,
     lastSuccessAt: s.lastSuccessAt,
     lastFile: s.lastFile,
@@ -509,15 +849,19 @@ export function driveStatus(): DriveStatus {
 }
 
 /**
- * The owner alert (monitor.ts): copies switched on but failing, paused (no passphrase or no key),
- * or none since local backups kept succeeding for two intervals.
+ * The owner alert (monitor.ts): copies switched on but failing, paused (no passphrase, no key, not
+ * connected, or Google refused the connection: "Reconnect Google Drive"), or none since local
+ * backups kept succeeding for two intervals.
  */
 export function driveProblem(localLastSuccessAt: string | undefined, intervalHours: number, now = Date.now()): { id: string; level: 'failing'; text: string } | null {
+  const cfg = config();
   const st = driveStatus();
   if (!st.enabled) return null;
   const id = 'drive_backup';
   if (!st.passphraseSet) return { id, level: 'failing', text: `Copies to Google Drive are paused: ${NO_PASSPHRASE}` };
-  if (!st.keySaved) return { id, level: 'failing', text: 'Copies to Google Drive are paused: the service account key is missing. Paste it again in Settings → System & backups.' };
+  if (cfg.mode === 'oauth' && cfg.needsReconnect) return { id, level: 'failing', text: `Copies to Google Drive have stopped. ${RECONNECT}` };
+  const missing = missingFor(cfg);
+  if (missing) return { id, level: 'failing', text: `Copies to Google Drive are paused: ${missing}` };
   if (st.level === 'failing') return { id, level: 'failing', text: `The copy to Google Drive failed: ${st.lastError}` };
   const local = localLastSuccessAt ? Date.parse(localLastSuccessAt) : 0;
   const last = st.lastSuccessAt ? Date.parse(st.lastSuccessAt) : 0;
@@ -527,12 +871,13 @@ export function driveProblem(localLastSuccessAt: string | undefined, intervalHou
   return null;
 }
 
-const FIELDS = ['enabled', 'folderId', 'keep', 'serviceAccountKey'];
+const FIELDS = ['enabled', 'mode', 'folderId', 'keep', 'serviceAccountKey', 'disconnect'];
 
 /**
- * Save Settings → Google Drive: { enabled?, folderId?, keep?, serviceAccountKey? } (a JSON key
- * replaces the saved one; null removes it; missing or empty keeps it). Switching on needs
- * BACKUP_PASSPHRASE, a key and a folder.
+ * Save Settings → Google Drive: { enabled?, mode?, folderId?, keep?, serviceAccountKey?, disconnect? }.
+ * A JSON key replaces the saved one; null removes it; missing or empty keeps it. `disconnect: true`
+ * forgets the Google Drive connection (the refresh token). Switching on needs BACKUP_PASSPHRASE and,
+ * for the mode chosen, a connection (oauth) or a key and a folder (service account).
  */
 export function saveDriveSettings(input: Record<string, unknown>, by = ''): DriveStatus {
   for (const k of Object.keys(input)) if (!FIELDS.includes(k)) throw new HttpError(400, `Unexpected field: ${k.slice(0, 40)}.`);
@@ -541,6 +886,10 @@ export function saveDriveSettings(input: Record<string, unknown>, by = ''): Driv
   if (input.enabled !== undefined) {
     if (typeof input.enabled !== 'boolean') throw new HttpError(400, 'enabled must be true or false.');
     next.enabled = input.enabled;
+  }
+  if (input.mode !== undefined) {
+    if (input.mode !== 'oauth' && input.mode !== 'service_account') throw new HttpError(400, 'mode: oauth or service_account.');
+    next.mode = input.mode;
   }
   if (input.folderId !== undefined) {
     if (typeof input.folderId !== 'string' || input.folderId.length > 500) throw new HttpError(400, 'Google Drive folder: paste the folder’s link or its id.');
@@ -556,56 +905,94 @@ export function saveDriveSettings(input: Record<string, unknown>, by = ''): Driv
     next.privateKey = '';
     next.keyId = '';
     next.clientEmail = '';
-    next.enabled = false;
+    if (next.mode === 'service_account') next.enabled = false;
     keyChanged = true;
   } else if (typeof input.serviceAccountKey === 'string' && input.serviceAccountKey.trim()) {
     if (input.serviceAccountKey.length > 12_000) throw new HttpError(400, 'Service account key: that is too long for a key file.');
     Object.assign(next, parseServiceAccountKey(input.serviceAccountKey));
     keyChanged = true;
+    // A key pasted without saying which way: the service account way.
+    if (input.mode === undefined) next.mode = 'service_account';
   } else if (input.serviceAccountKey !== undefined && typeof input.serviceAccountKey !== 'string') {
     throw new HttpError(400, 'Service account key: paste the JSON file as text.');
   }
+  if (input.disconnect !== undefined) {
+    if (input.disconnect !== true) throw new HttpError(400, 'disconnect must be true.');
+    next.refreshToken = '';
+    next.needsReconnect = false;
+    if (next.mode === 'oauth') next.enabled = false;
+    kvSet(DEVICE_KEY, null);
+    _resetDriveUserToken();
+  }
   if (next.enabled) {
     if (!passphraseSet()) throw new HttpError(400, `Not switched on. ${NO_PASSPHRASE.replace(', then try again', ', restart the shop, then switch this on')}`, {}, { code: 'passphrase_required' });
-    if (!next.privateKey) throw new HttpError(400, 'Paste the service account’s JSON key before switching this on.');
-    if (!next.folderId) throw new HttpError(400, 'Paste the Google Drive folder’s link before switching this on.');
+    if (next.mode === 'oauth' && !next.refreshToken) throw new HttpError(400, 'Press Connect Google Drive before switching this on.');
+    if (next.mode === 'service_account' && !next.privateKey) throw new HttpError(400, 'Paste the service account’s JSON key before switching this on.');
+    if (next.mode === 'service_account' && !next.folderId) throw new HttpError(400, 'Paste the Google Drive folder’s link before switching this on.');
   }
-  // Another account's key, or another folder: the copies recorded so far stay in Drive, but are no
-  // longer this setting's to delete (they may not even be reachable with the new key).
-  if ((keyChanged && next.clientEmail !== cur.clientEmail) || next.folderId !== cur.folderId) kvSet(FILES_KEY, []);
+  // Another account, folder or mode: the copies recorded so far stay in Drive, but are no longer
+  // this setting's to delete (they may not even be reachable now).
+  const sameAccount = next.mode === cur.mode && (next.mode === 'oauth' ? next.oauthClientId === cur.oauthClientId : !(keyChanged && next.clientEmail !== cur.clientEmail));
+  if (!sameAccount || activeFolder(next) !== activeFolder(cur)) kvSet(FILES_KEY, []);
   next.savedAt = new Date().toISOString();
   next.savedBy = by;
   kvSet(CONFIG_KEY, next);
   if (keyChanged) _resetDriveToken();
-  audit('backup.drive_saved', { by, enabled: next.enabled, folderId: next.folderId, keep: next.keep, serviceAccount: next.clientEmail, keyChanged });
+  audit('backup.drive_saved', { by, enabled: next.enabled, mode: next.mode, folderId: activeFolder(next), keep: next.keep, serviceAccount: next.clientEmail, keyChanged, disconnected: input.disconnect === true });
   return driveStatus();
 }
 
 /**
- * "Test connection": with the typed key and folder (blank ones from the saved settings), take a
- * token, upload a tiny text file, check it, and delete it again.
+ * "Test connection": take a token, upload a tiny text file to the folder, check it, delete it.
+ * Service account: the typed key and folder (blank ones from the saved settings). Connect my
+ * Google Drive: the saved connection and the shop's own folder.
  */
-export async function testDriveConnection(input: Record<string, unknown>, by = ''): Promise<{ clientEmail: string; folderId: string }> {
-  for (const k of Object.keys(input)) if (!['folderId', 'serviceAccountKey'].includes(k)) throw new HttpError(400, `Unexpected field: ${k.slice(0, 40)}.`);
+export async function testDriveConnection(input: Record<string, unknown>, by = ''): Promise<{ mode: DriveMode; clientEmail: string; folderId: string }> {
+  for (const k of Object.keys(input)) if (!['mode', 'folderId', 'serviceAccountKey'].includes(k)) throw new HttpError(400, `Unexpected field: ${k.slice(0, 40)}.`);
   const cur = config();
-  const typedKey = typeof input.serviceAccountKey === 'string' && input.serviceAccountKey.trim() ? input.serviceAccountKey : '';
-  if (typedKey.length > 12_000) throw new HttpError(400, 'Service account key: that is too long for a key file.');
-  const key = typedKey ? parseServiceAccountKey(typedKey) : { clientEmail: cur.clientEmail, privateKey: cur.privateKey, keyId: cur.keyId };
-  const folderId = typeof input.folderId === 'string' && input.folderId.trim() ? parseFolderId(input.folderId) : cur.folderId;
-  if (!key.privateKey) throw new HttpError(400, 'Paste the service account’s JSON key first.');
-  if (!folderId) throw new HttpError(400, 'Paste the Google Drive folder’s link first.');
+  // A key typed without saying which way: the service account way.
+  const typedSa = typeof input.serviceAccountKey === 'string' && input.serviceAccountKey.trim() !== '';
+  const mode: DriveMode = input.mode === 'oauth' || input.mode === 'service_account' ? input.mode : typedSa ? 'service_account' : cur.mode;
+  let token = '';
+  let account = '';
+  let folderId = '';
+  let getToken: () => Promise<string>;
+  if (mode === 'oauth') {
+    if (!cur.refreshToken) throw new HttpError(400, 'Press Connect Google Drive first.');
+    folderId = cur.oauthFolderId;
+    getToken = () => tokenFor({ ...cur, mode: 'oauth' });
+  } else {
+    const typedKey = typeof input.serviceAccountKey === 'string' && input.serviceAccountKey.trim() ? input.serviceAccountKey : '';
+    if (typedKey.length > 12_000) throw new HttpError(400, 'Service account key: that is too long for a key file.');
+    const key = typedKey ? parseServiceAccountKey(typedKey) : { clientEmail: cur.clientEmail, privateKey: cur.privateKey, keyId: cur.keyId };
+    folderId = typeof input.folderId === 'string' && input.folderId.trim() ? parseFolderId(input.folderId) : cur.folderId;
+    if (!key.privateKey) throw new HttpError(400, 'Paste the service account’s JSON key first.');
+    if (!folderId) throw new HttpError(400, 'Paste the Google Drive folder’s link first.');
+    account = key.clientEmail;
+    getToken = () => accessToken(key);
+  }
   const scratch = path.join(fs.mkdtempSync(path.join(dataDir(), '.drive-test-')), 'test.txt');
   try {
     fs.writeFileSync(scratch, `Beautiful UAE Home: Google Drive connection test, ${new Date().toISOString()}. Safe to delete.\n`, { mode: 0o600 });
-    const token = await accessToken(key);
-    const up = await uploadToDrive(token, folderId, scratch, `buh-connection-test-${Date.now()}.txt`, key.clientEmail);
-    await deleteDriveFile(token, up.id, key.clientEmail);
-    audit('backup.drive_tested', { by, ok: true, serviceAccount: key.clientEmail, folderId });
-    return { clientEmail: key.clientEmail, folderId };
+    token = await getToken();
+    if (mode === 'oauth') {
+      // The shop's folder gone (deleted by hand)? Make it again, as a backup would need.
+      const folder = await ensureAppFolder(token, folderId);
+      if (folder !== folderId) {
+        kvSet(CONFIG_KEY, { ...config(), oauthFolderId: folder });
+        kvSet(FILES_KEY, []);
+        folderId = folder;
+      }
+    }
+    const up = await uploadToDrive(token, folderId, scratch, `buh-connection-test-${Date.now()}.txt`, account);
+    await deleteDriveFile(token, up.id, account);
+    if (mode === 'oauth' && cur.needsReconnect) kvSet(CONFIG_KEY, { ...config(), needsReconnect: false });
+    audit('backup.drive_tested', { by, ok: true, mode, serviceAccount: account, folderId });
+    return { mode, clientEmail: account, folderId };
   } catch (err) {
     if (err instanceof HttpError) throw err;
     const message = err instanceof Error ? err.message : String(err);
-    audit('backup.drive_tested', { by, ok: false, serviceAccount: key.clientEmail, folderId, error: message });
+    audit('backup.drive_tested', { by, ok: false, mode, serviceAccount: account, folderId, error: message });
     logEvent('warn', 'backup_drive_test_failed', { error: message });
     throw new HttpError(502, message, {}, { code: 'drive_test_failed' });
   } finally {

@@ -36,6 +36,9 @@ export function maskGoogleKeys(s: string): string {
 const PEM_KEY = /-----BEGIN [A-Z ]*PRIVATE KEY-----[\s\S]*?(?:-----END [A-Z ]*PRIVATE KEY-----|$)/g;
 const BARE_KEY = /\bMII[A-Za-z0-9+/=]{60,}/g;
 const GOOGLE_TOKEN = /\bya29\.[A-Za-z0-9._-]+/g;
+// Google refresh tokens (1//…: Connect my Google Drive) and OAuth client secrets (GOCSPX-…).
+const GOOGLE_REFRESH = /(?<![\w/])1\/\/[A-Za-z0-9._-]{10,}/g;
+const GOOGLE_CLIENT_SECRET = /\bGOCSPX-[A-Za-z0-9_-]{6,}/g;
 
 export function maskPhone(phone: string): string {
   const digits = phone.replace(/\D/g, '');
@@ -52,11 +55,12 @@ function scrubString(s: string, max = 500): string {
   // Masked before it is cut, so a cut can never leave half a phone number unmasked.
   // A private key is removed whole, or what is left of it after the cut (from its BEGIN line on);
   // a bare key body (base64 DER starts MII…) too.
-  return maskSecretPaths(s.slice(0, max * 2).replace(PEM_KEY, '[private key redacted]').replace(BARE_KEY, '[private key redacted]'))
+  return maskSecretPaths(s.slice(0, max * 2).replace(PEM_KEY, '[private key redacted]').replace(BARE_KEY, '[private key redacted]').replace(GOOGLE_REFRESH, '1//[redacted]'))
     .replace(STRIPE_SECRET, (_m, key: string | undefined, intent: string | undefined) => (key ? `${key}[redacted]` : `${intent}_[redacted]`))
     .replace(ANTHROPIC_KEY, 'sk-ant-[redacted]')
     .replace(GOOGLE_KEY, (_m, classic: string | undefined, auth: string | undefined) => `${classic ?? auth}[redacted]`)
     .replace(GOOGLE_TOKEN, 'ya29.[redacted]')
+    .replace(GOOGLE_CLIENT_SECRET, 'GOCSPX-[redacted]')
     .replace(EMAIL, '$1***@$2')
     .replace(PHONE, (m) => (ISO_DATE.test(m) ? m : maskPhone(m)))
     .slice(0, max);

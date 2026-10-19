@@ -469,17 +469,31 @@ The line at the top of the Admin Hub shows when the last backup ran:
 
 An off-server copy: if the server is lost, the shop can be rebuilt from Drive on a new one. Copies are always encrypted, so `BACKUP_PASSPHRASE` must be set first (keep it in your password manager: without it a copy can't be opened).
 
-1. Go to console.cloud.google.com, make a project (any name), and switch on the **Google Drive API** (APIs & Services → Library).
-2. IAM & Admin → **Service accounts** → **Create service account** (any name, no roles) → open it → **Keys** → **Add key** → **JSON**: a `.json` file downloads. Keep it safe; you also need it to rebuild the shop.
-3. In Google Drive, make a folder for the backups and **Share** it with the service account's email (`…@….iam.gserviceaccount.com`, in the JSON file) as **Editor**.
-4. Google gives a service account no storage of its own: with a personal Gmail Drive, Google may refuse the upload ("service account has no storage"). Then use a folder in a **shared drive** (Google Workspace) and add the service account to the shared drive as **Content manager**.
-5. In the Admin Hub: Settings → System & backups → **Copy each backup to Google Drive**: paste the whole JSON file, paste the folder's link, and press **Test connection** (it uploads a tiny file and deletes it again).
-6. Tick **Copy each backup to Google Drive**, choose how many copies to keep (30 by default), and press **Save**. Press **Back up now** to make the first copy.
+**Connect my Google Drive (recommended, works with a personal Gmail):**
+
+1. Go to console.cloud.google.com and make a project (any name).
+2. APIs & Services → Library → **Google Drive API** → **Enable**.
+3. Google Auth Platform → **Branding**: app name "Beautiful UAE Home backups", your Gmail as the support and contact email.
+4. Google Auth Platform → **Audience**: user type **External**; while it says **Testing**, add your own Gmail under **Test users**.
+5. Audience → **Publish app** (status **In production**): in Testing, Google cuts the connection off after 7 days. The shop asks only for `drive.file` (the files it makes itself), which is not a sensitive permission, so no Google review is needed; Google may still show "Google hasn't verified this app": press **Advanced** → **Go to … (unsafe)**, it is your own app.
+6. Google Auth Platform → **Data access** → **Add or remove scopes** → tick `…/auth/drive.file` → **Update** → **Save**.
+7. Google Auth Platform → **Clients** → **Create client** → type **TVs and Limited Input devices** → **Create**: copy the **Client ID** and **Client secret**.
+8. In the Admin Hub: Settings → System & backups → **Copy each backup to Google Drive** → **Connect my Google Drive**: paste the client ID and secret, press **Connect Google Drive**.
+9. On your phone or computer open **google.com/device**, sign in with your Gmail, type the code the hub shows, and press **Allow**. The hub says **Connected** within seconds.
+10. The shop makes a folder **Beautiful UAE Home backups** in your Drive and switches copies on. Press **Back up now** for the first copy.
+11. Press **Copy restore details** (your password is asked), and save the four lines in your password manager: a new server needs them to rebuild the shop.
+
+**Or a service account (Google Workspace shared drives only):**
+
+1. Go to console.cloud.google.com, make a project, and switch on the **Google Drive API**.
+2. IAM & Admin → **Service accounts** → **Create service account** (no roles) → **Keys** → **Add key** → **JSON**: keep the downloaded file safe.
+3. In a **shared drive**, add the service account's email (in the JSON file) as **Content manager**, and make a folder. (A personal Drive folder refuses its uploads: Google gives a service account no storage of its own.)
+4. In the Admin Hub, choose **A service account and a shared drive**, paste the whole JSON file and the folder's link, press **Test connection**, tick **Copy each backup to Google Drive**, and press **Save**.
 
 - The status line at the top of the Admin Hub says when the last copy reached Drive; the card shows its time and size.
-- A failed copy never stops the local backup: you get an alert (email, and Settings → System & backups → Health) until a copy works again.
-- Older copies the shop made are deleted once there are more than you keep; nothing else in the folder is touched.
-- The key is shown only as the service account's email, is never in a backup, and **Remove the key** deletes it. A restored shop keeps the folder but not the key: paste it again.
+- A failed copy never stops the local backup: you get an alert (email, and Settings → System & backups → Health) until a copy works again. If Google stops accepting the connection (you removed the app's access, or it ran out), the alert says **Reconnect Google Drive**: press it and enter the new code.
+- Older copies the shop made are deleted once there are more than you keep (30 by default); nothing else in your Drive is touched.
+- The client secret, the connection and the key are never shown again, never in a backup and never in the logs. A restored shop keeps the settings but not the connection: connect again (or paste the key again).
 - Rebuilding a lost server from Drive: HOSTINGER_DEPLOYMENT_GUIDE.md, "Rebuilding on a new server from Google Drive".
 
 ### Phone check and the SMS gateway

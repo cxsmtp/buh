@@ -121,7 +121,7 @@ for (const width of [375, 1280]) {
     await card.waitFor();
     assert.match(await card.getByTestId('drive-key-saved').innerText(), new RegExp(sa.email.replace(/\./g, '\\.')));
     assert.equal(await card.getByLabel('Service account key (JSON)').inputValue(), '', 'the key is never sent back');
-    assert.equal(await card.getByLabel('Drive folder link or id').inputValue(), FOLDER);
+    assert.equal(await card.getByLabel('Shared drive folder link or id').inputValue(), FOLDER);
     assert.equal(await card.getByLabel('Copies to keep').inputValue(), '30');
     assert.ok(await card.getByRole('checkbox', { name: 'Copy each backup to Google Drive' }).isChecked());
     assert.match(await card.getByTestId('drive-last-copy').innerText(), /Last copy .*[KM]B \(1 in Drive\)/);

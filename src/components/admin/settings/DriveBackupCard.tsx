@@ -1,24 +1,37 @@
 'use client';
 
-import React, { useEffect, useState } from 'react';
-import { AlertTriangle, CheckCircle2, CloudUpload, Loader2, XCircle } from 'lucide-react';
+import React, { useCallback, useEffect, useState } from 'react';
+import { AlertTriangle, CheckCircle2, CloudUpload, Copy, Loader2, XCircle } from 'lucide-react';
 import { getJson, postJson, sendJson } from '@/lib/apiClient';
 
 /**
- * Settings → System & backups → "Copy each backup to Google Drive": a service account's JSON key
- * (write-only: only its email is shown once saved), the shared folder, how many copies to keep, the
- * switch, Test connection, and the last copy.
+ * Settings → System & backups → "Copy each backup to Google Drive", one of two ways:
+ * - Connect my Google Drive (recommended, any Google account): the OAuth client's id and secret,
+ *   then a code to enter at google.com/device; the shop makes its own folder. "Copy restore
+ *   details" (password needed) gives what a new server needs.
+ * - A service account (shared drives): its JSON key (write-only: only its email is shown) and the
+ *   shared folder.
+ * Both: how many copies to keep, the switch, Test connection, and the last copy.
  */
 
 export interface DriveStatus {
   enabled: boolean;
-  folderId: string;
+  mode: 'oauth' | 'service_account';
   keep: number;
-  clientEmail: string;
-  keySaved: boolean;
   passphraseSet: boolean;
   copies: number;
   level: 'off' | 'ok' | 'failing';
+  folderId: string;
+  clientEmail: string;
+  keySaved: boolean;
+  oauthClientId: string;
+  oauthSecretSaved: boolean;
+  connected: boolean;
+  connectedAt?: string;
+  needsReconnect: boolean;
+  oauthFolderId: string;
+  folderName: string;
+  connecting: { userCode: string; verificationUrl: string; expiresAt: string; interval: number } | null;
   lastAttemptAt?: string;
   lastSuccessAt?: string;
   lastFile?: string;
@@ -26,9 +39,12 @@ export interface DriveStatus {
   lastError?: string;
 }
 
+type Outcome = 'none' | 'pending' | 'connected' | 'denied' | 'expired';
+
 const field = 'w-full min-w-0 px-3 py-2 rounded-xl border border-line-strong bg-surface text-ink text-sm placeholder:text-ink-muted focus:outline-none focus:ring-2 focus:ring-gold';
 const darkButton = 'min-h-11 px-4 py-2 rounded-xl bg-ink text-paper text-xs font-bold inline-flex items-center gap-1.5 disabled:opacity-60';
 const lightButton = 'min-h-11 px-3 py-2 rounded-xl border border-line-strong bg-surface text-ink text-xs font-bold inline-flex items-center gap-1.5 hover:bg-ivory disabled:opacity-60';
+const label = 'block text-xs font-semibold text-ink-soft mb-1';
 
 export function mb(n?: number): string {
   if (n === undefined) return '';
@@ -43,35 +59,67 @@ export function when(iso?: string): string {
 
 export function DriveBackupCard() {
   const [status, setStatus] = useState<DriveStatus | null>(null);
+  const [mode, setMode] = useState<DriveStatus['mode']>('oauth');
   const [enabled, setEnabled] = useState(false);
   const [folder, setFolder] = useState('');
   const [keep, setKeep] = useState('30');
   const [key, setKey] = useState('');
-  const [busy, setBusy] = useState<'' | 'save' | 'test' | 'remove'>('');
+  const [clientId, setClientId] = useState('');
+  const [clientSecret, setClientSecret] = useState('');
+  const [busy, setBusy] = useState<'' | 'save' | 'test' | 'remove' | 'connect' | 'details'>('');
   const [message, setMessage] = useState<{ ok: boolean; text: string } | null>(null);
+  const [detailsOpen, setDetailsOpen] = useState(false);
+  const [password, setPassword] = useState('');
+  const [details, setDetails] = useState('');
+  const [copied, setCopied] = useState(false);
+  const [nextPoll, setNextPoll] = useState<{ n: number; interval: number } | null>(null);
 
-  const apply = (s: DriveStatus) => {
+  const apply = useCallback((s: DriveStatus) => {
     setStatus(s);
+    setMode(s.mode);
     setEnabled(s.enabled);
     setFolder(s.folderId);
     setKeep(String(s.keep));
-  };
+    setClientId(s.oauthClientId);
+  }, []);
+
+  // While a connection is in progress: ask the server every `interval` seconds (it asks Google).
+  const schedule = useCallback((interval: number) => setNextPoll((p) => ({ n: (p?.n ?? 0) + 1, interval })), []);
+  useEffect(() => {
+    if (!nextPoll) return;
+    const t = setTimeout(async () => {
+      const { ok, data } = await postJson<{ outcome?: Outcome; status?: DriveStatus; message?: string }>('/api/admin/backup/drive/connect', { action: 'poll' });
+      if (!ok || !data.status) {
+        setMessage({ ok: false, text: data.message || 'Could not finish connecting. Press Connect Google Drive to try again.' });
+        void getJson<DriveStatus>('/api/admin/backup/drive').then((r) => r.ok && apply(r.data));
+        return;
+      }
+      apply(data.status);
+      if (data.outcome === 'pending' && data.status.connecting) schedule(data.status.connecting.interval);
+      else if (data.outcome === 'connected') setMessage({ ok: true, text: data.status.enabled ? 'Connected. Each backup is now copied to your Google Drive.' : 'Connected. Set BACKUP_PASSPHRASE, then switch copies on.' });
+      else if (data.outcome === 'denied') setMessage({ ok: false, text: 'Google says access was refused. Press Connect Google Drive and choose Allow.' });
+      else if (data.outcome === 'expired') setMessage({ ok: false, text: 'The code ran out before it was entered. Press Connect Google Drive for a new one.' });
+    }, Math.max(1, nextPoll.interval) * 1000);
+    return () => clearTimeout(t);
+  }, [nextPoll, apply, schedule]);
 
   useEffect(() => {
     let cancelled = false;
     void getJson<DriveStatus>('/api/admin/backup/drive').then(({ ok, data }) => {
-      if (!cancelled && ok) apply(data);
+      if (cancelled || !ok) return;
+      apply(data);
+      if (data.connecting) schedule(data.connecting.interval);
     });
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [apply, schedule]);
 
   const save = async (e?: React.FormEvent, overrides: Record<string, unknown> = {}) => {
     e?.preventDefault();
     setMessage(null);
-    setBusy(overrides.serviceAccountKey === null ? 'remove' : 'save');
-    const body: Record<string, unknown> = { enabled, folderId: folder, keep: Number(keep), ...(key.trim() ? { serviceAccountKey: key } : {}), ...overrides };
+    setBusy(overrides.serviceAccountKey === null || overrides.disconnect ? 'remove' : 'save');
+    const body: Record<string, unknown> = { mode, enabled, keep: Number(keep), ...(mode === 'service_account' ? { folderId: folder, ...(key.trim() ? { serviceAccountKey: key } : {}) } : {}), ...overrides };
     const { ok, data } = await sendJson<DriveStatus & { message?: string }>('PUT', '/api/admin/backup/drive', body);
     setBusy('');
     if (!ok) {
@@ -83,16 +131,67 @@ export function DriveBackupCard() {
     setMessage({ ok: true, text: data.enabled ? 'Saved. Each backup is now copied to Google Drive.' : 'Saved.' });
   };
 
+  const connect = async () => {
+    setMessage(null);
+    setBusy('connect');
+    const { ok, data } = await postJson<{ status?: DriveStatus; message?: string }>('/api/admin/backup/drive/connect', { action: 'start', clientId, ...(clientSecret.trim() ? { clientSecret } : {}) });
+    setBusy('');
+    if (!ok || !data.status) {
+      setMessage({ ok: false, text: data.message || 'Could not start connecting. Please try again.' });
+      return;
+    }
+    setClientSecret('');
+    apply(data.status);
+    if (data.status.connecting) schedule(data.status.connecting.interval);
+  };
+
+  const cancel = async () => {
+    setNextPoll(null);
+    const { ok, data } = await postJson<{ status?: DriveStatus }>('/api/admin/backup/drive/connect', { action: 'cancel' });
+    if (ok && data.status) apply(data.status);
+  };
+
   const test = async () => {
     setMessage(null);
     setBusy('test');
-    const { ok, data } = await postJson<{ message?: string; clientEmail?: string }>('/api/admin/backup/drive/test', { folderId: folder, ...(key.trim() ? { serviceAccountKey: key } : {}) });
+    const body = mode === 'oauth' ? { mode } : { mode, folderId: folder, ...(key.trim() ? { serviceAccountKey: key } : {}) };
+    const { ok, data } = await postJson<{ message?: string; clientEmail?: string }>('/api/admin/backup/drive/test', body);
     setBusy('');
-    setMessage(ok ? { ok: true, text: `Connected: a test file was uploaded to the folder and deleted again, as ${data.clientEmail}.` } : { ok: false, text: data.message || 'The test failed. Please try again.' });
+    setMessage(
+      ok
+        ? { ok: true, text: mode === 'oauth' ? `Connected: a test file was uploaded to “${status?.folderName}” and deleted again.` : `Connected: a test file was uploaded to the folder and deleted again, as ${data.clientEmail}.` }
+        : { ok: false, text: data.message || 'The test failed. Please try again.' }
+    );
+    void getJson<DriveStatus>('/api/admin/backup/drive').then((r) => r.ok && apply(r.data));
+  };
+
+  const reveal = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setBusy('details');
+    const { ok, data } = await postJson<{ text?: string; message?: string }>('/api/admin/backup/drive/restore-details', { currentPassword: password });
+    setBusy('');
+    setPassword('');
+    if (!ok || !data.text) {
+      setMessage({ ok: false, text: data.message || 'Could not show the restore details.' });
+      return;
+    }
+    setMessage(null);
+    setDetails(data.text);
+    setCopied(false);
+  };
+
+  const copyDetails = async () => {
+    try {
+      await navigator.clipboard.writeText(details);
+      setCopied(true);
+    } catch {
+      setCopied(false);
+    }
   };
 
   if (!status) return null;
   const Icon = status.level === 'failing' ? XCircle : status.lastSuccessAt ? CheckCircle2 : AlertTriangle;
+  const canTest = mode === 'oauth' ? status.connected : status.keySaved || Boolean(key.trim());
 
   return (
     <form onSubmit={(e) => void save(e)} className="space-y-3 text-sm rounded-2xl border border-line p-3.5" data-testid="drive-backup-card">
@@ -101,7 +200,7 @@ export function DriveBackupCard() {
         <div className="space-y-1 min-w-0">
           <h3 className="font-semibold text-ink">Copy each backup to Google Drive</h3>
           <p className="text-xs text-ink-soft leading-relaxed">
-            An off-server copy, so a lost server never means lost orders. Copies are always encrypted with your <code>BACKUP_PASSPHRASE</code>; the newest ones are kept and older copies this shop made are deleted (nothing else in the folder is touched).
+            An off-server copy, so a lost server never means lost orders. Copies are always encrypted with your <code>BACKUP_PASSPHRASE</code>; the newest ones are kept and older copies this shop made are deleted (nothing else in your Drive is touched).
           </p>
         </div>
       </div>
@@ -109,6 +208,12 @@ export function DriveBackupCard() {
       {!status.passphraseSet && (
         <p role="alert" className="text-xs rounded-xl border border-warning-line bg-warning-soft text-warning px-3 py-2">
           Set <code>BACKUP_PASSPHRASE</code> first (see the deployment guide): an unencrypted copy of the shop never goes to Google Drive, so this can&rsquo;t be switched on without it.
+        </p>
+      )}
+
+      {status.mode === 'oauth' && status.needsReconnect && (
+        <p role="alert" data-testid="drive-reconnect" className="text-xs rounded-xl border border-danger-line bg-danger-soft text-danger px-3 py-2">
+          Google no longer accepts the shop&rsquo;s access to your Drive (removed, or it ran out). Press <strong>Reconnect Google Drive</strong> below.
         </p>
       )}
 
@@ -122,40 +227,142 @@ export function DriveBackupCard() {
         </p>
       )}
 
-      <label className="flex items-center gap-2 text-sm font-semibold text-ink min-h-11">
-        <input type="checkbox" className="w-5 h-5 accent-current" checked={enabled} disabled={!status.passphraseSet && !enabled} onChange={(e) => setEnabled(e.target.checked)} />
-        Copy each backup to Google Drive
-      </label>
+      <fieldset className="space-y-1.5">
+        <legend className={label}>How to connect</legend>
+        <label className="flex items-start gap-2 text-sm text-ink min-h-11">
+          <input type="radio" name="drive-mode" className="mt-1 w-4 h-4" checked={mode === 'oauth'} onChange={() => setMode('oauth')} />
+          <span><strong>Connect my Google Drive</strong> (recommended: any Google account, a Gmail too)</span>
+        </label>
+        <label className="flex items-start gap-2 text-sm text-ink min-h-11">
+          <input type="radio" name="drive-mode" className="mt-1 w-4 h-4" checked={mode === 'service_account'} onChange={() => setMode('service_account')} />
+          <span>A service account and a shared drive (Google Workspace)</span>
+        </label>
+      </fieldset>
 
-      <div>
-        <label htmlFor="drive-key" className="block text-xs font-semibold text-ink-soft mb-1">Service account key (JSON)</label>
-        {status.keySaved && (
-          <p className="text-xs text-ink-muted mb-1 [overflow-wrap:anywhere]" data-testid="drive-key-saved">
-            Saved: <strong className="text-ink">{status.clientEmail}</strong>. Paste a new key only to replace it.
-          </p>
-        )}
-        <textarea id="drive-key" rows={3} spellCheck={false} autoComplete="off" maxLength={12000} value={key} onChange={(e) => setKey(e.target.value)} placeholder={status.keySaved ? 'Saved (hidden)' : '{ "type": "service_account", … }'} className={`${field} font-mono text-xs`} />
-      </div>
+      {mode === 'oauth' ? (
+        <div className="space-y-3" data-testid="drive-oauth">
+          {status.connecting ? (
+            <div role="status" data-testid="drive-connect-code" className="rounded-2xl border border-gold bg-ivory p-3.5 space-y-2 text-xs text-ink">
+              <p>On your phone or computer, open <a className="font-semibold underline break-all" href={status.connecting.verificationUrl} target="_blank" rel="noopener noreferrer">{status.connecting.verificationUrl.replace(/^https:\/\//, '')}</a>, sign in with the Google account for the backups, and enter this code:</p>
+              <p className="font-mono text-2xl font-bold tracking-widest text-center select-all" data-testid="drive-user-code">{status.connecting.userCode}</p>
+              <p className="text-ink-soft flex items-center gap-1.5">
+                <Loader2 className="w-3.5 h-3.5 animate-spin" aria-hidden="true" /> Waiting for Google… The code works until {when(status.connecting.expiresAt)}.
+              </p>
+              <button type="button" onClick={() => void cancel()} className={lightButton}>Cancel</button>
+            </div>
+          ) : status.connected && !status.needsReconnect ? (
+            <p data-testid="drive-connected" className="text-xs text-ink-soft [overflow-wrap:anywhere]">
+              Connected{status.connectedAt ? ` on ${when(status.connectedAt)}` : ''}. Copies go to the folder <strong className="text-ink">{status.folderName}</strong> in your Google Drive (the shop sees only the files it made).
+            </p>
+          ) : null}
 
-      <div className="grid gap-3 sm:grid-cols-[1fr_8rem]">
-        <div className="min-w-0">
-          <label htmlFor="drive-folder" className="block text-xs font-semibold text-ink-soft mb-1">Drive folder link or id</label>
-          <input id="drive-folder" type="text" inputMode="url" autoComplete="off" maxLength={500} value={folder} onChange={(e) => setFolder(e.target.value)} placeholder="https://drive.google.com/drive/folders/…" className={field} />
+          {!status.connecting && (
+            <>
+              <div className="grid gap-3 sm:grid-cols-2">
+                <div className="min-w-0">
+                  <label htmlFor="drive-client-id" className={label}>OAuth client ID</label>
+                  <input id="drive-client-id" type="text" autoComplete="off" spellCheck={false} maxLength={200} value={clientId} onChange={(e) => setClientId(e.target.value)} placeholder="…apps.googleusercontent.com" className={`${field} font-mono text-xs`} />
+                </div>
+                <div className="min-w-0">
+                  <label htmlFor="drive-client-secret" className={label}>Client secret</label>
+                  <input id="drive-client-secret" type="password" autoComplete="off" spellCheck={false} maxLength={200} value={clientSecret} onChange={(e) => setClientSecret(e.target.value)} placeholder={status.oauthSecretSaved ? 'Saved (hidden)' : 'GOCSPX-…'} className={`${field} font-mono text-xs`} />
+                </div>
+              </div>
+              <div className="flex flex-wrap gap-2">
+                <button type="button" onClick={() => void connect()} disabled={Boolean(busy)} className={status.connected && !status.needsReconnect ? lightButton : darkButton}>
+                  {busy === 'connect' && <Loader2 className="w-4 h-4 animate-spin" aria-hidden="true" />}
+                  {status.connected ? 'Reconnect Google Drive' : 'Connect Google Drive'}
+                </button>
+                {status.connected && (
+                  <>
+                    <button type="button" onClick={() => { setDetailsOpen((x) => !x); setDetails(''); }} className={lightButton} aria-expanded={detailsOpen}>
+                      Copy restore details
+                    </button>
+                    <button type="button" onClick={() => void save(undefined, { disconnect: true, enabled: false })} disabled={Boolean(busy)} className={lightButton}>
+                      Disconnect
+                    </button>
+                  </>
+                )}
+              </div>
+            </>
+          )}
+
+          {detailsOpen && status.connected && (
+            <div className="rounded-2xl border border-line bg-ivory p-3.5 space-y-2.5 text-xs" data-testid="drive-restore-details">
+              <p className="text-ink-soft leading-relaxed">
+                What a new server needs to restore from your Drive. Keep it in your password manager, never in an email or chat: anyone with it can read the encrypted copies (they still need your passphrase).
+              </p>
+              {!details ? (
+                <div className="flex flex-wrap items-end gap-2">
+                  <div className="min-w-0 flex-1">
+                    <label htmlFor="drive-details-password" className={label}>Current password</label>
+                    <input id="drive-details-password" type="password" autoComplete="current-password" maxLength={256} value={password} onChange={(e) => setPassword(e.target.value)} className={field} />
+                  </div>
+                  <button type="button" onClick={(e) => void reveal(e)} disabled={!password || Boolean(busy)} className={darkButton}>
+                    {busy === 'details' && <Loader2 className="w-4 h-4 animate-spin" aria-hidden="true" />}
+                    Show
+                  </button>
+                </div>
+              ) : (
+                <>
+                  <pre className="font-mono text-[11px] bg-surface border border-line rounded-lg px-2.5 py-2 whitespace-pre-wrap [overflow-wrap:anywhere] text-ink" data-testid="drive-details-text">{details}</pre>
+                  <button type="button" onClick={() => void copyDetails()} className={lightButton}>
+                    <Copy className="w-4 h-4" aria-hidden="true" />
+                    {copied ? 'Copied' : 'Copy'}
+                  </button>
+                </>
+              )}
+            </div>
+          )}
         </div>
-        <div>
-          <label htmlFor="drive-keep" className="block text-xs font-semibold text-ink-soft mb-1">Copies to keep</label>
+      ) : (
+        <div className="space-y-3" data-testid="drive-service-account">
+          <div>
+            <label htmlFor="drive-key" className={label}>Service account key (JSON)</label>
+            {status.keySaved && (
+              <p className="text-xs text-ink-muted mb-1 [overflow-wrap:anywhere]" data-testid="drive-key-saved">
+                Saved: <strong className="text-ink">{status.clientEmail}</strong>. Paste a new key only to replace it.
+              </p>
+            )}
+            <textarea id="drive-key" rows={3} spellCheck={false} autoComplete="off" maxLength={12000} value={key} onChange={(e) => setKey(e.target.value)} placeholder={status.keySaved ? 'Saved (hidden)' : '{ "type": "service_account", … }'} className={`${field} font-mono text-xs`} />
+          </div>
+          <div className="min-w-0">
+            <label htmlFor="drive-folder" className={label}>Shared drive folder link or id</label>
+            <input id="drive-folder" type="text" inputMode="url" autoComplete="off" maxLength={500} value={folder} onChange={(e) => setFolder(e.target.value)} placeholder="https://drive.google.com/drive/folders/…" className={field} />
+          </div>
+        </div>
+      )}
+
+      <div className="grid gap-3 grid-cols-[1fr_auto] items-end">
+        <label className="flex items-center gap-2 text-sm font-semibold text-ink min-h-11">
+          <input type="checkbox" className="w-5 h-5 accent-current" checked={enabled} disabled={!status.passphraseSet && !enabled} onChange={(e) => setEnabled(e.target.checked)} />
+          Copy each backup to Google Drive
+        </label>
+        <div className="w-28">
+          <label htmlFor="drive-keep" className={label}>Copies to keep</label>
           <input id="drive-keep" type="number" min={1} max={365} step={1} value={keep} onChange={(e) => setKeep(e.target.value)} className={field} />
         </div>
       </div>
 
       <details className="text-xs text-ink-soft">
         <summary className="cursor-pointer font-semibold text-ink">How to set it up (10 minutes)</summary>
-        <ol className="list-decimal pl-5 mt-2 space-y-1 leading-relaxed">
-          <li>In console.cloud.google.com, make a project and switch on the Google Drive API.</li>
-          <li>IAM &amp; Admin → Service accounts → Create (no roles needed) → Keys → Add key → JSON: a file downloads.</li>
-          <li>In Google Drive, make a folder (in a shared drive with Google Workspace) and share it with the service account&rsquo;s email as Editor (Content manager in a shared drive).</li>
-          <li>Paste the whole JSON file and the folder&rsquo;s link here, press Test connection, then switch this on and Save.</li>
-        </ol>
+        {mode === 'oauth' ? (
+          <ol className="list-decimal pl-5 mt-2 space-y-1 leading-relaxed">
+            <li>In console.cloud.google.com, make a project and switch on the Google Drive API.</li>
+            <li>Google Auth Platform → Branding: app name &ldquo;Beautiful UAE Home backups&rdquo;, your Gmail as support email; Audience: External.</li>
+            <li>Audience → Publish app (&ldquo;In production&rdquo;): in Testing, Google cuts the connection off after 7 days.</li>
+            <li>Data access → Add scope <code>…/auth/drive.file</code> (not sensitive: no review needed).</li>
+            <li>Clients → Create client → &ldquo;TVs and Limited Input devices&rdquo;: copy its client ID and secret here.</li>
+            <li>Press Connect Google Drive and enter the code at google.com/device (Google may warn the app is unverified: Advanced → Go to …).</li>
+          </ol>
+        ) : (
+          <ol className="list-decimal pl-5 mt-2 space-y-1 leading-relaxed">
+            <li>In console.cloud.google.com, make a project and switch on the Google Drive API.</li>
+            <li>IAM &amp; Admin → Service accounts → Create (no roles needed) → Keys → Add key → JSON: a file downloads.</li>
+            <li>In a shared drive (Google Workspace), add the service account&rsquo;s email as Content manager and make a folder.</li>
+            <li>Paste the whole JSON file and the folder&rsquo;s link here, press Test connection, then switch this on and Save.</li>
+          </ol>
+        )}
       </details>
 
       {message && (
@@ -169,11 +376,11 @@ export function DriveBackupCard() {
           {busy === 'save' && <Loader2 className="w-4 h-4 animate-spin" aria-hidden="true" />}
           Save
         </button>
-        <button type="button" onClick={() => void test()} disabled={Boolean(busy)} className={lightButton}>
+        <button type="button" onClick={() => void test()} disabled={Boolean(busy) || !canTest} className={lightButton}>
           {busy === 'test' && <Loader2 className="w-4 h-4 animate-spin" aria-hidden="true" />}
           Test connection
         </button>
-        {status.keySaved && (
+        {mode === 'service_account' && status.keySaved && (
           <button type="button" onClick={() => void save(undefined, { serviceAccountKey: null, enabled: false })} disabled={Boolean(busy)} className={lightButton}>
             {busy === 'remove' && <Loader2 className="w-4 h-4 animate-spin" aria-hidden="true" />}
             Remove the key
