@@ -1,5 +1,20 @@
 # Changelog
 
+## BUH-02.14.00 — 2026-10-19 08:40 UTC · [#NN](https://github.com/cxsmtp/buh/pull/NN)
+
+- **Real Jeebly bookings.** Booking a courier now uses Jeebly's own API, exactly as documented and tested against Jeebly's demo system (create, label, tracking and cancel all passed). Before, the key labels and every booking field were wrong, so nothing ever reached Jeebly.
+- **Test first, then Live.** Test mode books in Jeebly's demo system with separate test keys. Live mode needs Jeebly's live address and a Sandbox check passed in the last 30 days. Every screen says plainly which mode is on, and test bookings never reach customers.
+- **Real labels.** "Print Jeebly label (PDF)" prints Jeebly's own label. The shop's packing slip has real, scannable barcodes, your own pickup details and the real contents, and test bookings are marked TEST.
+- **Live tracking.** Track Order shows Jeebly's latest status and events to the customer (no phone numbers, rider or proof photos). The hub has Refresh tracking, and cancelling an order also cancels its Jeebly booking.
+- **Enter tracking number.** A parcel booked in a courier's own portal can be given its tracking number on the order, and the customer sees it straight away.
+- **Weight per size.** Each size can carry its packed weight. The booking weight is worked out from the order plus packaging (200 g, changeable) and rounded up to whole kilos for Jeebly; a size with no weight is pointed out, never guessed.
+- **No invented details.** Made-up warehouse addresses, phone numbers, hubs and sample accounts are gone from bookings, labels and messages, and Eco Express no longer books against a demo server.
+- **Status.**
+  - **Benchmark:** BENCH
+  - **Tests:** TESTS
+  - **Dependency audit:** production 0 vulnerabilities; no new packages.
+  - **Security scan:** new admin routes (carrier label, carrier tracking, enter tracking number, Sandbox check, Live switch) check the session, size-cap and allow-list their input, and are audited. Carrier keys stay on the server and are blanked in backups. Real run against Jeebly's demo: create, label PDF, tracking and cancel passed (test AWBs JB115105, JB115106, both cancelled).
+
 ## BUH-02.13.00 — 2026-10-19 03:50 UTC · [#30](https://github.com/cxsmtp/buh/pull/30)
 
 - **Newer, slimmer server software.** The shop now runs on Node 24 (Node 20 is out of support), and npm, yarn and corepack are removed from the running shop, which only needs `node`. This clears the known holes Checkmarx found in the old base image.
