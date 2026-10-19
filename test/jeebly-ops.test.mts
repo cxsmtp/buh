@@ -137,3 +137,120 @@ test('the order routes cancel with Jeebly after the order is cancelled, and repo
   assert.ok(label.indexOf("auditOrThrow('courier.label_printed'") < label.indexOf('new Response('), 'audited before it is sent');
   assert.match(label, /'Content-Type': 'application\/pdf'/);
 });
+
+function newCod(): string {
+  const p = listProducts()[0];
+  const phone = `+97150${String(++n).padStart(7, '0')}`;
+  return orders.placeOrder({
+    idempotencyKey: `ops-${n}-${Date.now()}-abcdefgh`,
+    verificationToken: issuePhoneToken(phone),
+    customer: { fullName: 'Aisha Test', emirate: 'Dubai', area: 'Marina', streetAddress: 's', buildingVilla: 'b', flatVillaNo: '1' },
+    items: [{ productId: p.id, profileId: p.profiles[0].id, quantity: 1 }],
+    paymentMethod: 'cod',
+  }).order.id;
+}
+const cancels = () => mock.calls.filter((c) => c.path === 'cancel_shipment').length;
+
+test('review M4: cancelling an order whose booking got no answer says so and flags it (check the portal)', async () => {
+  mock.restore();
+  mock = installJeeblyMock({ create: () => new Response('<html>502</html>', { status: 502 }) });
+  const id = newCod();
+  const res = await dispatchOrder({ orderId: id, provider: 'jeebly', rebook: false, actor: 'owner@shop.test', weightKg: 1 });
+  assert.equal(res.body.uncertain, true);
+  assert.equal(orders.getOrder(id)!.courier.bookingState, 'uncertain');
+  orders.updateOrderByAdmin(id, { status: 'cancelled' }, 'owner@shop.test');
+  const r = await ops.cancelJeeblyBooking(orders.getOrder(id)!, 'owner@shop.test');
+  assert.equal(r.cancelled, false);
+  assert.equal(r.message, `This order's courier booking may exist: check the Jeebly portal for reference ${id} and cancel it there.`);
+  const o = orders.getOrder(id)!;
+  assert.equal(o.attention?.kind, 'booked_after_cancel');
+  assert.match(o.attention!.text, new RegExp(`check the Jeebly portal for reference ${id}`));
+  assert.ok(auditEntries().some((e) => e.action === 'courier.cancel' && e.details.orderId === id && e.details.reason === 'uncertain'));
+  assert.equal(cancels(), 0, 'no AWB to cancel at Jeebly');
+});
+
+test('review L3: two cancels at once (or again later, or from an older copy of the order) send one cancel to Jeebly', async () => {
+  const { id } = await booked();
+  orders.updateOrderByAdmin(id, { status: 'cancelled' }, 'owner@shop.test');
+  const [a, b] = await Promise.all([ops.cancelJeeblyBooking(orders.getOrder(id)!, 'owner@shop.test'), ops.cancelJeeblyBooking(orders.getOrder(id)!, 'owner@shop.test')]);
+  assert.equal(cancels(), 1);
+  assert.deepEqual([a.cancelled || b.cancelled, a.attempted && b.attempted], [true, false]);
+  await ops.cancelJeeblyBooking(orders.getOrder(id)!, 'owner@shop.test');
+  assert.equal(cancels(), 1, 'already cancelled with the carrier');
+  // An older copy of the order (a sandbox test booking keeps its AWB after a cancel) changes nothing.
+  const stale = orders.getOrder(id)!;
+  await ops.cancelJeeblyBooking({ ...stale, courier: { ...stale.courier, testKind: 'sandbox', simulated: true, carrierEnv: 'sandbox', status: 'Booked' } }, 'owner@shop.test');
+  assert.equal(cancels(), 1, 'the order as it is now decides');
+});
+
+test('review L5: a booking that lands after the order was cancelled is cancelled with Jeebly at once; the flag stays if Jeebly refuses', async () => {
+  for (const refuse of [false, true]) {
+    const id = newCod();
+    mock.restore();
+    mock = installJeeblyMock({
+      create: () => {
+        // The owner cancels while Jeebly is still booking it.
+        orders.updateOrderByAdmin(id, { status: 'cancelled' }, 'owner@shop.test');
+        return undefined;
+      },
+      ...(refuse ? { cancel: () => ({ status: 400, body: { success: 'false1', message: 'Shipment can not be Cancel' } }) } : {}),
+    });
+    const res = await dispatchOrder({ orderId: id, provider: 'jeebly', rebook: false, actor: 'owner@shop.test', weightKg: 1 });
+    assert.equal(res.body.success, true);
+    assert.equal(cancels(), 1, `${refuse}: cancelled with Jeebly at once`);
+    const o = orders.getOrder(id)!;
+    assert.ok(auditEntries().some((e) => e.action === 'courier.cancel' && e.details.orderId === id && e.details.cancelled === !refuse));
+    if (refuse) {
+      assert.equal(o.attention?.kind, 'booked_after_cancel', 'Jeebly refused: the flag stays');
+      assert.match(o.attention!.text, /Cancel it in the Jeebly portal/);
+    } else {
+      assert.equal(o.courier.status, 'Cancelled with the carrier');
+      assert.equal(o.attention, undefined, 'nothing left for the owner to do');
+    }
+  }
+});
+
+test('review L8: Track Order masks phones and emails in Jeebly\'s text; a failed lookup is not kept 5 minutes; the owner\'s refresh has its own budget', async () => {
+  const { id, awb } = await booked();
+  const order = orders.getOrder(id)!;
+  let fail = true;
+  mock.restore();
+  mock = installJeeblyMock({
+    track: () =>
+      fail
+        ? { status: 500, body: { success: 'false', message: 'down' } }
+        : {
+            status: 200,
+            body: { success: 'true', Tracking: { reference_no: awb, last_status: 'Out for delivery', events: [{ status: 'Out for delivery', desc: 'Rider will call 0501234567 or mail rider.ali@example.com', hub_name: 'DXB hub +971 50 765 4321', event_date_time: '2026-10-20T09:12:00Z' }] } },
+          },
+  });
+  assert.equal(await ops.customerTracking(order), undefined, 'Jeebly down');
+  fail = false;
+  const realNow = Date.now;
+  Date.now = () => realNow() + 60_000;
+  let shown;
+  try {
+    shown = await ops.customerTracking(order);
+  } finally {
+    Date.now = realNow;
+  }
+  assert.ok(shown, 'a minute later it is asked again');
+  const text = JSON.stringify(shown);
+  assert.doesNotMatch(text, /0501234567|765 4321|rider\.ali@example\.com/);
+  assert.match(text, /Out for delivery/);
+
+  // Customers have used up the shared budget: the owner's "Refresh tracking" still works.
+  const { rateLimit } = await import('@/lib/server/rateLimit');
+  for (let i = 0; i < 70; i++) rateLimit('jeebly:track', 60, 60_000);
+  const fresh = await ops.jeeblyTrackingFor(order, { fresh: true });
+  assert.ok(!('error' in fresh), JSON.stringify(fresh));
+});
+
+test('review M5/L6: the label route sends no CSP sandbox (Chrome\'s PDF viewer) and names the file by a plain AWB only (source)', () => {
+  const label = fs.readFileSync('src/app/api/admin/orders/[id]/carrier-label/route.ts', 'utf8');
+  const csp = label.match(/'Content-Security-Policy': "([^"]+)"/)![1];
+  assert.doesNotMatch(csp, /sandbox/);
+  assert.match(csp, /default-src 'none'/);
+  assert.match(label, /'X-Content-Type-Options': 'nosniff'/);
+  assert.match(label, /filename="\$\{AWB_PATTERN\.test\(res\.access\.awb\) \? res\.access\.awb : 'jeebly-label'\}\.pdf"/);
+});

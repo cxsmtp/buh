@@ -1,4 +1,5 @@
 import { redact } from './server/log';
+import { safeRequest, type SafeRequestInit, type SafeResponse } from './server/outbound';
 
 /**
  * Everything this shop knows about Jeebly's Scheduled API, in one place.
@@ -89,52 +90,103 @@ export function jeeblyHint(said: string): string {
 }
 
 export interface JeeblyCall {
-  /** False: no answer at all (network, timeout). */
+  /** False: no answer at all (network, timeout, also a reply cut off part way). */
   reached: boolean;
   status?: number;
   data?: unknown;
-  error?: string;
+  /** False: Jeebly answered, but not with JSON that could be read (or longer than the cap). */
+  readable?: boolean;
+  /** 'blocked': the address is not a public one, so nothing was sent. */
+  error?: 'timeout' | 'network' | 'blocked';
 }
+
+/** JSON replies are small (an AWB, a message, tracking events): anything longer is not read. */
+export const JEEBLY_JSON_MAX_BYTES = 256 * 1024;
+
+/**
+ * The tests' stand-in for Jeebly (test/fixtures/jeebly-mock.mjs) is a fetch-style function set
+ * here; otherwise every call goes through safeRequest (https only, public addresses only, checked
+ * at connect time, no redirects, capped and timed out).
+ */
+const MOCK_FETCH = Symbol.for('buh.jeebly.fetch');
+
+async function viaMock(mock: typeof fetch, url: string, init: SafeRequestInit): Promise<SafeResponse> {
+  const signal = AbortSignal.timeout(init.timeoutMs ?? 10_000);
+  const response = await mock(url, { method: init.method, headers: init.headers, body: init.body, redirect: 'manual', signal });
+  const max = init.maxBytes ?? JEEBLY_JSON_MAX_BYTES;
+  const chunks: Buffer[] = [];
+  let size = 0;
+  let truncated = false;
+  const reader = response.body?.getReader();
+  while (reader) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    if (size + value.length > max) {
+      chunks.push(Buffer.from(value.subarray(0, max - size)));
+      truncated = true;
+      await reader.cancel().catch(() => undefined);
+      break;
+    }
+    size += value.length;
+    chunks.push(Buffer.from(value));
+  }
+  return { status: response.status, ok: response.ok, headers: Object.fromEntries(response.headers), body: Buffer.concat(chunks), truncated };
+}
+
+function send(url: string, init: SafeRequestInit): Promise<SafeResponse> {
+  const mock = (globalThis as Record<symbol, unknown>)[MOCK_FETCH];
+  return typeof mock === 'function' ? viaMock(mock as typeof fetch, url, init) : safeRequest(url, init);
+}
+
+const why = (err: unknown): NonNullable<JeeblyCall['error']> => {
+  const e = err as { code?: string; name?: string };
+  if (e?.code === 'EBLOCKED') return 'blocked';
+  return e?.code === 'ETIMEDOUT' || e?.name === 'TimeoutError' ? 'timeout' : 'network';
+};
+
+const post = (keys: { apiKey: string; clientKey: string }, body: unknown) => ({
+  method: 'POST',
+  headers: { 'Content-Type': 'application/json', [JEEBLY_API.headers.apiKey]: keys.apiKey, [JEEBLY_API.headers.clientKey]: keys.clientKey },
+  body: JSON.stringify(body),
+});
 
 /** One JSON request to Jeebly (fixed paths; the base is the sandbox or the vetted live address). */
 export async function callJeebly(base: string, path: string, keys: { apiKey: string; clientKey: string }, body: unknown, timeoutMs = 15_000): Promise<JeeblyCall> {
+  let response: SafeResponse;
   try {
-    const response = await fetch(`${base}${path}`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', [JEEBLY_API.headers.apiKey]: keys.apiKey, [JEEBLY_API.headers.clientKey]: keys.clientKey },
-      body: JSON.stringify(body),
-      redirect: 'manual',
-      signal: AbortSignal.timeout(timeoutMs),
-    });
-    const data = await response.json().catch(() => null);
-    return { reached: true, status: response.status, data };
+    response = await send(`${base}${path}`, { ...post(keys, body), timeoutMs, maxBytes: JEEBLY_JSON_MAX_BYTES });
   } catch (err) {
-    return { reached: false, error: (err as Error).name === 'TimeoutError' ? 'timeout' : 'network' };
+    return { reached: false, error: why(err) };
   }
+  let data: unknown = null;
+  let readable = false;
+  if (!response.truncated) {
+    try {
+      data = JSON.parse(response.body.toString('utf8'));
+      readable = data !== null && typeof data === 'object';
+    } catch {
+      data = null;
+    }
+  }
+  return { reached: true, status: response.status, data, readable };
 }
 
 /**
  * The label PDF for an AWB (generate_shipment_label): only a reply that says application/pdf, starts
- * with %PDF- and stays under labelMaxBytes. Otherwise Jeebly's message (a JSON refusal) or why not.
+ * with %PDF- and stays under labelMaxBytes (reading stops just past it). Otherwise Jeebly's message
+ * (a JSON refusal) or why not.
  */
 export async function fetchJeeblyLabel(base: string, keys: { apiKey: string; clientKey: string }, awb: string): Promise<{ pdf: Buffer } | { error: string; status?: number }> {
-  let response: Response;
+  let response: SafeResponse;
   try {
-    response = await fetch(`${base}${JEEBLY_API.paths.label}`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', [JEEBLY_API.headers.apiKey]: keys.apiKey, [JEEBLY_API.headers.clientKey]: keys.clientKey },
-      body: JSON.stringify({ reference_number: awb }),
-      redirect: 'manual',
-      signal: AbortSignal.timeout(20_000),
-    });
+    response = await send(`${base}${JEEBLY_API.paths.label}`, { ...post(keys, { reference_number: awb }), timeoutMs: 20_000, maxBytes: JEEBLY_API.labelMaxBytes + 1 });
   } catch (err) {
-    return { error: `Could not reach Jeebly (${(err as Error).name === 'TimeoutError' ? 'timeout' : 'network'}).` };
+    return { error: `Could not reach Jeebly (${why(err)}).` };
   }
-  const type = response.headers.get('content-type') || '';
-  const length = Number(response.headers.get('content-length') || 0);
-  if (length > JEEBLY_API.labelMaxBytes) return { error: 'Jeebly sent a label that is too large.', status: response.status };
-  const bytes = Buffer.from(await response.arrayBuffer().catch(() => new ArrayBuffer(0)));
-  if (response.ok && /application\/pdf/i.test(type) && bytes.length <= JEEBLY_API.labelMaxBytes && bytes.subarray(0, 5).toString('latin1') === '%PDF-') {
+  const type = response.headers['content-type'] || '';
+  const bytes = response.body;
+  if (response.truncated || bytes.length > JEEBLY_API.labelMaxBytes) return { error: 'Jeebly sent a label that is too large.', status: response.status };
+  if (response.ok && /application\/pdf/i.test(type) && bytes.subarray(0, 5).toString('latin1') === '%PDF-') {
     return { pdf: bytes };
   }
   let said = '';

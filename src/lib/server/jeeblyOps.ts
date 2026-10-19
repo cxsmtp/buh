@@ -1,7 +1,8 @@
 import type { Order } from '@/types';
 import { callJeebly, fetchJeeblyLabel, JEEBLY_API, jeeblyOk, jeeblySaid, mapJeeblyTracking, type JeeblyTracking } from '@/lib/jeeblyApi';
 import { auditOrThrow } from './audit';
-import { noteCarrierCancel } from './orders';
+import { redact } from './log';
+import { getOrder, noteCarrierCancel } from './orders';
 import { rateLimit } from './rateLimit';
 import { getSettings } from './settings';
 
@@ -40,7 +41,11 @@ export async function jeeblyLabelFor(order: Order): Promise<{ pdf: Buffer; acces
   return 'pdf' in res ? { pdf: res.pdf, access } : { error: res.error };
 }
 
+const scrub = (text: string) => String(redact(text));
+
 const TRACK_TTL = 5 * 60_000;
+/** A failed lookup is kept only briefly, so a passing outage is not shown for 5 minutes. */
+const TRACK_FAIL_TTL = 30_000;
 const tracked = new Map<string, { at: number; value: JeeblyTracking | { error: string } }>();
 
 export function forgetTracking(awb: string): void {
@@ -57,8 +62,9 @@ export async function jeeblyTrackingFor(order: Order, { fresh = false } = {}): P
   if ('error' in access) return access;
   const key = `${access.env}:${access.awb}`;
   const hit = tracked.get(key);
-  if (hit && !fresh && Date.now() - hit.at < TRACK_TTL) return hit.value;
-  if (!rateLimit('jeebly:track', 60, 60_000).ok) return hit?.value ?? { error: 'Tracking is busy: try again in a minute.' };
+  if (hit && !fresh && Date.now() - hit.at < ('error' in hit.value ? TRACK_FAIL_TTL : TRACK_TTL)) return hit.value;
+  // The owner's "Refresh tracking" has its own budget: customers' lookups can't use it up.
+  if (!rateLimit(fresh ? 'jeebly:track:owner' : 'jeebly:track', 60, 60_000).ok) return hit?.value ?? { error: 'Tracking is busy: try again in a minute.' };
   const call = await callJeebly(access.base, JEEBLY_API.paths.track, access.keys, { reference_number: access.awb }, 10_000);
   const value: JeeblyTracking | { error: string } = !call.reached
     ? { error: `Could not reach Jeebly (${call.error}).` }
@@ -73,7 +79,8 @@ export async function customerTracking(order: Order): Promise<{ lastStatus: stri
   if (order.courier.simulated || order.courier.bookingState !== 'booked' || !jeeblyBooking(order)) return undefined;
   const t = await jeeblyTrackingFor(order);
   if ('error' in t) return undefined;
-  return { lastStatus: t.lastStatus, events: t.events.map(({ status, desc, hub, at }) => ({ status, desc, hub, at })) };
+  // Jeebly's free text may carry a phone or an email (a rider's, the customer's): masked.
+  return { lastStatus: scrub(t.lastStatus), events: t.events.map(({ status, desc, hub, at }) => ({ status: scrub(status), desc: scrub(desc), hub: scrub(hub), at })) };
 }
 
 /**
@@ -81,7 +88,30 @@ export async function customerTracking(order: Order): Promise<{ lastStatus: stri
  * before it is reported, and on the order. Never claims a cancel Jeebly did not confirm.
  */
 export async function cancelJeeblyBooking(order: Order, actor: string): Promise<{ attempted: boolean; cancelled: boolean; message: string }> {
-  if (!jeeblyBooking(order)) return { attempted: false, cancelled: false, message: '' };
+  const none = { attempted: false, cancelled: false, message: '' };
+  // The order as it is now: a second request (or the refund's webhook) finds it cancelled already.
+  order = getOrder(order.id) ?? order;
+  const c = order.courier;
+  // A live attempt Jeebly never answered: there may be a shipment, which only the portal can show.
+  if (c.provider === 'jeebly' && c.bookingState === 'uncertain') {
+    const message = `This order's courier booking may exist: check the Jeebly portal for reference ${order.id} and cancel it there.`;
+    auditOrThrow('courier.cancel', { by: actor, orderId: order.id, awb: c.awbNumber || null, cancelled: false, reason: 'uncertain' });
+    noteCarrierCancel(order.id, actor, false, message);
+    return { attempted: false, cancelled: false, message };
+  }
+  if (!jeeblyBooking(order) || c.status === 'Cancelled with the carrier' || cancelling.has(order.id)) return none;
+  cancelling.add(order.id);
+  try {
+    return await cancelNow(order, actor);
+  } finally {
+    cancelling.delete(order.id);
+  }
+}
+
+// One cancel per order at a time (two requests cancelling at once send it once).
+const cancelling = new Set<string>();
+
+async function cancelNow(order: Order, actor: string): Promise<{ attempted: boolean; cancelled: boolean; message: string }> {
   const access = jeeblyAccess(order);
   if ('error' in access) {
     const message = `The Jeebly booking ${order.courier.awbNumber} was not cancelled (${access.error}): cancel it in the Jeebly portal.`;
@@ -99,4 +129,24 @@ export async function cancelJeeblyBooking(order: Order, actor: string): Promise<
   noteCarrierCancel(order.id, actor, cancelled, message);
   forgetTracking(access.awb);
   return { attempted: true, cancelled, message };
+}
+
+/**
+ * A full refund made in Stripe's dashboard cancelled the order (its webhook): the Jeebly booking
+ * is cancelled too, as "stripe". Whatever happens is on the order: Jeebly's answer (audited), or
+ * the flag to cancel it in the portal. Never throws.
+ */
+export async function cancelJeeblyAfterRefund(orderId: string): Promise<void> {
+  const order = getOrder(orderId);
+  if (!order || order.status !== 'cancelled') return;
+  try {
+    await cancelJeeblyBooking(order, 'stripe');
+  } catch (err) {
+    console.warn('Jeebly cancel after a Stripe refund failed:', (err as Error).message);
+    try {
+      noteCarrierCancel(orderId, 'stripe', false, `Refunded in Stripe, but its Jeebly booking${order.courier.awbNumber ? ` (AWB ${order.courier.awbNumber})` : ''} could not be cancelled from here: check the Jeebly portal for reference ${orderId} and cancel it there.`);
+    } catch {
+      // The flag set with the refund stays.
+    }
+  }
 }

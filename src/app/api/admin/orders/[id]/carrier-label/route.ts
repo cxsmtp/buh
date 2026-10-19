@@ -2,12 +2,13 @@ import { auditOrThrow } from '@/lib/server/audit';
 import { enforceLimit, requireAdmin } from '@/lib/server/guard';
 import { handleRouteError, HttpError } from '@/lib/server/http';
 import { jeeblyLabelFor } from '@/lib/server/jeeblyOps';
-import { getOrder } from '@/lib/server/orders';
+import { AWB_PATTERN, getOrder } from '@/lib/server/orders';
 
 /**
  * Admin: the label PDF Jeebly makes for this order's booking, fetched with the keys on the server
  * (Jeebly gives no link) and passed on: only a real PDF (application/pdf, %PDF-, at most 2 MB),
- * never cached, sandboxed. Audited before it is sent.
+ * never cached, nothing else loaded (no `sandbox`: it stops Chrome's PDF viewer). Audited before it
+ * is sent. The file name is the AWB only when it is a plain one (an older order's may not be).
  */
 export async function GET(req: Request, { params }: { params: Promise<{ id: string }> }) {
   try {
@@ -23,10 +24,10 @@ export async function GET(req: Request, { params }: { params: Promise<{ id: stri
     return new Response(new Uint8Array(res.pdf), {
       headers: {
         'Content-Type': 'application/pdf',
-        'Content-Disposition': `inline; filename="${res.access.awb}.pdf"`,
+        'Content-Disposition': `inline; filename="${AWB_PATTERN.test(res.access.awb) ? res.access.awb : 'jeebly-label'}.pdf"`,
         'Cache-Control': 'private, no-store',
         'X-Content-Type-Options': 'nosniff',
-        'Content-Security-Policy': "default-src 'none'; object-src 'self'; sandbox",
+        'Content-Security-Policy': "default-src 'none'; object-src 'self'",
       },
     });
   } catch (err) {

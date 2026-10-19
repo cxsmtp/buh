@@ -2,7 +2,7 @@
  * A stand-in for Jeebly's Scheduled API with the exact replies seen from demo.jeebly.com on
  * 2026-10-19 (create, label PDF, track, cancel, and the error replies). Used by the unit tests
  * (installJeeblyMock) and, as a preload (`node --import ./test/fixtures/jeebly-mock.mjs`, with
- * JEEBLY_MOCK=1), by end-to-end tests: only *.jeebly.com requests are answered, all else passes.
+ * JEEBLY_MOCK=1), by end-to-end tests: only *.jeebly.com requests are answered, all else fails.
  */
 
 export const REPLIES = {
@@ -83,12 +83,17 @@ export function createJeeblyMock(script = {}) {
   return { calls, shipments, handler, setStatus: (awb, status) => shipments.get(awb) && (shipments.get(awb).status = status) };
 }
 
-/** Answer *.jeebly.com requests from the mock; everything else goes to the real fetch. */
+/**
+ * The shop sends Jeebly requests to a fetch-style function at this symbol when one is set
+ * (src/lib/jeeblyApi.ts), instead of the network. Exported for tests that script their own.
+ */
+export const JEEBLY_FETCH = Symbol.for('buh.jeebly.fetch');
+
+/** Answer *.jeebly.com requests from the mock; any other host fails as an unreachable one. */
 export function installJeeblyMock(script) {
-  const real = globalThis.__realFetch ?? globalThis.fetch;
-  globalThis.__realFetch = real;
+  const previous = globalThis[JEEBLY_FETCH];
   const mock = createJeeblyMock(script);
-  globalThis.fetch = async (url, init) => {
+  globalThis[JEEBLY_FETCH] = async (url, init) => {
     const host = (() => {
       try {
         return new URL(String(url)).hostname;
@@ -96,9 +101,16 @@ export function installJeeblyMock(script) {
         return '';
       }
     })();
-    return host === 'jeebly.com' || host.endsWith('.jeebly.com') ? mock.handler(url, init) : real(url, init);
+    if (host === 'jeebly.com' || host.endsWith('.jeebly.com')) return mock.handler(url, init);
+    throw new TypeError('fetch failed');
   };
-  return { ...mock, restore: () => (globalThis.fetch = real) };
+  return {
+    ...mock,
+    restore: () => {
+      if (previous === undefined) delete globalThis[JEEBLY_FETCH];
+      else globalThis[JEEBLY_FETCH] = previous;
+    },
+  };
 }
 
 // As a preload for the e2e server: on only with JEEBLY_MOCK=1.

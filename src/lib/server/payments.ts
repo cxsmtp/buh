@@ -16,6 +16,7 @@ import {
   markRefundFailed,
   noteRefundedSoFar,
   openCardOrders,
+  orderByPaymentRef,
   recordCardIntent,
   recordCardRefund,
   setCardLabel,
@@ -434,7 +435,7 @@ export const WEBHOOK_REFUSED = 'Invalid request.';
  * check out, or nothing happens. Each event id is applied once. A paid event must match the
  * order's intent, amount and currency. Returns what happened (for the log; Stripe only needs 200).
  */
-export function handleStripeWebhook(raw: Buffer, signature: string | null): { type: string; outcome: CardOutcome } {
+export function handleStripeWebhook(raw: Buffer, signature: string | null): { type: string; outcome: CardOutcome; carrierCancel?: string } {
   const secret = getSettings('payments').stripeWebhookSecret;
   if (!secret || !signature || signature.length > 2000) throw new HttpError(400, WEBHOOK_REFUSED);
   let event: Stripe.Event;
@@ -468,7 +469,13 @@ export function handleStripeWebhook(raw: Buffer, signature: string | null): { ty
       const charge = event.data.object;
       const pi = typeof charge.payment_intent === 'string' ? charge.payment_intent : charge.payment_intent?.id;
       if (!pi) return { type: event.type, outcome: 'unknown' };
-      return { type: event.type, outcome: markCardRefunded(pi, { amount: charge.amount, amountRefunded: charge.amount_refunded, refundId: charge.refunds?.data?.[0]?.id }, 'stripe', ref) };
+      const before = orderByPaymentRef(pi);
+      const outcome = markCardRefunded(pi, { amount: charge.amount, amountRefunded: charge.amount_refunded, refundId: charge.refunds?.data?.[0]?.id }, 'stripe', ref);
+      // Refunded in full in Stripe's dashboard, so the order was cancelled: its Jeebly booking is
+      // cancelled too, once Stripe is answered (the webhook route).
+      const now = outcome === 'refunded' && before ? getOrder(before.id) : undefined;
+      const carrierCancel = now && before!.status !== 'cancelled' && now.status === 'cancelled' && now.courier.provider === 'jeebly' ? now.id : undefined;
+      return { type: event.type, outcome, ...(carrierCancel ? { carrierCancel } : {}) };
     }
     // A refund that failed after Stripe took it (the card was closed, the bank sent it back).
     case 'charge.refund.updated':

@@ -174,15 +174,21 @@ export async function createJeeblyShipment(order: Order, settings: CourierSettin
 
   const where = live ? 'Jeebly' : "Jeebly's sandbox";
   const call = await callJeebly(live ? settings.liveBaseUrl! : JEEBLY_API.sandboxBase, JEEBLY_API.paths.create, keys, buildJeeblyPayload(order, settings, sender));
+  const okStatus = call.reached && call.status !== undefined && call.status >= 200 && call.status < 300;
+  // Live: no answer, a reply cut off or unreadable after a 2xx, or a server error (5xx) may all
+  // follow a shipment Jeebly made, so it is remembered as uncertain. A refused address sent nothing.
+  // Sandbox: nothing is recorded.
+  const unanswered = !call.reached ? call.error !== 'blocked' : (okStatus && !call.readable) || (call.status ?? 0) >= 500;
+  if (live && unanswered) {
+    console.warn('Jeebly API create: no clear answer', call.reached ? `HTTP ${call.status}` : call.error);
+    const what = call.reached ? `Jeebly's answer could not be read (HTTP ${call.status})` : 'No answer from Jeebly (timeout or network)';
+    return { ...failure(`${what}, so the shipment may or may not have been created. Check the Jeebly portal for reference ${order.id} before booking again.`, call.status, true), mode };
+  }
   if (!call.reached) {
     console.warn('Jeebly API connection attempt error:', call.error);
-    // Live: the shipment may exist, so it is remembered as uncertain. Sandbox: nothing is recorded.
-    return live
-      ? { ...failure(`No answer from Jeebly (timeout or network), so the shipment may or may not have been created. Check the Jeebly portal for reference ${order.id} before booking again.`, undefined, true), mode }
-      : { ...failure(`Could not reach ${where} (${call.error}). Nothing was booked.`), mode };
+    return { ...failure(`Could not reach ${where} (${call.error}). Nothing was booked.`), mode };
   }
   const said = jeeblySaid(call.data, [keys.apiKey, keys.clientKey]);
-  const okStatus = call.status !== undefined && call.status >= 200 && call.status < 300;
   if (!okStatus || !jeeblyOk(call.data)) {
     return { ...failure(`${where} did not book it (HTTP ${call.status})${said ? `. Jeebly said: "${said}"` : ''}. Nothing was booked.${jeeblyHint(said)}`, call.status), mode };
   }

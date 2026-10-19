@@ -3,6 +3,7 @@ import { createEchoShipment } from '@/lib/echo';
 import { BLOCKED_MESSAGE, carrierLabel, ECO_LIVE_NOT_CONNECTED } from '@/lib/courierMode';
 import type { Order } from '@/types';
 import { HttpError } from './http';
+import { cancelJeeblyBooking, jeeblyBooking } from './jeeblyOps';
 import { assertNotHeld, assertShipAllowed, getOrder, recordBooking } from './orders';
 import { contactEmail, getSettings } from './settings';
 
@@ -65,8 +66,10 @@ export async function dispatchOrder(input: {
 
   const previous = order.courier.bookingState;
   // A real booking is never made twice, and never replaced by a test one: a repeat returns it.
-  // (A test booking leaves bookingState unset, so it never blocks a real one.)
-  if (previous === 'booked' || (live && previous === 'uncertain' && !rebook)) {
+  // A live attempt Jeebly never answered stays in the way in any mode (a test booking never clears
+  // it), until the owner confirms it is not in the portal. (A test booking leaves bookingState
+  // as it was, so it never blocks a real one.)
+  if (previous === 'booked' || (previous === 'uncertain' && !rebook)) {
     if (previous === 'booked') {
       return {
         status: 200,
@@ -153,6 +156,13 @@ export async function dispatchOrder(input: {
       });
     } else if (live && result.uncertain) {
       saved = recordBooking(order.id, actor, { provider, bookingState: 'uncertain', status: 'Booking sent – no answer from the carrier' });
+    }
+    // Jeebly booked it after the order was cancelled or its card refunded (flagged by recordBooking):
+    // cancelled with Jeebly at once (audited); if Jeebly does not confirm, the flag stays.
+    const late = saved.status === 'cancelled' || (saved.paymentMethod === 'online_card' && saved.card?.state !== 'paid');
+    if (result.success && provider === 'jeebly' && late && saved.attention?.kind === 'booked_after_cancel' && jeeblyBooking(saved)) {
+      await cancelJeeblyBooking(saved, actor).catch((err) => console.warn('Jeebly cancel after a late booking failed:', (err as Error).message));
+      saved = getOrder(order.id) ?? saved;
     }
 
     const { rawResponse: _raw, ...safe } = result as typeof result & { rawResponse?: unknown };

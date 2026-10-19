@@ -136,15 +136,25 @@ function guardedLookup(
   });
 }
 
+/** What safeRequest got back: the status, the headers, and at most maxBytes of the body. */
+export interface SafeResponse {
+  status: number;
+  ok: boolean;
+  headers: Record<string, string>;
+  body: Buffer;
+  /** The reply was longer than maxBytes: reading stopped there (body holds what came before). */
+  truncated: boolean;
+}
+
+export type SafeRequestInit = { method?: string; headers?: Record<string, string>; body?: string; timeoutMs?: number; maxBytes?: number };
+
 /**
- * HTTPS request with a timeout, no redirects (a redirect could bounce a vetted
- * URL to an internal one), a cap on how much of the reply is read, and every
- * connection checked against the non-public address ranges above.
+ * HTTPS request with a timeout (for the whole exchange, the body included), no redirects (a
+ * redirect could bounce a vetted URL to an internal one), a cap on how much of the reply is read,
+ * and every connection checked against the non-public address ranges above. A timeout rejects
+ * (code ETIMEDOUT), also once the reply has started: a cut-off body is never taken as the answer.
  */
-export function safeFetch(
-  url: string | URL,
-  init: { method?: string; headers?: Record<string, string>; body?: string; timeoutMs?: number; maxBytes?: number } = {}
-): Promise<{ status: number; ok: boolean; data: unknown }> {
+export function safeRequest(url: string | URL, init: SafeRequestInit = {}): Promise<SafeResponse> {
   const { method = 'GET', headers = {}, body, timeoutMs = 10_000, maxBytes = 256 * 1024 } = init;
   const target = new URL(url);
   if (target.protocol !== 'https:') return Promise.reject(new Error('Only https is allowed.'));
@@ -154,6 +164,14 @@ export function safeFetch(
   }
 
   return new Promise((resolve, reject) => {
+    let settled = false;
+    const fail = (err: Error) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(deadline);
+      reject(err);
+    };
+    const timedOut = () => Object.assign(new Error('Request timed out.'), { code: 'ETIMEDOUT' });
     const req = https.request(
       target,
       {
@@ -165,39 +183,61 @@ export function safeFetch(
       (res) => {
         const chunks: Buffer[] = [];
         let size = 0;
+        let truncated = false;
+        const finish = () => {
+          if (settled) return;
+          if (!truncated && !res.complete) return fail(Object.assign(new Error('The reply was cut off.'), { code: 'ECONNRESET' }));
+          settled = true;
+          clearTimeout(deadline);
+          const status = res.statusCode ?? 0;
+          const head: Record<string, string> = {};
+          for (const [k, v] of Object.entries(res.headers)) if (v !== undefined) head[k.toLowerCase()] = Array.isArray(v) ? v.join(', ') : String(v);
+          resolve({ status, ok: status >= 200 && status < 300, headers: head, body: Buffer.concat(chunks), truncated });
+        };
         res.on('data', (chunk: Buffer) => {
-          size += chunk.length;
-          if (size > maxBytes) {
+          if (truncated) return;
+          if (size + chunk.length > maxBytes) {
+            chunks.push(chunk.subarray(0, maxBytes - size));
+            size = maxBytes;
+            truncated = true;
+            finish();
             res.destroy();
             return;
           }
+          size += chunk.length;
           chunks.push(chunk);
         });
-        const finish = () => {
-          const text = Buffer.concat(chunks).toString('utf8');
-          let data: unknown = null;
-          try {
-            data = text ? JSON.parse(text) : null;
-          } catch {
-            data = null;
-          }
-          const status = res.statusCode ?? 0;
-          resolve({ status, ok: status >= 200 && status < 300, data });
-        };
         res.on('end', finish);
         res.on('close', finish);
-        res.on('error', reject);
+        res.on('error', (err) => fail(err));
       }
     );
     // Overall deadline, not just idle time.
-    const deadline = setTimeout(() => req.destroy(Object.assign(new Error('Request timed out.'), { code: 'ETIMEDOUT' })), timeoutMs);
-    req.on('timeout', () => req.destroy(Object.assign(new Error('Request timed out.'), { code: 'ETIMEDOUT' })));
-    req.on('error', (err) => {
-      clearTimeout(deadline);
-      reject(err);
+    const deadline = setTimeout(() => {
+      fail(timedOut());
+      req.destroy(timedOut());
+    }, timeoutMs);
+    req.on('timeout', () => {
+      fail(timedOut());
+      req.destroy(timedOut());
     });
-    req.on('close', () => clearTimeout(deadline));
+    req.on('error', (err) => fail(err));
     if (body !== undefined) req.write(body);
     req.end();
   });
+}
+
+/** safeRequest with the reply read as JSON (null when it is not JSON, or longer than maxBytes). */
+export async function safeFetch(url: string | URL, init: SafeRequestInit = {}): Promise<{ status: number; ok: boolean; data: unknown }> {
+  const res = await safeRequest(url, init);
+  let data: unknown = null;
+  if (!res.truncated) {
+    try {
+      const text = res.body.toString('utf8');
+      data = text ? JSON.parse(text) : null;
+    } catch {
+      data = null;
+    }
+  }
+  return { status: res.status, ok: res.ok, data };
 }

@@ -11,16 +11,15 @@ import { createEchoShipment } from '@/lib/echo';
 import { JEEBLY_API, jeeblyCity, jeeblyLiveBase, jeeblyMobile, jeeblySaid, mapJeeblyTracking } from '@/lib/jeeblyApi';
 import { ECO_LIVE_NOT_CONNECTED } from '@/lib/courierMode';
 import type { CourierSettings, Order } from '@/types';
-import { installJeeblyMock, REPLIES } from './fixtures/jeebly-mock.mjs';
+import { installJeeblyMock, JEEBLY_FETCH, REPLIES } from './fixtures/jeebly-mock.mjs';
 
 type Mock = { calls: Array<{ host: string; path: string; headers: Record<string, string>; body: Record<string, unknown> }>; restore: () => void };
 let mock: Mock | null = null;
 const useMock = (script?: Record<string, unknown>) => (mock = installJeeblyMock(script) as Mock);
-const realFetch = globalThis.fetch;
 afterEach(() => {
   mock?.restore();
   mock = null;
-  globalThis.fetch = realFetch;
+  delete (globalThis as Record<symbol, unknown>)[JEEBLY_FETCH];
 });
 
 const order = {
@@ -145,9 +144,9 @@ test("Jeebly's refusals are shown verbatim (with what to do), and never become a
   assert.equal(noAwb.success, false);
   assert.equal(noAwb.uncertain, true, 'live success without an AWB: check the portal before booking again');
 
-  globalThis.fetch = (async () => {
+  (globalThis as Record<symbol, unknown>)[JEEBLY_FETCH] = async () => {
     throw new TypeError('fetch failed');
-  }) as typeof fetch;
+  };
   const down = await createJeeblyShipment(order, jeebly(true), sender);
   assert.equal(down.success, false);
   assert.equal(down.uncertain, true);
@@ -221,4 +220,97 @@ test("Jeebly's message: text only, at most 200 characters, keys, emails and phon
   assert.equal(jeeblySaid({ message: 'x'.repeat(500) }).length, 200);
   assert.equal(jeeblySaid({ message: { nested: true } }), '');
   assert.doesNotMatch(jeeblySaid({ message: 'call +971 50 123 4567 or a@b.com' }), /123 4567|a@b\.com/);
+});
+
+/** A reply body served in chunks on demand, counting what was read (to check reading stops at the cap). */
+function lazyBody(total: number, first = '', chunk = 64 * 1024) {
+  const seen = { bytes: 0 };
+  let sent = 0;
+  const stream = new ReadableStream<Uint8Array>({
+    pull(controller) {
+      if (sent >= total) return controller.close();
+      const head = sent === 0 ? Buffer.from(first) : Buffer.alloc(0);
+      const part = Buffer.concat([head, Buffer.alloc(Math.min(chunk, total - sent) - head.length, 0x20)]);
+      sent += part.length;
+      seen.bytes = sent;
+      controller.enqueue(new Uint8Array(part));
+    },
+  });
+  return { stream, seen };
+}
+
+test('review M2: in Live mode a reply that cannot be read, cut off, or a 5xx may be a shipment: uncertain (Sandbox: a plain failure)', async () => {
+  const replies: Array<[string, () => Response]> = [
+    ['200 HTML', () => new Response('<html>gateway</html>', { status: 200, headers: { 'content-type': 'text/html' } })],
+    ['200 empty', () => new Response('', { status: 200 })],
+    ['503 JSON', () => new Response(JSON.stringify({ success: 'false', message: 'busy' }), { status: 503 })],
+    ['502 HTML', () => new Response('<html>bad gateway</html>', { status: 502 })],
+    [
+      '200 cut off',
+      () =>
+        new Response(
+          new ReadableStream({
+            start(c) {
+              c.enqueue(new TextEncoder().encode('{"success":"true","AWB No":"JB1'));
+              c.error(new Error('socket hang up'));
+            },
+          }),
+          { status: 200 }
+        ),
+    ],
+  ];
+  for (const [what, reply] of replies) {
+    mock?.restore();
+    mock = installJeeblyMock({ create: reply }) as Mock;
+    const r = await createJeeblyShipment(order, jeebly(true), sender);
+    assert.equal(r.success, false, what);
+    assert.equal(r.uncertain, true, `${what}: live, may exist`);
+    assert.match(r.message, /may or may not have been created\. Check the Jeebly portal for reference BUH-261019-ABC123/, what);
+    const sb = await createJeeblyShipment(order, jeebly(false, sandboxKeys), sender);
+    assert.equal(sb.success, false, what);
+    assert.notEqual(sb.uncertain, true, `${what}: sandbox is a plain failure`);
+  }
+  // A clear refusal (4xx with Jeebly's message) is still a plain "not booked".
+  mock?.restore();
+  useMock({ create: () => REPLIES.invalidToken });
+  assert.notEqual((await createJeeblyShipment(order, jeebly(true), sender)).uncertain, true);
+});
+
+test('review L1: Jeebly calls go through the guarded HTTPS path (public addresses only), never plain fetch', async () => {
+  const realFetch = globalThis.fetch;
+  let plain = 0;
+  globalThis.fetch = (async () => {
+    plain++;
+    return new Response(JSON.stringify(REPLIES.created().body), { status: 200 });
+  }) as typeof fetch;
+  try {
+    const { callJeebly, fetchJeeblyLabel } = await import('@/lib/jeeblyApi');
+    const call = await callJeebly('https://127.0.0.1', JEEBLY_API.paths.track, keys, { reference_number: 'JB1' });
+    assert.deepEqual([call.reached, call.error], [false, 'blocked']);
+    assert.ok('error' in (await fetchJeeblyLabel('https://[::1]', keys, 'JB1')));
+    const r = await createJeeblyShipment(order, jeebly(true, { liveBaseUrl: 'https://10.0.0.1' }), sender);
+    assert.equal(r.success, false);
+    assert.notEqual(r.uncertain, true, 'a refused address sent nothing: not uncertain');
+    assert.equal(plain, 0, 'plain fetch was never used');
+  } finally {
+    globalThis.fetch = realFetch;
+  }
+  assert.doesNotMatch(fs.readFileSync('src/lib/jeeblyApi.ts', 'utf8'), /await fetch\(/);
+});
+
+test('review L2: the label stops reading just past 2 MB, JSON replies at 256 KB', async () => {
+  const { callJeebly, fetchJeeblyLabel } = await import('@/lib/jeeblyApi');
+  const big = lazyBody(20 * 1024 * 1024, '%PDF-1.4\n');
+  useMock({ label: () => new Response(big.stream, { status: 200, headers: { 'content-type': 'application/pdf' } }) });
+  const label = await fetchJeeblyLabel(LIVE, keys, 'JB115106');
+  assert.ok('error' in label && /too large/.test(label.error));
+  assert.ok(big.seen.bytes <= JEEBLY_API.labelMaxBytes + 2 * 64 * 1024, `read ${big.seen.bytes} bytes`);
+
+  const json = lazyBody(5 * 1024 * 1024, '{"success":"true","pad":"');
+  mock!.restore();
+  useMock({ track: () => new Response(json.stream, { status: 200 }) });
+  const call = await callJeebly(LIVE, JEEBLY_API.paths.track, keys, { reference_number: 'JB1' });
+  assert.equal(call.reached, true);
+  assert.equal(call.data ?? null, null, 'not read as JSON');
+  assert.ok(json.seen.bytes <= 256 * 1024 + 2 * 64 * 1024, `read ${json.seen.bytes} bytes`);
 });

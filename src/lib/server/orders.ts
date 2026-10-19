@@ -1352,6 +1352,8 @@ export function recordBooking(id: string, actor: string, booking: Partial<Order[
     const order = getOrder(id);
     if (!order) throw new HttpError(404, 'Order not found.');
     const { notes, ...courier } = booking;
+    // A test or practice result never clears what a live attempt left (an unanswered one may exist).
+    if (courier.bookingState === undefined) delete courier.bookingState;
     const cardState = order.paymentMethod === 'online_card' ? order.card?.state : undefined;
     const why = order.status === 'cancelled' ? 'the order was cancelled' : cardState !== undefined && cardState !== 'paid' ? `its card payment is ${cardState === 'refund_pending' || cardState === 'refunded' ? 'refunded' : 'not paid'}` : '';
     order.courier = { ...order.courier, ...courier };
@@ -1466,10 +1468,13 @@ export function noteCarrierCancel(id: string, actor: string, cancelled: boolean,
     const order = getOrder(id);
     if (!order) return;
     order.courier.status = cancelled ? 'Cancelled with the carrier' : 'Not cancelled with the carrier – cancel it in the portal';
+    const uncertain = order.courier.bookingState === 'uncertain';
     if (cancelled) order.courier.bookingState = undefined;
     writeOrder(order);
     logEvent(id, actor, 'carrier_cancel', { cancelled, awb: order.courier.awbNumber });
-    if (!cancelled && !order.courier.simulated) {
+    // Jeebly confirmed the cancel: a "booked after it was cancelled" flag has nothing left to do.
+    if (cancelled && order.attention?.kind === 'booked_after_cancel') getDb().prepare('UPDATE orders SET needs_attention = NULL WHERE id = ?').run(id);
+    if (!cancelled && (!order.courier.simulated || uncertain)) {
       setAttention(id, 'booked_after_cancel', message.slice(0, 400));
       flagged = true;
     }
@@ -1774,6 +1779,12 @@ export function recordCardRefund(orderId: string, refund: { id: string; status: 
   return result;
 }
 
+/** A real (or unanswered) Jeebly booking that cancelling the order must cancel with Jeebly too. */
+export function jeeblyToCancel(order: Order): boolean {
+  const c = order.courier;
+  return c.provider === 'jeebly' && ((c.bookingState === 'booked' && Boolean(c.awbNumber) && !c.simulated) || c.bookingState === 'uncertain');
+}
+
 /**
  * Stripe says a charge was refunded (its webhook; also refunds made in the Stripe dashboard).
  * A full refund marks the order refunded, once; a partial one is only noted (the shop refunds in full).
@@ -1806,6 +1817,11 @@ export function markCardRefunded(ref: string, charge: { amount: number; amountRe
       releaseStock(order, 'cancelled');
       order.status = 'cancelled';
       writeOrder(order);
+      // Its Jeebly booking is cancelled with Jeebly next (once Stripe is answered: the webhook
+      // route), flagged until Jeebly confirms, so a cancel that never runs is not missed.
+      if (jeeblyToCancel(order)) {
+        setAttention(order.id, 'booked_after_cancel', `Refunded in Stripe, so the order was cancelled: its Jeebly booking${order.courier.awbNumber ? ` (AWB ${order.courier.awbNumber})` : ''} is being cancelled with Jeebly. If this note stays, check the Jeebly portal for reference ${order.id} and cancel it there.`);
+      }
     }
     logEvent(order.id, actor, 'card_refunded', { amount: aed(charge.amountRefunded) });
     auditOrThrow('payment.refunded', { orderId: order.id, ref, amountFils: charge.amountRefunded, via: actor, ...(event ? { event: event.id } : {}) });

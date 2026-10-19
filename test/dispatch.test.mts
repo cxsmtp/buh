@@ -14,8 +14,9 @@ let carrierCalls = 0;
 let mode: 'ok' | 'down' | 'reject' = 'ok';
 let lastKey = '';
 let lastUrl = '';
-const realFetch = globalThis.fetch;
-globalThis.fetch = (async (url: unknown, init?: RequestInit) => {
+// The shop's Jeebly calls go to the function at this symbol when one is set (src/lib/jeeblyApi.ts).
+const JEEBLY_FETCH = Symbol.for('buh.jeebly.fetch');
+(globalThis as Record<symbol, unknown>)[JEEBLY_FETCH] = (async (url: unknown, init?: RequestInit) => {
   carrierCalls++;
   lastUrl = String(url);
   lastKey = String((init?.headers as Record<string, string>)?.['X-API-KEY'] ?? '');
@@ -26,9 +27,6 @@ globalThis.fetch = (async (url: unknown, init?: RequestInit) => {
 }) as typeof fetch;
 afterEach(() => {
   mode = 'ok';
-});
-process.on('exit', () => {
-  globalThis.fetch = realFetch;
 });
 
 let phoneN = 1000;
@@ -219,4 +217,33 @@ test('cancelled orders cannot be booked; unknown orders are refused', async () =
   await assert.rejects(book(id), (e: { status?: number }) => e.status === 409);
   await assert.rejects(book('BUH-000000-NOPE00'), (e: { status?: number }) => e.status === 404);
   assert.ok(getSettings('courier'));
+});
+
+test('review M1: a test booking never wipes an unanswered live attempt, so a second live booking still needs the confirm', async () => {
+  await live(true);
+  carrierCalls = 0;
+  const id = newOrder();
+  mode = 'down';
+  assert.equal((await book(id)).body.uncertain, true);
+  assert.equal(getOrder(id)!.courier.bookingState, 'uncertain');
+  mode = 'ok';
+
+  // Switched to Test mode: still asked first, in any mode.
+  await live(false);
+  const asked = await book(id, false, true);
+  assert.equal(asked.status, 409);
+  assert.equal(asked.body.needsConfirm, true);
+  assert.equal(carrierCalls, 1, 'nothing sent');
+  // Confirmed: the test booking is made, but the unanswered live attempt is still remembered.
+  const test = await book(id, true, true);
+  assert.equal(test.status, 200);
+  assert.equal(test.body.isSimulated, true);
+  assert.equal(getOrder(id)!.courier.bookingState, 'uncertain', 'not overwritten by the test result');
+
+  // Back to Live: no second real booking without the owner's confirm.
+  await live(true);
+  const again = await book(id);
+  assert.equal(again.status, 409);
+  assert.equal(again.body.needsConfirm, true);
+  assert.equal(carrierCalls, 2, 'only the sandbox test was sent since');
 });

@@ -3,6 +3,7 @@ import { clientIp, handleRouteError, HttpError, json, readRawBody } from '@/lib/
 import { logEvent } from '@/lib/server/log';
 import { fillPaymentLabel, handleStripeWebhook, WEBHOOK_MAX_BYTES, WEBHOOK_REFUSED } from '@/lib/server/payments';
 import { rateLimit } from '@/lib/server/rateLimit';
+import { cancelJeeblyAfterRefund } from '@/lib/server/jeeblyOps';
 
 /**
  * Stripe's webhook (Settings → Payments shows this address to paste into Stripe). Public by
@@ -19,7 +20,7 @@ export async function POST(req: Request) {
       return json({ received: false, message: 'Too many requests.' }, 429, { 'Retry-After': '60' });
     }
     const raw = await readRawBody(req, WEBHOOK_MAX_BYTES, new HttpError(400, WEBHOOK_REFUSED));
-    const { type, outcome } = handleStripeWebhook(raw, req.headers.get('stripe-signature'));
+    const { type, outcome, carrierCancel } = handleStripeWebhook(raw, req.headers.get('stripe-signature'));
     if (outcome === 'mismatch') logEvent('error', 'stripe_webhook_mismatch', { type });
     else logEvent('info', 'stripe_webhook', { type, outcome });
     if (type === 'payment_intent.succeeded' && outcome === 'paid') {
@@ -31,6 +32,14 @@ export async function POST(req: Request) {
         } catch {
           void fillPaymentLabel(orderId); // outside a request (called directly): just start it
         }
+      }
+    }
+    if (carrierCancel) {
+      // Refunded in Stripe's dashboard: the order's Jeebly booking is cancelled too (audited), after answering.
+      try {
+        after(() => cancelJeeblyAfterRefund(carrierCancel));
+      } catch {
+        void cancelJeeblyAfterRefund(carrierCancel);
       }
     }
     return json({ received: true });

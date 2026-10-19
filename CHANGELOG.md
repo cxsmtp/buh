@@ -9,6 +9,7 @@
 - **Enter tracking number.** A parcel booked in a courier's own portal can be given its tracking number on the order, and the customer sees it straight away.
 - **Weight per size.** Each size can carry its packed weight. The booking weight is worked out from the order plus packaging (200 g, changeable) and rounded up to whole kilos for Jeebly; a size with no weight is pointed out, never guessed.
 - **No invented details.** Made-up warehouse addresses, phone numbers, hubs and sample accounts are gone from bookings, labels and messages, and Eco Express no longer books against a demo server.
+- **Already in Live mode?** Add Jeebly's live address in Couriers; bookings wait for it.
 - **Status.**
   - **Benchmark:** BENCH
   - **Tests:** TESTS

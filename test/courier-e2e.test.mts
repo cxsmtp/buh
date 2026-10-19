@@ -218,6 +218,41 @@ test("a live Jeebly booking: Jeebly's AWB, its label PDF through the hub, tracki
   await goLive(false);
 });
 
+test('review M5: the Jeebly label opens in Chromium (200, application/pdf, nosniff, no CSP sandbox, which stops its PDF viewer)', { skip: skipBrowser }, async (t) => {
+  await goLive(true);
+  const { id } = await confirmedOrder();
+  const res = await api('POST', '/api/courier/dispatch', { orderId: id, provider: 'jeebly', shipUnconfirmed: true, weightKg: 1 });
+  assert.equal(res.status, 200, await res.clone().text());
+  const awb = (await res.json()).awbNumber as string;
+  const browser = await pw!.chromium.launch();
+  try {
+    const context = await browser.newContext();
+    const url = new URL(server.base);
+    await context.addCookies(
+      [server.door, cookie].map((c) => {
+        const [name, ...v] = c.split('=');
+        return { name, value: v.join('='), domain: url.hostname, path: '/' };
+      })
+    );
+    const page = await context.newPage();
+    // Headless Chromium has no PDF viewer: it may hand the PDF over as a download, after the response.
+    const seen = page.waitForResponse((r) => r.url().endsWith(`/api/admin/orders/${id}/carrier-label`));
+    await page.goto(`${server.base}/api/admin/orders/${id}/carrier-label`).catch(() => null);
+    const response = await seen;
+    const h = await response.allHeaders();
+    assert.equal(response.status(), 200);
+    assert.equal(h['content-type'], 'application/pdf');
+    assert.equal(h['x-content-type-options'], 'nosniff');
+    assert.equal(h['content-disposition'], `inline; filename="${awb}.pdf"`);
+    assert.match(h['content-security-policy'], /default-src 'none'/);
+    assert.doesNotMatch(h['content-security-policy'], /sandbox/);
+    t.diagnostic(`content-security-policy: ${h['content-security-policy']}`);
+  } finally {
+    await browser.close();
+    await goLive(false);
+  }
+});
+
 async function overflow(page: import('playwright').Page): Promise<string[]> {
   return page.evaluate(() => {
     const out: string[] = [];
