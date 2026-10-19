@@ -150,7 +150,7 @@ On the server (this replaces the live data; the current data is kept aside in `r
 
 Then sign in with the new one-time password from `docker compose logs app-blue` at your admin link (the backup keeps it; a backup from before BUH-02.08 prints a new one in the log; if you changed the link after the backup, make a new one with `docker compose exec app-blue node scripts/admin-link.mjs --new`), and re-enter the courier and SMS keys. Restored passkeys are switched off and old recovery codes no longer work (the backup may be older than a passkey you removed): follow the banner in the Admin Hub to keep your passkeys and create new codes. Keys and the admin account are deliberately not in backups.
 
-To check a backup on your own computer (Node 20+, in a checkout of this repository after `npm ci`):
+To check a backup on your own computer (Node 24, in a checkout of this repository after `npm ci`):
 
 ```bash
 BACKUP_PASSPHRASE='your passphrase' node scripts/restore-backup.mjs buh-backup-….tar.gz.enc ./restored
@@ -522,7 +522,7 @@ Day to day: Settings → Versions in the Admin Hub; the commands in the section 
 
 Only if you cannot use Docker.
 
-1. Install Node 20 and the build tools for the SQLite module:
+1. Install Node 24 (LTS) and the build tools for the SQLite module:
    ```bash
    apt install -y build-essential python3
    ```

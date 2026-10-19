@@ -92,7 +92,7 @@ jobs:
           docker rm -f buh-test
 
   helpers:
-    # The updater and the proxy: small, built on bases pinned by digest (docker:28.5.2-cli, caddy:2.8.4-alpine).
+    # The updater and the proxy: small, built on bases pinned by digest (alpine:3.24 with the docker 29.9.1 CLI, caddy:2.11.7-alpine).
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:

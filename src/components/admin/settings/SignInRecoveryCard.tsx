@@ -287,6 +287,8 @@ function RecoveryCodesSection() {
       setStatus({ ok: false, text: 'The print window was blocked: use Download instead, then print the file.' });
       return;
     }
+    // A blank page of our own: it gets no handle back to the hub.
+    w.opener = null;
     const pre = w.document.createElement('pre');
     pre.style.font = '16px/1.6 monospace';
     pre.textContent = asText(codes);

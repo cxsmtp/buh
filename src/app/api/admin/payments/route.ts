@@ -1,7 +1,7 @@
 import { audit } from '@/lib/server/audit';
 import { requireAdmin } from '@/lib/server/guard';
 import { allowFields, handleRouteError, HttpError, json, readJsonBody } from '@/lib/server/http';
-import { checkStripeAccount, registerPaymentDomain, shopDomain } from '@/lib/server/payments';
+import { checkStripeAccount, hostOrPlaceholder, registerPaymentDomain, shopDomain } from '@/lib/server/payments';
 import { appUrl } from '@/lib/server/runtimeConfig';
 import { getSettings, stripeMode } from '@/lib/server/settings';
 
@@ -10,7 +10,7 @@ const EVENTS = ['payment_intent.succeeded', 'payment_intent.payment_failed', 'pa
 
 /** Where Stripe should send its webhook: this shop's own address. */
 function webhookUrl(req: Request): string {
-  const base = appUrl() || `https://${(req.headers.get('host') || 'your-domain').split(',')[0].trim()}`;
+  const base = appUrl() || `https://${hostOrPlaceholder(req.headers.get('host'))}`;
   return `${base.replace(/\/+$/, '')}/api/stripe/webhook`;
 }
 

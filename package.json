@@ -1,6 +1,6 @@
 {
   "name": "buhome-uae",
-  "version": "2.12.0",
+  "version": "2.13.0",
   "private": true,
   "scripts": {
     "dev": "next dev",
@@ -50,6 +50,7 @@
     "typescript": "^5"
   },
   "overrides": {
-    "@grpc/grpc-js": "1.13.6"
+    "@grpc/grpc-js": "1.13.6",
+    "debug": "4.4.3"
   }
 }

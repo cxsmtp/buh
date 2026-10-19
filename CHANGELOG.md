@@ -1,5 +1,18 @@
 # Changelog
 
+## BUH-02.13.00 — 2026-10-19 03:50 UTC · [#30](https://github.com/cxsmtp/buh/pull/30)
+
+- **Newer, slimmer server software.** The shop now runs on Node 24 (Node 20 is out of support), and npm, yarn and corepack are removed from the running shop, which only needs `node`. This clears the known holes Checkmarx found in the old base image.
+- **Updater and HTTPS proxy refreshed.** The updater carries only the container command it uses (docker CLI 29.9.1 on Alpine 3.24), and the proxy is Caddy 2.11.7 without curl. Both now report their own health.
+- **No sample courier keys in the hub.** Leftover example Jeebly and Eco Express keys were removed from the Admin Hub's page code.
+- **Safer receipt links.** Links to bank-transfer receipts open only this shop's own pages or http(s) addresses, the same on the server and in the browser.
+- **Stripe webhook address shown safely.** Settings → Payments only builds the webhook address from a plain host name, otherwise it shows "your-domain".
+- **Status.**
+  - **Benchmark:** 3 alternating rounds, 0 failed requests. Storefront branch 915 / 839 / 908 req/s vs main 838 / 940 / 943; serviceability API branch 681 / 619 / 718 vs main 717 / 761 / 791; catalogue API branch 819 / 803 / 778 vs main 805 / 833 / 874. No code on these paths changed. The branch's slightly slower rounds coincided with another build and test run on the same machine (load average up to 6.9), so they are noise.
+  - **Tests:** 740 passed, 0 failed (unit and end-to-end, Node 22). Node 24, the image's version, was checked separately (698 of 698 before the latest merges).
+  - **Dependency audit:** production 0 vulnerabilities; dev-only `debug` raised to 4.4.3.
+  - **Security scan:** Checkmarx Fusion Hub scan 6324d8fd (329 findings) triaged: images, the sample keys and 2 code findings fixed, with 8 new tests that fail before and pass after. The remaining ones are test fixtures, by-design behaviour or dev tools with no fixed version, listed for marking Not exploitable. The rescan follows the merge.
+
 ## BUH-02.12.00 — 2026-10-19 03:08 UTC · [#29](https://github.com/cxsmtp/buh/pull/29)
 
 - **Four luxury looks, each light and dark.** Settings → Look: Ivory & Gold (today's look, unchanged in light), Noir & Champagne, Pearl & Emerald and Sand & Rose, each with a matching dark version.
