@@ -24,7 +24,7 @@ export function AdminMoneyTab({ phone }: { phone: boolean }) {
             ['audit', 'Audit log'],
           ] as Array<[Section, string]>
         ).map(([id, label]) => (
-          <button key={id} type="button" aria-pressed={section === id} onClick={() => setSection(id)} className={`min-h-11 rounded-xl text-sm font-semibold ${section === id ? 'bg-ink text-white' : 'text-ink-soft hover:bg-sand'}`}>
+          <button key={id} type="button" aria-pressed={section === id} onClick={() => setSection(id)} className={`min-h-11 rounded-xl text-sm font-semibold ${section === id ? 'bg-ink text-paper' : 'text-ink-soft hover:bg-sand'}`}>
             {label}
           </button>
         ))}

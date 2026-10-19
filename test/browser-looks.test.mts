@@ -4,6 +4,8 @@
  * sideways scroll and no white or black surfaces left in dark; the look arrives with the page
  * (/look.css, no flash, no script); a festival's accent shows, lifted, on dark; the owner switches
  * looks and switches back from the hub; and the storefront carries none of it beyond the stylesheet.
+ * The screens added since (test/newer-screens.mts: card option, confirmation, /pay, order panels,
+ * Money, Settings → Phone check, Payments and Look) are walked the same way.
  */
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
@@ -14,6 +16,8 @@ import { PALETTE } from '@/lib/design/tokens';
 import { FESTIVALS } from '@/lib/festivals/catalog';
 import { hasBuild, startServer, type RunningServer } from './server.mjs';
 import { openAdminSection } from './helpers.mjs';
+import { prepareNewerScreens, walkNewerScreens, type NewerScreens } from './newer-screens.mjs';
+import { startStripeMock, type StripeMock } from './stripe-mock.mjs';
 
 type PW = typeof import('playwright');
 const pw: PW | null = hasBuild ? await import('playwright').catch(() => null) : null;
@@ -23,11 +27,14 @@ type Page = import('playwright').Page;
 let server: RunningServer;
 let browser: import('playwright').Browser;
 let cookie = '';
+let stripe: StripeMock;
+let newer: NewerScreens;
 const h = () => ({ 'content-type': 'application/json', origin: server.base, cookie });
 
 before(async () => {
   if (skip) return;
-  server = await startServer();
+  stripe = await startStripeMock();
+  server = await startServer({ BUH_TEST_STRIPE_API: stripe.url, CARD_SWEEP_DISABLED: '1' });
   browser = await pw!.chromium.launch();
   const j = { 'content-type': 'application/json', origin: server.base };
   await fetch(`${server.base}/api/admin/login`, { method: 'POST', headers: j, body: JSON.stringify({ email: 'x@y.z', password: 'x' }) });
@@ -37,10 +44,12 @@ before(async () => {
   const first = (login.headers.get('set-cookie') || '').split(';')[0];
   const changed = await fetch(`${server.base}/api/admin/password`, { method: 'POST', headers: { ...j, cookie: first }, body: JSON.stringify({ currentPassword: once, newPassword: 'Looks-Owner-Pass-1' }) });
   cookie = (changed.headers.get('set-cookie') || '').split(';')[0];
+  newer = await prepareNewerScreens(server, cookie);
 });
 after(async () => {
   await browser?.close();
   server?.stop();
+  await stripe?.close();
 });
 
 async function setLook(preset: string, mode: string) {
@@ -175,6 +184,33 @@ for (const [preset, mode] of [['ivory-gold', 'system'], ['noir-champagne', 'syst
       problems.push(...(await walk('dark', width, rgb(LOOK_PRESETS[preset].dark.colors.ivory))));
     }
     await setLook('ivory-gold', 'system');
+    assert.deepEqual(problems, []);
+  });
+}
+
+const NEWER_RUNS: Array<{ preset: keyof typeof LOOK_PRESETS; colorScheme: 'light' | 'dark'; width: number }> = [
+  { preset: 'ivory-gold', colorScheme: 'light', width: 375 },
+  { preset: 'ivory-gold', colorScheme: 'dark', width: 375 },
+  { preset: 'ivory-gold', colorScheme: 'dark', width: 1280 },
+  { preset: 'noir-champagne', colorScheme: 'dark', width: 375 },
+  { preset: 'pearl-emerald', colorScheme: 'dark', width: 1280 },
+];
+const SHOTS = process.env.LOOKS_SCREENSHOTS;
+for (const { preset, colorScheme, width } of NEWER_RUNS) {
+  test(`${preset} ${colorScheme} at ${width} px: the newer screens (card option, confirmation, /pay, order panels, Money, Phone check, Payments, Look) wear the look`, { skip }, async () => {
+    await setLook(preset, 'system');
+    const problems: string[] = [];
+    try {
+      await walkNewerScreens(browser, server, cookie, newer, colorScheme, width, async (page, where) => {
+        problems.push(...(await check(page, `${where} ${colorScheme} ${width}`, rgb(LOOK_PRESETS[preset][colorScheme].colors.ivory))));
+        if (SHOTS) {
+          fs.mkdirSync(SHOTS, { recursive: true });
+          await page.screenshot({ path: path.join(SHOTS, `${preset}-${colorScheme}-${width}-${where.replace(/[^A-Za-z0-9]+/g, '-').replace(/^-|-$/g, '')}.png`) });
+        }
+      });
+    } finally {
+      await setLook('ivory-gold', 'system');
+    }
     assert.deepEqual(problems, []);
   });
 }

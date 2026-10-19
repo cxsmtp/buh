@@ -3,12 +3,17 @@
  * dark mode (a phone or laptop set to dark mode once made labels invisible on white cards),
  * at phone and desktop width. Covers the shop (its filter sheet, filtered view and search), the
  * "Install the app" offer, a product and its full-screen photo, the bag, checkout, the chat, the
- * admin sign-in, the offline page and every Admin Hub tab and settings section.
+ * admin sign-in, the offline page and every Admin Hub tab and settings section; and the screens
+ * added since (test/newer-screens.mts): checkout's Card option, the confirmation, the /pay page,
+ * order cards with the WhatsApp and bank-transfer panels, Money (Expenses, Reports, Audit log) and
+ * Settings → Phone check, Payments and Look, in Ivory & Gold light and dark and other looks in dark.
  */
 import assert from 'node:assert/strict';
 import { after, before, test } from 'node:test';
 import { hasBuild, startServer, type RunningServer } from './server.mjs';
 import { openAdminSection } from './helpers.mjs';
+import { prepareNewerScreens, walkNewerScreens, type NewerScreens } from './newer-screens.mjs';
+import { startStripeMock, type StripeMock } from './stripe-mock.mjs';
 
 type PW = typeof import('playwright');
 const pw: PW | null = hasBuild ? await import('playwright').catch(() => null) : null;
@@ -16,10 +21,13 @@ const skip = !pw;
 let server: RunningServer;
 let browser: import('playwright').Browser;
 let cookie = '';
+let stripe: StripeMock;
+let newer: NewerScreens;
 
 before(async () => {
   if (skip) return;
-  server = await startServer();
+  stripe = await startStripeMock();
+  server = await startServer({ BUH_TEST_STRIPE_API: stripe.url, CARD_SWEEP_DISABLED: '1' });
   browser = await pw!.chromium.launch();
   const h = { 'content-type': 'application/json', origin: server.base };
   await fetch(`${server.base}/api/admin/login`, { method: 'POST', headers: h, body: JSON.stringify({ email: 'x@y.z', password: 'x' }) });
@@ -29,10 +37,12 @@ before(async () => {
   const first = (login.headers.get('set-cookie') || '').split(';')[0];
   const changed = await fetch(`${server.base}/api/admin/password`, { method: 'POST', headers: { ...h, cookie: first }, body: JSON.stringify({ currentPassword: once, newPassword: 'Contrast-Owner-Pass-1' }) });
   cookie = (changed.headers.get('set-cookie') || '').split(';')[0];
+  newer = await prepareNewerScreens(server, cookie);
 });
 after(async () => {
   await browser?.close();
   server?.stop();
+  await stripe?.close();
 });
 
 /**
@@ -308,6 +318,31 @@ for (const preset of ['noir-champagne', 'pearl-emerald', 'sand-rose']) {
       }
     });
   }
+}
+
+// The screens added since looks were first built: Ivory & Gold light and dark at both widths, and
+// other looks in dark.
+const NEWER_RUNS: Array<{ preset: string; colorScheme: 'light' | 'dark'; width: number }> = [
+  { preset: 'ivory-gold', colorScheme: 'light', width: 375 },
+  { preset: 'ivory-gold', colorScheme: 'light', width: 1280 },
+  { preset: 'ivory-gold', colorScheme: 'dark', width: 375 },
+  { preset: 'ivory-gold', colorScheme: 'dark', width: 1280 },
+  { preset: 'noir-champagne', colorScheme: 'dark', width: 375 },
+  { preset: 'sand-rose', colorScheme: 'dark', width: 1280 },
+];
+for (const { preset, colorScheme, width } of NEWER_RUNS) {
+  test(`newer screens are readable in ${preset} (${colorScheme} mode, ${width} px): card option, confirmation, /pay, order panels, Money, Phone check, Payments, Look`, { skip }, async () => {
+    await setLook(preset);
+    const problems: string[] = [];
+    try {
+      await walkNewerScreens(browser, server, cookie, newer, colorScheme, width, async (page, where) => {
+        problems.push(...(await lowContrast(page, where)));
+      });
+    } finally {
+      await setLook('ivory-gold');
+    }
+    assert.deepEqual(problems, [], `${problems.length} hard-to-read texts`);
+  });
 }
 
 // Every festival look on the shop (greeting band, story ring, announcement bar), at phone and

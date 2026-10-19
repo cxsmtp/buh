@@ -675,7 +675,7 @@ export function ProductEditor({
                 <p>
                   <strong>Taken off the shop by the update:</strong> {legacyShown.map(([size, f]) => `${shortSizeName(draft.sizes.find((x) => x.id === size)!)} duvet cover ${f.duvetCover}`).join(' · ')}. It was the standard size&apos;s duvet cover, and this set isn&apos;t a duvet product. If the set does include one, put it back.
                 </p>
-                <button type="button" onClick={restoreLegacy} className="min-h-11 px-3 rounded-xl bg-ink text-white font-bold">
+                <button type="button" onClick={restoreLegacy} className="min-h-11 px-3 rounded-xl bg-ink text-paper font-bold">
                   Put {legacyShown.length === 1 ? 'it' : 'them'} back
                 </button>
               </div>

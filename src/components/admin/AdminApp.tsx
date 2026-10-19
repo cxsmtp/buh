@@ -421,7 +421,7 @@ export function AdminApp() {
                 >
                   Open Phone check
                 </button>
-                <button type="button" onClick={dismissPhoneCheckNotice} className="min-h-10 px-3 rounded-xl bg-ink text-white text-xs font-bold">
+                <button type="button" onClick={dismissPhoneCheckNotice} className="min-h-10 px-3 rounded-xl bg-ink text-paper text-xs font-bold">
                   Got it
                 </button>
               </div>
