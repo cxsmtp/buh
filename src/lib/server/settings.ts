@@ -730,7 +730,7 @@ const VALIDATORS: { [K in SettingsKey]: (input: Obj, current: SettingsMap[K]) =>
     if (typeof k === 'string' && k.trim() && !ANTHROPIC_KEY.test(k.trim())) throw new HttpError(400, 'An Anthropic API key starts with sk-ant- (console.anthropic.com → API keys).');
     const g = input.geminiApiKey;
     if (g !== undefined && g !== null && typeof g !== 'string') throw new HttpError(400, 'The API key must be text.');
-    if (typeof g === 'string' && g.trim() && !GEMINI_KEY.test(g.trim())) throw new HttpError(400, 'A Gemini API key starts with AIza (aistudio.google.com → Get API key).');
+    if (typeof g === 'string' && g.trim() && !GEMINI_KEY.test(g.trim())) throw new HttpError(400, GEMINI_KEY_HINT);
     return {
       enabled: bool(input.enabled, current.enabled),
       provider: provider as AiSettings['provider'],
@@ -935,8 +935,14 @@ const VALIDATORS: { [K in SettingsKey]: (input: Obj, current: SettingsMap[K]) =>
 const FESTIVAL_ID_SET = new Set(FESTIVALS.map((f) => f.id));
 
 const ANTHROPIC_KEY = /^sk-ant-[A-Za-z0-9_-]{20,300}$/;
-/** Google AI Studio keys: AIza and 35 more characters (a little room either way). */
-export const GEMINI_KEY = /^AIza[A-Za-z0-9_-]{30,60}$/;
+/**
+ * Google AI Studio keys: the classic standard key (AIza and 35 more characters, a little room
+ * either way) or the authorization key AI Studio creates since May 2026, which starts with AQ.
+ * (Google does not publish its length: 20–250 of letters, digits, '.', '_' or '-' after AQ.).
+ */
+export const GEMINI_KEY = /^(?:AIza[A-Za-z0-9_-]{30,60}|AQ\.[A-Za-z0-9._-]{20,250})$/;
+/** What the owner is told when a Gemini key has the wrong shape. */
+export const GEMINI_KEY_HINT = 'A Gemini API key starts with AIza or AQ. (aistudio.google.com → Get API key).';
 
 /** A weave's name: letters and digits first, then also spaces and ' & / ( ) . + - (no markup). */
 const WEAVE_NAME = /^[\p{L}\p{N}][\p{L}\p{N} '’&\/().+-]*$/u;

@@ -494,6 +494,16 @@ test('scanner slow-down (TRUST_PROXY=1): many 404s from one address are slowed, 
       assert.ok((await time('/p/a-product-that-was-removed', shopper)).status < 500);
     }
     assert.equal((await time('/', shopper)).status, 200);
+    // Probing Stripe's webhook address (a GET, a HEAD) counts like any other miss.
+    const prober = '198.51.100.71';
+    for (let i = 0; i < 10; i++) {
+      const res = await rawFetch(`${shop.base}/api/stripe/webhook`, { ...from(prober), method: i % 2 ? 'HEAD' : 'GET' });
+      await res.arrayBuffer();
+      assert.equal(res.status, 404);
+    }
+    const probed = await time('/api/stripe/webhook', prober);
+    assert.equal(probed.status, 404);
+    assert.ok(probed.ms >= 900, `slowed (${probed.ms} ms)`);
     if (!skipBrowser) {
       // The same in a real browser at phone width: a whole visit, never a 429.
       const ctx = await browser.newContext({ viewport: { width: 375, height: 800 }, extraHTTPHeaders: { 'X-Real-IP': '198.51.100.69' } });

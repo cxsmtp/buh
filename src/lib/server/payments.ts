@@ -429,6 +429,8 @@ export async function cancelPaidCardWithoutStripe(orderId: string, actor: string
 
 /** Every refused webhook gets this same answer: nothing tells a prober which check failed. */
 export const WEBHOOK_REFUSED = 'Invalid request.';
+/** How far a webhook's signed timestamp may be from now, either way (Stripe's own default). */
+export const WEBHOOK_TOLERANCE_SEC = 300;
 
 /**
  * A webhook from Stripe: the signature over the raw body (with the saved signing secret) must
@@ -438,9 +440,13 @@ export const WEBHOOK_REFUSED = 'Invalid request.';
 export function handleStripeWebhook(raw: Buffer, signature: string | null): { type: string; outcome: CardOutcome; carrierCancel?: string } {
   const secret = getSettings('payments').stripeWebhookSecret;
   if (!secret || !signature || signature.length > 2000) throw new HttpError(400, WEBHOOK_REFUSED);
+  // Stripe's library checks every v1 signature (timing-safe) over the raw body and refuses a
+  // timestamp more than 5 minutes old; one more than 5 minutes ahead (or not a number) is refused here.
+  const t = /(?:^|,)\s*t=(\d{1,12})\s*(?:,|$)/.exec(signature)?.[1];
+  if (!t || Math.abs(Date.now() / 1000 - Number(t)) > WEBHOOK_TOLERANCE_SEC) throw new HttpError(400, WEBHOOK_REFUSED);
   let event: Stripe.Event;
   try {
-    event = Stripe.webhooks.constructEvent(raw, signature, secret);
+    event = Stripe.webhooks.constructEvent(raw, signature, secret, WEBHOOK_TOLERANCE_SEC);
   } catch {
     throw new HttpError(400, WEBHOOK_REFUSED);
   }

@@ -2,8 +2,8 @@
  * BUH-02.09 against the real build: card payments through Stripe, with a local stand-in for
  * Stripe's API (the server is pointed at it with BUH_TEST_STRIPE_API) and, in Chromium, a stub of
  * Stripe.js served for js.stripe.com (no real Stripe anywhere). Settings → Payments (door, session,
- * keys write-only, connection check, Apple Pay domain); the webhook is public (the front gate
- * leaves it alone) and signed; the shop's first load has no Stripe code; at 375 and 1280 px the
+ * keys write-only, connection check, Apple Pay domain); the webhook is public but answers only a
+ * POST carrying a Stripe-Signature header (anything else is the unknown address's 404) and is signed; the shop's first load has no Stripe code; at 375 and 1280 px the
  * Card option shows Stripe's field without sideways scroll and is reachable with the keyboard;
  * Apple Pay's address fills checkout (an unknown area is asked for before paying), and the
  * confirmation says "Paid by card" only once the server has Stripe's word. Skipped without a build.
@@ -106,14 +106,42 @@ test('Settings → Payments: off by default; keys saved write-only; check the co
   assert.ok(auditLines().some((l) => l.includes('"action":"payments.checked"')));
 });
 
-test('the webhook is public (the front gate leaves it alone), signed, and the same short answer for every refusal', { skip }, async () => {
+/** Status, body and every header but Date: what a visitor can compare. */
+async function answerOf(res: Response) {
+  const body = await res.text();
+  const headers = [...res.headers.entries()].filter(([k]) => k !== 'date').map(([k, v]) => `${k}: ${v}`).sort();
+  return { status: res.status, body, headers };
+}
+
+test('the webhook is invisible to scanners: anything but a POST with a Stripe-Signature header is the unknown address’s 404, byte for byte', { skip }, async () => {
+  const unknownAt = () => `${server.base}/api/no-such-${crypto.randomBytes(4).toString('hex')}`;
+  for (const method of ['GET', 'HEAD', 'POST', 'PUT', 'DELETE', 'OPTIONS', 'PATCH']) {
+    const body = method === 'GET' || method === 'HEAD' ? undefined : '{}';
+    const init = { method, headers: { 'content-type': 'application/json' }, body, redirect: 'manual' as const };
+    const unknown = await answerOf(await rawFetch(unknownAt(), init));
+    assert.equal(unknown.status, 404, method);
+    assert.deepEqual(await answerOf(await rawFetch(`${server.base}/api/stripe/webhook`, init)), unknown, `${method} without a signature`);
+    assert.deepEqual(await answerOf(await rawFetch(`${server.base}/api/stripe/webhook?x=1`, init)), await answerOf(await rawFetch(`${unknownAt()}?x=1`, init)), `${method} with a query`);
+    if (method !== 'POST') {
+      // A signature header on another method: still nothing there.
+      const signed = { ...init, headers: { ...init.headers, 'stripe-signature': 't=1,v1=00' } };
+      assert.deepEqual(await answerOf(await rawFetch(`${server.base}/api/stripe/webhook`, signed)), await answerOf(await rawFetch(unknownAt(), signed)), `${method} with a signature`);
+    }
+  }
+});
+
+test('the webhook: a delivery from Stripe (POST + Stripe-Signature) reaches the route; a wrong or old signature is 400 (shown in Stripe’s dashboard)', { skip }, async () => {
   const unknown = await rawFetch(`${server.base}/api/no-such-${crypto.randomBytes(4).toString('hex')}`, { method: 'POST' });
   const bad = await hook('{}', 't=1,v1=00');
   assert.equal(bad.status, 400);
   assert.match(bad.headers.get('content-type') || '', /json/, 'answered by the route, not the unknown-address page');
   assert.notEqual(await bad.clone().text(), await unknown.text());
-  const unsigned = await hook('{}');
-  assert.deepEqual(await unsigned.json(), await bad.json());
+  const old = mock.event('customer.created', { id: 'cus_old' }, { timestamp: Math.floor(Date.now() / 1000) - 600 });
+  const replayed = await hook(old.body, old.signature);
+  assert.equal(replayed.status, 400, 'an old timestamp (a replay) is refused');
+  assert.deepEqual(await replayed.json(), await bad.json());
+  const wrong = mock.event('customer.created', { id: 'cus_2' }, { secret: 'whsec_someoneElsesSecret00000000' });
+  assert.equal((await hook(wrong.body, wrong.signature)).status, 400);
   const big = await hook('x'.repeat(300 * 1024), 't=1,v1=00');
   assert.equal(big.status, 400);
   assert.deepEqual(await big.json(), { received: false, message: 'Invalid request.' });

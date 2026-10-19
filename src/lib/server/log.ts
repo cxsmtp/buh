@@ -22,8 +22,15 @@ const SECRET_PATH = /\/([A-Za-z0-9_-]{4})[A-Za-z0-9_-]{28,}/g;
 const STRIPE_SECRET = /\b((?:sk|rk)_(?:test|live)_|whsec_)[A-Za-z0-9+/=_-]{6,}|\b(pi|seti)_[A-Za-z0-9]+_secret_[A-Za-z0-9]+/g;
 // Anthropic API keys (Settings → AI writing).
 const ANTHROPIC_KEY = /\bsk-ant-[A-Za-z0-9_-]{6,}/g;
-// Google (Gemini) API keys: AIza and 35 more characters (Settings → AI writing).
-const GOOGLE_KEY = /\bAIza[A-Za-z0-9_-]{20,}/g;
+// Google (Gemini) API keys (Settings → AI writing): the classic AIza… keys and the newer
+// authorization keys that start with AQ. (letters, digits, '.', '_' and '-'). Whole words only,
+// so ordinary text is never touched.
+const GOOGLE_KEY = /\b(AIza)[A-Za-z0-9_-]{20,}|\b(AQ\.)[A-Za-z0-9._-]{16,}/g;
+
+/** Google API keys (AIza… and AQ.…) anywhere in a text, replaced by their prefix + [redacted]. */
+export function maskGoogleKeys(s: string): string {
+  return s.replace(GOOGLE_KEY, (_m, classic: string | undefined, auth: string | undefined) => `${classic ?? auth}[redacted]`);
+}
 
 export function maskPhone(phone: string): string {
   const digits = phone.replace(/\D/g, '');
@@ -41,7 +48,7 @@ function scrubString(s: string, max = 500): string {
   return maskSecretPaths(s.slice(0, max * 2))
     .replace(STRIPE_SECRET, (_m, key: string | undefined, intent: string | undefined) => (key ? `${key}[redacted]` : `${intent}_[redacted]`))
     .replace(ANTHROPIC_KEY, 'sk-ant-[redacted]')
-    .replace(GOOGLE_KEY, 'AIza[redacted]')
+    .replace(GOOGLE_KEY, (_m, classic: string | undefined, auth: string | undefined) => `${classic ?? auth}[redacted]`)
     .replace(EMAIL, '$1***@$2')
     .replace(PHONE, (m) => (ISO_DATE.test(m) ? m : maskPhone(m)))
     .slice(0, max);

@@ -10,6 +10,8 @@ import { cancelJeeblyAfterRefund } from '@/lib/server/jeeblyOps';
  * nature, so it trusts nothing but the signature: the raw body (size-capped) must be signed with
  * the saved webhook signing secret, or nothing happens. Every refusal (no secret saved, no or a
  * wrong signature, too big, not JSON) gets the same short answer. Each event is applied once.
+ * Only a POST carrying a Stripe-Signature header reaches this route: the front gate answers
+ * anything else (a GET, a HEAD, a probe) as an unknown address (src/lib/server/frontGate.ts).
  */
 const refused = () => json({ received: false, message: WEBHOOK_REFUSED }, 400);
 

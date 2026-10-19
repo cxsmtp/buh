@@ -296,7 +296,7 @@ export interface AiSettings {
   model: AiModel;
   /** The owner's Anthropic API key (secret: write-only, never sent to a browser or a backup). */
   anthropicApiKey: string;
-  /** The owner's Google Gemini API key, AIza… (secret: write-only, never sent to a browser or a backup). */
+  /** The owner's Google Gemini API key, AIza… or AQ.… (secret: write-only, never sent to a browser or a backup). */
   geminiApiKey: string;
   /** Gemini model for writing ('' until Test fills the list). */
   geminiModel: string;

@@ -58,6 +58,16 @@ export const NOWHERE_API = '/api/_buh/nowhere';
 
 const ADMIN_APIS = ['/api/courier/dispatch', '/api/courier/test', '/api/courier/live', '/api/courier/sandbox-check'];
 
+/** Stripe's webhook: public by design (Stripe must reach it), so only its own deliveries are let through. */
+export const STRIPE_WEBHOOK = '/api/stripe/webhook';
+
+/** What the gate needs to know about the request besides its address and cookie. */
+export interface GateRequest {
+  method?: string;
+  /** Whether a Stripe-Signature header came with it (its value is checked by the route). */
+  stripeSignature?: boolean;
+}
+
 export function isAdminApi(path: string): boolean {
   return path === '/api/admin' || path.startsWith('/api/admin/') || ADMIN_APIS.includes(path) || ADMIN_APIS.some((p) => path.startsWith(`${p}/`));
 }
@@ -100,7 +110,7 @@ function serializeCookie(c: ReturnType<typeof doorCookie>): string {
 }
 
 /** What to do with this request's address (pure apart from reading the link record). */
-export function decide(rawUrl: string | undefined, cookieHeader: string | undefined, now = Date.now()): GateDecision {
+export function decide(rawUrl: string | undefined, cookieHeader: string | undefined, now = Date.now(), req: GateRequest = {}): GateDecision {
   const { path, query } = normalizePath(rawUrl);
   // With a trailing slash, Next.js only redirects to the address without it (which comes back here).
   if (path.length > 1 && path.endsWith('/')) return { kind: 'pass' };
@@ -112,6 +122,11 @@ export function decide(rawUrl: string | undefined, cookieHeader: string | undefi
     return orderId ? { kind: 'pay', orderId, api } : unknown(api);
   }
   if (path.startsWith('/api/')) {
+    // Stripe's webhook answers only what looks like a delivery from Stripe (a POST with a
+    // Stripe-Signature header): anything else (a GET, a HEAD, a probe) gets the unknown
+    // address's 404, so a scanner can't tell the address exists. A delivery whose signature
+    // is wrong still gets the route's 400, which Stripe's dashboard shows the owner.
+    if (path === STRIPE_WEBHOOK && (req.method !== 'POST' || !req.stripeSignature)) return unknown(true);
     if (!isAdminApi(path)) return { kind: 'pass' };
     const door = verifyDoorToken(doorTokenFromCookieHeader(cookieHeader), now);
     if (!door.ok) return unknown(true);
@@ -228,12 +243,12 @@ export function installFrontGate(): void {
     const cookieHeader = typeof req.headers.cookie === 'string' ? req.headers.cookie : '';
     let decision: GateDecision;
     try {
-      decision = decide(rawPath, cookieHeader);
+      decision = decide(rawPath, cookieHeader, Date.now(), { method: req.method, stripeSignature: req.headers['stripe-signature'] !== undefined });
     } catch (err) {
       logEvent('error', 'front_gate_failed', { error: err instanceof Error ? err.message : String(err) });
       // Never the hub by mistake: an admin address that can't be checked is unknown.
       const { path } = normalizePath(rawPath);
-      decision = isAdminApi(path) || path.startsWith(HUB_ROUTE) ? { kind: 'unknown', url: path.startsWith('/api/') ? NOWHERE_API : NOWHERE_PAGE } : { kind: 'pass' };
+      decision = isAdminApi(path) || path === STRIPE_WEBHOOK || path.startsWith(HUB_ROUTE) ? { kind: 'unknown', url: path.startsWith('/api/') ? NOWHERE_API : NOWHERE_PAGE } : { kind: 'pass' };
     }
     if (decision.kind === 'unknown') {
       req.url = decision.url;

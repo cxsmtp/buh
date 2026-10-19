@@ -6,11 +6,11 @@ import { audit } from './audit';
 import { HttpError } from './http';
 import { parseImageDataUrl } from './imageInput';
 import { IMAGE_NAME, readImage } from './images';
-import { logEvent } from './log';
+import { logEvent, maskGoogleKeys } from './log';
 import { safeFetch } from './outbound';
 import { rateLimit } from './rateLimit';
 import { answerOf, generateContent, listGeminiModels, textOf, type ModelLists } from './gemini';
-import { GEMINI_KEY, getSettings, withStoredSecrets } from './settings';
+import { GEMINI_KEY, GEMINI_KEY_HINT, getSettings, withStoredSecrets } from './settings';
 
 /**
  * "Write from photo" (Admin Hub → Inventory → product editor): the product's photo goes to
@@ -107,8 +107,8 @@ const send: Transport = (body, headers) => {
 
 /** Anthropic API keys (and the key in hand), wherever they appear in a message. */
 function scrub(text: string, key: string): string {
-  let out = text.replace(/sk-ant-[A-Za-z0-9_-]+/g, 'sk-ant-[redacted]');
-  if (key) out = out.split(key).join('[redacted]');
+  let out = key ? text.split(key).join('[redacted]') : text;
+  out = maskGoogleKeys(out.replace(/sk-ant-[A-Za-z0-9_-]+/g, 'sk-ant-[redacted]'));
   return out.replace(/[\u0000-\u001f\u007f]+/g, ' ').trim().slice(0, 200);
 }
 
@@ -425,7 +425,7 @@ export async function testGeminiSettings(input: unknown, actor: string): Promise
   const typed = withStoredSecrets('ai', input) as Partial<AiSettings>;
   const key = typeof typed.geminiApiKey === 'string' ? typed.geminiApiKey.trim() : '';
   if (!key) throw new HttpError(400, 'Type your Gemini API key first (aistudio.google.com → Get API key).', {}, { code: 'ai_off' });
-  if (!GEMINI_KEY.test(key)) throw new HttpError(400, 'A Gemini API key starts with AIza (aistudio.google.com → Get API key).');
+  if (!GEMINI_KEY.test(key)) throw new HttpError(400, GEMINI_KEY_HINT);
   enforceLimit(`ai-test:${actor}`, TEST_LIMIT.max, TEST_LIMIT.windowMs, 'Too many tests. Please wait a few minutes.');
   const models = await listGeminiModels(key);
   audit('settings.ai_tested', { by: actor, provider: 'gemini', ok: true, writingModels: models.writing.length, imageModels: models.image.length });

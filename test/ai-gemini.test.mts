@@ -664,3 +664,90 @@ test('a backup keeps styled photos (files, their mark on the product, the record
   }
   assert.ok(!fs.readFileSync(result.file).includes(Buffer.from('TESTKEY')), 'not in the backup file');
 });
+
+// ── the newer key format (AQ.…) ────────────────────────────────────────────
+
+// AI Studio's authorization keys (all new keys since May 2026) start with AQ. instead of AIza.
+const AUTH_KEY = 'AQ.Ab8RN6IvTESTAUTHKEY-q2_w.e9r8t7y6u5i4o3p2-L4sT';
+
+test('an AQ. key (AI Studio authorization key) is accepted, saved write-only (••••last4), sent only in x-goog-api-key, and never in history, logs, errors or backups', async () => {
+  await settings.updateSettings('ai', { geminiApiKey: AUTH_KEY });
+  assert.equal(settings.getSettings('ai').geminiApiKey, AUTH_KEY, 'saved as typed');
+  const view = settings.adminView('ai');
+  assert.equal(view.value.geminiApiKey, '');
+  assert.equal(view.secretsHint?.geminiApiKey, '••••L4sT');
+  assert.ok(!JSON.stringify(view).includes('AUTHKEY'), 'never in a response');
+  // Writing: only in the header.
+  sent = [];
+  await ai.describeProduct({ image: PHOTO_URL }, 'o@s.t');
+  assert.equal(sent[0].headers['x-goog-api-key'], AUTH_KEY);
+  assert.ok(!sent[0].path.includes('AQ.') && !JSON.stringify(sent[0].body).includes(AUTH_KEY), 'not in the address or body');
+  // Test: the saved AQ. key, and a typed one.
+  sent = [];
+  await ai.testGeminiSettings({}, 'o@s.t');
+  assert.equal(sent[0].headers['x-goog-api-key'], AUTH_KEY);
+  const typed = 'AQ.Ab8RN6OTHERAUTHKEY_abcdefghijklmnop';
+  await ai.testGeminiSettings({ geminiApiKey: typed }, 'o@s.t');
+  assert.equal(sent[1].headers['x-goog-api-key'], typed);
+  // Google echoing the key (or another AQ. key) back: never in the message or the logs.
+  const OTHER = 'AQ.Ab8RN6ANOTHERAUTHKEY-zyxwvutsrqponm';
+  answer = () => ({ status: 400, data: { error: { code: 400, message: `Unsupported MIME type ${AUTH_KEY} ${OTHER}`, status: 'INVALID_ARGUMENT' } } });
+  const r = await logsOf(() => ai.describeProduct({ image: PHOTO_URL }, 'o@s.t'));
+  assert.match((r.result as Error).message, /^Gemini said: Unsupported MIME type/);
+  assert.ok(!((r.result as Error).message + r.logs).includes('AUTHKEY'), 'neither key in the error or logs');
+  answer = () => ({ status: 400, data: { error: { code: 400, message: `API key not valid. (${AUTH_KEY})`, status: 'INVALID_ARGUMENT', details: [{ reason: 'API_KEY_INVALID' }] } } });
+  const bad = await logsOf(() => ai.describeProduct({ image: PHOTO_URL }, 'o@s.t'));
+  const e = bad.result as unknown as { message: string; details: unknown };
+  assert.match(e.message, /did not accept the Gemini API key/);
+  assert.ok(!(JSON.stringify({ m: e.message, d: e.details }) + bad.logs).includes('AUTHKEY'));
+  // Settings history, audit log, backup.
+  const history = getDb().prepare("SELECT data FROM settings_history WHERE key = 'ai'").pluck().all() as string[];
+  assert.ok(!history.join('').includes('AUTHKEY'), 'history never keeps the key');
+  assert.ok(!auditLog().includes('AUTHKEY'), 'never in the audit log');
+  delete process.env.BACKUP_PASSPHRASE;
+  const backup = await import('@/lib/server/backup');
+  const result = await backup.createBackup();
+  assert.ok(!fs.readFileSync(result.file).includes(Buffer.from('AUTHKEY')), 'not in the backup file');
+  await settings.updateSettings('ai', { geminiApiKey: KEY });
+});
+
+test('Gemini key shapes: AIza… and AQ.… accepted; anything else refused with "starts with AIza or AQ."', async () => {
+  const { GEMINI_KEY } = settings;
+  for (const good of [KEY, AUTH_KEY, `AQ.${'a'.repeat(20)}`, `AQ.${'A1._-'.repeat(50)}`, `AIza${'b'.repeat(35)}`]) assert.ok(GEMINI_KEY.test(good), good);
+  const badKeys = [
+    'AQ.short',
+    `AQ.${'a'.repeat(19)}`,
+    `AQ.${'a'.repeat(251)}`,
+    `aq.${'a'.repeat(30)}`,
+    `AQ${'a'.repeat(30)}`,
+    `AQ.${'a'.repeat(15)} ${'b'.repeat(15)}`,
+    `AQ.${'a'.repeat(15)}\n${'b'.repeat(15)}`,
+    `AQ.${'a'.repeat(20)}<script>`,
+    `AQ.${'a'.repeat(20)}/../x`,
+    `AQ.${'a'.repeat(20)}+=`,
+    'AIzaTooShort',
+    `AIza${'b'.repeat(61)}`,
+    `xAQ.${'a'.repeat(30)}`,
+    'sk-not-google',
+  ];
+  for (const bad of badKeys) {
+    assert.ok(!GEMINI_KEY.test(bad), bad);
+    await assert.rejects(settings.updateSettings('ai', { geminiApiKey: bad }), /starts with AIza or AQ\./, bad);
+    await assert.rejects(ai.testGeminiSettings({ geminiApiKey: bad }, 'o@s.t'), /starts with AIza or AQ\./, bad);
+  }
+  assert.equal(settings.getSettings('ai').geminiApiKey, KEY, 'the saved key is untouched');
+});
+
+test('redaction covers both Google key formats, as whole words only', () => {
+  const text = `classic ${KEY}, new ${AUTH_KEY}; in a url https://x.test/?key=${AUTH_KEY}&k2=${KEY}`;
+  const out = JSON.stringify(redact({ note: text }));
+  assert.ok(!out.includes('TESTKEY') && !out.includes('AUTHKEY'), out);
+  assert.match(out, /AIza\[redacted\]/);
+  assert.match(out, /AQ\.\[redacted\]/);
+  const scrubbed = gemini.scrubGemini(text, '');
+  assert.ok(!scrubbed.includes('TESTKEY') && !scrubbed.includes('AUTHKEY'), scrubbed);
+  // Ordinary text is left alone: a short AQ. word, AQ. inside a longer word, and plain sentences.
+  for (const plain of ['Grade AQ. Next sentence.', 'See AQ.example.com for more', `SAQ.${'a'.repeat(30)}`, 'Ask the AQI today', 'Model AQ.5 sheets']) {
+    assert.equal(redact(plain), plain, plain);
+  }
+});

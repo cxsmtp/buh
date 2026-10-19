@@ -194,7 +194,7 @@ export function AiSettingsCard({
             id="ai-gemini-key"
             type="password"
             className={`${field} font-mono`}
-            placeholder={geminiSaved ? `${secretsHint?.geminiApiKey ?? '••••'} saved` : 'AIza…'}
+            placeholder={geminiSaved ? `${secretsHint?.geminiApiKey ?? '••••'} saved` : 'AIza… or AQ.…'}
             autoComplete="off"
             spellCheck={false}
             value={d.geminiApiKey}

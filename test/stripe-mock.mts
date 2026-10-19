@@ -53,7 +53,8 @@ export interface StripeMock {
   /** The refunds made (by the shop or the dashboard). */
   refunds: Map<string, Record<string, unknown>>;
   /** The signed webhook body Stripe would send (with this secret, or another one). */
-  event(type: string, object: unknown, opts?: { id?: string; secret?: string }): { body: string; signature: string; id: string };
+  /** A signed event; `timestamp` (seconds) signs it as sent at that time (default: now). */
+  event(type: string, object: unknown, opts?: { id?: string; secret?: string; timestamp?: number }): { body: string; signature: string; id: string };
   close(): Promise<void>;
 }
 
@@ -202,7 +203,7 @@ export async function startStripeMock(): Promise<StripeMock> {
   mock.event = (type, object, opts = {}) => {
     const eventId = opts.id ?? id('evt');
     const body = JSON.stringify({ id: eventId, object: 'event', type, api_version: '2025-08-27.basil', created: Math.floor(Date.now() / 1000), data: { object }, livemode: false });
-    const signature = Stripe.webhooks.generateTestHeaderString({ payload: body, secret: opts.secret ?? TEST_KEYS.webhook });
+    const signature = Stripe.webhooks.generateTestHeaderString({ payload: body, secret: opts.secret ?? TEST_KEYS.webhook, ...(opts.timestamp !== undefined ? { timestamp: opts.timestamp } : {}) });
     return { body, signature, id: eventId };
   };
   mock.close = () => new Promise<void>((resolve) => server.close(() => resolve()));
