@@ -1,6 +1,6 @@
 # Changelog
 
-## BUH-02.15.00 — 2026-10-19 06:10 UTC · [#NN](https://github.com/cxsmtp/buh/pull/NN)
+## BUH-02.15.00 — 2026-10-19 06:10 UTC · [#33](https://github.com/cxsmtp/buh/pull/33)
 
 - **Write name & descriptions from a photo.** In the product editor's Photos step, one tap reads the design in your photo (pattern, motif, colours, texture) and fills in the name, short description and full description. It never invents thread count, material, origin or care claims, and nothing is saved until you publish.
 - **Your text stays yours.** If you've already written something, you see both versions side by side with "Use these" or "Keep mine". Suggested colours and weave are added only when you tap them.
