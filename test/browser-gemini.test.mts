@@ -20,7 +20,7 @@ import path from 'node:path';
 import { after, before, test } from 'node:test';
 import { hasBuild, rawFetch, startServer, type RunningServer } from './server.mjs';
 import { openAdminSection } from './helpers.mjs';
-import { bedroomPng } from './fixtures/png.mjs';
+import { bedroomPng, chunk } from './fixtures/png.mjs';
 
 type PW = typeof import('playwright');
 const pw: PW | null = hasBuild ? await import('playwright').catch(() => null) : null;
@@ -29,7 +29,15 @@ type Page = import('playwright').Page;
 
 const KEY = 'AIzaSyE2EKEY-abcdefghijklmnopqrstuvw-L4ST';
 const SHOTS = process.env.BUH_SHOTS_DIR || '';
-const STAGED = bedroomPng(320, 400);
+/** The stand-in's picture: a different one each time (Gemini never sends the same one twice). */
+let made = 0;
+const staged = () => {
+  const phys = Buffer.alloc(9);
+  phys.writeUInt32BE(2835 + ++made, 0);
+  phys.writeUInt32BE(2835, 4);
+  phys[8] = 1;
+  return bedroomPng(320, 400, [chunk('pHYs', phys)]);
+};
 
 const MODELS = {
   models: [
@@ -64,7 +72,7 @@ before(async () => {
       if (req.method === 'GET' && req.url === '/v1beta/models?pageSize=1000') return res.end(JSON.stringify(MODELS));
       if (req.method === 'POST' && /^\/v1beta\/models\/gemini-[a-z0-9.-]+:generateContent$/.test(req.url!)) {
         // A little wait, as a real image model takes a while (the editor shows its spinner).
-        return setTimeout(() => res.end(JSON.stringify({ candidates: [{ content: { role: 'model', parts: [{ inlineData: { mimeType: 'image/png', data: STAGED.toString('base64') } }] }, finishReason: 'STOP' }] })), 400);
+        return setTimeout(() => res.end(JSON.stringify({ candidates: [{ content: { role: 'model', parts: [{ inlineData: { mimeType: 'image/png', data: staged().toString('base64') } }] }, finishReason: 'STOP' }] })), 400);
       }
       res.statusCode = 404;
       res.end(JSON.stringify({ error: { code: 404, message: 'not found', status: 'NOT_FOUND' } }));
@@ -255,8 +263,9 @@ for (const width of [375, 1280]) {
     assert.equal(await photos.count(), 2);
     assert.match((await photos.nth(1).getAttribute('src'))!, /^\/api\/images\/[a-f0-9]{64}\.png$/);
     assert.equal(await editor.getByAltText('Cover photo').getAttribute('src').then((s) => s!.startsWith('/api/images/')), true);
-    // The same picture each time from the stand-in: the one deleted by Try again came back with the last run.
+    // Try again threw the first picture away.
     assert.ok(firstUrl);
+    assert.equal((await api('GET', firstUrl!)).status, 404);
     assert.deepEqual(await overflow(page), []);
     await shot(page, `stage-added-${width}`);
     assert.deepEqual(errors, []);

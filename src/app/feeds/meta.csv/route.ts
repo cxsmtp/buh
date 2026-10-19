@@ -15,6 +15,8 @@ export async function GET() {
     const base = await siteUrl();
     const brand = getSettings('brand').storeName;
     const abs = (u: string) => (u.startsWith('http') ? u : `${base}${u}`);
+    // Styled photos (made with AI) go to Meta and Google only while the shop labels them.
+    const label = getSettings('ai').labelStyledPhotos;
     const rows = listProducts().flatMap((p) =>
       p.profiles.map((s) => {
         const qty = p.stockBySize[s.id] ?? 0;
@@ -29,7 +31,11 @@ export async function GET() {
           `${price} AED`,
           `${base}/p/${encodeURIComponent(p.id)}`,
           abs(p.aiTransformedImage || p.featuredImage),
-          p.galleryImages.slice(0, 10).map(abs).join(','),
+          p.galleryImages
+            .filter((u) => label || !p.stagedPhotos?.[u])
+            .slice(0, 10)
+            .map(abs)
+            .join(','),
           brand,
           p.id,
           s.name,

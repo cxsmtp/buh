@@ -13,6 +13,7 @@
  */
 import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
+import crypto from 'node:crypto';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -40,6 +41,19 @@ const PHOTO = makePng(96, 120, (x, y) => ((x + y) % 24 < 12 ? [47, 63, 122] : [2
 const PHOTO_URL = `data:image/png;base64,${PHOTO.toString('base64')}`;
 /** What the stand-in sends back: a real PNG carrying metadata the shop must strip. */
 const STAGED = bedroomPng(160, 200, [chunk('tEXt', Buffer.from('Comment\0made by a camera at 25.2,55.3', 'latin1')), chunk('eXIf', Buffer.from('MM\0*private'))]);
+/** STAGED, but a different picture each time (Gemini never sends the same one twice). */
+let made = 0;
+const freshStaged = () => {
+  const phys = Buffer.alloc(9);
+  phys.writeUInt32BE(2835 + ++made, 0);
+  phys.writeUInt32BE(2835, 4);
+  phys[8] = 1;
+  return bedroomPng(160, 200, [chunk('tEXt', Buffer.from('Comment\0made by a camera at 25.2,55.3', 'latin1')), chunk('eXIf', Buffer.from('MM\0*private')), chunk('pHYs', phys)]);
+};
+/** An XMP packet as Gemini may send it (saying the picture was made with AI). */
+const GEMINI_XMP = '<x:xmpmeta xmlns:x="adobe:ns:meta/"><rdf:RDF xmlns:rdf="http://www.w3.org/1999/02/22-rdf-syntax-ns#"><rdf:Description xmlns:Iptc4xmpExt="http://iptc.org/std/Iptc4xmpExt/2008-02-29/" Iptc4xmpExt:DigitalSourceType="http://cv.iptc.org/newscodes/digitalsourcetype/trainedAlgorithmicMedia"/></rdf:RDF></x:xmpmeta>';
+const xmpChunk = (xmp: string) => chunk('iTXt', Buffer.concat([Buffer.from('XML:com.adobe.xmp\0\0\0\0\0', 'latin1'), Buffer.from(xmp, 'utf8')]));
+const COMPOSITE = 'digitalsourcetype/compositeWithTrainedAlgorithmicMedia';
 
 interface Sent {
   method: string;
@@ -102,7 +116,7 @@ const status = (p: Promise<unknown>) => p.then(() => 200, (e: { status?: number 
 beforeEach(async () => {
   _clearAllRateLimits();
   sent = [];
-  answer = (req) => (req.method === 'GET' ? { status: 200, data: MODELS } : req.path.includes('image') ? imageReply(STAGED) : textReply(SUGGESTION));
+  answer = (req) => (req.method === 'GET' ? { status: 200, data: MODELS } : req.path.includes('image') ? imageReply(freshStaged()) : textReply(SUGGESTION));
   gemini._setGeminiTransport(async (req) => {
     const s: Sent = { method: req.method, path: req.path, headers: req.headers, body: req.body ? JSON.parse(req.body) : null };
     sent.push(s);
@@ -303,7 +317,8 @@ test('stage-photo: the picture is saved as a NEW photo marked styled; the origin
   assert.deepEqual(readImage(name)!.bytes, PHOTO, 'the original is unchanged');
   const saved = readImage(r.url.slice('/api/images/'.length))!.bytes;
   assert.ok(!saved.includes(Buffer.from('tEXt')) && !saved.includes(Buffer.from('eXIf')) && !saved.includes(Buffer.from('25.2,55.3')), 'metadata stripped');
-  assert.ok(saved.includes(Buffer.from('IDAT')) && saved.length < STAGED.length);
+  assert.ok(saved.includes(Buffer.from('IDAT')));
+  assert.ok(saved.includes(Buffer.from(COMPOSITE)), 'marked as made with AI (XMP DigitalSourceType)');
   assert.deepEqual({ ...r.staged, at: '' }, { staged: true, source: name, preset: 'dubai-master', at: '' });
   assert.equal(r.width, 160);
   assert.equal(r.height, 200);
@@ -395,12 +410,22 @@ test('stage-photo: a model that wants TEXT and IMAGE together is asked again tha
   answer = (req) => {
     calls++;
     const mods = (req.body as { generationConfig: { responseModalities: string[] } }).generationConfig.responseModalities;
-    return mods.length === 1 ? { status: 400, data: { error: { code: 400, message: 'Model does not support the requested response modalities: image', status: 'INVALID_ARGUMENT' } } } : imageReply(STAGED);
+    return mods.length === 1 ? { status: 400, data: { error: { code: 400, message: 'Model does not support the requested response modalities: image', status: 'INVALID_ARGUMENT' } } } : imageReply(freshStaged());
   };
   const r = await stage.stagePhoto({ image: PHOTO_URL, preset: 'hotel-suite' }, 'mods@s.t');
   assert.equal(calls, 2);
   assert.ok(r.url);
-  answer = () => imageReply(STAGED);
+  // The second call is paid for too: it counts against the 10 an hour (2 + 1 + 3 × 2 = 9 used).
+  const wants = answer;
+  answer = () => imageReply(freshStaged());
+  await stage.stagePhoto({ image: PHOTO_URL, preset: 'hotel-suite' }, 'mods@s.t');
+  answer = wants;
+  for (let i = 0; i < 3; i++) await stage.stagePhoto({ image: PHOTO_URL, preset: 'hotel-suite' }, 'mods@s.t');
+  calls = 0;
+  await assert.rejects(stage.stagePhoto({ image: PHOTO_URL, preset: 'hotel-suite' }, 'mods@s.t'), (e: { status: number }) => e.status === 429);
+  assert.equal(calls, 1, 'the second call is not made over the limit');
+  _clearAllRateLimits();
+  answer = () => imageReply(freshStaged());
   sent = [];
   await settings.updateSettings('ai', { geminiImageModel: 'gemini-2.5-flash-image' });
   await stage.stagePhoto({ image: PHOTO_URL, preset: 'hotel-suite' }, 'mods@s.t');
@@ -429,6 +454,162 @@ test('Discard deletes an unused styled photo; it refuses photos it did not make 
   assert.ok(readImage(used.url.slice('/api/images/'.length)));
 });
 
+test('Discard refuses a styled photo an order line or a setting still shows', async () => {
+  const db = getDb();
+  const now = new Date().toISOString();
+  const inOrder = await stage.stagePhoto({ image: PHOTO_URL, preset: 'kids-room' }, 'refs@s.t');
+  db.prepare("INSERT INTO orders (id, created_at, updated_at, phone, status, payment_method, payment_status, total_fils, data) VALUES ('ord-staged-ref', ?, ?, '+971500000000', 'pending', 'cod', 'pending', 30000, ?)").run(now, now, JSON.stringify({ items: [{ title: 'Set', image: inOrder.url }] }));
+  assert.throws(() => stage.discardStagedPhoto({ url: inOrder.url }, 'refs@s.t'), (e: { status: number }) => e.status === 409);
+  assert.ok(readImage(inOrder.url.slice('/api/images/'.length)), 'the order still shows its picture');
+  const inSetting = await stage.stagePhoto({ image: PHOTO_URL, preset: 'kids-room' }, 'refs@s.t');
+  db.prepare("INSERT INTO settings (key, data, updated_at) VALUES ('test-staged-ref', ?, ?)").run(JSON.stringify({ heroImage: inSetting.url }), now);
+  assert.throws(() => stage.discardStagedPhoto({ url: inSetting.url }, 'refs@s.t'), (e: { status: number }) => e.status === 409);
+  assert.ok(readImage(inSetting.url.slice('/api/images/'.length)));
+  db.prepare("DELETE FROM settings WHERE key = 'test-staged-ref'").run();
+  db.prepare("DELETE FROM orders WHERE id = 'ord-staged-ref'").run();
+});
+
+test('a picture Gemini sends back that is already stored (the photo sent, or a real photo) is refused, never marked styled, and Discard cannot delete it', async () => {
+  // A real photo uploaded with an XMP packet that says how it was made: kept as it is when cleaned.
+  const realBytes = bedroomPng(150, 190, [xmpChunk(GEMINI_XMP)]);
+  const real = saveImageDataUrl(`data:image/png;base64,${realBytes.toString('base64')}`);
+  const name = real.slice('/api/images/'.length);
+  const king = settings.getSettings('catalog').sizes.filter((s) => s.id === 'king');
+  const p = products.createProduct({ title: 'Real Photo Set', category: 'bedsheets', price: 300, featuredImage: real, galleryImages: [], profiles: king, defaultProfileId: 'king', stockBySize: { king: 1 } });
+  answer = () => imageReply(realBytes);
+  for (const body of [{ imageId: name }, { image: PHOTO_URL }]) {
+    await assert.rejects(stage.stagePhoto({ ...body, preset: 'hotel-suite' }, 'same@s.t'), (e: { status: number; message: string; details?: { code?: string } }) => e.status === 502 && e.details?.code === 'ai_same_image' && /same photo; try another style/.test(e.message));
+  }
+  const { stagedRecords } = await import('@/lib/server/stagedPhotos');
+  assert.equal(name in stagedRecords(), false, 'not recorded as styled');
+  assert.equal(products.updateProduct(p.id, { title: 'Real Photo Set 2' }).stagedPhotos, undefined, 'the real photo is not marked');
+  // Taken off the product, it still can't be deleted as a "styled photo".
+  products.updateProduct(p.id, { featuredImage: saveImageDataUrl(PHOTO_URL) });
+  assert.throws(() => stage.discardStagedPhoto({ url: real }, 'same@s.t'), (e: { status: number }) => e.status === 404);
+  assert.deepEqual(readImage(name)!.bytes, realBytes, 'the real photo is still stored');
+  // The same picture sent twice: the second is refused, so "Try again" can't discard the first one.
+  const twice = freshStaged();
+  answer = () => imageReply(twice);
+  const first = await stage.stagePhoto({ image: PHOTO_URL, preset: 'kids-room' }, 'same@s.t');
+  await assert.rejects(stage.stagePhoto({ image: PHOTO_URL, preset: 'kids-room' }, 'same@s.t'), /same photo/);
+  assert.ok(readImage(first.url.slice('/api/images/'.length)));
+});
+
+test('styled photos keep their AI provenance: C2PA and the XMP DigitalSourceType stay (or are added); EXIF, GPS and text go', async () => {
+  const { cleanImage } = await import('@/lib/server/images');
+  const c2pa = chunk('caBX', Buffer.from('jumbc2pa-manifest'));
+  const text = chunk('tEXt', Buffer.from('Comment\0secret', 'latin1'));
+  const exif = chunk('eXIf', Buffer.from('MM\0*GPS 25.2,55.3'));
+  // PNG from Gemini with C2PA and XMP: both kept; EXIF and text gone.
+  const withXmp = bedroomPng(100, 120, [c2pa, xmpChunk(GEMINI_XMP), text, exif]);
+  const kept = cleanImage(withXmp, 1e7, { keepProvenance: true })!.bytes;
+  assert.ok(kept.includes(c2pa) && kept.includes(xmpChunk(GEMINI_XMP)), 'C2PA and XMP kept');
+  assert.ok(!kept.includes(Buffer.from('secret')) && !kept.includes(Buffer.from('25.2,55.3')), 'text and EXIF gone');
+  assert.ok(!kept.includes(Buffer.from(COMPOSITE)), 'nothing added when Gemini said it already');
+  // Without keepProvenance (anything else): all of it goes.
+  const plain = cleanImage(withXmp, 1e7)!.bytes;
+  assert.ok(!plain.includes(Buffer.from('caBX')) && !plain.includes(Buffer.from('xmpmeta')));
+  // PNG without XMP (or XMP with a place in it): the packet is added as an iTXt XML:com.adobe.xmp chunk.
+  for (const extra of [[c2pa], [xmpChunk('<x:xmpmeta>DigitalSourceType exif:GPSLatitude="25.2"</x:xmpmeta>')]]) {
+    const added = cleanImage(bedroomPng(100, 120, extra), 1e7, { keepProvenance: true })!;
+    assert.ok(added.bytes.includes(Buffer.from('iTXtXML:com.adobe.xmp\0', 'latin1')) && added.bytes.includes(Buffer.from(COMPOSITE)));
+    assert.ok(!added.bytes.includes(Buffer.from('GPSLatitude')));
+    assert.equal(added.bytes.subarray(-12).toString('latin1', 4, 8), 'IEND');
+    assert.equal(added.width, 100);
+  }
+
+  // JPEG: SOI, JFIF, EXIF, C2PA (APP11), a comment, a frame of 100 × 80, the scan.
+  const seg = (marker: number, data: Buffer) => {
+    const h = Buffer.from([0xff, marker, 0, 0]);
+    h.writeUInt16BE(2 + data.length, 2);
+    return Buffer.concat([h, data]);
+  };
+  const jfif = seg(0xe0, Buffer.from('JFIF\0\x01\x01\0\0\x01\0\x01\0\0', 'latin1'));
+  const app11 = seg(0xeb, Buffer.from('JP\0\x01jumbc2pa', 'latin1'));
+  const sof = seg(0xc0, Buffer.from([8, 0, 80, 0, 100, 1, 1, 0x11, 0]));
+  const scan = Buffer.concat([seg(0xda, Buffer.from([1, 1, 0, 0, 63, 0])), Buffer.from([1, 2, 3, 0xff, 0xd9])]);
+  const jpeg = (...mid: Buffer[]) => Buffer.concat([Buffer.from([0xff, 0xd8]), jfif, ...mid, sof, scan]);
+  const exifSeg = seg(0xe1, Buffer.from('Exif\0\0GPS 25.2,55.3', 'latin1'));
+  const xmpSeg = seg(0xe1, Buffer.concat([Buffer.from('http://ns.adobe.com/xap/1.0/\0', 'latin1'), Buffer.from(GEMINI_XMP)]));
+  const j1 = cleanImage(jpeg(exifSeg, app11, xmpSeg, seg(0xfe, Buffer.from('comment'))), 1e7, { keepProvenance: true })!;
+  assert.deepEqual(j1.bytes, jpeg(app11, xmpSeg), 'C2PA and XMP kept; EXIF and the comment gone');
+  assert.equal(j1.width, 100);
+  const j2 = cleanImage(jpeg(exifSeg, app11), 1e7, { keepProvenance: true })!.bytes;
+  assert.deepEqual(j2.subarray(0, 2 + jfif.length), Buffer.concat([Buffer.from([0xff, 0xd8]), jfif]), 'JFIF stays first');
+  assert.equal(j2.readUInt16BE(2 + jfif.length), 0xffe1, 'an APP1 XMP segment right after it');
+  assert.ok(j2.includes(Buffer.from(COMPOSITE)) && j2.includes(app11) && !j2.includes(Buffer.from('Exif')));
+  assert.deepEqual(cleanImage(jpeg(exifSeg, app11, xmpSeg), 1e7)!.bytes, jpeg(), 'everything goes without keepProvenance');
+
+  // WebP (lossless, 100 × 80): EXIF, XMP and unknown chunks go; with keepProvenance, VP8X + XMP are added.
+  const riff = (type: string, data: Buffer) => {
+    const h = Buffer.alloc(8);
+    h.write(type, 0, 'latin1');
+    h.writeUInt32LE(data.length, 4);
+    return Buffer.concat([h, data, Buffer.alloc(data.length % 2)]);
+  };
+  const vp8lData = Buffer.alloc(11);
+  vp8lData[0] = 0x2f;
+  vp8lData.writeUInt32LE((99 & 0x3fff) | ((79 & 0x3fff) << 14), 1);
+  const webp = (...chunks: Buffer[]) => {
+    const body = Buffer.concat([Buffer.from('WEBP', 'latin1'), ...chunks]);
+    const h = Buffer.alloc(8);
+    h.write('RIFF', 0, 'latin1');
+    h.writeUInt32LE(body.length, 4);
+    return Buffer.concat([h, body]);
+  };
+  const vp8l = riff('VP8L', vp8lData);
+  const w1 = cleanImage(webp(vp8l, riff('EXIF', Buffer.from('GPS 25.2,55.3')), riff('ABCD', Buffer.from('tracking')), riff('XMP ', Buffer.from(GEMINI_XMP))), 1e7)!;
+  assert.deepEqual(w1.bytes, webp(vp8l), 'only the picture is kept');
+  assert.deepEqual([w1.width, w1.height], [100, 80]);
+  const w2 = cleanImage(webp(vp8l, riff('ABCD', Buffer.from('tracking'))), 1e7, { keepProvenance: true })!;
+  assert.equal(w2.bytes.toString('latin1', 12, 16), 'VP8X');
+  assert.equal(w2.bytes[20] & 0x04, 0x04, 'the XMP flag');
+  assert.deepEqual([w2.width, w2.height], [100, 80]);
+  assert.ok(w2.bytes.includes(Buffer.from(COMPOSITE)) && !w2.bytes.includes(Buffer.from('tracking')));
+  assert.equal(w2.bytes.readUInt32LE(4), w2.bytes.length - 8, 'the RIFF size is right');
+  // WebP from Gemini with its own XMP and C2PA: kept, XMP flag set.
+  const vp8x = Buffer.alloc(10);
+  vp8x[0] = 0x0c;
+  vp8x.writeUIntLE(99, 4, 3);
+  vp8x.writeUIntLE(79, 7, 3);
+  const w3 = cleanImage(webp(riff('VP8X', vp8x), vp8l, riff('EXIF', Buffer.from('x')), riff('XMP ', Buffer.from(GEMINI_XMP)), riff('C2PA', Buffer.from('manifest'))), 1e7, { keepProvenance: true })!.bytes;
+  assert.deepEqual(w3, webp(riff('VP8X', Buffer.concat([Buffer.from([0x04]), vp8x.subarray(1)])), vp8l, riff('XMP ', Buffer.from(GEMINI_XMP)), riff('C2PA', Buffer.from('manifest'))));
+});
+
+test('a PNG whose IHDR is not 13 bytes is refused', async () => {
+  const { cleanImage } = await import('@/lib/server/images');
+  const { imageDimensions } = await import('@/lib/server/imageInput');
+  const good = bedroomPng(100, 120);
+  // The same picture with a 17-byte IHDR (4 extra bytes): length, type, data and CRC rebuilt.
+  const ihdr = Buffer.concat([good.subarray(16, 29), Buffer.alloc(4)]);
+  const bad = Buffer.concat([good.subarray(0, 8), chunk('IHDR', ihdr), good.subarray(33)]);
+  assert.ok(cleanImage(good, 1e7));
+  assert.equal(cleanImage(bad, 1e7), null);
+  assert.equal(imageDimensions(bad), null);
+});
+
+test('the styled-photo record never drops a photo still stored (only records of files that are gone)', async () => {
+  const sp = await import('@/lib/server/stagedPhotos');
+  const { kvSet } = await import('@/lib/server/kv');
+  const imgDir = path.join(dir, 'images');
+  const before = sp.stagedRecords();
+  const all: Record<string, { source: string; preset: string; at: string }> = {};
+  const fake = (i: number) => `${crypto.createHash('sha256').update(`staged-${i}`).digest('hex')}.png`;
+  for (let i = 0; i < 2002; i++) {
+    if (i < 2000) all[fake(i)] = { source: '', preset: 'kids-room', at: '' };
+    if (i !== 5) fs.writeFileSync(path.join(imgDir, fake(i)), 'x');
+  }
+  kvSet('staging:photos', all);
+  sp.recordStaged(fake(2000), { source: '', preset: 'kids-room', at: '' });
+  sp.recordStaged(fake(2001), { source: '', preset: 'kids-room', at: '' });
+  const now = sp.stagedRecords();
+  assert.equal(fake(5) in now, false, 'the record of a file that is gone goes first');
+  for (const i of [0, 1, 4, 6, 1999, 2000, 2001]) assert.ok(fake(i) in now, `record ${i} kept`);
+  assert.equal(Object.keys(now).length, 2001, 'over the limit rather than lose a stored photo’s mark');
+  for (let i = 0; i < 2002; i++) fs.rmSync(path.join(imgDir, fake(i)), { force: true });
+  kvSet('staging:photos', before);
+});
+
 test('the shop: styled photos carry a "Styled image" mark while the label setting is on, and none when it is off', async () => {
   answer = () => imageReply(bedroomPng(180, 225));
   const real = saveImageDataUrl(PHOTO_URL);
@@ -437,10 +618,18 @@ test('the shop: styled photos carry a "Styled image" mark while the label settin
   const p = products.createProduct({ title: 'Label Test Set', category: 'bedsheets', price: 300, featuredImage: real, galleryImages: [r.url], profiles: king, defaultProfileId: 'king', stockBySize: { king: 1 } });
   const shown = async () => ((await (await productsRoute.GET()).json()) as { products: Array<{ id: string; stagedPhotos?: Record<string, unknown> }> }).products.find((x) => x.id === p.id)!;
   assert.deepEqual((await shown()).stagedPhotos, { [r.url]: { staged: true } }, 'only the mark: not the source or the style');
+  // The Meta / Google feed: the styled photo is an additional image only while the shop labels them.
+  const feed = await import('@/app/feeds/meta.csv/route');
+  process.env.NEXT_PUBLIC_APP_URL = 'https://shop.test';
+  const feedRow = async () => (await (await feed.GET()).text()).split('\n').find((l) => l.includes(`${p.id}-king`))!;
+  assert.ok((await feedRow()).includes(r.url));
   await settings.updateSettings('ai', { labelStyledPhotos: false });
   assert.equal((await shown()).stagedPhotos, undefined);
+  assert.ok(!(await feedRow()).includes(r.url), 'no unlabelled styled photo in the feed');
+  assert.ok((await feedRow()).includes(real), 'the real photo stays');
   await settings.updateSettings('ai', { labelStyledPhotos: true });
   assert.ok((await shown()).stagedPhotos);
+  delete process.env.NEXT_PUBLIC_APP_URL;
 });
 
 test('a backup keeps styled photos (files, their mark on the product, the record) and never the Gemini key; the restore script restores them', async () => {

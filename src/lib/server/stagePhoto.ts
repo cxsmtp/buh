@@ -15,7 +15,8 @@ import { forgetStaged, recordStaged, stagedRecords } from './stagedPhotos';
  * "Style in a bedroom" (product editor → Photos): one of the product's photos goes to Google Gemini
  * (an image model, the owner's own key from Settings → AI writing) with a fixed prompt that keeps
  * the product exactly as photographed and changes only the room around it. The picture that comes
- * back is checked (a whole PNG, JPEG or WebP, size and pixel limits), its metadata is taken out, and
+ * back is checked (a whole PNG, JPEG or WebP, size and pixel limits), its metadata is taken out
+ * except its AI provenance (C2PA, XMP DigitalSourceType: kept, or added when missing), and
  * it is stored as a NEW photo, recorded as styled (src/lib/server/stagedPhotos.ts). The original is
  * never touched. The owner looks at both side by side and adds it to the product, or discards it.
  *
@@ -135,6 +136,9 @@ export async function stagePhoto(body: Record<string, unknown>, actor: string): 
     // A model that only answers with text and pictures together: asked again that way.
     const detail = String((err as { details?: { detail?: string } }).details?.detail ?? '');
     if ((err as { details?: { code?: string } }).details?.code !== 'ai_error' || !/modalit/i.test(detail)) throw err;
+    // The second call is paid for too: it counts against the hour's limit.
+    const again = rateLimit(`ai-stage:${actor}`, STAGE_LIMIT.max, STAGE_LIMIT.windowMs);
+    if (!again.ok) throw new HttpError(429, 'That is 10 styled photos this hour. Please wait a while before the next one.', { 'Retry-After': String(again.retryAfterSec) });
     data = await generateContent(ai.geminiApiKey, model, request(['TEXT', 'IMAGE']), opts);
   }
 
@@ -148,14 +152,20 @@ export async function stagePhoto(body: Record<string, unknown>, actor: string): 
     logEvent('warn', 'gemini_stage_no_image', { finishReason, parts: parts.length });
     throw new HttpError(502, 'Gemini did not send a picture back. Please try again.', {}, { code: 'ai_no_image' });
   }
-  const clean = b64.length <= Math.ceil(RESULT_MAX_BYTES * 1.37) && /^[A-Za-z0-9+/_-]+={0,2}$/.test(b64) ? cleanImage(Buffer.from(b64, 'base64'), RESULT_MAX_BYTES) : null;
+  const clean = b64.length <= Math.ceil(RESULT_MAX_BYTES * 1.37) && /^[A-Za-z0-9+/_-]+={0,2}$/.test(b64) ? cleanImage(Buffer.from(b64, 'base64'), RESULT_MAX_BYTES, { keepProvenance: true }) : null;
   if (!clean) {
     logEvent('warn', 'gemini_stage_bad_image', { length: b64.length });
     throw new HttpError(502, 'Gemini’s picture could not be used (not a whole PNG, JPEG or WebP, or too large). Nothing was saved; please try again.', {}, { code: 'ai_bad_image' });
   }
 
-  const url = saveImageBytes(clean.bytes, clean.mime);
+  // Stored by its SHA-256: a picture already stored (the photo sent, or any other) is not a new
+  // styled photo, and must never be marked styled or deleted by Discard.
+  const { url, created } = saveImageBytes(clean.bytes, clean.mime);
   const name = url.slice('/api/images/'.length);
+  if (!created || name === source) {
+    logEvent('warn', 'gemini_stage_same_image', { created });
+    throw new HttpError(502, 'Gemini returned the same photo; try another style.', {}, { code: 'ai_same_image' });
+  }
   const at = new Date().toISOString();
   recordStaged(name, { source, preset: preset.id, at });
   audit('product.photo_staged', { by: actor, model, preset: preset.id, source: source || 'upload', sourceBytes: photo.bytes.length, result: name, resultBytes: clean.bytes.length, width: clean.width, height: clean.height, extraLength: extra.length, aspect });
@@ -170,12 +180,13 @@ export function discardStagedPhoto(body: Record<string, unknown>, actor: string)
   for (const k of Object.keys(body)) if (k !== 'url') throw new HttpError(400, `Unexpected field: ${k.slice(0, 30)}.`);
   const name = typeof body.url === 'string' ? body.url.replace(/^\/api\/images\//, '') : '';
   if (!IMAGE_NAME.test(name)) throw new HttpError(400, 'Which styled photo?');
+  // Only a photo this feature stored as new (it is recorded only then, never a picture already stored).
   if (!(name in stagedRecords())) throw new HttpError(404, 'That is not a styled photo.');
   const db = getDb();
-  const used =
-    (db.prepare('SELECT COUNT(*) FROM products WHERE instr(data, ?) > 0').pluck().get(name) as number) +
-    (db.prepare('SELECT COUNT(*) FROM product_drafts WHERE instr(data, ?) > 0').pluck().get(name) as number);
-  if (used) throw new HttpError(409, 'That styled photo is on a product (or its draft): remove it there instead.');
+  // Nothing may use it: a product, a draft, an order line (its picture), a setting (the logo…) or a
+  // saved earlier version of a setting.
+  const used = ['products', 'product_drafts', 'orders', 'settings', 'settings_history'].some((table) => (db.prepare(`SELECT COUNT(*) FROM ${table} WHERE instr(data, ?) > 0`).pluck().get(name) as number) > 0);
+  if (used) throw new HttpError(409, 'That styled photo is in use (on a product, its draft, an order or a setting): remove it there instead.');
   const deleted = deleteImage(name);
   forgetStaged(name);
   audit('product.photo_staged_discarded', { by: actor, result: name });

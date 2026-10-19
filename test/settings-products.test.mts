@@ -119,3 +119,15 @@ test('a new product gets a server id, its photo stored as a file, and goes first
   assert.equal(products.listProducts()[0].id, created.id);
   assert.ok(fs.readdirSync(path.join(dir, 'images')).length >= 1);
 });
+
+test('a stored-photo address whose file is not stored is refused (no broken photo on a product or the logo)', async () => {
+  const template = products.listProducts()[0];
+  const missing = `/api/images/${'c'.repeat(64)}.png`;
+  for (const change of [{ featuredImage: missing }, { galleryImages: [missing] }, { aiTransformedImage: missing }]) {
+    assert.throws(() => products.updateProduct(template.id, change), (e: { status?: number; message: string }) => e.status === 400 && /no longer stored/.test(e.message), JSON.stringify(change));
+  }
+  await assert.rejects(settings.updateSettings('brand', { logoType: 'image', logoImageUrl: missing }), /no longer stored/);
+  // One that is stored is still accepted.
+  const stored = products.listProducts().find((p) => p.featuredImage.startsWith('/api/images/'))!;
+  assert.ok(products.updateProduct(stored.id, { galleryImages: [stored.featuredImage] }));
+});

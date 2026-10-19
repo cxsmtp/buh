@@ -1,4 +1,5 @@
 import type { StagedPhoto } from '@/types';
+import { imageExists } from './images';
 import { kvGet, kvSet } from './kv';
 
 /**
@@ -21,8 +22,16 @@ export function stagedRecords(): Record<string, StagedRecord> {
 export function recordStaged(name: string, rec: StagedRecord): void {
   const all = { ...stagedRecords(), [name]: rec };
   const names = Object.keys(all);
-  // The newest KEEP (a styled photo older than that is on its product by now, or was never used).
-  for (const old of names.slice(0, Math.max(0, names.length - KEEP))) delete all[old];
+  // Over KEEP, the oldest records of files no longer stored go. A record whose file is still stored
+  // is never dropped: the photo would lose its "styled" mark the next time a product is saved.
+  let over = names.length - KEEP;
+  for (const old of names) {
+    if (over <= 0) break;
+    if (old !== name && !imageExists(old)) {
+      delete all[old];
+      over--;
+    }
+  }
   kvSet(KEY, all);
 }
 
