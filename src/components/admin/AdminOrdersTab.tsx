@@ -59,7 +59,7 @@ export function realBooking(order: Order): boolean {
 /** The customer's WhatsApp update, from what is real: an AWB and link only for a real booking. */
 export function whatsAppUpdateText(order: Order, shopName = 'Beautiful UAE Home'): string {
   const c = order.courier;
-  const pay = order.paymentMethod === 'cod' ? `Cash on delivery: AED ${aed2(order.total)}` : `Total: AED ${aed2(order.total)} (prepaid)`;
+  const pay = order.paymentMethod === 'cod' ? `Cash on delivery: AED ${aed2(order.total)}` : `Total: AED ${aed2(order.total)} (prepaid${order.cardFee ? `, incl. card payment fee AED ${aed2(order.cardFee)}` : ''})`;
   const lines = [`Dear ${order.customer.fullName}, greetings from ${shopName}!`, ''];
   if (realBooking(order)) {
     lines.push(`Your order ${order.id} is booked with ${carrierLabel(c.provider, c.carrierName)}.`, `Tracking number (AWB): ${c.awbNumber}`);
@@ -457,6 +457,11 @@ export const AdminOrdersTab: React.FC<AdminOrdersTabProps> = ({
                     <span className="text-base font-bold text-ink block">
                       AED {order.total}
                     </span>
+                    {Boolean(order.cardFee) && (
+                      <span data-testid="order-card-fee" className="text-[10px] text-ink-muted block">
+                        incl. card fee{order.cardFeePercent ? ` ${order.cardFeePercent}%` : ''} AED {aed2(order.cardFee ?? 0)}
+                      </span>
+                    )}
                     <span
                       className={`inline-flex items-center gap-1 text-[10px] font-semibold px-2 py-0.5 rounded-md ${
                         isCod

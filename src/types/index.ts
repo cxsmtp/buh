@@ -169,9 +169,15 @@ export interface Order {
   /** standard (free, standardDays) or same_day (with Settings → Delivery's charge). */
   deliveryOption?: 'standard' | 'same_day';
   codFee: number;
+  /** Card payment fee (Settings → Payments, % of items + delivery), in AED; absent or 0 for other payments. Part of total. */
+  cardFee?: number;
+  /** The fee's percent when the order was placed. */
+  cardFeePercent?: number;
   discount: number;
   total: number;
   paymentMethod: PaymentMethod;
+  /** Bank transfer "on request": no account was saved, so the customer asks for it on the shop's WhatsApp. */
+  bankDetailsBy?: 'whatsapp';
   paymentStatus: 'pending' | 'receipt_uploaded' | 'verified' | 'cod_pending' | 'paid';
   paymentReceiptUrl?: string;
   bankTransferRef?: string;
@@ -266,7 +272,18 @@ export interface PaymentSettings {
   stripeSecretKey: string;
   /** whsec_… (secret: proves a webhook came from Stripe). */
   stripeWebhookSecret: string;
+  /** Added to card orders (items + delivery), 0–10 with up to 2 decimals; 0: no fee. Default 3.5. */
+  cardFeePercent: number;
+  /**
+   * Bank transfer at checkout: send_details (the saved account is emailed and on the order's private
+   * page), ask_whatsapp (the customer messages the shop's WhatsApp for the details; no account needs
+   * to be saved), off; default: send_details with an account saved, else ask_whatsapp with a WhatsApp
+   * number, else off.
+   */
+  bankTransferMode: BankTransferMode;
 }
+
+export type BankTransferMode = 'default' | 'send_details' | 'ask_whatsapp' | 'off';
 
 export type BankState = 'awaiting' | 'uploaded' | 'not_received' | 'paid';
 

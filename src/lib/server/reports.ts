@@ -114,7 +114,7 @@ export interface Report {
   from: string;
   to: string;
   generatedAt: string;
-  sales: { orders: number; itemsFils: number; deliveryFils: number; codFeeFils: number; discountFils: number; grossFils: number; paidFils: number; unpaidFils: number };
+  sales: { orders: number; itemsFils: number; deliveryFils: number; codFeeFils: number; cardFeeFils: number; discountFils: number; grossFils: number; paidFils: number; unpaidFils: number };
   refunds: { count: number; fils: number };
   netSalesFils: number;
   byMethod: Record<PaymentMethod, MethodTotals>;
@@ -169,7 +169,7 @@ export function buildReport(from: string, to: string, now = Date.now()): Report 
   const booked = bookedRefunds(orders);
   const methods: PaymentMethod[] = ['cod', 'bank_transfer', 'online_card'];
   const byMethod = Object.fromEntries(methods.map((m) => [m, { orders: 0, fils: 0, paidOrders: 0, paidFils: 0 }])) as Record<PaymentMethod, MethodTotals>;
-  const sales = { orders: 0, itemsFils: 0, deliveryFils: 0, codFeeFils: 0, discountFils: 0, grossFils: 0, paidFils: 0, unpaidFils: 0 };
+  const sales = { orders: 0, itemsFils: 0, deliveryFils: 0, codFeeFils: 0, cardFeeFils: 0, discountFils: 0, grossFils: 0, paidFils: 0, unpaidFils: 0 };
   const refunds = { count: 0, fils: 0 };
   const card = { paidCount: 0, paidFils: 0, refundedFils: 0 };
   const excluded = { cancelled: 0, awaitingCard: 0, testMode: 0 };
@@ -189,6 +189,8 @@ export function buildReport(from: string, to: string, now = Date.now()): Report 
       sales.itemsFils += fils(o.subtotal);
       sales.deliveryFils += fils(o.deliveryFee);
       sales.codFeeFils += fils(o.codFee);
+      // The card payment fee is the shop's income (part of the total the customer paid).
+      sales.cardFeeFils += fils(o.cardFee ?? 0);
       sales.discountFils += fils(o.discount);
       sales.grossFils += total;
       if (c.paid) sales.paidFils += total;
@@ -296,7 +298,7 @@ function salesCsv(orders: Order[], refunds: BookedRefund[]): string {
     refundOf.set(r.orderId, t);
   }
   return toCsv(
-    ['date', 'order_number', 'customer_name', 'emirate', 'items', 'quantity', 'items_aed', 'delivery_fee_aed', 'cod_fee_aed', 'discount_aed', 'total_aed', 'payment_method', 'payment_status', 'payment_ref', 'paid', 'refund_aed', 'refund_date', 'order_status', 'courier', 'awb', 'counted_in_sales', 'not_counted_because', 'placed_at_utc', 'refund_date_approximate'],
+    ['date', 'order_number', 'customer_name', 'emirate', 'items', 'quantity', 'items_aed', 'delivery_fee_aed', 'cod_fee_aed', 'discount_aed', 'total_aed', 'payment_method', 'payment_status', 'payment_ref', 'paid', 'refund_aed', 'refund_date', 'order_status', 'courier', 'awb', 'counted_in_sales', 'not_counted_because', 'placed_at_utc', 'refund_date_approximate', 'card_fee_aed'],
     orders.map((o) => {
       const c = classifyOrder(o);
       const refund = refundOf.get(o.id);
@@ -308,7 +310,7 @@ function salesCsv(orders: Order[], refunds: BookedRefund[]): string {
         METHOD[o.paymentMethod] ?? o.paymentMethod, paymentStatusText(o), paymentRef(o), c.paid ? 'yes' : 'no',
         refund?.fils ? aedText(refund.fils) : '', refund?.fils ? refund.date : '', o.status,
         o.courier?.provider ?? '', o.courier?.simulated ? '' : (o.courier?.awbNumber ?? ''),
-        c.counted ? 'yes' : 'no', c.reason, o.createdAt, refund?.fils && refund.approx ? 'yes' : '',
+        c.counted ? 'yes' : 'no', c.reason, o.createdAt, refund?.fils && refund.approx ? 'yes' : '', aedText(fils(o.cardFee ?? 0)),
       ];
     })
   );
@@ -341,6 +343,7 @@ function summaryRows(r: Report): Array<[string, string, string | number, string]
     ['Sales', 'Items', '', aedText(r.sales.itemsFils)],
     ['Sales', 'Delivery charges', '', aedText(r.sales.deliveryFils)],
     ['Sales', 'Cash-on-delivery fees', '', aedText(r.sales.codFeeFils)],
+    ['Sales', 'Card fees (card payment fee charged to customers)', '', aedText(r.sales.cardFeeFils)],
     ['Sales', 'Discounts', '', aedText(-r.sales.discountFils)],
     ['Sales', 'Gross sales', r.sales.orders, aedText(r.sales.grossFils)],
     ['Sales', 'Refunds', r.refunds.count, aedText(-r.refunds.fils)],
@@ -417,6 +420,8 @@ function readme(r: Report, shop: string, bills: number, auditCount: number, veri
     '  waiting for its card payment, or was a Stripe test payment. A card payment refunded later counts as a',
     '  sale (when placed) and as a refund (on the day each refund was made). Cash on delivery and bank transfers not yet marked',
     '  as received are in the totals and shown as "not marked paid yet".',
+    '  The card payment fee customers pay on card orders is part of each order\'s total and is the shop\'s',
+    '  income: card_fee_aed in sales.csv, "Card fees" in the summary (Stripe\'s own fees are in Stripe).',
     '',
     'VAT',
     `  ${r.vat.text}`,

@@ -115,3 +115,60 @@ export function notReceivedReply(orderId: string, total: number, link?: string):
     link ? `If you have a new screenshot, you can upload it here: ${link}` : 'If you have a screenshot of the transfer, please send it here.',
   ].join('\n');
 }
+
+// ── Bank transfer "on request" (Settings → Payments: the customer asks on WhatsApp) ─────────────
+
+/** What the customer sends the shop's WhatsApp to ask for the bank details. */
+export function askBankDetailsMessage(orderId: string, total: number): string {
+  return `Hello, I placed order ${orderId} for ${aed(total)}. Please send your bank details so I can pay by transfer.`;
+}
+
+/** Stands for the account in the owner's reply when none is saved (the owner types it in WhatsApp). */
+export const BANK_DETAILS_PLACEHOLDER = '[your bank details]';
+
+/** The account is saved (bank, account name and IBAN): the reply can carry it. */
+export const bankDetailsSaved = (bank?: Partial<BankTransferDetails> | null) => Boolean(bank?.iban && bank.accountName && bank.bankName);
+
+/**
+ * The owner's WhatsApp reply to a customer who asked for the bank details: the saved account, or
+ * "[your bank details]" for the owner to fill in before sending; the amount, reference and link.
+ */
+export function bankDetailsReply(input: Omit<BankMessageInput, 'bank'> & { bank?: BankTransferDetails | null }): string {
+  if (input.bank && bankDetailsSaved(input.bank)) return bankDetailsWhatsApp({ ...input, bank: input.bank });
+  const firstName = safeFirstName(input.firstName);
+  return [
+    `Hello${firstName ? ` ${firstName}` : ''}, thank you for your order ${input.orderId} with ${input.shopName || 'Beautiful UAE Home'}.`,
+    '',
+    `Please transfer ${aed(input.total)} to:`,
+    BANK_DETAILS_PLACEHOLDER,
+    `Reference: ${input.orderId}`,
+    '',
+    input.link ? `Then upload a screenshot of the transfer here: ${input.link}` : 'Then send us a screenshot of the transfer here.',
+    ...(input.link ? ['Or simply reply here with the screenshot.'] : []),
+  ].join('\n');
+}
+
+/** The email to a customer who will ask for the bank details on WhatsApp: no account in it (none is saved). */
+export function bankRequestEmail({ orderId, total, link, firstName: name, shopName, askLink }: Omit<BankMessageInput, 'bank' | 'confirmLink' | 'cancelHours'> & { askLink: string }): { subject: string; text: string } {
+  const firstName = safeFirstName(name);
+  const shop = shopName || 'Beautiful UAE Home';
+  return {
+    subject: `Paying for your order ${orderId} by bank transfer`,
+    text: [
+      `Hello${firstName ? ` ${firstName}` : ''},`,
+      '',
+      `Thank you for your order ${orderId}. To pay ${aed(total)} by bank transfer, message us on WhatsApp for the bank details (the message is already typed, just tap Send):`,
+      askLink,
+      '',
+      `Please use ${orderId} as the transfer reference.`,
+      '',
+      ...(link ? ['Then upload a screenshot or PDF of the transfer on your order’s private page:', link, '', 'or send it to us on WhatsApp.'] : ['Then send us a screenshot of the transfer on WhatsApp.']),
+      '',
+      'We will confirm your order as soon as we see the transfer.',
+      '',
+      `${shop}`,
+      '',
+      'This link is only for you: please don’t share it.',
+    ].join('\n'),
+  };
+}

@@ -4,7 +4,7 @@ import React, { useState } from 'react';
 import { Building2, Check, CheckCircle2, Clock, Copy, Eye, MessageCircle, XCircle } from 'lucide-react';
 import type { BankTransferDetails, Order } from '@/types';
 import { postJson, safeLinkHref } from '@/lib/apiClient';
-import { bankDetailsWhatsApp, notReceivedReply, paymentReceivedReply } from '@/lib/bankMessages';
+import { bankDetailsReply, bankDetailsSaved, BANK_DETAILS_PLACEHOLDER, notReceivedReply, paymentReceivedReply } from '@/lib/bankMessages';
 import { waMeLink } from '@/lib/whatsappConfirm';
 
 /** A bank transfer with a screenshot waiting for the owner's look (not paid, not cancelled). */
@@ -61,7 +61,10 @@ export function OrderBankTransfer({ order, bank, shopName, onOrderChanged }: { o
     }
   };
 
-  const details = waMeLink(order.customer.phone, bankDetailsWhatsApp({ orderId: order.id, total: order.total, bank, link: link || undefined, firstName: order.customer.fullName, shopName }));
+  // The saved account, or "[your bank details]" for the owner to type in WhatsApp before sending.
+  const details = waMeLink(order.customer.phone, bankDetailsReply({ orderId: order.id, total: order.total, bank, link: link || undefined, firstName: order.customer.fullName, shopName }));
+  const onRequest = order.bankDetailsBy === 'whatsapp';
+  const accountSaved = bankDetailsSaved(bank);
   const reply = bt.state === 'paid' ? waMeLink(order.customer.phone, paymentReceivedReply(order.id)) : bt.state === 'not_received' ? waMeLink(order.customer.phone, notReceivedReply(order.id, order.total, link || undefined)) : null;
   const button = 'min-h-11 px-3 py-2 rounded-xl text-xs font-bold flex items-center justify-center gap-1.5 disabled:opacity-50 focus:outline-none focus-visible:ring-2 focus-visible:ring-gold';
   const receipt = safeLinkHref(order.paymentReceiptUrl) || `/api/admin/orders/${encodeURIComponent(order.id)}/receipt`;
@@ -75,6 +78,11 @@ export function OrderBankTransfer({ order, bank, shopName, onOrderChanged }: { o
         </strong>
         <span className="text-ink-soft">AED {order.total} · reference <span className="font-mono">{order.id}</span></span>
       </div>
+      {onRequest && (
+        <p data-testid="bank-on-request" className="font-semibold text-ink flex items-center gap-1.5">
+          <MessageCircle className="w-3.5 h-3.5 text-whatsapp shrink-0" aria-hidden="true" /> Bank transfer: customer will ask for details on WhatsApp
+        </p>
+      )}
       {bt.state === 'paid' && bt.checkedAt && <p className="text-ink-soft">Marked received{bt.checkedBy ? ` by ${bt.checkedBy}` : ''} at {when(bt.checkedAt)}.</p>}
       {bt.uploads > 0 && (
         <div className="flex flex-wrap items-center gap-2">
@@ -115,7 +123,7 @@ export function OrderBankTransfer({ order, bank, shopName, onOrderChanged }: { o
         )}
         {bt.state !== 'paid' && !cancelled && details && (
           <a href={details} target="_blank" rel="noopener noreferrer" className={`${button} ${reply ? 'bg-surface text-ink border border-line-strong' : 'bg-whatsapp text-paper'}`}>
-            <MessageCircle className="w-4 h-4" aria-hidden="true" /> Send bank details on WhatsApp
+            <MessageCircle className="w-4 h-4" aria-hidden="true" /> {onRequest ? 'Reply with bank details on WhatsApp' : 'Send bank details on WhatsApp'}
           </a>
         )}
       </div>
@@ -135,7 +143,16 @@ export function OrderBankTransfer({ order, bank, shopName, onOrderChanged }: { o
       )}
       {bt.state !== 'paid' && !cancelled && (
         <p className="text-ink-muted">
-          {bt.emailedAt ? `Bank details emailed to the customer at ${when(bt.emailedAt)}.` : order.customer.email ? 'Not emailed yet (or email is not set up): you can send the details on WhatsApp.' : 'No email on this order: send the bank details on WhatsApp.'}
+          {onRequest
+            ? bt.emailedAt
+              ? `Emailed the customer how to ask on WhatsApp at ${when(bt.emailedAt)}.`
+              : 'The customer was shown a button to ask on WhatsApp.'
+            : bt.emailedAt
+              ? `Bank details emailed to the customer at ${when(bt.emailedAt)}.`
+              : order.customer.email
+                ? 'Not emailed yet (or email is not set up): you can send the details on WhatsApp.'
+                : 'No email on this order: send the bank details on WhatsApp.'}
+          {!accountSaved && ` No bank account is saved (Settings → Branding & bank): the reply has ${BANK_DETAILS_PLACEHOLDER} for you to fill in.`}
         </p>
       )}
       {problem && <p role="alert" className="text-danger font-semibold">{problem}</p>}

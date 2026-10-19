@@ -35,6 +35,7 @@ const webhookRoute = await import('@/app/api/stripe/webhook/route');
 const publicRoute = await import('@/app/api/settings/public/route');
 const { walletAddress, emirateFrom } = await import('@/lib/walletAddress');
 const { redact } = await import('@/lib/server/log');
+const { cardFeeFils } = await import('@/lib/money');
 
 after(() => mock.close());
 
@@ -52,6 +53,8 @@ after(() => Object.assign(console, saved));
 let n = 0;
 const product = () => listProducts()[0];
 const stockOf = (productId: string, sizeId: string) => (getDb().prepare('SELECT qty FROM product_stock WHERE product_id = ? AND size_id = ?').get(productId, sizeId) as { qty: number }).qty;
+/** Items + delivery with Settings → Payments' default 3.5% card fee (half up, in fils). */
+const withFee = (f: number) => f + cardFeeFils(f, 3.5);
 const priceFils = () => Math.round(product().price * 100) + Math.round((product().profiles[0].priceDelta || 0) * 100);
 
 function cardBody(over: Record<string, unknown> = {}) {
@@ -112,7 +115,7 @@ test('Settings → Payments: off by default; keys validated; on needs all three 
   assert.equal(settings.stripeMode(TEST_KEYS.publishable), 'test');
   assert.equal(settings.stripeMode('sk_live_x'), 'live');
   const after = await (await publicRoute.GET()).json();
-  assert.deepEqual(after.payments, { card: true, publishableKey: TEST_KEYS.publishable });
+  assert.deepEqual(after.payments, { card: true, publishableKey: TEST_KEYS.publishable, cardFeePercent: 3.5 });
   const text = JSON.stringify(after);
   assert.ok(!text.includes(TEST_KEYS.secret) && !text.includes(TEST_KEYS.webhook), 'only the publishable key reaches the shop');
   // A save without the keys keeps them (write-only); history never keeps them.
@@ -131,7 +134,7 @@ test('a card order: no SMS code, the server’s prices (a tampered total is refu
   assert.equal(tampered.data.code, 'price_changed');
   assert.equal(stockOf(p.id, p.profiles[0].id), before, 'nothing reserved');
   // Extra fields from the browser (a price, a total) are simply not read.
-  const body = cardBody({ total: 1, subtotal: 1, amount: 100, expectedTotal: priceFils() / 100 });
+  const body = cardBody({ total: 1, subtotal: 1, amount: 100, cardFee: 0, expectedTotal: withFee(priceFils()) / 100 });
   (body.items as Array<Record<string, unknown>>)[0].unitPrice = 1;
   const res = await ordersRoute.POST(jsonRequest(body, { origin: ORIGIN }) as never);
   assert.equal(res.status, 201);
@@ -144,7 +147,7 @@ test('a card order: no SMS code, the server’s prices (a tampered total is refu
   assert.match(data.payment.clientSecret, /^pi_\w+_secret_\w+$/);
   assert.equal(stockOf(p.id, p.profiles[0].id), before - 1, 'the piece is held while the customer pays');
   const pi = intentOf(data.order.id);
-  assert.equal(pi.amount, priceFils(), 'Stripe is asked for the server’s total, in fils');
+  assert.equal(pi.amount, withFee(priceFils()), 'Stripe is asked for the server’s total (with the 3.5% card fee), in fils');
   assert.equal(pi.currency, 'aed');
   const creates = mock.requests.filter((r) => r.method === 'POST' && r.path === '/v1/payment_intents' && r.body.get('metadata[orderId]') === data.order.id);
   assert.equal(creates.length, 1);
@@ -587,7 +590,7 @@ test('with an SMS gateway on, a card order proves its phone with a code like any
     await settings.updateSettings('phoneCheck', { mode: 'sms_code' });
     assert.equal(settings.phoneCodesOn(), true);
     const pub = await (await publicRoute.GET()).json();
-    assert.deepEqual(pub.payments, { card: true, publishableKey: TEST_KEYS.publishable, phoneCheck: true });
+    assert.deepEqual(pub.payments, { card: true, publishableKey: TEST_KEYS.publishable, cardFeePercent: 3.5, phoneCheck: true });
     const none = await placeCard();
     assert.equal(none.res.status, 401, 'no code: refused');
     const { issuePhoneToken } = await import('@/lib/server/phoneToken');

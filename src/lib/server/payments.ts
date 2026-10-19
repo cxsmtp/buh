@@ -525,6 +525,19 @@ export function paymentsModeWarning(beforeKey: string, afterKey: string): string
   );
 }
 
+/** The card fee and bank-transfer choice now (Settings → Payments), to audit a change. */
+export function paymentOptions(): { cardFeePercent: number; bankTransferMode: string } {
+  const p = getSettings('payments');
+  return { cardFeePercent: p.cardFeePercent, bankTransferMode: p.bankTransferMode };
+}
+
+/** Audit a change to the card fee or the bank-transfer choice (from, to, who): what customers pay and see. */
+export function auditPaymentOptions(before: ReturnType<typeof paymentOptions>, by: string): void {
+  const after = paymentOptions();
+  if (before.cardFeePercent === after.cardFeePercent && before.bankTransferMode === after.bankTransferMode) return;
+  audit('settings.payment_options_changed', { by, from: before, to: after });
+}
+
 /** "Check the connection": the account behind the secret key (typed now, or saved). */
 export async function checkStripeAccount(typedKey?: string): Promise<{ mode: 'test' | 'live' | null; name: string; chargesEnabled: boolean; country: string; email: string }> {
   const key = typedKey || getSettings('payments').stripeSecretKey;

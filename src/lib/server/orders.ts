@@ -13,7 +13,8 @@ import { parseReceiptDataUrl } from './imageInput';
 import { verifyPhoneToken } from './phoneToken';
 import { getProduct, invalidateProducts, listProducts } from './products';
 import { bump } from './live';
-import { bankTransferReady, cardPaymentsReady, getSettings, phoneCheckMode, phoneCodesOn } from './settings';
+import { bankTransferMode, cardFeePercent, cardPaymentsReady, getSettings, phoneCheckMode, phoneCodesOn } from './settings';
+import { cardFeeFils } from '@/lib/money';
 import { audit, auditedTransaction, auditOrThrow } from './audit';
 import { kvGet, kvSet } from './kv';
 import { logEvent as logEvent_ } from './log';
@@ -402,9 +403,13 @@ export function placeOrder(input: unknown, context: PlaceOrderContext = {}): Pla
   const deliveryFils = deliveryOption === 'same_day' ? fils(delivery.sameDay.fee) : fils(DELIVERY_FEE);
 
   if (paymentMethod !== 'cod' && paymentMethod !== 'bank_transfer' && !card) throw new HttpError(400, 'Choose Cash on Delivery, Bank Transfer or Card.');
-  if (paymentMethod === 'bank_transfer' && !bankTransferReady(getSettings('bank'))) {
+  // Settings → Payments → Bank transfer: our details sent automatically, or asked for on WhatsApp.
+  const bankMode = paymentMethod === 'bank_transfer' ? bankTransferMode() : null;
+  if (paymentMethod === 'bank_transfer' && !bankMode) {
     throw new HttpError(400, 'Bank transfer is not available right now. Please choose Cash on Delivery.');
   }
+  // Settings → Payments "Card payment fee (%)": card orders only, worked out here (never the browser's).
+  const feePercent = card ? cardFeePercent() : 0;
   const bankRef = text(body.bankTransferRef, 'Transfer reference', 60);
   // Where the customer came from: an allow-listed label only (for the owner's records).
   const src = body.source && typeof body.source === 'object' ? (body.source as Obj) : null;
@@ -578,10 +583,12 @@ export function placeOrder(input: unknown, context: PlaceOrderContext = {}): Pla
 
       const subtotalFils = items.reduce((s, i) => s + fils(i.totalPrice), 0);
       const codFils = paymentMethod === 'cod' ? fils(COD_FEE) : 0;
-      const totalFils = subtotalFils + deliveryFils + codFils;
+      // The card fee: a percent of items + delivery, in whole fils (half up), part of the total Stripe is asked for.
+      const cardFeeF = card ? cardFeeFils(subtotalFils + deliveryFils, feePercent) : 0;
+      const totalFils = subtotalFils + deliveryFils + codFils + cardFeeF;
       // Never charge a total the customer was not shown (a price changed while they were at checkout).
       if (expectedTotalFils !== null && expectedTotalFils !== totalFils) {
-        throw new HttpError(409, `Prices have changed since you opened checkout: your total is now AED ${aed(totalFils)}. Please check your bag and confirm again.`, {}, { code: 'price_changed', total: aed(totalFils) });
+        throw new HttpError(409, `Prices have changed since you opened checkout: your total is now AED ${aed(totalFils)}. Please check your bag and confirm again.`, {}, { code: 'price_changed', total: aed(totalFils), ...(card ? { cardFeePercent: feePercent } : {}) });
       }
       const provider = paymentMethod === 'cod' ? courierSettings.autoAssignRules.codCourier : courierSettings.autoAssignRules.prepaidCourier;
 
@@ -597,9 +604,11 @@ export function placeOrder(input: unknown, context: PlaceOrderContext = {}): Pla
         deliveryFee: aed(deliveryFils),
         deliveryOption,
         codFee: aed(codFils),
+        ...(cardFeeF ? { cardFee: aed(cardFeeF), cardFeePercent: feePercent } : {}),
         discount: 0,
         total: aed(totalFils),
         paymentMethod: paymentMethod as Order['paymentMethod'],
+        ...(bankMode === 'ask_whatsapp' ? { bankDetailsBy: 'whatsapp' as const } : {}),
         paymentStatus: paymentMethod === 'cod' ? 'cod_pending' : receipt ? 'receipt_uploaded' : 'pending',
         paymentReceiptUrl: receipt ? `/api/admin/orders/${id}/receipt` : undefined,
         bankTransferRef: bankRef || undefined,
@@ -630,7 +639,7 @@ export function placeOrder(input: unknown, context: PlaceOrderContext = {}): Pla
         ...(source ? { source } : {}),
       };
       writeOrder(created, idempotencyKey);
-      logEvent(id, 'customer', 'created', { total: created.total, paymentMethod });
+      logEvent(id, 'customer', 'created', { total: created.total, paymentMethod, ...(created.cardFee ? { cardFee: created.cardFee } : {}), ...(created.bankDetailsBy ? { bankDetailsBy: created.bankDetailsBy } : {}) });
       if (ipHash) getDb().prepare('UPDATE orders SET card_ip = ? WHERE id = ?').run(ipHash, id);
       if (card) {
         getDb().prepare("UPDATE orders SET card_state = 'pending' WHERE id = ?").run(id);

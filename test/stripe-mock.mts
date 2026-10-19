@@ -208,3 +208,64 @@ export async function startStripeMock(): Promise<StripeMock> {
   mock.close = () => new Promise<void>((resolve) => server.close(() => resolve()));
   return mock;
 }
+
+/** A stand-in for Stripe.js: the Payment Element is a plain card field; Express Checkout an "Apple Pay (test)" button. */
+export const STRIPE_JS_STUB = `
+(() => {
+  const calls = (window.__stripeCalls = []);
+  function element(type) {
+    const handlers = {};
+    let node = null;
+    const el = {
+      mount(dom) {
+        node = dom;
+        if (type === 'payment') {
+          dom.innerHTML = '<label style="display:block;font-size:12px">Card number <input data-stub-card aria-label="Card number" inputmode="numeric" style="width:100%;max-width:100%;box-sizing:border-box" /></label>';
+        } else if (type === 'expressCheckout') {
+          dom.innerHTML = '<button type="button" data-stub-wallet style="width:100%;height:44px">Apple Pay (test)</button>';
+          dom.querySelector('button').addEventListener('click', () => {
+            const w = window.__wallet || {};
+            const event = {
+              expressPaymentType: 'apple_pay',
+              billingDetails: { name: w.name, email: w.email, phone: w.phone, address: w.address },
+              shippingAddress: { name: w.name, address: w.address },
+              shippingRate: { id: 'standard', amount: 0, displayName: 'Free delivery' },
+              paymentFailed: (p) => { window.__walletFailed = p || {}; },
+            };
+            (handlers.confirm || []).forEach((h) => h(event));
+          });
+        }
+        setTimeout(() => (handlers.ready || []).forEach((h) => h(type === 'expressCheckout' ? { elementType: type, availablePaymentMethods: { applePay: true, googlePay: false, link: false, paypal: false, amazonPay: false, klarna: false } } : { elementType: type })), 30);
+      },
+      on(name, h) { (handlers[name] = handlers[name] || []).push(h); return el; },
+      off(name, h) { handlers[name] = (handlers[name] || []).filter((x) => x !== h); return el; },
+      update() { return el; },
+      destroy() { if (node) node.innerHTML = ''; },
+      unmount() {},
+    };
+    return el;
+  }
+  window.Stripe = function (key) {
+    calls.push(['Stripe', key]);
+    return {
+      _registerWrapper() {},
+      registerAppInfo() {},
+      createToken() {},
+      createPaymentMethod() {},
+      confirmCardPayment() {},
+      elements(options) {
+        calls.push(['elements', options.amount, options.currency]);
+        return { create: (type) => element(type), update(o) { calls.push(['update', o.amount]); }, submit: async () => ({}), getElement: () => null };
+      },
+      // __confirmError: a message (a decline: card_error), or a whole error ({ type, message }).
+      confirmPayment: async (p) => {
+        calls.push(['confirmPayment', p.clientSecret, p.redirect]);
+        const e = window.__confirmError;
+        if (!e) return { paymentIntent: { status: 'processing' } };
+        return { error: typeof e === 'string' ? { type: 'card_error', code: 'card_declined', message: e } : e };
+      },
+    };
+  };
+  window.Stripe.version = 'basil';
+})();
+`;

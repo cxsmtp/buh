@@ -5,7 +5,7 @@ import dynamic from 'next/dynamic';
 import { CartItem, Emirate, Order, PaymentMethod, PhoneVerificationConfig } from '@/types';
 import { UAE_EMIRATES } from '@/data/initialData';
 import { resolveArea, searchAreas, type UAEArea } from '@/data/uaeAreas';
-import { cartFils, formatAed, toFils } from '@/lib/money';
+import { cardFeeFils, cartFils, formatAed, percentText, toFils } from '@/lib/money';
 import { useShop } from '@/lib/client/shop';
 import { postJson } from '@/lib/apiClient';
 import { formatAccuracy, suggestAreaFromGps, UAE_KEY_LOCATIONS } from '@/lib/uaeLocations';
@@ -14,7 +14,8 @@ import { emirateFrom, walletAddress } from '@/lib/walletAddress';
 import type { CardPay, CardResult, StartedCardOrder, WalletPayment } from './StripeCheckout';
 import { AreaCombobox } from './AreaCombobox';
 import { WhatsAppConfirm } from './WhatsAppConfirm';
-import { cancelHoursOf } from '@/lib/whatsappConfirm';
+import { cancelHoursOf, waMeLink } from '@/lib/whatsappConfirm';
+import { askBankDetailsMessage } from '@/lib/bankMessages';
 import { 
   X, 
   CheckCircle2, 
@@ -54,6 +55,11 @@ interface CheckoutModalProps {
    * website: it is sent to the customer privately after the order (src/lib/server/bankPay.ts).
    */
   bankTransfer: boolean;
+  /**
+   * Bank transfer "on request" (Settings → Payments): no account is saved, so the customer asks
+   * for the details on the shop's WhatsApp after ordering.
+   */
+  bankAskWhatsApp?: boolean;
   /** The server stored the order (it is shown confirmed only after that). */
   onOrderPlaced: (order: Order) => void;
   /** Reload the catalogue and the bag (prices changed on the server). */
@@ -71,7 +77,7 @@ interface CheckoutModalProps {
    * Card payments through the shop's Stripe account (Settings → Payments), when switched on.
    * phoneCheck: an SMS gateway is on, so a card order proves the phone with a code like any order.
    */
-  card?: { publishableKey: string; phoneCheck?: boolean } | null;
+  card?: { publishableKey: string; phoneCheck?: boolean; cardFeePercent?: number } | null;
 }
 
 /** A card order (paying is its own proof of the number). */
@@ -135,6 +141,7 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
   onClose,
   items,
   bankTransfer,
+  bankAskWhatsApp = false,
   onOrderPlaced,
   onPricesChanged,
   supportEmail,
@@ -200,6 +207,8 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
 
   // Payment Method
   const [paymentMethod, setPaymentMethod] = useState<PaymentMethod>('cod');
+  // The card fee's percent the server gave when it refused a total (the owner changed it meanwhile).
+  const [feePercentNow, setFeePercentNow] = useState<number | null>(null);
 
   // Submission State
   const [isSubmitting, setIsSubmitting] = useState(false);
@@ -231,10 +240,16 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
   const sameDayChosen = deliveryChoice.option === 'same_day' && deliveryChoice.key === `${emirate}|${area}` && delivery.sameDay.available;
   const deliveryFils = sameDayChosen ? toFils(delivery.sameDay.fee) : 0;
   const totalFils = cartFils(items) + deliveryFils;
-  const grandTotal = formatAed(totalFils);
   const bankReady = bankTransfer;
   const shopWhatsApp = useShop().store.whatsappNumber.replace(/\D/g, '');
   const byCard = paymentMethod === 'online_card' && Boolean(card);
+  // Card payment fee (Settings → Payments): a percent of items + delivery, worked out like the server
+  // does (whole fils, half up). The server works it out again and refuses a total that differs.
+  const feePercent = feePercentNow ?? card?.cardFeePercent ?? 0;
+  const cardFee = card ? cardFeeFils(totalFils, feePercent) : 0;
+  const cardTotalFils = totalFils + cardFee;
+  const shownTotalFils = byCard ? cardTotalFils : totalFils;
+  const grandTotal = formatAed(shownTotalFils);
   // With an SMS gateway on, a card order needs the phone code too (once per checkout).
   const cardNeedsCode = byCard && Boolean(card?.phoneCheck);
   const phoneOk = classifyPhone(phone).kind === 'uae';
@@ -387,19 +402,24 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
     })),
     paymentMethod: method,
     deliveryOption: over.deliveryOption ?? (sameDayChosen ? 'same_day' : 'standard'),
-    expectedTotal: totalFils / 100,
+    // The total shown for this way of paying (a card order includes the card fee).
+    expectedTotal: (method === 'online_card' ? cardTotalFils : totalFils) / 100,
     source: landing ?? undefined,
   });
 
   /** A refused order: reload prices or delivery if that was why, and say what happened. */
-  const orderRefused = async (status: number, data: { message?: string; code?: string }) => {
+  const orderRefused = async (status: number, data: { message?: string; code?: string; cardFeePercent?: number }) => {
     if (status === 401) {
       // The phone check expired (30 minutes): verify again.
       setIsPhoneVerified(false);
       setPhoneToken('');
     }
     // A price changed since the bag was filled: reload it, so the new total is shown before confirming.
-    if (status === 409 && data.code === 'price_changed') await onPricesChanged();
+    if (status === 409 && data.code === 'price_changed') {
+      // The card fee changed meanwhile: the server's percent, so the new total is shown.
+      if (typeof data.cardFeePercent === 'number') setFeePercentNow(data.cardFeePercent);
+      await onPricesChanged();
+    }
     // Same-day closed while they were at checkout (past the cut-off): back to standard, total shown again.
     if (status === 409 && data.code === 'same_day_unavailable') setDeliveryOption('standard');
     return data.message || 'We could not place your order. Nothing was charged. Please try again.';
@@ -407,7 +427,7 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
 
   /** Create the card order on the server (its prices, its total) and get Stripe's client secret for it. */
   const startCardOrder = async (over: Parameters<typeof orderBody>[1] = {}): Promise<StartedCardOrder> => {
-    const { ok, status, data } = await postJson<{ order?: Order; payment?: { clientSecret?: string }; message?: string; code?: string }>('/api/orders', orderBody('online_card', over));
+    const { ok, status, data } = await postJson<{ order?: Order; payment?: { clientSecret?: string }; message?: string; code?: string; cardFeePercent?: number }>('/api/orders', orderBody('online_card', over));
     if (!ok || !data.order) {
       const message = await orderRefused(status, data);
       // Stripe could not be reached: that attempt is closed on the server, so the next is a new one.
@@ -603,7 +623,7 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
 
     setSubmitError('');
     setIsSubmitting(true);
-    const { ok, status, data } = await postJson<{ order?: Order; message?: string; code?: string }>('/api/orders', orderBody(paymentMethod));
+    const { ok, status, data } = await postJson<{ order?: Order; message?: string; code?: string; cardFeePercent?: number }>('/api/orders', orderBody(paymentMethod));
     setIsSubmitting(false);
 
     if (!ok || !data.order) {
@@ -628,6 +648,8 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
     const cardOver = paidByCard && (cardShown?.state === 'canceled' || cardShown?.state === 'refunded');
     const byTransfer = confirmedOrder.paymentMethod === 'bank_transfer';
     const payPath = confirmedOrder.bankTransfer?.payPath;
+    // Bank transfer "on request": the customer asks the shop's WhatsApp for the details (none are saved).
+    const askBankLink = byTransfer && confirmedOrder.bankDetailsBy === 'whatsapp' ? waMeLink(shopWhatsApp, askBankDetailsMessage(confirmedOrder.id, confirmedOrder.total)) : null;
     const whatsappMessage = encodeURIComponent(
       `Hello Beautiful UAE Home! I have placed Order #${confirmedOrder.id} (${confirmedOrder.customer.fullName}) for AED ${confirmedOrder.total}. Payment method: ${confirmedOrder.paymentMethod === 'cod' ? 'Cash on Delivery' : paidByCard ? 'Card' : 'Bank Transfer'}. ${byTransfer ? 'Please send me the bank details.' : 'Please confirm dispatch.'}`
     );
@@ -658,8 +680,40 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
             </p>
           )}
 
+          {/* Bank transfer "on request": one big button to ask for the details on the shop's WhatsApp. */}
+          {askBankLink && (
+            <section aria-labelledby="transfer-ask" data-testid="bank-ask-section" className="rounded-2xl border border-line bg-ivory p-4 space-y-3 text-left">
+              <h3 id="transfer-ask" className="text-sm font-semibold text-ink">Paying by bank transfer</h3>
+              <p className="text-xs text-ink-soft leading-relaxed">
+                Message us on WhatsApp and we&rsquo;ll send you our bank details. The message is already typed: just tap Send.
+              </p>
+              <a
+                data-testid="bank-ask-whatsapp"
+                href={askBankLink}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="w-full min-h-12 bg-whatsapp hover:brightness-110 text-paper font-semibold text-sm py-3 px-4 rounded-xl flex items-center justify-center gap-2 transition-all focus:outline-none focus-visible:ring-2 focus-visible:ring-gold focus-visible:ring-offset-2"
+              >
+                <MessageCircle className="w-5 h-5 shrink-0" aria-hidden="true" />
+                <span>Ask for bank details on WhatsApp</span>
+              </a>
+              {payPath && (
+                <a
+                  href={payPath}
+                  target="_blank"
+                  rel="noopener"
+                  className="w-full min-h-11 border border-line-strong bg-surface hover:bg-sand text-ink font-semibold text-xs py-2.5 px-4 rounded-xl flex items-center justify-center gap-2 transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-gold"
+                >
+                  <Upload className="w-4 h-4 shrink-0" aria-hidden="true" />
+                  <span>Then upload your transfer screenshot</span>
+                </a>
+              )}
+              <p className="text-[11px] text-ink-muted text-center">Please use <span className="font-mono">{confirmedOrder.id}</span> as the transfer reference.</p>
+            </section>
+          )}
+
           {/* Bank transfer: the details come privately (email, WhatsApp, the order's own page), never on the website. */}
-          {byTransfer && payPath && (
+          {byTransfer && payPath && !askBankLink && (
             <section aria-labelledby="transfer-next" className="rounded-2xl border border-line bg-ivory p-4 space-y-3 text-left">
               <h3 id="transfer-next" className="text-sm font-semibold text-ink">Paying by bank transfer</h3>
               <p className="text-xs text-ink-soft leading-relaxed">
@@ -728,9 +782,16 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
               )}
             </div>
 
+            {Boolean(confirmedOrder.cardFee) && (
+              <div data-testid="confirmed-card-fee" className="flex justify-between items-center">
+                <span className="text-ink-muted font-medium">Card payment fee{confirmedOrder.cardFeePercent ? ` (${percentText(confirmedOrder.cardFeePercent)}%)` : ''}</span>
+                <span className="text-ink">AED {formatAed(toFils(confirmedOrder.cardFee ?? 0))}</span>
+              </div>
+            )}
+
             <div className="flex justify-between items-center pt-2 border-t border-line">
               <span className="font-semibold text-ink">{cardPaid ? 'Total Paid' : 'Total Payable'}</span>
-              <span className="font-semibold text-base text-ink">AED {confirmedOrder.total}</span>
+              <span className="font-semibold text-base text-ink">AED {formatAed(toFils(confirmedOrder.total))}</span>
             </div>
           </div>
 
@@ -798,6 +859,11 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
               </div>
             </div>
             <div className="text-right">
+              {byCard && cardFee > 0 && (
+                <span data-testid="card-fee-line" className="text-[11px] text-ink-soft block">
+                  Card payment fee ({percentText(feePercent)}%) AED {formatAed(cardFee)}
+                </span>
+              )}
               <span className="text-[10px] text-ink-muted block">Total Due</span>
               <span id="checkout-total" className="text-base font-semibold text-ink">AED {grandTotal}</span>
               {sameDayChosen && <span className="text-[10px] text-ink-muted block">incl. same-day AED {formatAed(deliveryFils)}</span>}
@@ -808,7 +874,7 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
           {card && (
             <ExpressCheckout
               publishableKey={card.publishableKey}
-              amountFils={totalFils}
+              amountFils={cardTotalFils}
               shippingRate={sameDayChosen ? { id: 'same_day', displayName: 'Same-day delivery', amount: deliveryFils } : { id: 'standard', displayName: `Free delivery in ${deliverySettings.standardDays}`, amount: 0 }}
               servesEmirate={(state, city) => {
                 const em = emirateFrom(state) ?? emirateFrom(city);
@@ -1183,8 +1249,8 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
                   </span>
                   {paymentMethod === 'bank_transfer' && <Check className="w-4 h-4 shrink-0 text-ink" />}
                 </span>
-                <span className="block text-[11px] leading-relaxed text-ink-soft break-anywhere">
-                  Transfer to our UAE bank account; we dispatch as soon as it arrives.
+                <span data-testid="bank-option-text" className="block text-[11px] leading-relaxed text-ink-soft break-anywhere">
+                  {bankAskWhatsApp ? 'Message us on WhatsApp for our bank details; we dispatch as soon as it arrives.' : 'Transfer to our UAE bank account; we dispatch as soon as it arrives.'}
                 </span>
               </button>}
 
@@ -1209,6 +1275,7 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
                 </span>
                 <span className="block text-[11px] leading-relaxed text-ink-soft">
                   Visa, Mastercard and more, paid securely through Stripe.{card.phoneCheck ? '' : ' No SMS code needed.'}
+                  {cardFeeFils(10000, feePercent) > 0 ? ` A ${percentText(feePercent)}% card fee applies.` : ''}
                 </span>
               </button>}
             </div>
@@ -1216,7 +1283,7 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
             {/* Card: Stripe's own fields (the number never touches this shop) */}
             {byCard && card && (
               <div className="rounded-2xl border border-line bg-surface p-3 min-w-0">
-                <CardFields publishableKey={card.publishableKey} amountFils={totalFils} onReady={onCardReady} />
+                <CardFields publishableKey={card.publishableKey} amountFils={cardTotalFils} onReady={onCardReady} />
                 <p className="mt-2 text-[10px] text-ink-muted flex items-center gap-1">
                   <ShieldCheck className="w-3 h-3 text-gold" aria-hidden="true" /> Secured by Stripe. Your card details go straight to Stripe, never to us.
                 </p>
@@ -1230,10 +1297,18 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
                   <ShieldCheck className="w-4 h-4 shrink-0 text-gold" aria-hidden="true" />
                   <span>How bank transfer works</span>
                 </p>
-                <p className="text-ink-soft leading-relaxed">
-                  After you order, we&apos;ll send our bank details by email and WhatsApp, with a private link to upload your transfer screenshot.
-                </p>
-                {!email && <p className="text-[11px] text-ink-muted leading-relaxed">Add your email above to get them by email too.</p>}
+                {bankAskWhatsApp ? (
+                  <p className="text-ink-soft leading-relaxed">
+                    After you order, tap &ldquo;Ask for bank details on WhatsApp&rdquo;: we&apos;ll reply with our bank details. You&apos;ll also get a private link to upload your transfer screenshot.
+                  </p>
+                ) : (
+                  <>
+                    <p className="text-ink-soft leading-relaxed">
+                      After you order, we&apos;ll send our bank details by email and WhatsApp, with a private link to upload your transfer screenshot.
+                    </p>
+                    {!email && <p className="text-[11px] text-ink-muted leading-relaxed">Add your email above to get them by email too.</p>}
+                  </>
+                )}
               </div>
             )}
           </div>

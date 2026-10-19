@@ -1,7 +1,8 @@
 import type { Metadata } from 'next';
 import { notFound } from 'next/navigation';
 import { PayTransfer } from '@/components/store/PayTransfer';
-import { safeFirstName } from '@/lib/bankMessages';
+import { askBankDetailsMessage, bankDetailsSaved, safeFirstName } from '@/lib/bankMessages';
+import { waMeLink } from '@/lib/whatsappConfirm';
 import { openPayOrderId } from '@/lib/server/bankPay';
 import { getOrder } from '@/lib/server/orders';
 import { getSettings } from '@/lib/server/settings';
@@ -29,11 +30,14 @@ export default async function PayPage({ params }: { params: Promise<{ token: str
   const order = orderId ? getOrder(orderId) : undefined;
   if (!order?.bankTransfer) notFound();
   const bank = getSettings('bank');
+  // No account saved (bank transfer "on request"): the customer asks for it on the shop's WhatsApp.
+  const askLink = bankDetailsSaved(bank) ? null : waMeLink(getSettings('store').whatsappNumber, askBankDetailsMessage(order.id, order.total));
   return (
     <PayTransfer
       token={token}
       shopName={getSettings('brand').storeName || 'Beautiful UAE Home'}
       order={{ id: order.id, total: order.total, firstName: safeFirstName(order.customer.fullName), state: order.bankTransfer.state, uploads: order.bankTransfer.uploads }}
+      askLink={askLink}
       bank={{ bankName: bank.bankName, accountName: bank.accountName, iban: bank.iban, accountNumber: bank.accountNumber, swiftCode: bank.swiftCode, branch: bank.branch, instructions: bank.instructions }}
     />
   );

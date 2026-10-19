@@ -17,6 +17,8 @@ import { HttpError } from './http';
 import { acceptImageRef, LOGO_MAX_SIDE } from './images';
 import { assertPublicHttpsUrl } from './outbound';
 import { supportEmail as envSupportEmail } from './runtimeConfig';
+import { DEFAULT_CARD_FEE_PERCENT, MAX_CARD_FEE_PERCENT } from '@/lib/money';
+import { waMeLink } from '@/lib/whatsappConfirm';
 
 /**
  * Shop settings, kept on the server so every visitor sees the same branding
@@ -72,7 +74,8 @@ const DEFAULTS: SettingsMap = {
   assistant: DEFAULT_ASSISTANT,
   delivery: DEFAULT_DELIVERY,
   // Off, and no keys: checkout offers cash on delivery (and bank transfer) until the owner adds them.
-  payments: { cardEnabled: false, stripePublishableKey: '', stripeSecretKey: '', stripeWebhookSecret: '' },
+  // The card fee the owner asked for (3.5%); bank transfer as the saved details allow (bankTransferMode()).
+  payments: { cardEnabled: false, stripePublishableKey: '', stripeSecretKey: '', stripeWebhookSecret: '', cardFeePercent: DEFAULT_CARD_FEE_PERCENT, bankTransferMode: 'default' },
   // WhatsApp (free) for every shop, new or existing, until the owner chooses SMS codes.
   phoneCheck: { mode: 'whatsapp', unconfirmedCancelHours: 24, unopenedCancelHours: 6 },
   // Ivory & Gold, light or dark as the device is set (migration 13 records when it started).
@@ -462,13 +465,35 @@ export function cardPaymentsReady(p: PaymentSettings = getSettings('payments')):
   return p.cardEnabled && cardKeysComplete(p);
 }
 
+const BANK_MODES: PaymentSettings['bankTransferMode'][] = ['default', 'send_details', 'ask_whatsapp', 'off'];
 const STRIPE_PUBLISHABLE = /^pk_(test|live)_[A-Za-z0-9]{10,240}$/;
 const STRIPE_SECRET = /^(sk|rk)_(test|live)_[A-Za-z0-9]{10,240}$/;
 const STRIPE_WEBHOOK_SECRET = /^whsec_[A-Za-z0-9+/=_-]{10,240}$/;
 
-/** Bank transfer is offered only once the real account is entered. */
+/** The real account is entered (bank details can be sent automatically). */
 export function bankTransferReady(bank: BankTransferDetails): boolean {
   return Boolean(bank.iban && bank.accountName && bank.bankName);
+}
+
+/**
+ * How checkout offers bank transfer now (Settings → Payments → Bank transfer), or null when it
+ * doesn't: 'send_details' needs the account saved, 'ask_whatsapp' the shop's WhatsApp number.
+ * "default": send_details with an account, else ask_whatsapp with a number, else off.
+ */
+export function bankTransferMode(): 'send_details' | 'ask_whatsapp' | null {
+  const chosen = getSettings('payments').bankTransferMode;
+  const account = bankTransferReady(getSettings('bank'));
+  const whatsapp = Boolean(waMeLink(getSettings('store').whatsappNumber, ''));
+  if (chosen === 'off') return null;
+  if (chosen === 'send_details') return account ? 'send_details' : null;
+  if (chosen === 'ask_whatsapp') return whatsapp ? 'ask_whatsapp' : null;
+  return account ? 'send_details' : whatsapp ? 'ask_whatsapp' : null;
+}
+
+/** Settings → Payments "Card payment fee (%)": 0 (off) to 10, up to 2 decimals. */
+export function cardFeePercent(p: PaymentSettings = getSettings('payments')): number {
+  const v = Number(p.cardFeePercent);
+  return Number.isFinite(v) && v > 0 && v <= MAX_CARD_FEE_PERCENT ? v : 0;
 }
 
 type Obj = Record<string, unknown>;
@@ -797,7 +822,20 @@ const VALIDATORS: { [K in SettingsKey]: (input: Obj, current: SettingsMap[K]) =>
     for (const [k, v] of Object.entries({ stripeSecretKey: sk, stripeWebhookSecret: wh })) {
       if (v !== undefined && v !== null && typeof v !== 'string') throw new HttpError(400, `${k === 'stripeSecretKey' ? 'Secret key' : 'Webhook signing secret'} must be text.`);
     }
-    return { cardEnabled: bool(input.cardEnabled, current.cardEnabled), stripePublishableKey: pk, stripeSecretKey: '', stripeWebhookSecret: '' };
+    const feeIn = input.cardFeePercent === undefined || input.cardFeePercent === null ? current.cardFeePercent : typeof input.cardFeePercent === 'string' && input.cardFeePercent.trim() ? Number(input.cardFeePercent.trim()) : input.cardFeePercent;
+    if (typeof feeIn !== 'number' || !Number.isFinite(feeIn) || feeIn < 0 || feeIn > MAX_CARD_FEE_PERCENT || Math.abs(feeIn * 100 - Math.round(feeIn * 100)) > 1e-6) {
+      throw new HttpError(400, `Card payment fee: a percent from 0 to ${MAX_CARD_FEE_PERCENT}, with up to 2 decimals (0 turns it off).`);
+    }
+    const modeIn = input.bankTransferMode === undefined ? current.bankTransferMode : input.bankTransferMode;
+    if (!BANK_MODES.includes(modeIn as PaymentSettings['bankTransferMode'])) throw new HttpError(400, 'Choose how bank transfer is offered.');
+    return {
+      cardEnabled: bool(input.cardEnabled, current.cardEnabled),
+      stripePublishableKey: pk,
+      stripeSecretKey: '',
+      stripeWebhookSecret: '',
+      cardFeePercent: Math.round(feeIn * 100) / 100,
+      bankTransferMode: modeIn as PaymentSettings['bankTransferMode'],
+    };
   },
 
   async assistant(input, current) {

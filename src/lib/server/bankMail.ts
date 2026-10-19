@@ -1,9 +1,9 @@
-import { bankDetailsEmail } from '@/lib/bankMessages';
+import { askBankDetailsMessage, bankDetailsEmail, bankRequestEmail } from '@/lib/bankMessages';
 import { logEvent } from './log';
 import { mailConfig, ownerEmail, sender, transport } from './mail';
 import { bankEmailDone, bankEmailLimited, claimBankEmail, getOrder, isCustomerEmail } from './orders';
 import { bankTransferReady, contactEmail, getSettings } from './settings';
-import { confirmLink } from '@/lib/whatsappConfirm';
+import { confirmLink, waMeLink } from '@/lib/whatsappConfirm';
 
 /**
  * The bank details, emailed to a customer who chose bank transfer and gave an email (when the
@@ -14,12 +14,17 @@ import { confirmLink } from '@/lib/whatsappConfirm';
  * never sends it twice; and at most 3 a day to one address, 5 a day per connection (the address is
  * whatever was typed at checkout). Noted on the order's history; logged with the address and link masked.
  * Never throws: a failed email is noted, and the owner sends the details on WhatsApp instead.
+ * Bank transfer "on request" (no account saved): the email has no account, only the WhatsApp link
+ * to ask for it (and the private link for the screenshot).
  */
 export async function emailBankDetails(orderId: string): Promise<'sent' | 'skipped' | 'failed'> {
   const order = getOrder(orderId);
   const bank = getSettings('bank');
   const to = order?.customer.email;
-  if (!order || order.paymentMethod !== 'bank_transfer' || !order.bankTransfer?.payPath || !to || !isCustomerEmail(to) || !mailConfig() || !bankTransferReady(bank)) return 'skipped';
+  // Bank transfer "on request": no account is saved, so the email carries the WhatsApp link to ask for it.
+  const askLink = order?.bankDetailsBy === 'whatsapp' ? waMeLink(getSettings('store').whatsappNumber, askBankDetailsMessage(order.id, order.total)) : null;
+  if (!order || order.paymentMethod !== 'bank_transfer' || !order.bankTransfer?.payPath || !to || !isCustomerEmail(to) || !mailConfig()) return 'skipped';
+  if (order.bankDetailsBy === 'whatsapp' ? !askLink : !bankTransferReady(bank)) return 'skipped';
   const claim = claimBankEmail(orderId);
   if (claim === 'limited') {
     // Today's share for this address (or connection) is used: the customer has the private page already.
@@ -31,17 +36,19 @@ export async function emailBankDetails(orderId: string): Promise<'sent' | 'skipp
   // The link is built from the shop's configured address only (never the request's Host): without
   // it, the email asks for the screenshot by reply instead.
   const link = order.bankTransfer.payUrl;
-  const { subject, text } = bankDetailsEmail({
-    orderId,
-    total: order.total,
-    bank,
-    link,
-    firstName: order.customer.fullName,
-    shopName: getSettings('brand').storeName,
-    // Still waiting for the customer's WhatsApp message: the email carries the same one-tap link.
-    ...(order.whatsappCheck?.status === 'awaiting' ? { confirmLink: confirmLink(getSettings('store').whatsappNumber, orderId, order.whatsappCheck.code) ?? undefined } : {}),
-    ...(order.whatsappCheck?.cancelAt ? { cancelHours: Math.round((Date.parse(order.whatsappCheck.cancelAt) - Date.parse(order.createdAt)) / 3600_000) } : {}),
-  });
+  const { subject, text } = askLink
+    ? bankRequestEmail({ orderId, total: order.total, link, firstName: order.customer.fullName, shopName: getSettings('brand').storeName, askLink })
+    : bankDetailsEmail({
+      orderId,
+      total: order.total,
+      bank,
+      link,
+      firstName: order.customer.fullName,
+      shopName: getSettings('brand').storeName,
+      // Still waiting for the customer's WhatsApp message: the email carries the same one-tap link.
+      ...(order.whatsappCheck?.status === 'awaiting' ? { confirmLink: confirmLink(getSettings('store').whatsappNumber, orderId, order.whatsappCheck.code) ?? undefined } : {}),
+      ...(order.whatsappCheck?.cancelAt ? { cancelHours: Math.round((Date.parse(order.whatsappCheck.cancelAt) - Date.parse(order.createdAt)) / 3600_000) } : {}),
+    });
   try {
     const replyTo = contactEmail() || ownerEmail().split(',')[0]?.trim() || undefined;
     await (await transport()).sendMail({ from: sender(), to, ...(replyTo ? { replyTo } : {}), headers: { 'Auto-Submitted': 'auto-generated' }, subject, text });

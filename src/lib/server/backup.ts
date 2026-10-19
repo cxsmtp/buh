@@ -117,6 +117,8 @@ function csvFiles(): TarEntry[] {
     x.card?.refundedAmount ?? '', x.card?.mode ?? '', x.card?.refundOutsideAt ?? '', x.attention?.text ?? '',
     // The bank transfer (never its private link: only the shop can make that again).
     x.bankTransfer?.state ?? '', x.bankTransfer?.uploads ?? '', x.bankTransfer?.uploadedAt ?? '', x.bankTransfer?.emailedAt ?? '', x.bankTransfer?.checkedAt ?? '', x.bankTransfer?.checkedBy ?? '',
+    // The card payment fee (part of total_aed), and a bank transfer whose details the customer asks for on WhatsApp.
+    x.cardFee ?? '', x.cardFeePercent ?? '', x.bankDetailsBy ?? '',
   ];
   return [
     {
@@ -128,7 +130,8 @@ function csvFiles(): TarEntry[] {
           'whatsapp_check', 'whatsapp_checked_at', 'whatsapp_checked_by',
           'card_payment', 'payment_ref', 'card', 'paid_at', 'paid_aed', 'refund_ref', 'refunded_at',
           'refunded_aed', 'stripe_mode', 'refund_outside_stripe_at', 'needs_attention',
-          'bank_transfer', 'transfer_screenshots', 'transfer_uploaded_at', 'bank_details_emailed_at', 'bank_checked_at', 'bank_checked_by'],
+          'bank_transfer', 'transfer_screenshots', 'transfer_uploaded_at', 'bank_details_emailed_at', 'bank_checked_at', 'bank_checked_by',
+          'card_fee_aed', 'card_fee_percent', 'bank_details_by'],
         orders.map(o)
       )),
     },

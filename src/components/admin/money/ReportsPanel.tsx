@@ -23,7 +23,7 @@ interface Vat {
 interface Report {
   from: string;
   to: string;
-  sales: { orders: number; itemsFils: number; deliveryFils: number; codFeeFils: number; discountFils: number; grossFils: number; paidFils: number; unpaidFils: number };
+  sales: { orders: number; itemsFils: number; deliveryFils: number; codFeeFils: number; cardFeeFils?: number; discountFils: number; grossFils: number; paidFils: number; unpaidFils: number };
   refunds: { count: number; fils: number };
   netSalesFils: number;
   byMethod: Record<string, Totals>;
@@ -213,6 +213,7 @@ export function ReportsPanel() {
             <Line label={`Orders (${report.sales.orders})`} value={aed(report.sales.itemsFils)} />
             <Line label="Delivery charges" value={aed(report.sales.deliveryFils)} />
             {report.sales.codFeeFils > 0 && <Line label="Cash-on-delivery fees" value={aed(report.sales.codFeeFils)} />}
+            {(report.sales.cardFeeFils ?? 0) > 0 && <Line label="Card fees" value={aed(report.sales.cardFeeFils ?? 0)} testId="report-card-fees" />}
             {report.sales.discountFils > 0 && <Line label="Discounts" value={aed(-report.sales.discountFils)} />}
             <Line label="Gross sales" value={aed(report.sales.grossFils)} strong testId="report-gross" />
             <Line label={`Refunds (${report.refunds.count})`} value={aed(-report.refunds.fils)} testId="report-refunds" />

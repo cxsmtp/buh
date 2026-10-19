@@ -30,6 +30,8 @@ import { DeliverySettingsCard } from './settings/DeliverySettingsCard';
 import { EmailSettingsCard } from './settings/EmailSettingsCard';
 import { MarqueeSettingsCard } from './settings/MarqueeSettingsCard';
 import { PaymentsSettingsCard } from './settings/PaymentsSettingsCard';
+import { bankDetailsSaved } from '@/lib/bankMessages';
+import { DEFAULT_CARD_FEE_PERCENT } from '@/lib/money';
 import { SettingsConsole } from './settings/SettingsConsole';
 import { DEFAULT_PHONE_CHECK, PhoneCheckCard } from './settings/PhoneCheckCard';
 import { SettingsHistoryCard } from './settings/SettingsHistoryCard';
@@ -62,7 +64,7 @@ interface AdminSettings {
   ai: AdminSetting<AiSettings>;
 }
 
-const NO_PAYMENTS: PaymentSettings = { cardEnabled: false, stripePublishableKey: '', stripeSecretKey: '', stripeWebhookSecret: '' };
+const NO_PAYMENTS: PaymentSettings = { cardEnabled: false, stripePublishableKey: '', stripeSecretKey: '', stripeWebhookSecret: '', cardFeePercent: DEFAULT_CARD_FEE_PERCENT, bankTransferMode: 'default' };
 
 type AdminTab = 'orders' | 'add-product' | 'inventory' | 'crm' | 'money' | 'settings' | 'chats';
 export type HubView = 'phone' | 'laptop';
@@ -580,6 +582,8 @@ export function AdminApp() {
                       key={`payments-${adminSettingsLoaded}-${settingsEpoch}-${undone['payments'] ?? 0}`}
                       value={adminSettings.payments.value}
                       secretsSet={adminSettings.payments.secretsSet}
+                      bankAccountSaved={bankDetailsSaved(bankDetails)}
+                      shopWhatsApp={adminSettings.store.value.whatsappNumber}
                       onSave={(v, onWarning) => saveSettings('payments', v, onWarning)}
                       auto={autoSaveHooks}
                     />
