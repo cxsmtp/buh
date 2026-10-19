@@ -1,6 +1,6 @@
 # Changelog
 
-## BUH-02.14.00 — 2026-10-19 08:40 UTC · [#NN](https://github.com/cxsmtp/buh/pull/NN)
+## BUH-02.14.00 — 2026-10-19 08:40 UTC · [#32](https://github.com/cxsmtp/buh/pull/32)
 
 - **Real Jeebly bookings.** Booking a courier now uses Jeebly's own API, exactly as documented and tested against Jeebly's demo system (create, label, tracking and cancel all passed). Before, the key labels and every booking field were wrong, so nothing ever reached Jeebly.
 - **Test first, then Live.** Test mode books in Jeebly's demo system with separate test keys. Live mode needs Jeebly's live address and a Sandbox check passed in the last 30 days. Every screen says plainly which mode is on, and test bookings never reach customers.
