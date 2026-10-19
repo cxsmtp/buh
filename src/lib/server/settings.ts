@@ -236,7 +236,14 @@ export async function restoreSettingsVersion(id: number, by = ''): Promise<Setti
   }
   // Saved like any other change: validated, and keys follow their host (a key saved for
   // today's address is not sent to an older one). Blank keys mean "keep the saved key".
-  const restored = deepMerge(DEFAULTS[key], JSON.parse(row.data)) as Obj;
+  const old = JSON.parse(row.data) as Obj;
+  // A payments version from before the card fee and bank choice existed keeps today's (not the defaults).
+  if (key === 'payments') {
+    const now = getSettings('payments');
+    if (!('cardFeePercent' in old)) old.cardFeePercent = now.cardFeePercent;
+    if (!('bankTransferMode' in old)) old.bankTransferMode = now.bankTransferMode;
+  }
+  const restored = deepMerge(DEFAULTS[key], old) as Obj;
   for (const p of SECRETS[key]) setPath(restored, p, '');
   // A restore is always kept in history (it can itself be undone), even mid-session.
   await updateSettings(key, restored, { keepHistory: true });
@@ -479,7 +486,8 @@ export function bankTransferReady(bank: BankTransferDetails): boolean {
 
 /**
  * How checkout offers bank transfer now (Settings → Payments → Bank transfer), or null when it
- * doesn't: 'send_details' needs the account saved, 'ask_whatsapp' the shop's WhatsApp number.
+ * doesn't: 'send_details' needs the account saved (without it, customers ask on WhatsApp when there
+ * is a number), 'ask_whatsapp' the shop's WhatsApp number.
  * "default": send_details with an account, else ask_whatsapp with a number, else off.
  */
 export function bankTransferMode(): 'send_details' | 'ask_whatsapp' | null {
@@ -487,9 +495,19 @@ export function bankTransferMode(): 'send_details' | 'ask_whatsapp' | null {
   const account = bankTransferReady(getSettings('bank'));
   const whatsapp = Boolean(waMeLink(getSettings('store').whatsappNumber, ''));
   if (chosen === 'off') return null;
-  if (chosen === 'send_details') return account ? 'send_details' : null;
+  // The account was deleted: customers can still ask for it on WhatsApp rather than lose bank transfer.
+  if (chosen === 'send_details') return account ? 'send_details' : whatsapp ? 'ask_whatsapp' : null;
   if (chosen === 'ask_whatsapp') return whatsapp ? 'ask_whatsapp' : null;
   return account ? 'send_details' : whatsapp ? 'ask_whatsapp' : null;
+}
+
+/** Bank-transfer orders "on request" (asked for on WhatsApp) still waiting for payment, not cancelled. */
+export function openOnRequestTransfers(): number {
+  return (
+    getDb()
+      .prepare("SELECT COUNT(*) AS n FROM orders WHERE payment_method = 'bank_transfer' AND bank_state IN ('awaiting', 'uploaded', 'not_received') AND status <> 'cancelled' AND json_extract(data, '$.bankDetailsBy') = 'whatsapp'")
+      .get() as { n: number }
+  ).n;
 }
 
 /** Settings → Payments "Card payment fee (%)": 0 (off) to 10, up to 2 decimals. */
@@ -727,6 +745,11 @@ const VALIDATORS: { [K in SettingsKey]: (input: Obj, current: SettingsMap[K]) =>
     const wa = text(input.whatsappNumber, 'WhatsApp number', 20, current.whatsappNumber).replace(/[\s()-]/g, '');
     const whatsappNumber = wa.startsWith('00') ? `+${wa.slice(2)}` : wa.startsWith('05') ? `+971${wa.slice(1)}` : wa;
     if (whatsappNumber && !/^\+[1-9]\d{7,14}$/.test(whatsappNumber)) throw new HttpError(400, 'WhatsApp number: use the international form, e.g. +971 50 123 4567.');
+    // Customers of open bank transfers "on request" ask for the details on this number.
+    if (!whatsappNumber && current.whatsappNumber && bankTransferMode() === 'ask_whatsapp') {
+      const open = openOnRequestTransfers();
+      if (open) throw new HttpError(400, `WhatsApp number: ${open === 1 ? '1 bank-transfer order is' : `${open} bank-transfer orders are`} waiting for payment, and those customers ask for your bank details on this number. Keep it until they have paid (or the orders are cancelled), or first choose "Send our bank details automatically" in Settings → Payments.`);
+    }
     const supportEmail = text(input.supportEmail, 'Support email', 254, current.supportEmail);
     if (supportEmail && !/^[^\s@<>"]+@[^\s@<>"]+\.[^\s@<>"]+$/.test(supportEmail)) throw new HttpError(400, 'Please check the support email.');
     const ig = text(input.instagramHandle, 'Instagram', 40, current.instagramHandle).replace(/^@/, '').replace(/^https?:\/\/(www\.)?instagram\.com\//i, '').replace(/\/.*$/, '');

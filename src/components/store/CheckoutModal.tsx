@@ -648,8 +648,12 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
     const cardOver = paidByCard && (cardShown?.state === 'canceled' || cardShown?.state === 'refunded');
     const byTransfer = confirmedOrder.paymentMethod === 'bank_transfer';
     const payPath = confirmedOrder.bankTransfer?.payPath;
-    // Bank transfer "on request": the customer asks the shop's WhatsApp for the details (none are saved).
-    const askBankLink = byTransfer && confirmedOrder.bankDetailsBy === 'whatsapp' ? waMeLink(shopWhatsApp, askBankDetailsMessage(confirmedOrder.id, confirmedOrder.total)) : null;
+    // Bank transfer "on request": the customer asks the shop's WhatsApp for the details. While the
+    // order waits for its WhatsApp confirmation, that one message (with its code) asks for them too,
+    // so there is one button; with no WhatsApp number, the support email.
+    const bankOnRequest = byTransfer && confirmedOrder.bankDetailsBy === 'whatsapp';
+    const confirmAsks = bankOnRequest && askWhatsApp && confirmedOrder.whatsappCheck?.status !== 'confirmed';
+    const askBankLink = bankOnRequest && !confirmAsks ? waMeLink(shopWhatsApp, askBankDetailsMessage(confirmedOrder.id, confirmedOrder.total)) : null;
     const whatsappMessage = encodeURIComponent(
       `Hello Beautiful UAE Home! I have placed Order #${confirmedOrder.id} (${confirmedOrder.customer.fullName}) for AED ${confirmedOrder.total}. Payment method: ${confirmedOrder.paymentMethod === 'cod' ? 'Cash on Delivery' : paidByCard ? 'Card' : 'Bank Transfer'}. ${byTransfer ? 'Please send me the bank details.' : 'Please confirm dispatch.'}`
     );
@@ -673,30 +677,43 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
           </div>
 
           {/* Confirm on WhatsApp (Settings → Store & contact): one message from the customer's own WhatsApp. */}
-          {askWhatsApp && <WhatsAppConfirm orderId={confirmedOrder.id} phone={confirmedOrder.customer.phone} check={confirmedOrder.whatsappCheck!} bankDetails={byTransfer} cancelHours={cancelHours} openHours={cancelHoursOf(confirmedOrder.createdAt, confirmedOrder.whatsappCheck?.openBy)} />}
+          {askWhatsApp && <WhatsAppConfirm orderId={confirmedOrder.id} phone={confirmedOrder.customer.phone} check={confirmedOrder.whatsappCheck!} bankDetails={byTransfer} cancelHours={cancelHours} openHours={cancelHoursOf(confirmedOrder.createdAt, confirmedOrder.whatsappCheck?.openBy)} {...(confirmAsks ? { buttonLabel: 'Confirm & ask for bank details on WhatsApp' } : {})} />}
           {weCall && (
             <p role="status" className="text-xs text-ink-soft bg-ivory border border-line rounded-xl px-3 py-2">
               We&rsquo;ll call you on <span className="font-mono">{confirmedOrder.customer.phone}</span> to confirm your order.
             </p>
           )}
 
-          {/* Bank transfer "on request": one big button to ask for the details on the shop's WhatsApp. */}
-          {askBankLink && (
+          {/* Bank transfer "on request": one big button to ask for the details on the shop's WhatsApp
+              (the confirmation's button above while it waits), or the support email without a number. */}
+          {bankOnRequest && (
             <section aria-labelledby="transfer-ask" data-testid="bank-ask-section" className="rounded-2xl border border-line bg-ivory p-4 space-y-3 text-left">
               <h3 id="transfer-ask" className="text-sm font-semibold text-ink">Paying by bank transfer</h3>
-              <p className="text-xs text-ink-soft leading-relaxed">
-                Message us on WhatsApp and we&rsquo;ll send you our bank details. The message is already typed: just tap Send.
+              <p className="text-xs text-ink-soft leading-relaxed break-anywhere">
+                {confirmAsks ? (
+                  <>Tap &ldquo;Confirm &amp; ask for bank details on WhatsApp&rdquo; above: we&rsquo;ll send you our bank details in reply.</>
+                ) : askBankLink ? (
+                  <>Message us on WhatsApp and we&rsquo;ll send you our bank details. The message is already typed: just tap Send.</>
+                ) : supportEmail ? (
+                  <>
+                    Email us at <a className="font-semibold text-ink underline" href={`mailto:${supportEmail}?subject=${encodeURIComponent(`Bank details for order ${confirmedOrder.id}`)}`}>{supportEmail}</a> and we&rsquo;ll send you our bank details.
+                  </>
+                ) : (
+                  <>We&rsquo;ll contact you on <span className="font-mono">{confirmedOrder.customer.phone}</span> with our bank details.</>
+                )}
               </p>
-              <a
-                data-testid="bank-ask-whatsapp"
-                href={askBankLink}
-                target="_blank"
-                rel="noopener noreferrer"
-                className="w-full min-h-12 bg-whatsapp hover:brightness-110 text-paper font-semibold text-sm py-3 px-4 rounded-xl flex items-center justify-center gap-2 transition-all focus:outline-none focus-visible:ring-2 focus-visible:ring-gold focus-visible:ring-offset-2"
-              >
-                <MessageCircle className="w-5 h-5 shrink-0" aria-hidden="true" />
-                <span>Ask for bank details on WhatsApp</span>
-              </a>
+              {askBankLink && (
+                <a
+                  data-testid="bank-ask-whatsapp"
+                  href={askBankLink}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="w-full min-h-12 bg-whatsapp hover:brightness-110 text-paper font-semibold text-sm py-3 px-4 rounded-xl flex items-center justify-center gap-2 transition-all focus:outline-none focus-visible:ring-2 focus-visible:ring-gold focus-visible:ring-offset-2"
+                >
+                  <MessageCircle className="w-5 h-5 shrink-0" aria-hidden="true" />
+                  <span>Ask for bank details on WhatsApp</span>
+                </a>
+              )}
               {payPath && (
                 <a
                   href={payPath}
@@ -713,7 +730,7 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
           )}
 
           {/* Bank transfer: the details come privately (email, WhatsApp, the order's own page), never on the website. */}
-          {byTransfer && payPath && !askBankLink && (
+          {byTransfer && payPath && !bankOnRequest && (
             <section aria-labelledby="transfer-next" className="rounded-2xl border border-line bg-ivory p-4 space-y-3 text-left">
               <h3 id="transfer-next" className="text-sm font-semibold text-ink">Paying by bank transfer</h3>
               <p className="text-xs text-ink-soft leading-relaxed">
@@ -799,7 +816,8 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
           {/* WhatsApp Direct Notification, and Done: always on the screen */}
           <div className="shrink-0 border-t border-line bg-surface p-4 pb-[max(1rem,env(safe-area-inset-bottom))] flex flex-col sm:flex-row gap-2">
             {/* The shop's WhatsApp number from Settings → Store & contact (hidden when none is set). */}
-            {shopWhatsApp && !askWhatsApp && (
+            {/* Not for a bank transfer "on request": its own WhatsApp button above is the one to tap. */}
+            {shopWhatsApp && !askWhatsApp && !bankOnRequest && (
               <a
                 href={`https://wa.me/${shopWhatsApp}?text=${whatsappMessage}`}
                 target="_blank"
@@ -876,6 +894,7 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
               publishableKey={card.publishableKey}
               amountFils={cardTotalFils}
               shippingRate={sameDayChosen ? { id: 'same_day', displayName: 'Same-day delivery', amount: deliveryFils } : { id: 'standard', displayName: `Free delivery in ${deliverySettings.standardDays}`, amount: 0 }}
+              lineItems={cardFee > 0 ? [{ name: 'Items', amount: totalFils - deliveryFils }, { name: `Card payment fee (${percentText(feePercent)}%)`, amount: cardFee }] : undefined}
               servesEmirate={(state, city) => {
                 const em = emirateFrom(state) ?? emirateFrom(city);
                 return !em || deliverySettings.emirates.includes(em);

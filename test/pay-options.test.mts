@@ -289,7 +289,10 @@ test('bank transfer on request: offered with no account but a WhatsApp number; h
   assert.equal(JSON.stringify(pub).includes('AE07'), false);
 
   await settings.updateSettings('payments', { bankTransferMode: 'send_details' });
-  assert.equal(settings.bankTransferMode(), null, 'send details, but none saved: off');
+  assert.equal(settings.bankTransferMode(), 'ask_whatsapp', 'send details, but the account was deleted: asked on WhatsApp, not switched off');
+  await settings.updateSettings('store', { whatsappNumber: '' });
+  assert.equal(settings.bankTransferMode(), null, 'send details, no account and no WhatsApp number: off');
+  await settings.updateSettings('store', { whatsappNumber: SHOP_WA });
   await settings.updateSettings('bank', BANK);
   assert.equal(settings.bankTransferMode(), 'send_details');
   await settings.updateSettings('payments', { bankTransferMode: 'default' });
@@ -356,8 +359,11 @@ test('bank transfer on request: the order is placed awaiting payment with its pr
     const parsed = await simpleParser(mails[0]);
     assert.notEqual(parsed.subject, `Bank details for your order ${o.id}`, 'not the bank details email');
     const textBody = parsed.text ?? '';
-    assert.match(textBody, /message us on WhatsApp for the bank details/);
-    assert.ok(textBody.includes(link), 'the WhatsApp link');
+    // Phone check "WhatsApp" (the default) still waits for this order: its one link is the confirmation, asking for the details.
+    assert.equal(o.whatsappCheck?.status, 'awaiting');
+    assert.match(textBody, /To confirm it and get our bank details/);
+    assert.ok(textBody.includes(messages.bankAskLink(SHOP_WA, o)!.href), 'the WhatsApp link (with the code)');
+    assert.ok(!textBody.includes(link), 'not the ask without the code');
     assert.ok(textBody.includes(`https://beautifuluaehome.com${o.bankTransfer!.payPath}`), 'the private upload link');
     assert.ok(!/IBAN|Account name/.test(textBody), 'no account details');
     // Once per order, like the details email.
@@ -372,4 +378,116 @@ test('bank transfer on request: the order is placed awaiting payment with its pr
   assert.equal(changed, true);
   assert.equal(paid.bankTransfer!.state, 'paid');
   assert.equal(paid.bankDetailsBy, 'whatsapp');
+});
+
+// ── Review fixes: one confirming WhatsApp ask, no number, restore, the hub reply ─────────────────
+
+/** Mails sent through a local SMTP server while `run` runs. */
+async function captureMail(run: () => Promise<void>): Promise<string[]> {
+  const { SMTPServer } = await import('smtp-server');
+  const { simpleParser } = await import('mailparser');
+  const raw: string[] = [];
+  const server = new SMTPServer({
+    authOptional: true,
+    disabledCommands: ['STARTTLS'],
+    onData(stream, _session, cb) {
+      let r = '';
+      stream.on('data', (c) => (r += c));
+      stream.on('end', () => {
+        raw.push(r);
+        cb();
+      });
+    },
+  });
+  await new Promise<void>((res) => server.listen(0, '127.0.0.1', res));
+  const port = (server.server.address() as { port: number }).port;
+  Object.assign(process.env, { SMTP_HOST: '127.0.0.1', SMTP_PORT: String(port), SMTP_SECURE: 'false', SMTP_REQUIRE_TLS: 'false', SMTP_FROM: 'shop@shop.test', BACKUP_EMAIL: 'owner@shop.test', NEXT_PUBLIC_APP_URL: 'https://beautifuluaehome.com' });
+  try {
+    await run();
+  } finally {
+    server.close();
+    for (const k of ['SMTP_HOST', 'SMTP_PORT', 'SMTP_SECURE', 'SMTP_REQUIRE_TLS', 'SMTP_FROM', 'BACKUP_EMAIL', 'NEXT_PUBLIC_APP_URL']) delete process.env[k];
+  }
+  return Promise.all(raw.map(async (r) => (await simpleParser(r)).text ?? ''));
+}
+
+test('on request, phone check WhatsApp: the one link is the confirmation (code + "send me the bank details"); the email carries it; the hub reply asks for YES', async () => {
+  await settings.updateSettings('bank', NO_BANK);
+  await settings.updateSettings('store', { whatsappNumber: SHOP_WA });
+  assert.equal(settings.phoneCheckMode(), 'whatsapp', 'the default');
+  const r = await post(body('bank_transfer', { verificationToken: undefined }));
+  assert.equal(r.status, 201, r.data.message);
+  const o = orders.getOrder(r.data.order!.id)!;
+  assert.equal(o.bankDetailsBy, 'whatsapp');
+  assert.equal(o.whatsappCheck?.status, 'awaiting');
+  const { confirmLink, waMeLink } = await import('@/lib/whatsappConfirm');
+  const confirm = confirmLink(SHOP_WA, o.id, o.whatsappCheck!.code, { bankDetails: true })!;
+  assert.deepEqual(messages.bankAskLink(SHOP_WA, o), { href: confirm, confirms: true });
+  assert.match(decodeURIComponent(confirm), new RegExp(`code ${o.whatsappCheck!.code}, and please send me the bank details`));
+  // Confirmed: the plain ask.
+  assert.deepEqual(messages.bankAskLink(SHOP_WA, { ...o, whatsappCheck: { ...o.whatsappCheck!, status: 'confirmed' } }), { href: waMeLink(SHOP_WA, messages.askBankDetailsMessage(o.id, o.total)), confirms: false });
+  assert.equal(messages.bankAskLink('', o), null, 'no number: nothing to tap');
+
+  const [mail] = await captureMail(async () => assert.equal(await emailBankDetails(o.id), 'sent'));
+  assert.ok(mail.includes(confirm), 'the email’s link confirms the order (with its code)');
+  assert.match(mail, /To confirm it and get our bank details/);
+  assert.ok(!mail.includes(waMeLink(SHOP_WA, messages.askBankDetailsMessage(o.id, o.total))!), 'not the plain ask (no code)');
+  assert.ok(!/IBAN|Account name/.test(mail));
+  const withHours = messages.bankRequestEmail({ orderId: o.id, total: o.total, confirmLink: confirm, cancelHours: 24 });
+  assert.match(withHours.text, /Orders not confirmed within 24 hours are cancelled\./);
+
+  // The hub's reply to an order still waiting for its WhatsApp confirmation asks for it too.
+  const reply = messages.bankDetailsReply({ orderId: o.id, total: o.total, bank: NO_BANK, askConfirm: true });
+  assert.ok(reply.includes(messages.BANK_DETAILS_PLACEHOLDER) && /reply YES to confirm your order/.test(reply));
+  assert.match(messages.bankDetailsReply({ orderId: o.id, total: o.total, bank: { ...NO_BANK, ...BANK }, askConfirm: true }), /Emirates NBD[\s\S]*reply YES to confirm your order/);
+  assert.ok(!/reply YES/.test(messages.bankDetailsReply({ orderId: o.id, total: o.total, bank: NO_BANK })), 'not once confirmed');
+  orders.checkBankTransfer(o.id, 'received', 'owner@shop.test');
+});
+
+test('on request with no WhatsApp number: the email says "reply to this email"; the number can’t be cleared while such orders wait for payment', async () => {
+  await settings.updateSettings('bank', NO_BANK);
+  await settings.updateSettings('store', { whatsappNumber: SHOP_WA, supportEmail: 'hello@shop.test' });
+  await settings.updateSettings('payments', { bankTransferMode: 'default' });
+  // Earlier on-request orders are paid; this one waits.
+  getDb().prepare("UPDATE orders SET bank_state = 'paid' WHERE json_extract(data, '$.bankDetailsBy') = 'whatsapp'").run();
+  assert.equal(settings.openOnRequestTransfers(), 0);
+  const r = await post(body('bank_transfer'));
+  assert.equal(r.status, 201, r.data.message);
+  const o = orders.getOrder(r.data.order!.id)!;
+  assert.equal(settings.openOnRequestTransfers(), 1);
+  await assert.rejects(settings.updateSettings('store', { whatsappNumber: '' }), (e: { status?: number; message?: string }) => e.status === 400 && /1 bank-transfer order is waiting for payment/.test(e.message ?? ''));
+  assert.equal(settings.getSettings('store').whatsappNumber, '+971501234567', 'kept');
+  await settings.updateSettings('store', { whatsappNumber: '+971 50 765 4321' }, {});
+  assert.equal(settings.getSettings('store').whatsappNumber, '+971507654321', 'changing it is fine');
+
+  // The number is gone anyway (the order was placed, then the shop moved to sending details, then
+  // the account was deleted): the email still goes, asking for a reply instead of showing nothing.
+  getDb().prepare("UPDATE settings SET data = json_set(data, '$.whatsappNumber', '') WHERE key = 'store'").run();
+  settings._clearSettingsCache();
+  const [mail] = await captureMail(async () => assert.equal(await emailBankDetails(o.id), 'sent'));
+  assert.match(mail, /reply to this email and we will send you our bank details/);
+  assert.ok(!mail.includes('wa.me'));
+  assert.ok(mail.includes(`https://beautifuluaehome.com${o.bankTransfer!.payPath}`));
+
+  // Paid: the number may be cleared.
+  await settings.updateSettings('store', { whatsappNumber: SHOP_WA });
+  orders.checkBankTransfer(o.id, 'received', 'owner@shop.test');
+  assert.equal(settings.openOnRequestTransfers(), 0);
+  await settings.updateSettings('store', { whatsappNumber: '' });
+  assert.equal(settings.getSettings('store').whatsappNumber, '');
+  await settings.updateSettings('store', { whatsappNumber: SHOP_WA });
+});
+
+test('restoring a payments version from before the fee and bank choice keeps today’s fee and choice', async () => {
+  await settings.updateSettings('payments', { cardFeePercent: 2.5, bankTransferMode: 'ask_whatsapp' });
+  const id = (getDb().prepare("INSERT INTO settings_history (key, data, saved_at) VALUES ('payments', ?, ?)").run(JSON.stringify({ cardEnabled: false, stripePublishableKey: '' }), new Date().toISOString()).lastInsertRowid) as number;
+  await settings.restoreSettingsVersion(id, 'owner@shop.test');
+  assert.equal(settings.getSettings('payments').cardFeePercent, 2.5, 'not reset to 3.5');
+  assert.equal(settings.getSettings('payments').bankTransferMode, 'ask_whatsapp', 'not reset to default');
+  // A version that has them puts them back.
+  const id2 = (getDb().prepare("INSERT INTO settings_history (key, data, saved_at) VALUES ('payments', ?, ?)").run(JSON.stringify({ cardEnabled: false, stripePublishableKey: '', cardFeePercent: 1, bankTransferMode: 'off' }), new Date().toISOString()).lastInsertRowid) as number;
+  await settings.restoreSettingsVersion(id2, 'owner@shop.test');
+  assert.equal(settings.getSettings('payments').cardFeePercent, 1);
+  assert.equal(settings.getSettings('payments').bankTransferMode, 'off');
+  await settings.updateSettings('payments', { cardFeePercent: 3.5, bankTransferMode: 'default' });
 });

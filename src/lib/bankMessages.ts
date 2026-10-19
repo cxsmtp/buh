@@ -1,5 +1,6 @@
 import type { BankTransferDetails } from '@/types';
 import { formatAed, toFils } from './money';
+import { confirmLink, waMeLink } from './whatsappConfirm';
 
 /**
  * What the customer is sent for a bank transfer, by email (automatic) or WhatsApp (the owner's
@@ -133,8 +134,10 @@ export const bankDetailsSaved = (bank?: Partial<BankTransferDetails> | null) => 
  * The owner's WhatsApp reply to a customer who asked for the bank details: the saved account, or
  * "[your bank details]" for the owner to fill in before sending; the amount, reference and link.
  */
-export function bankDetailsReply(input: Omit<BankMessageInput, 'bank'> & { bank?: BankTransferDetails | null }): string {
-  if (input.bank && bankDetailsSaved(input.bank)) return bankDetailsWhatsApp({ ...input, bank: input.bank });
+export function bankDetailsReply(input: Omit<BankMessageInput, 'bank'> & { bank?: BankTransferDetails | null; askConfirm?: boolean }): string {
+  // The order still waits for its WhatsApp confirmation: the reply asks for it too (like the hub's "Ask to confirm").
+  const confirm = input.askConfirm ? ['', 'Please also reply YES to confirm your order.'] : [];
+  if (input.bank && bankDetailsSaved(input.bank)) return [bankDetailsWhatsApp({ ...input, bank: input.bank }), ...confirm].join('\n');
   const firstName = safeFirstName(input.firstName);
   return [
     `Hello${firstName ? ` ${firstName}` : ''}, thank you for your order ${input.orderId} with ${input.shopName || 'Beautiful UAE Home'}.`,
@@ -145,11 +148,33 @@ export function bankDetailsReply(input: Omit<BankMessageInput, 'bank'> & { bank?
     '',
     input.link ? `Then upload a screenshot of the transfer here: ${input.link}` : 'Then send us a screenshot of the transfer here.',
     ...(input.link ? ['Or simply reply here with the screenshot.'] : []),
+    ...confirm,
   ].join('\n');
 }
 
-/** The email to a customer who will ask for the bank details on WhatsApp: no account in it (none is saved). */
-export function bankRequestEmail({ orderId, total, link, firstName: name, shopName, askLink }: Omit<BankMessageInput, 'bank' | 'confirmLink' | 'cancelHours'> & { askLink: string }): { subject: string; text: string } {
+/**
+ * The customer's one WhatsApp button for an "on request" order: while their number still has to be
+ * confirmed (Settings → Phone check), the confirmation message (with its code) that also asks for
+ * the bank details, so asking never leaves the order unconfirmed; after that, the plain ask.
+ * Null without the shop's WhatsApp number (the caller then points to the support email).
+ */
+export function bankAskLink(shopNumber: string, order: { id: string; total: number; whatsappCheck?: { status: string; code: string } | null }): { href: string; confirms: boolean } | null {
+  const check = order.whatsappCheck;
+  if (check?.code && check.status !== 'confirmed') {
+    const href = confirmLink(shopNumber, order.id, check.code, { bankDetails: true });
+    return href ? { href, confirms: true } : null;
+  }
+  const href = waMeLink(shopNumber, askBankDetailsMessage(order.id, order.total));
+  return href ? { href, confirms: false } : null;
+}
+
+/**
+ * The email to a customer who will ask for the bank details on WhatsApp: no account in it. While the
+ * order waits for its WhatsApp confirmation, the link is that confirmation (it asks for the details
+ * too), with the hours before an unconfirmed order is cancelled. With no WhatsApp link at all (the
+ * shop's number was removed), they ask by replying to the email.
+ */
+export function bankRequestEmail({ orderId, total, link, firstName: name, shopName, askLink, confirmLink: confirm, cancelHours }: Omit<BankMessageInput, 'bank'> & { askLink?: string | null }): { subject: string; text: string } {
   const firstName = safeFirstName(name);
   const shop = shopName || 'Beautiful UAE Home';
   return {
@@ -157,12 +182,19 @@ export function bankRequestEmail({ orderId, total, link, firstName: name, shopNa
     text: [
       `Hello${firstName ? ` ${firstName}` : ''},`,
       '',
-      `Thank you for your order ${orderId}. To pay ${aed(total)} by bank transfer, message us on WhatsApp for the bank details (the message is already typed, just tap Send):`,
-      askLink,
+      ...(confirm
+        ? [
+            `Thank you for your order ${orderId}. To confirm it and get our bank details to pay ${aed(total)} by transfer, tap to send us a WhatsApp message (it is already typed, just tap Send):`,
+            confirm,
+            ...(cancelHours ? [`Orders not confirmed within ${cancelHours} hours are cancelled.`] : []),
+          ]
+        : askLink
+          ? [`Thank you for your order ${orderId}. To pay ${aed(total)} by bank transfer, message us on WhatsApp for the bank details (the message is already typed, just tap Send):`, askLink]
+          : [`Thank you for your order ${orderId}. To pay ${aed(total)} by bank transfer, reply to this email and we will send you our bank details.`]),
       '',
       `Please use ${orderId} as the transfer reference.`,
       '',
-      ...(link ? ['Then upload a screenshot or PDF of the transfer on your order’s private page:', link, '', 'or send it to us on WhatsApp.'] : ['Then send us a screenshot of the transfer on WhatsApp.']),
+      ...(link ? ['Then upload a screenshot or PDF of the transfer on your order’s private page:', link, '', confirm || askLink ? 'or send it to us on WhatsApp.' : 'or reply to this email with it.'] : [confirm || askLink ? 'Then send us a screenshot of the transfer on WhatsApp.' : 'Then reply to this email with your screenshot.']),
       '',
       'We will confirm your order as soon as we see the transfer.',
       '',

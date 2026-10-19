@@ -169,6 +169,7 @@ export function ExpressCheckout({
   publishableKey,
   amountFils,
   shippingRate,
+  lineItems,
   servesEmirate,
   onWallet,
   onDone,
@@ -177,6 +178,8 @@ export function ExpressCheckout({
   amountFils: number;
   /** The delivery the customer chose in checkout (shown in the wallet's sheet). */
   shippingRate: { id: 'standard' | 'same_day'; displayName: string; amount: number };
+  /** The sheet's lines (the items and the card payment fee), adding up with the delivery to amountFils. */
+  lineItems?: Array<{ name: string; amount: number }>;
   /** Is this emirate (as the wallet names it) one the shop delivers to? */
   servesEmirate: (state: string, city: string) => boolean;
   /** Turn the wallet's details into an order on the server, or say what to ask for. */
@@ -186,12 +189,12 @@ export function ExpressCheckout({
   if (useStripeFailed(publishableKey)) return null;
   return (
     <Elements stripe={stripeFor(publishableKey)} options={options(amountFils)}>
-      <ExpressInner shippingRate={shippingRate} servesEmirate={servesEmirate} onWallet={onWallet} onDone={onDone} />
+      <ExpressInner shippingRate={shippingRate} lineItems={lineItems} servesEmirate={servesEmirate} onWallet={onWallet} onDone={onDone} />
     </Elements>
   );
 }
 
-function ExpressInner({ shippingRate, servesEmirate, onWallet, onDone }: Omit<React.ComponentProps<typeof ExpressCheckout>, 'publishableKey' | 'amountFils'>) {
+function ExpressInner({ shippingRate, lineItems, servesEmirate, onWallet, onDone }: Omit<React.ComponentProps<typeof ExpressCheckout>, 'publishableKey' | 'amountFils'>) {
   const stripe = useStripe();
   const elements = useElements();
   const [available, setAvailable] = useState<boolean | null>(null);
@@ -238,7 +241,9 @@ function ExpressInner({ shippingRate, servesEmirate, onWallet, onDone }: Omit<Re
           layout: { maxColumns: 2, maxRows: 1, overflow: 'auto' },
         }}
         onReady={(e) => setAvailable(Boolean(e.availablePaymentMethods && Object.values(e.availablePaymentMethods).some(Boolean)))}
-        onShippingAddressChange={(e) => (servesEmirate(e.address.state, e.address.city) ? e.resolve({ shippingRates: [shippingRate] }) : e.reject())}
+        // The sheet lists the card payment fee when there is one (the total already includes it).
+        onClick={(e) => e.resolve(lineItems?.length ? { lineItems, shippingRates: [shippingRate] } : {})}
+        onShippingAddressChange={(e) => (servesEmirate(e.address.state, e.address.city) ? e.resolve({ shippingRates: [shippingRate], ...(lineItems?.length ? { lineItems } : {}) }) : e.reject())}
         onConfirm={(e) => void onConfirm(e)}
       />
     </div>

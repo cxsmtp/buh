@@ -3,10 +3,12 @@
  * "on request". Checkout's Card option says the fee applies, the summary shows "Card payment fee
  * (3.5%) AED x" before the total and the Pay button the full amount; switching to bank transfer
  * removes the line. With no bank account saved but the shop's WhatsApp number, bank transfer is
- * offered as "message us on WhatsApp"; the confirmation's big button opens wa.me/<shop number>
- * with the order and amount typed; the hub's order card says the customer will ask, with a reply
- * that has "[your bank details]" to fill in. A card order is charged total + fee (Stripe stand-in)
- * and the confirmation shows the fee. No sideways scroll. Skipped without a build.
+ * offered as "message us on WhatsApp"; while the order waits for its WhatsApp confirmation the
+ * confirmation has one button, "Confirm & ask for bank details on WhatsApp" (the code and the ask),
+ * also on /pay, which never shows the account for these orders; the hub's order card says the
+ * customer will ask, with a reply that has "[your bank details]" to fill in. A card order is charged
+ * total + fee (Stripe stand-in) and the confirmation shows the fee. The fee setting goes live when
+ * the field is left. No sideways scroll. Skipped without a build.
  */
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
@@ -127,7 +129,7 @@ async function baseFils(page: Page): Promise<number> {
 }
 
 for (const [width, phone] of [[375, '050 662 3001'], [1280, '055 662 3002']] as const) {
-  test(`at ${width}px: the card fee line and Pay amount; bank transfer on request; the confirmation's "Ask for bank details on WhatsApp"; the hub's note`, { skip: skip || skipBrowser }, async () => {
+  test(`at ${width}px: the card fee line and Pay amount; bank transfer on request; the confirmation's one WhatsApp button; the hub's note`, { skip: skip || skipBrowser }, async () => {
     const { ctx, page, errors } = await openCheckout(width);
     await fillDetails(page, 'Salma Fee', phone);
     await page.getByRole('button', { name: /Send code/ }).click();
@@ -178,15 +180,20 @@ for (const [width, phone] of [[375, '050 662 3001'], [1280, '055 662 3002']] as 
 
     await page.locator('button[type=submit]').click();
     await page.getByText('Thank you for your order').waitFor({ timeout: 10_000 });
-    const ask = page.getByTestId('bank-ask-whatsapp');
+    // The order still waits for its WhatsApp confirmation (Store & contact's "Confirm orders on
+    // WhatsApp"): one button, the confirmation with its code, which also asks for the details.
+    const dialog = page.getByRole('dialog');
+    const ask = dialog.getByRole('link', { name: 'Confirm & ask for bank details on WhatsApp' });
     await ask.waitFor();
+    assert.equal(await dialog.locator('a[href^="https://wa.me/"]').count(), 1, 'one WhatsApp button, not two');
+    assert.equal(await page.getByTestId('bank-ask-whatsapp').count(), 0);
     const href = (await ask.getAttribute('href'))!;
     const url = new URL(href);
     assert.equal(url.origin + url.pathname, 'https://wa.me/971501239876', 'the shop’s number');
     const text = url.searchParams.get('text')!;
     const id = text.match(/BUH-[A-Z0-9-]+/)?.[0];
     assert.ok(id, text);
-    assert.equal(text, `Hello, I placed order ${id} for AED ${aed(base)}. Please send your bank details so I can pay by transfer.`);
+    assert.match(text, new RegExp(`^Confirm my order ${id} · code \\d{4}, and please send me the bank details$`));
     const box = (await ask.boundingBox())!;
     assert.ok(box.height >= 44 && box.x >= 0 && box.x + box.width <= width, JSON.stringify(box));
     await page.getByRole('link', { name: 'Then upload your transfer screenshot' }).waitFor();
@@ -249,4 +256,102 @@ test('at 1280px: a card order is charged total + fee, and the confirmation shows
   const order = (await (await api('GET', `/api/admin/orders/${pi.metadata.orderId}`)).json()).order;
   assert.equal(order.cardFee, fee / 100);
   assert.equal(order.total, (base + fee) / 100);
+});
+
+// ── Review fixes ─────────────────────────────────────────────────────────────────────────────────
+
+const BANK = { bankName: 'Emirates NBD', accountName: 'BEAUTIFUL UAE HOME TEXTILES LLC', iban: 'AE070331234567890123456', accountNumber: '1012345678901', swiftCode: 'EBILAEAD' };
+
+test('at 375px, phone check WhatsApp, "on request" with an account saved: one WhatsApp button (confirm + ask, with the code); /pay shows no account; the hub reply asks for YES', { skip: skip || skipBrowser }, async () => {
+  await setPhoneCheck(server, 'whatsapp');
+  for (const [key, settings] of [['bank', BANK], ['payments', { bankTransferMode: 'ask_whatsapp' }]] as const) {
+    const res = await api('PUT', `/api/admin/settings/${key}`, { settings });
+    assert.equal(res.status, 200, await res.text());
+  }
+  try {
+    const { ctx, page, errors } = await openCheckout(375);
+    await fillDetails(page, 'Noura Ask', '050 662 3011');
+    await page.getByRole('radio', { name: /Bank transfer/ }).click();
+    await page.locator('button[type=submit]').click();
+    await page.getByText('Thank you for your order').waitFor({ timeout: 10_000 });
+    const dialog = page.getByRole('dialog');
+    const button = dialog.getByRole('link', { name: 'Confirm & ask for bank details on WhatsApp' });
+    await button.waitFor();
+    assert.equal(await dialog.locator('a[href^="https://wa.me/"]').count(), 1, 'one WhatsApp button, not two');
+    assert.equal(await page.getByTestId('bank-ask-whatsapp').count(), 0, 'no separate ask without the code');
+    const text = new URL((await button.getAttribute('href'))!).searchParams.get('text')!;
+    const id = text.match(/BUH-[A-Z0-9-]+/)?.[0];
+    const placed = (await (await api('GET', `/api/admin/orders/${id}`)).json()).order;
+    assert.equal(placed.bankDetailsBy, 'whatsapp');
+    assert.equal(placed.whatsappCheck.status, 'awaiting');
+    assert.equal(text, `Confirm my order ${id} · code ${placed.whatsappCheck.code}, and please send me the bank details`);
+    assert.equal(await overflow(page), false, 'confirmation: no sideways scroll');
+    await shot(page, 'confirmation-confirm-and-ask-375.png');
+    assert.deepEqual(errors, []);
+
+    // The order's private page: no account detail at all, the same one button.
+    const html = await (await rawFetch(`${server.base}${placed.bankTransfer.payPath}`)).text();
+    assert.match(html, /Pay by bank transfer/);
+    const flat = html.replace(/\s+/g, '');
+    for (const s of [BANK.iban, BANK.accountName, BANK.accountNumber, BANK.swiftCode, BANK.bankName]) assert.ok(!flat.includes(s.replace(/\s+/g, '')), `not on /pay: ${s}`);
+    await page.goto(`${server.base}${placed.bankTransfer.payPath}`, { waitUntil: 'load' });
+    const pay = page.getByTestId('pay-ask-bank');
+    assert.equal((await pay.innerText()).trim(), 'Confirm & ask for bank details on WhatsApp');
+    assert.equal(new URL((await pay.getAttribute('href'))!).searchParams.get('text'), text);
+    assert.equal(await overflow(page), false, '/pay: no sideways scroll');
+    await ctx.close();
+
+    // The hub's reply (the saved account) also asks for the confirmation while it is awaited.
+    const hub = await browser.newContext({ viewport: { width: 375, height: 860 }, hasTouch: true });
+    const [name, value] = cookie.split('=');
+    await hub.addCookies([{ name, value, url: server.base }]);
+    const hp = await hub.newPage();
+    await hp.goto(server.adminUrl, { waitUntil: 'domcontentloaded' });
+    await openAdminSection(hp, /^Orders/);
+    const panel = hp.getByTestId('bank-transfer').filter({ hasText: id! });
+    const reply = new URL((await panel.getByRole('link', { name: 'Reply with bank details on WhatsApp' }).getAttribute('href'))!).searchParams.get('text')!;
+    assert.ok(reply.includes(BANK.bankName) && reply.includes('Please also reply YES to confirm your order.'), reply);
+    await hub.close();
+  } finally {
+    await setPhoneCheck(server, 'sms_code');
+    await api('PUT', '/api/admin/settings/payments', { settings: { bankTransferMode: 'default' } });
+    await api('PUT', '/api/admin/settings/bank', { settings: { bankName: '', accountName: '', iban: '', accountNumber: '', swiftCode: '' } });
+  }
+});
+
+test('Settings → Payments: the card fee goes live when the field is left, not while typing ("3" on the way to "3.7" is never saved or audited)', { skip: skip || skipBrowser }, async () => {
+  const feeChanges = () =>
+    fs
+      .readdirSync(server.dataDir)
+      .filter((f) => /^audit-.*\.jsonl$/.test(f))
+      .flatMap((f) => fs.readFileSync(path.join(server.dataDir, f), 'utf8').split('\n').filter(Boolean))
+      .map((l) => JSON.parse(l))
+      .filter((e) => e.action === 'settings.payment_options_changed');
+  const saved = async () => (await (await api('GET', '/api/admin/settings')).json()).payments.value.cardFeePercent;
+  assert.equal(await saved(), 3.5);
+  const before = feeChanges().length;
+  const ctx = await browser.newContext({ viewport: { width: 1280, height: 900 } });
+  const [name, value] = cookie.split('=');
+  await ctx.addCookies([{ name, value, url: server.base }]);
+  const page = await ctx.newPage();
+  await page.goto(server.adminUrl, { waitUntil: 'domcontentloaded' });
+  await page.getByRole('navigation', { name: 'Admin sections' }).getByRole('button', { name: 'Settings' }).click();
+  await page.getByRole('navigation', { name: 'Settings sections' }).getByRole('button', { name: 'Payments' }).click();
+  const input = page.getByTestId('card-fee-input');
+  await input.click();
+  await input.press('ControlOrMeta+a');
+  await input.pressSequentially('3');
+  await page.waitForTimeout(3000); // longer than the autosave's pause
+  assert.equal(await saved(), 3.5, 'a half-typed fee is not saved');
+  await input.pressSequentially('.7');
+  await page.getByText('On AED 100: AED 3.70').waitFor();
+  await input.press('Tab');
+  for (let i = 0; i < 100 && (await saved()) !== 3.7; i++) await page.waitForTimeout(100);
+  assert.equal(await saved(), 3.7, 'saved once the field is left');
+  const changes = feeChanges().slice(before);
+  assert.equal(changes.length, 1, JSON.stringify(changes));
+  assert.equal(changes[0].details.from.cardFeePercent, 3.5);
+  assert.equal(changes[0].details.to.cardFeePercent, 3.7);
+  await ctx.close();
+  assert.equal((await api('PUT', '/api/admin/settings/payments', { settings: { cardFeePercent: 3.5 } })).status, 200);
 });

@@ -62,8 +62,10 @@ export function OrderBankTransfer({ order, bank, shopName, onOrderChanged }: { o
   };
 
   // The saved account, or "[your bank details]" for the owner to type in WhatsApp before sending.
-  const details = waMeLink(order.customer.phone, bankDetailsReply({ orderId: order.id, total: order.total, bank, link: link || undefined, firstName: order.customer.fullName, shopName }));
+  // An "on request" order still waiting for its WhatsApp confirmation: the reply asks for it too.
   const onRequest = order.bankDetailsBy === 'whatsapp';
+  const askConfirm = onRequest && Boolean(order.whatsappCheck) && order.whatsappCheck?.status !== 'confirmed';
+  const details = waMeLink(order.customer.phone, bankDetailsReply({ orderId: order.id, total: order.total, bank, link: link || undefined, firstName: order.customer.fullName, shopName, askConfirm }));
   const accountSaved = bankDetailsSaved(bank);
   const reply = bt.state === 'paid' ? waMeLink(order.customer.phone, paymentReceivedReply(order.id)) : bt.state === 'not_received' ? waMeLink(order.customer.phone, notReceivedReply(order.id, order.total, link || undefined)) : null;
   const button = 'min-h-11 px-3 py-2 rounded-xl text-xs font-bold flex items-center justify-center gap-1.5 disabled:opacity-50 focus:outline-none focus-visible:ring-2 focus-visible:ring-gold';

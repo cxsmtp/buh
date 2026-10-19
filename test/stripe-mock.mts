@@ -224,6 +224,8 @@ export const STRIPE_JS_STUB = `
         } else if (type === 'expressCheckout') {
           dom.innerHTML = '<button type="button" data-stub-wallet style="width:100%;height:44px">Apple Pay (test)</button>';
           dom.querySelector('button').addEventListener('click', () => {
+            // Like Stripe: the click event first (what the sheet shows), then the confirm.
+            (handlers.click || []).forEach((h) => h({ elementType: type, expressPaymentType: 'apple_pay', resolve: (d) => calls.push(['expressClick', d || {}]) }));
             const w = window.__wallet || {};
             const event = {
               expressPaymentType: 'apple_pay',

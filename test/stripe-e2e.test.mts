@@ -353,6 +353,15 @@ test('at 375px: Apple Pay fills checkout; an area we don’t know is asked for b
   assert.equal(order.card.state, 'pending', 'the browser’s “done” is not “paid”');
   const confirmCalls = await page.evaluate(() => (window as unknown as { __stripeCalls: unknown[][] }).__stripeCalls.filter((c) => c[0] === 'confirmPayment'));
   assert.deepEqual(confirmCalls, [['confirmPayment', pi.client_secret, 'if_required']]);
+  // The wallet's sheet lists the card payment fee (3.5%): its lines and the delivery add up to what is charged.
+  const clicks = await page.evaluate(() => (window as unknown as { __stripeCalls: unknown[][] }).__stripeCalls.filter((c) => c[0] === 'expressClick').map((c) => c[1]));
+  const sheet = clicks.at(-1) as { lineItems?: Array<{ name: string; amount: number }>; shippingRates?: Array<{ amount: number }> };
+  assert.equal(sheet?.lineItems?.length, 2, JSON.stringify(clicks));
+  const [items, feeLine] = sheet.lineItems!;
+  assert.equal(items.name, 'Items');
+  assert.equal(feeLine.name, 'Card payment fee (3.5%)');
+  assert.equal(feeLine.amount, Math.floor((items.amount * 350 + 5000) / 10000), 'the fee on the items, half up');
+  assert.equal(items.amount + feeLine.amount + (sheet.shippingRates?.[0]?.amount ?? 0), pi.amount, 'the sheet adds up to the charge');
   // Stripe takes the payment: the confirmation screen hears it from the server (which asked Stripe).
   mock.succeed(pi.id);
   await page.getByText('Paid by card · Apple Pay · Visa •••• 4242').waitFor({ timeout: 15_000 });

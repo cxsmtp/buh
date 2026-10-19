@@ -44,7 +44,7 @@ const modeOf = (key: string) => (/^(?:pk|sk|rk)_live_/.test(key) ? 'live' : /^(?
 /** What checkout offers for bank transfer with this choice (like the server's bankTransferMode()). */
 export function effectiveBankMode(mode: BankTransferMode, accountSaved: boolean, whatsapp: boolean): 'send_details' | 'ask_whatsapp' | null {
   if (mode === 'off') return null;
-  if (mode === 'send_details') return accountSaved ? 'send_details' : null;
+  if (mode === 'send_details') return accountSaved ? 'send_details' : whatsapp ? 'ask_whatsapp' : null;
   if (mode === 'ask_whatsapp') return whatsapp ? 'ask_whatsapp' : null;
   return accountSaved ? 'send_details' : whatsapp ? 'ask_whatsapp' : null;
 }
@@ -89,7 +89,11 @@ export function PaymentsSettingsCard({
   const [copied, setCopied] = useState(false);
   const set = <K extends keyof PaymentSettings>(k: K, v: PaymentSettings[K]) => setD((x) => ({ ...x, [k]: v }));
   const [feeText, setFeeText] = useState(() => percentText(value.cardFeePercent ?? 0));
-  const feeProblem = parsePercent(feeText) === null;
+  const feeTyped = parsePercent(feeText);
+  const feeProblem = feeTyped === null;
+  const commitFee = () => {
+    if (feeTyped !== null && feeTyped !== d.cardFeePercent) set('cardFeePercent', feeTyped);
+  };
   const whatsappSet = Boolean(waMeLink(shopWhatsApp, ''));
   const bankShown = effectiveBankMode(d.bankTransferMode ?? 'default', bankAccountSaved, whatsappSet);
 
@@ -108,13 +112,13 @@ export function PaymentsSettingsCard({
     setSaving(true);
     setStatus(null);
     setWarning('');
-    if (feeProblem) {
+    if (feeTyped === null) {
       setSaving(false);
       return setStatus({ ok: false, text: `Card payment fee: a percent from 0 to ${MAX_CARD_FEE_PERCENT}, with up to 2 decimals.` });
     }
-    const problem = await onSave(d, setWarning);
+    const problem = await onSave({ ...d, cardFeePercent: feeTyped }, setWarning);
     setSaving(false);
-    if (!problem) setD((x) => ({ ...x, stripeSecretKey: '', stripeWebhookSecret: '' }));
+    if (!problem) setD((x) => ({ ...x, cardFeePercent: feeTyped, stripeSecretKey: '', stripeWebhookSecret: '' }));
     setStatus(problem ? { ok: false, text: problem } : { ok: true, text: d.cardEnabled ? 'Saved. Checkout now offers card, Apple Pay and Google Pay.' : 'Saved. Card payments are off.' });
   };
 
@@ -186,13 +190,14 @@ export function PaymentsSettingsCard({
             value={feeText}
             aria-invalid={feeProblem}
             aria-describedby="pay-card-fee-help"
-            onChange={(e) => {
-              setFeeText(e.target.value);
-              const v = parsePercent(e.target.value);
-              if (v !== null) set('cardFeePercent', v);
+            onChange={(e) => setFeeText(e.target.value)}
+            // Goes live (and is audited) when the owner leaves the field, never half-typed ("3" on the way to "3.7").
+            onBlur={commitFee}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter') commitFee();
             }}
           />
-          <span className="text-xs text-ink-soft">{feeProblem ? '' : d.cardFeePercent > 0 ? `On AED 100: AED ${formatAed(cardFeeFils(10000, d.cardFeePercent))}` : 'No card fee'}</span>
+          <span className="text-xs text-ink-soft">{feeTyped === null ? '' : feeTyped > 0 ? `On AED 100: AED ${formatAed(cardFeeFils(10000, feeTyped))}` : 'No card fee'}</span>
         </div>
         <p id="pay-card-fee-help" className={`text-[11px] ${feeProblem ? 'text-danger font-semibold' : 'text-ink-muted'}`}>
           {feeProblem
