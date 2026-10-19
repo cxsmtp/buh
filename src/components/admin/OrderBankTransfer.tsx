@@ -3,7 +3,7 @@
 import React, { useState } from 'react';
 import { Building2, Check, CheckCircle2, Clock, Copy, Eye, MessageCircle, XCircle } from 'lucide-react';
 import type { BankTransferDetails, Order } from '@/types';
-import { postJson } from '@/lib/apiClient';
+import { postJson, safeLinkHref } from '@/lib/apiClient';
 import { bankDetailsWhatsApp, notReceivedReply, paymentReceivedReply } from '@/lib/bankMessages';
 import { waMeLink } from '@/lib/whatsappConfirm';
 
@@ -64,7 +64,7 @@ export function OrderBankTransfer({ order, bank, shopName, onOrderChanged }: { o
   const details = waMeLink(order.customer.phone, bankDetailsWhatsApp({ orderId: order.id, total: order.total, bank, link: link || undefined, firstName: order.customer.fullName, shopName }));
   const reply = bt.state === 'paid' ? waMeLink(order.customer.phone, paymentReceivedReply(order.id)) : bt.state === 'not_received' ? waMeLink(order.customer.phone, notReceivedReply(order.id, order.total, link || undefined)) : null;
   const button = 'min-h-11 px-3 py-2 rounded-xl text-xs font-bold flex items-center justify-center gap-1.5 disabled:opacity-50 focus:outline-none focus-visible:ring-2 focus-visible:ring-gold';
-  const receipt = order.paymentReceiptUrl || `/api/admin/orders/${encodeURIComponent(order.id)}/receipt`;
+  const receipt = safeLinkHref(order.paymentReceiptUrl) || `/api/admin/orders/${encodeURIComponent(order.id)}/receipt`;
 
   return (
     <div data-testid="bank-transfer" className={`rounded-xl border p-3 space-y-2 text-xs ${badge.tone}`}>

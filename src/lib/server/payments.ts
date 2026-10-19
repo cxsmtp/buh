@@ -547,6 +547,15 @@ export interface DomainStatus {
 }
 
 /** The shop's own domain (from NEXT_PUBLIC_APP_URL, or the hub's address), if it is a public name. */
+/**
+ * The request's Host header when it is only a host name or IP address with an optional port
+ * (the first one, lower case); anything else (a path, quotes, spaces, a scheme) gives "your-domain".
+ */
+export function hostOrPlaceholder(host: string | null | undefined): string {
+  const h = (host || '').split(',')[0].trim().toLowerCase();
+  return /^(?=.{1,260}$)[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?(?:\.[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?)*(?::\d{1,5})?$/.test(h) ? h : 'your-domain';
+}
+
 export function shopDomain(fallbackHost?: string | null): string | null {
   let host = '';
   try {

@@ -28,9 +28,11 @@ export const INITIAL_COURIER_SETTINGS: CourierSettings = {
     codCourier: 'jeebly', // Default for Cash On Delivery (Jeebly UAE)
     prepaidCourier: 'echo', // Default for Pre-payment / Account transfer (Eco Express)
   },
+  // No keys in the code: the owner enters the carrier's own (Admin Hub → Courier); the server
+  // keeps them and never sends them back to the browser.
   jeebly: {
-    apiKey: 'jb_live_9a7d2e3f8b1c4a56_uae',
-    clientKey: 'BUH_CORP_DXB_882',
+    apiKey: '',
+    clientKey: '',
     serviceType: 'Scheduled',
     isLive: false,
     pickupLocationName: 'Beautiful UAE Home Artisan Studio',
@@ -39,7 +41,7 @@ export const INITIAL_COURIER_SETTINGS: CourierSettings = {
     pickupEmirate: 'Dubai',
   },
   echo: {
-    apiKey: 'ech_live_sec_78119024a',
+    apiKey: '',
     accountId: 'ECH-DXB-91402',
     isLive: false,
     hubCode: 'DXB-HUB-01',

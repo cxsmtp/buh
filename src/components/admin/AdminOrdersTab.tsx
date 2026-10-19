@@ -21,7 +21,7 @@ import {
   CreditCard,
   X,
 } from 'lucide-react';
-import { postJson, sendJson } from '@/lib/apiClient';
+import { postJson, safeLinkHref, sendJson } from '@/lib/apiClient';
 import { awaitingWhatsApp, heldForWhatsApp, OrderTimeline, OrderWhatsAppCheck } from './OrderWhatsAppCheck';
 import { OrderBankTransfer, transferToCheck } from './OrderBankTransfer';
 
@@ -460,9 +460,9 @@ export const AdminOrdersTab: React.FC<AdminOrdersTabProps> = ({
                         Payment: {order.paymentStatus.replace(/_/g, ' ')}
                         {order.bankTransferRef ? ` • Ref ${order.bankTransferRef}` : ''}
                       </span>
-                      {order.paymentReceiptUrl && (
+                      {safeLinkHref(order.paymentReceiptUrl) && (
                         <a
-                          href={order.paymentReceiptUrl}
+                          href={safeLinkHref(order.paymentReceiptUrl)}
                           target="_blank"
                           rel="noopener noreferrer"
                           className="px-2 py-1 rounded-lg font-semibold border border-line-strong bg-surface text-ink hover:bg-sand"

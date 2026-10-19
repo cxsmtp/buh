@@ -52,6 +52,22 @@ export async function sendJson<T = Record<string, unknown>>(method: 'GET' | 'POS
   }
 }
 
+/**
+ * A stored link that is safe as an href, the same on the server and in the browser: a path on
+ * this site ("/api/…", never "//host" or "/\host"), or an absolute http(s) address. Anything else
+ * (javascript:, data:, vbscript:, …) gives undefined.
+ */
+export function safeLinkHref(url: string | undefined | null): string | undefined {
+  if (!url || typeof url !== 'string') return undefined;
+  if (/^\/(?![/\\])/.test(url)) return /[\s\u0000-\u001f]/.test(url) ? undefined : url;
+  try {
+    const parsed = new URL(url);
+    return parsed.protocol === 'https:' || parsed.protocol === 'http:' ? parsed.href : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
 /** Only http(s) links may be rendered as hrefs (blocks javascript: URLs from stored data). */
 export function safeHref(url: string | undefined | null): string | undefined {
   if (!url) return undefined;
