@@ -15,6 +15,7 @@ export function imageDimensions(bytes: Buffer): { width: number; height: number 
   try {
     // PNG: the IHDR chunk right after the signature.
     if (bytes.length >= 24 && bytes[0] === 0x89 && bytes.toString('latin1', 12, 16) === 'IHDR') {
+      if (bytes.readUInt32BE(8) !== 13) return null; // IHDR is always 13 bytes
       return { width: bytes.readUInt32BE(16), height: bytes.readUInt32BE(20) };
     }
     // JPEG: walk the segments to the first start-of-frame (SOF0–SOF15, except DHT/JPG/DAC).

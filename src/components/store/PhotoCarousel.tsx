@@ -9,6 +9,8 @@ interface PhotoCarouselProps {
   images: string[];
   /** "Photos of …" for screen readers. */
   title: string;
+  /** Photos styled by AI from the real one: each shows a small "Styled image" tag. */
+  styled?: ReadonlySet<string>;
   children?: React.ReactNode;
 }
 
@@ -20,7 +22,7 @@ const reducedMotion = () => typeof window !== 'undefined' && window.matchMedia?.
  * dots, and the arrow keys (when the photos have focus) do the same. A tap on a photo (or the
  * expand button) shows it full screen, to pinch and zoom into.
  */
-export function PhotoCarousel({ images, title, children }: PhotoCarouselProps) {
+export function PhotoCarousel({ images, title, styled, children }: PhotoCarouselProps) {
   const track = useRef<HTMLDivElement>(null);
   const [index, setIndex] = useState(0);
   const drag = useRef<{ x: number; left: number; from: number } | null>(null);
@@ -178,6 +180,11 @@ export function PhotoCarousel({ images, title, children }: PhotoCarouselProps) {
                 draggable={false}
                 className="photo absolute inset-0 w-full h-full object-cover"
               />
+              {styled?.has(img) && (
+                <span className="pointer-events-none absolute left-3 bottom-3 rounded-full bg-surface/90 px-2 py-0.5 text-[11px] font-semibold text-ink shadow-sm" data-testid="styled-tag">
+                  Styled image
+                </span>
+              )}
             </div>
           );
         })}

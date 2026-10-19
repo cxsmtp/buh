@@ -15,7 +15,7 @@ import path from 'node:path';
 import { after, before, test } from 'node:test';
 import { hasBuild, rawFetch, setPhoneCheck, startServer, type RunningServer } from './server.mjs';
 import { openAdminSection } from './helpers.mjs';
-import { startStripeMock, TEST_KEYS, type StripeMock } from './stripe-mock.mjs';
+import { startStripeMock, STRIPE_JS_STUB, TEST_KEYS, type StripeMock } from './stripe-mock.mjs';
 
 type PW = typeof import('playwright');
 const pw: PW | null = hasBuild ? await import('playwright').catch(() => null) : null;
@@ -99,7 +99,7 @@ test('Settings → Payments: off by default; keys saved write-only; check the co
   assert.equal((await api('POST', '/api/admin/payments', { action: 'domain' })).status, 400);
 
   const pub = await (await rawFetch(`${server.base}/api/settings/public`)).json();
-  assert.deepEqual(pub.payments, { card: true, publishableKey: TEST_KEYS.publishable });
+  assert.deepEqual(pub.payments, { card: true, publishableKey: TEST_KEYS.publishable, cardFeePercent: 3.5 });
   for (const text of [JSON.stringify(pub), JSON.stringify(all), JSON.stringify(info), await (await rawFetch(`${server.base}/`)).text()]) {
     assert.ok(!text.includes(TEST_KEYS.secret) && !text.includes(TEST_KEYS.webhook));
   }
@@ -261,66 +261,6 @@ test('the shop’s first load carries no Stripe code (it comes only with checkou
 
 // ── In Chromium ─────────────────────────────────────────────────────────────
 
-/** A stand-in for Stripe.js: the Payment Element is a plain card field; Express Checkout an "Apple Pay (test)" button. */
-const STRIPE_JS_STUB = `
-(() => {
-  const calls = (window.__stripeCalls = []);
-  function element(type) {
-    const handlers = {};
-    let node = null;
-    const el = {
-      mount(dom) {
-        node = dom;
-        if (type === 'payment') {
-          dom.innerHTML = '<label style="display:block;font-size:12px">Card number <input data-stub-card aria-label="Card number" inputmode="numeric" style="width:100%;max-width:100%;box-sizing:border-box" /></label>';
-        } else if (type === 'expressCheckout') {
-          dom.innerHTML = '<button type="button" data-stub-wallet style="width:100%;height:44px">Apple Pay (test)</button>';
-          dom.querySelector('button').addEventListener('click', () => {
-            const w = window.__wallet || {};
-            const event = {
-              expressPaymentType: 'apple_pay',
-              billingDetails: { name: w.name, email: w.email, phone: w.phone, address: w.address },
-              shippingAddress: { name: w.name, address: w.address },
-              shippingRate: { id: 'standard', amount: 0, displayName: 'Free delivery' },
-              paymentFailed: (p) => { window.__walletFailed = p || {}; },
-            };
-            (handlers.confirm || []).forEach((h) => h(event));
-          });
-        }
-        setTimeout(() => (handlers.ready || []).forEach((h) => h(type === 'expressCheckout' ? { elementType: type, availablePaymentMethods: { applePay: true, googlePay: false, link: false, paypal: false, amazonPay: false, klarna: false } } : { elementType: type })), 30);
-      },
-      on(name, h) { (handlers[name] = handlers[name] || []).push(h); return el; },
-      off(name, h) { handlers[name] = (handlers[name] || []).filter((x) => x !== h); return el; },
-      update() { return el; },
-      destroy() { if (node) node.innerHTML = ''; },
-      unmount() {},
-    };
-    return el;
-  }
-  window.Stripe = function (key) {
-    calls.push(['Stripe', key]);
-    return {
-      _registerWrapper() {},
-      registerAppInfo() {},
-      createToken() {},
-      createPaymentMethod() {},
-      confirmCardPayment() {},
-      elements(options) {
-        calls.push(['elements', options.amount, options.currency]);
-        return { create: (type) => element(type), update(o) { calls.push(['update', o.amount]); }, submit: async () => ({}), getElement: () => null };
-      },
-      // __confirmError: a message (a decline: card_error), or a whole error ({ type, message }).
-      confirmPayment: async (p) => {
-        calls.push(['confirmPayment', p.clientSecret, p.redirect]);
-        const e = window.__confirmError;
-        if (!e) return { paymentIntent: { status: 'processing' } };
-        return { error: typeof e === 'string' ? { type: 'card_error', code: 'card_declined', message: e } : e };
-      },
-    };
-  };
-  window.Stripe.version = 'basil';
-})();
-`;
 
 async function openCheckout(width: number) {
   const ctx = await browser.newContext({ viewport: { width, height: width < 600 ? 812 : 900 } });
@@ -413,6 +353,15 @@ test('at 375px: Apple Pay fills checkout; an area we don’t know is asked for b
   assert.equal(order.card.state, 'pending', 'the browser’s “done” is not “paid”');
   const confirmCalls = await page.evaluate(() => (window as unknown as { __stripeCalls: unknown[][] }).__stripeCalls.filter((c) => c[0] === 'confirmPayment'));
   assert.deepEqual(confirmCalls, [['confirmPayment', pi.client_secret, 'if_required']]);
+  // The wallet's sheet lists the card payment fee (3.5%): its lines and the delivery add up to what is charged.
+  const clicks = await page.evaluate(() => (window as unknown as { __stripeCalls: unknown[][] }).__stripeCalls.filter((c) => c[0] === 'expressClick').map((c) => c[1]));
+  const sheet = clicks.at(-1) as { lineItems?: Array<{ name: string; amount: number }>; shippingRates?: Array<{ amount: number }> };
+  assert.equal(sheet?.lineItems?.length, 2, JSON.stringify(clicks));
+  const [items, feeLine] = sheet.lineItems!;
+  assert.equal(items.name, 'Items');
+  assert.equal(feeLine.name, 'Card payment fee (3.5%)');
+  assert.equal(feeLine.amount, Math.floor((items.amount * 350 + 5000) / 10000), 'the fee on the items, half up');
+  assert.equal(items.amount + feeLine.amount + (sheet.shippingRates?.[0]?.amount ?? 0), pi.amount, 'the sheet adds up to the charge');
   // Stripe takes the payment: the confirmation screen hears it from the server (which asked Stripe).
   mock.succeed(pi.id);
   await page.getByText('Paid by card · Apple Pay · Visa •••• 4242').waitFor({ timeout: 15_000 });

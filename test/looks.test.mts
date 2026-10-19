@@ -10,6 +10,7 @@ import fs from 'node:fs';
 import { test } from 'node:test';
 import { PALETTE, type Token } from '@/lib/design/tokens';
 import {
+  DEFAULT_LOOK_PRESET,
   FESTIVE_SOFT_DARK_PCT,
   LOOK_MODES,
   LOOK_PRESET_IDS,
@@ -104,6 +105,30 @@ test('Ivory & Gold in light is exactly the palette from before looks existed', (
   for (const [t, hex] of Object.entries(before)) assert.match(css, new RegExp(`--color-${t}:\\s*${hex};`), t);
 });
 
+/** The bright looks with a Dubai feel (opt-in in Settings → Look). */
+const BRIGHT = ['jumeirah-azure', 'civic-gold', 'digital-skyline', 'palm-fresh'] as const;
+
+test('the bright looks: light and airy by day, each with its own dark version; the default stays Ivory & Gold', () => {
+  assert.equal(DEFAULT_LOOK_PRESET, 'ivory-gold');
+  const lum = (hex: string) => contrast(hex, '#000000');
+  for (const id of BRIGHT) {
+    assert.ok((LOOK_PRESET_IDS as readonly string[]).includes(id), id);
+    const p = LOOK_PRESETS[id];
+    // Bright: the page and the cards are near white (brighter than the warm looks' linen), yet never
+    // pure white, so the cards still read as cards and no surface glares.
+    for (const t of ['ivory', 'surface'] as const) {
+      assert.ok(lum(p.light.colors[t]) >= 19.5, `${id} light ${t} is bright`);
+      assert.notEqual(p.light.colors[t], '#ffffff');
+    }
+    // A real dark version: dark surfaces with light lettering.
+    assert.ok(lum(p.dark.colors.ivory) < 1.4, `${id} dark ivory`);
+    assert.ok(contrast(p.dark.colors.ink, p.dark.colors.ivory) >= 12, `${id} dark ink`);
+    // Inspired by the region's design, not presented as anyone's: no official names or words.
+    for (const text of [p.name, p.description]) assert.doesNotMatch(text, /official|government|ministry|emirates?\b|federal|\bUAE\b|Dubai/i, `${id}: ${text}`);
+  }
+  assert.equal(LOOK_PRESETS['civic-gold'].light.colors.gold, '#b68a35');
+});
+
 test('every look has every token in both variants, as #rrggbb', () => {
   const tokens = Object.keys(PALETTE).sort();
   for (const id of LOOK_PRESET_IDS) {
@@ -190,6 +215,18 @@ test('looks: the default for an existing shop, history with timestamps, switch b
   await restoreSettingsVersion(anyOld.id, 'second@shop.ae');
   assert.equal(currentLook().preset, 'sand-rose');
   assert.equal(currentLook().changedBy, 'second@shop.ae');
+
+  // The bright looks are on the server's allow-list, kept in the history and switched back like any other.
+  for (const preset of BRIGHT) {
+    await saveLook({ preset, mode: 'light' }, 'owner@shop.ae');
+    assert.equal(currentLook().preset, preset);
+    assert.equal(currentLook().label, `${LOOK_PRESETS[preset].name} · Always light`);
+  }
+  const azure = earlierLooks().find((e) => e.preset === 'jumeirah-azure')!;
+  assert.equal(azure.label, 'Jumeirah Azure · Always light');
+  await switchBackLook(azure.id, 'owner@shop.ae');
+  assert.deepEqual([currentLook().preset, currentLook().mode], ['jumeirah-azure', 'light']);
+  assert.equal(currentLook().label, 'Switched back to: Jumeirah Azure · Always light');
 
   // Only known looks and modes; nothing else is stored.
   await assert.rejects(saveLook({ preset: 'neon', mode: 'system' }, 'a@b.c'), /Unknown look/);

@@ -299,3 +299,16 @@ test('regression: order problems go to a person; an owner’s answer beats the s
   assert.equal((reply('Can I return a queen sheet?', DEFAULT_ASSISTANT, sizes) as { entryId: string }).entryId, 'returns');
   assert.equal((reply('Can I pay by card?', DEFAULT_ASSISTANT, sizes) as { entryId: string }).entryId, 'payment');
 });
+
+test('the chat is called "Beautiful Home Assistant": the old default name is upgraded, a name the owner chose stays', () => {
+  const db = getDb();
+  const save = (name: string) => {
+    db.prepare('INSERT INTO settings (key, data, updated_at) VALUES (?, ?, ?) ON CONFLICT(key) DO UPDATE SET data = excluded.data').run('assistant', JSON.stringify({ ...DEFAULT_ASSISTANT, name }), new Date().toISOString());
+    settings._clearSettingsCache();
+  };
+  assert.equal(DEFAULT_ASSISTANT.name, 'Beautiful Home Assistant');
+  save('Shop assistant');
+  assert.equal(settings.getSettings('assistant').name, 'Beautiful Home Assistant');
+  save('Noura from the shop');
+  assert.equal(settings.getSettings('assistant').name, 'Noura from the shop');
+});

@@ -12,11 +12,13 @@ import { SMTP_PORTS, assertPublicMailHost } from './mail';
 import { FIREBASE_PROJECT_ID } from './firebaseAuth';
 import { bump, changedElsewhere } from './live';
 import { envGateways } from '@/lib/otpService';
-import { AI_MODELS } from '@/types';
+import { AI_MODELS, AI_PROVIDERS, GEMINI_MODEL_ID } from '@/types';
 import { HttpError } from './http';
 import { acceptImageRef, LOGO_MAX_SIDE } from './images';
 import { assertPublicHttpsUrl } from './outbound';
 import { supportEmail as envSupportEmail } from './runtimeConfig';
+import { DEFAULT_CARD_FEE_PERCENT, MAX_CARD_FEE_PERCENT } from '@/lib/money';
+import { waMeLink } from '@/lib/whatsappConfirm';
 
 /**
  * Shop settings, kept on the server so every visitor sees the same branding
@@ -72,7 +74,8 @@ const DEFAULTS: SettingsMap = {
   assistant: DEFAULT_ASSISTANT,
   delivery: DEFAULT_DELIVERY,
   // Off, and no keys: checkout offers cash on delivery (and bank transfer) until the owner adds them.
-  payments: { cardEnabled: false, stripePublishableKey: '', stripeSecretKey: '', stripeWebhookSecret: '' },
+  // The card fee the owner asked for (3.5%); bank transfer as the saved details allow (bankTransferMode()).
+  payments: { cardEnabled: false, stripePublishableKey: '', stripeSecretKey: '', stripeWebhookSecret: '', cardFeePercent: DEFAULT_CARD_FEE_PERCENT, bankTransferMode: 'default' },
   // WhatsApp (free) for every shop, new or existing, until the owner chooses SMS codes.
   phoneCheck: { mode: 'whatsapp', unconfirmedCancelHours: 24, unopenedCancelHours: 6 },
   // Ivory & Gold, light or dark as the device is set (migration 13 records when it started).
@@ -106,11 +109,11 @@ const SECRETS: Record<SettingsKey, string[]> = {
   payments: ['stripeSecretKey', 'stripeWebhookSecret'],
   phoneCheck: [],
   look: [],
-  ai: ['anthropicApiKey'],
+  ai: ['anthropicApiKey', 'geminiApiKey'],
 };
 
 /** Secrets the admin hub may see the last 4 characters of (to tell which key is saved). */
-const SHOW_LAST4 = new Set(['ai.anthropicApiKey']);
+const SHOW_LAST4 = new Set(['ai.anthropicApiKey', 'ai.geminiApiKey']);
 
 const cache = new Map<SettingsKey, unknown>();
 
@@ -132,6 +135,11 @@ export function getSettings<K extends SettingsKey>(key: K): SettingsMap[K] {
     if (SAMPLE_PICKUP_ADDRESSES.has(c.jeebly.pickupAddress)) c.jeebly.pickupAddress = '';
     if (c.echo.accountId === 'ECH-DXB-91402') c.echo.accountId = '';
     if (c.echo.hubCode === 'DXB-HUB-01') c.echo.hubCode = '';
+  }
+  // The chat's old default name: shops that never changed it get today's.
+  if (key === 'assistant') {
+    const a = merged as unknown as AssistantSettings;
+    if (a.name === 'Shop assistant') a.name = DEFAULT_ASSISTANT.name;
   }
   if (key === 'brand') {
     const brand = merged as unknown as BrandSettings;
@@ -228,7 +236,14 @@ export async function restoreSettingsVersion(id: number, by = ''): Promise<Setti
   }
   // Saved like any other change: validated, and keys follow their host (a key saved for
   // today's address is not sent to an older one). Blank keys mean "keep the saved key".
-  const restored = deepMerge(DEFAULTS[key], JSON.parse(row.data)) as Obj;
+  const old = JSON.parse(row.data) as Obj;
+  // A payments version from before the card fee and bank choice existed keeps today's (not the defaults).
+  if (key === 'payments') {
+    const now = getSettings('payments');
+    if (!('cardFeePercent' in old)) old.cardFeePercent = now.cardFeePercent;
+    if (!('bankTransferMode' in old)) old.bankTransferMode = now.bankTransferMode;
+  }
+  const restored = deepMerge(DEFAULTS[key], old) as Obj;
   for (const p of SECRETS[key]) setPath(restored, p, '');
   // A restore is always kept in history (it can itself be undone), even mid-session.
   await updateSettings(key, restored, { keepHistory: true });
@@ -356,11 +371,13 @@ export async function updateSettings<K extends SettingsKey>(key: K, input: unkno
       throw new HttpError(409, `Run the Sandbox check first: Jeebly Live mode can be switched on after a Sandbox check has passed (within ${SANDBOX_CHECK_DAYS} days).`, {}, { code: 'sandbox_check_required' });
     }
   }
-  // AI writing on means "Write from photo" calls Anthropic: it needs the key. Clearing the key switches it off.
+  // AI writing on means "Write from photo" calls the chosen AI: it needs that AI's key. Clearing
+  // the chosen AI's key switches it off.
   if (key === 'ai') {
     const a = next as unknown as AiSettings;
-    if (getPath(input as Obj, 'anthropicApiKey') === null) a.enabled = false;
-    if (a.enabled && !a.anthropicApiKey) throw new HttpError(400, 'Add your Anthropic API key before switching AI writing on.');
+    const activeKey = a.provider === 'gemini' ? 'geminiApiKey' : 'anthropicApiKey';
+    if (getPath(input as Obj, activeKey) === null) a.enabled = false;
+    if (a.enabled && !a[activeKey]) throw new HttpError(400, a.provider === 'gemini' ? 'Add your Gemini API key before switching AI writing on with Gemini.' : 'Add your Anthropic API key before switching AI writing on.');
   }
   if (options.beforeSave) await options.beforeSave(next as SettingsMap[K], current);
   save(key, next as SettingsMap[K], { keepHistory: options.keepHistory, auto: options.auto, expectUpdatedAt: currentAt });
@@ -457,13 +474,46 @@ export function cardPaymentsReady(p: PaymentSettings = getSettings('payments')):
   return p.cardEnabled && cardKeysComplete(p);
 }
 
+const BANK_MODES: PaymentSettings['bankTransferMode'][] = ['default', 'send_details', 'ask_whatsapp', 'off'];
 const STRIPE_PUBLISHABLE = /^pk_(test|live)_[A-Za-z0-9]{10,240}$/;
 const STRIPE_SECRET = /^(sk|rk)_(test|live)_[A-Za-z0-9]{10,240}$/;
 const STRIPE_WEBHOOK_SECRET = /^whsec_[A-Za-z0-9+/=_-]{10,240}$/;
 
-/** Bank transfer is offered only once the real account is entered. */
+/** The real account is entered (bank details can be sent automatically). */
 export function bankTransferReady(bank: BankTransferDetails): boolean {
   return Boolean(bank.iban && bank.accountName && bank.bankName);
+}
+
+/**
+ * How checkout offers bank transfer now (Settings → Payments → Bank transfer), or null when it
+ * doesn't: 'send_details' needs the account saved (without it, customers ask on WhatsApp when there
+ * is a number), 'ask_whatsapp' the shop's WhatsApp number.
+ * "default": send_details with an account, else ask_whatsapp with a number, else off.
+ */
+export function bankTransferMode(): 'send_details' | 'ask_whatsapp' | null {
+  const chosen = getSettings('payments').bankTransferMode;
+  const account = bankTransferReady(getSettings('bank'));
+  const whatsapp = Boolean(waMeLink(getSettings('store').whatsappNumber, ''));
+  if (chosen === 'off') return null;
+  // The account was deleted: customers can still ask for it on WhatsApp rather than lose bank transfer.
+  if (chosen === 'send_details') return account ? 'send_details' : whatsapp ? 'ask_whatsapp' : null;
+  if (chosen === 'ask_whatsapp') return whatsapp ? 'ask_whatsapp' : null;
+  return account ? 'send_details' : whatsapp ? 'ask_whatsapp' : null;
+}
+
+/** Bank-transfer orders "on request" (asked for on WhatsApp) still waiting for payment, not cancelled. */
+export function openOnRequestTransfers(): number {
+  return (
+    getDb()
+      .prepare("SELECT COUNT(*) AS n FROM orders WHERE payment_method = 'bank_transfer' AND bank_state IN ('awaiting', 'uploaded', 'not_received') AND status <> 'cancelled' AND json_extract(data, '$.bankDetailsBy') = 'whatsapp'")
+      .get() as { n: number }
+  ).n;
+}
+
+/** Settings → Payments "Card payment fee (%)": 0 (off) to 10, up to 2 decimals. */
+export function cardFeePercent(p: PaymentSettings = getSettings('payments')): number {
+  const v = Number(p.cardFeePercent);
+  return Number.isFinite(v) && v > 0 && v <= MAX_CARD_FEE_PERCENT ? v : 0;
 }
 
 type Obj = Record<string, unknown>;
@@ -665,17 +715,41 @@ const VALIDATORS: { [K in SettingsKey]: (input: Obj, current: SettingsMap[K]) =>
   async ai(input, current) {
     const model = input.model === undefined ? current.model : input.model;
     if (!AI_MODELS.includes(model as AiSettings['model'])) throw new HttpError(400, `Model: one of ${AI_MODELS.join(', ')}.`);
-    // The key is kept or replaced after this (write-only); only its shape is checked here.
+    const provider = input.provider === undefined ? current.provider : input.provider;
+    if (!AI_PROVIDERS.includes(provider as AiSettings['provider'])) throw new HttpError(400, 'Writing AI: Anthropic or Gemini.');
+    // Gemini model ids come from Google's own list (Test); only their shape is checked here.
+    const geminiModel = input.geminiModel === undefined ? current.geminiModel : input.geminiModel;
+    if (typeof geminiModel !== 'string' || (geminiModel !== '' && !GEMINI_MODEL_ID.test(geminiModel))) throw new HttpError(400, 'Gemini writing model: press Test and choose one from the list.');
+    const geminiImageModel = input.geminiImageModel === undefined ? current.geminiImageModel : input.geminiImageModel;
+    if (typeof geminiImageModel !== 'string' || !GEMINI_MODEL_ID.test(geminiImageModel)) throw new HttpError(400, 'Gemini image model: press Test and choose one from the list.');
+    // The keys are kept or replaced after this (write-only); only their shape is checked here.
     const k = input.anthropicApiKey;
     if (k !== undefined && k !== null && typeof k !== 'string') throw new HttpError(400, 'The API key must be text.');
     if (typeof k === 'string' && k.trim() && !ANTHROPIC_KEY.test(k.trim())) throw new HttpError(400, 'An Anthropic API key starts with sk-ant- (console.anthropic.com → API keys).');
-    return { enabled: bool(input.enabled, current.enabled), model: model as AiSettings['model'], anthropicApiKey: '' };
+    const g = input.geminiApiKey;
+    if (g !== undefined && g !== null && typeof g !== 'string') throw new HttpError(400, 'The API key must be text.');
+    if (typeof g === 'string' && g.trim() && !GEMINI_KEY.test(g.trim())) throw new HttpError(400, 'A Gemini API key starts with AIza (aistudio.google.com → Get API key).');
+    return {
+      enabled: bool(input.enabled, current.enabled),
+      provider: provider as AiSettings['provider'],
+      model: model as AiSettings['model'],
+      anthropicApiKey: '',
+      geminiApiKey: '',
+      geminiModel,
+      geminiImageModel,
+      labelStyledPhotos: bool(input.labelStyledPhotos, current.labelStyledPhotos),
+    };
   },
 
   async store(input, current) {
     const wa = text(input.whatsappNumber, 'WhatsApp number', 20, current.whatsappNumber).replace(/[\s()-]/g, '');
     const whatsappNumber = wa.startsWith('00') ? `+${wa.slice(2)}` : wa.startsWith('05') ? `+971${wa.slice(1)}` : wa;
     if (whatsappNumber && !/^\+[1-9]\d{7,14}$/.test(whatsappNumber)) throw new HttpError(400, 'WhatsApp number: use the international form, e.g. +971 50 123 4567.');
+    // Customers of open bank transfers "on request" ask for the details on this number.
+    if (!whatsappNumber && current.whatsappNumber && bankTransferMode() === 'ask_whatsapp') {
+      const open = openOnRequestTransfers();
+      if (open) throw new HttpError(400, `WhatsApp number: ${open === 1 ? '1 bank-transfer order is' : `${open} bank-transfer orders are`} waiting for payment, and those customers ask for your bank details on this number. Keep it until they have paid (or the orders are cancelled), or first choose "Send our bank details automatically" in Settings → Payments.`);
+    }
     const supportEmail = text(input.supportEmail, 'Support email', 254, current.supportEmail);
     if (supportEmail && !/^[^\s@<>"]+@[^\s@<>"]+\.[^\s@<>"]+$/.test(supportEmail)) throw new HttpError(400, 'Please check the support email.');
     const ig = text(input.instagramHandle, 'Instagram', 40, current.instagramHandle).replace(/^@/, '').replace(/^https?:\/\/(www\.)?instagram\.com\//i, '').replace(/\/.*$/, '');
@@ -792,7 +866,20 @@ const VALIDATORS: { [K in SettingsKey]: (input: Obj, current: SettingsMap[K]) =>
     for (const [k, v] of Object.entries({ stripeSecretKey: sk, stripeWebhookSecret: wh })) {
       if (v !== undefined && v !== null && typeof v !== 'string') throw new HttpError(400, `${k === 'stripeSecretKey' ? 'Secret key' : 'Webhook signing secret'} must be text.`);
     }
-    return { cardEnabled: bool(input.cardEnabled, current.cardEnabled), stripePublishableKey: pk, stripeSecretKey: '', stripeWebhookSecret: '' };
+    const feeIn = input.cardFeePercent === undefined || input.cardFeePercent === null ? current.cardFeePercent : typeof input.cardFeePercent === 'string' && input.cardFeePercent.trim() ? Number(input.cardFeePercent.trim()) : input.cardFeePercent;
+    if (typeof feeIn !== 'number' || !Number.isFinite(feeIn) || feeIn < 0 || feeIn > MAX_CARD_FEE_PERCENT || Math.abs(feeIn * 100 - Math.round(feeIn * 100)) > 1e-6) {
+      throw new HttpError(400, `Card payment fee: a percent from 0 to ${MAX_CARD_FEE_PERCENT}, with up to 2 decimals (0 turns it off).`);
+    }
+    const modeIn = input.bankTransferMode === undefined ? current.bankTransferMode : input.bankTransferMode;
+    if (!BANK_MODES.includes(modeIn as PaymentSettings['bankTransferMode'])) throw new HttpError(400, 'Choose how bank transfer is offered.');
+    return {
+      cardEnabled: bool(input.cardEnabled, current.cardEnabled),
+      stripePublishableKey: pk,
+      stripeSecretKey: '',
+      stripeWebhookSecret: '',
+      cardFeePercent: Math.round(feeIn * 100) / 100,
+      bankTransferMode: modeIn as PaymentSettings['bankTransferMode'],
+    };
   },
 
   async assistant(input, current) {
@@ -815,7 +902,7 @@ const VALIDATORS: { [K in SettingsKey]: (input: Obj, current: SettingsMap[K]) =>
     if (new Set(entries.map((e) => e.id)).size !== entries.length) throw new HttpError(400, 'Each answer needs its own id.');
     return {
       enabled: bool(input.enabled, current.enabled),
-      name: text(input.name, 'Assistant name', 40, current.name) || 'Shop assistant',
+      name: text(input.name, 'Assistant name', 40, current.name) || DEFAULT_ASSISTANT.name,
       greeting: longText(input.greeting, 'Greeting', 500, current.greeting),
       answerSizes: bool(input.answerSizes, current.answerSizes),
       waitSeconds,
@@ -846,6 +933,8 @@ const VALIDATORS: { [K in SettingsKey]: (input: Obj, current: SettingsMap[K]) =>
 const FESTIVAL_ID_SET = new Set(FESTIVALS.map((f) => f.id));
 
 const ANTHROPIC_KEY = /^sk-ant-[A-Za-z0-9_-]{20,300}$/;
+/** Google AI Studio keys: AIza and 35 more characters (a little room either way). */
+export const GEMINI_KEY = /^AIza[A-Za-z0-9_-]{30,60}$/;
 
 /** A weave's name: letters and digits first, then also spaces and ' & / ( ) . + - (no markup). */
 const WEAVE_NAME = /^[\p{L}\p{N}][\p{L}\p{N} '’&\/().+-]*$/u;

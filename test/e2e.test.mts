@@ -40,7 +40,7 @@ test('the one-time admin password is in the log as soon as the server starts', {
 });
 
 test('admin routes refuse anonymous and cross-site callers', { skip: !hasBuild }, async () => {
-  for (const p of ['/api/courier/dispatch', '/api/courier/test', '/api/admin/sms-test', '/api/ai-transform']) {
+  for (const p of ['/api/courier/dispatch', '/api/courier/test', '/api/admin/sms-test']) {
     assert.equal((await post(p, {})).status, 401, p);
   }
   assert.equal((await post('/api/admin/login', { email: 'a@b.c', password: 'x' }, { origin: 'https://evil.example' })).status, 403);
@@ -204,14 +204,17 @@ test("courier connection test reports Jeebly's own reply (or that it could not b
   assert.match(eco.summary, /isn't connected yet/);
 });
 
-test('AI studio accepts only real images', { skip: !hasBuild }, async () => {
+test('the old fake "AI transformation" address is gone: a 404 like any unknown address, signed in or not', { skip: !hasBuild }, async () => {
   const cookie = await adminCookie();
-  const svg = `data:image/svg+xml;base64,${Buffer.from('<svg onload=alert(1)>').toString('base64')}`;
-  assert.equal((await post('/api/ai-transform', { image: svg }, { cookie })).status, 400);
   const png = Buffer.concat([Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]), Buffer.alloc(16)]).toString('base64');
-  const ok = await post('/api/ai-transform', { image: `data:image/png;base64,${png}`, presetId: '__proto__' }, { cookie });
-  assert.equal(ok.status, 200);
-  assert.match((await ok.json()).transformedUrl, /^https:\/\/images\.unsplash\.com\//);
+  const unknown = await post('/api/no-such-address-here', { image: `data:image/png;base64,${png}` }, { cookie });
+  for (const c of [cookie, '']) {
+    const res = await post('/api/ai-transform', { image: `data:image/png;base64,${png}`, presetId: 'dubai-luxury-master' }, c ? { cookie: c } : {});
+    assert.equal(res.status, 404);
+    const text = await res.text();
+    assert.doesNotMatch(text, /unsplash|transformedUrl/i);
+    assert.equal(text, await unknown.clone().text());
+  }
 });
 
 test('public helpers: health, serviceability, API caching headers', { skip: !hasBuild }, async () => {

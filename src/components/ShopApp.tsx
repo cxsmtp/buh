@@ -14,7 +14,7 @@ import { applyUpdate, checkForUpdate, registerServiceWorker, useUpdateWaiting } 
 async function fetchCatalog() {
   const [products, settings] = await Promise.all([
     getJson<{ products: Product[] }>('/api/products'),
-    getJson<{ brand: BrandSettings; bankTransfer?: boolean; supportEmail?: string; store?: StoreSettings; catalog?: { categories: CatalogSettings['categories']; lowStockThreshold: number }; festival?: FestivalView | null; phoneVerification?: PhoneVerificationConfig; chat?: { name: string; greeting: string } | null; delivery?: DeliverySettings; payments?: { card: boolean; publishableKey?: string; phoneCheck?: boolean } }>('/api/settings/public'),
+    getJson<{ brand: BrandSettings; bankTransfer?: boolean; bankTransferMode?: 'send_details' | 'ask_whatsapp' | null; supportEmail?: string; store?: StoreSettings; catalog?: { categories: CatalogSettings['categories']; lowStockThreshold: number }; festival?: FestivalView | null; phoneVerification?: PhoneVerificationConfig; chat?: { name: string; greeting: string } | null; delivery?: DeliverySettings; payments?: { card: boolean; publishableKey?: string; phoneCheck?: boolean; cardFeePercent?: number } }>('/api/settings/public'),
   ]);
   return { products, settings };
 }
@@ -107,6 +107,8 @@ export function ShopApp({ initialProductId }: { initialProductId?: string } = {}
   const [brandSettings, setBrandSettings] = useState<BrandSettings>(INITIAL_BRAND_SETTINGS);
   // Checkout offers bank transfer (the account itself is never sent to the website).
   const [bankTransfer, setBankTransfer] = useState(false);
+  // How: our details sent automatically, or the customer asks for them on WhatsApp (no account saved).
+  const [bankAskWhatsApp, setBankAskWhatsApp] = useState(false);
   const [supportEmail, setSupportEmail] = useState<string | undefined>(undefined);
   // How checkout verifies phones (the shop's own SMS, or Firebase).
   const [phoneVerification, setPhoneVerification] = useState<PhoneVerificationConfig>({ method: 'server' });
@@ -117,7 +119,7 @@ export function ShopApp({ initialProductId }: { initialProductId?: string } = {}
   const [chatInfo, setChatInfo] = useState<{ name: string; greeting: string } | null>(null);
   const [delivery, setDelivery] = useState<DeliverySettings>(DEFAULT_DELIVERY);
   // Card payments (Settings → Payments): Stripe's publishable key when switched on.
-  const [cardPayments, setCardPayments] = useState<{ publishableKey: string; phoneCheck?: boolean } | null>(null);
+  const [cardPayments, setCardPayments] = useState<{ publishableKey: string; phoneCheck?: boolean; cardFeePercent?: number } | null>(null);
   // Where this visitor first came from (Instagram, WhatsApp…), sent with the order.
   const [landing] = useState<Landing | null>(() => (typeof window === 'undefined' ? null : captureLanding()));
   // Pre-fills Track Order (only rendered once opened, so no server/client mismatch).
@@ -151,6 +153,7 @@ export function ShopApp({ initialProductId }: { initialProductId?: string } = {}
     if (settings.ok) {
       setBrandSettings(settings.data.brand);
       setBankTransfer(settings.data.bankTransfer === true);
+      setBankAskWhatsApp(settings.data.bankTransferMode === 'ask_whatsapp');
       if (settings.data.supportEmail) setSupportEmail(settings.data.supportEmail);
       if (settings.data.phoneVerification) setPhoneVerification(settings.data.phoneVerification);
       if (settings.data.store) setStoreSettings(settings.data.store);
@@ -158,7 +161,7 @@ export function ShopApp({ initialProductId }: { initialProductId?: string } = {}
       setChatInfo(settings.data.chat ?? null);
       if (settings.data.delivery) setDelivery(settings.data.delivery);
       const pay = settings.data.payments;
-      setCardPayments(pay?.card && pay.publishableKey ? { publishableKey: pay.publishableKey, ...(pay.phoneCheck ? { phoneCheck: true } : {}) } : null);
+      setCardPayments(pay?.card && pay.publishableKey ? { publishableKey: pay.publishableKey, cardFeePercent: Number(pay.cardFeePercent) || 0, ...(pay.phoneCheck ? { phoneCheck: true } : {}) } : null);
       if (settings.data.catalog) {
         setLowStockThreshold(settings.data.catalog.lowStockThreshold);
         setCategories(settings.data.catalog.categories);
@@ -582,6 +585,7 @@ export function ShopApp({ initialProductId }: { initialProductId?: string } = {}
         onClose={() => setIsCheckoutOpen(false)}
         items={cart}
         bankTransfer={bankTransfer}
+        bankAskWhatsApp={bankAskWhatsApp}
         supportEmail={supportEmail}
         phoneVerification={phoneVerification}
         card={cardPayments}

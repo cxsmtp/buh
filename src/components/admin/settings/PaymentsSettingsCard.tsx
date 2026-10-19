@@ -1,9 +1,11 @@
 'use client';
 
 import React, { useEffect, useState } from 'react';
-import { Check, Copy, CreditCard, Globe, Loader2, PlugZap } from 'lucide-react';
+import { Building2, Check, Copy, CreditCard, Globe, Loader2, PlugZap } from 'lucide-react';
 import { getJson, postJson } from '@/lib/apiClient';
-import type { PaymentSettings } from '@/types';
+import type { BankTransferMode, PaymentSettings } from '@/types';
+import { cardFeeFils, formatAed, MAX_CARD_FEE_PERCENT, percentText } from '@/lib/money';
+import { waMeLink } from '@/lib/whatsappConfirm';
 import { secretPlaceholder } from '../AdminCouriersTab';
 import { useAutoSave, type AutoSaveHooks } from './useAutoSave';
 
@@ -39,14 +41,36 @@ interface DomainStatus {
 
 const modeOf = (key: string) => (/^(?:pk|sk|rk)_live_/.test(key) ? 'live' : /^(?:pk|sk|rk)_test_/.test(key) ? 'test' : null);
 
+/** What checkout offers for bank transfer with this choice (like the server's bankTransferMode()). */
+export function effectiveBankMode(mode: BankTransferMode, accountSaved: boolean, whatsapp: boolean): 'send_details' | 'ask_whatsapp' | null {
+  if (mode === 'off') return null;
+  if (mode === 'send_details') return accountSaved ? 'send_details' : whatsapp ? 'ask_whatsapp' : null;
+  if (mode === 'ask_whatsapp') return whatsapp ? 'ask_whatsapp' : null;
+  return accountSaved ? 'send_details' : whatsapp ? 'ask_whatsapp' : null;
+}
+
+/** "3.5" → 3.5; anything else (empty, letters, over 10, 3 decimals) → null. */
+function parsePercent(text: string): number | null {
+  const t = text.trim().replace(',', '.');
+  if (!/^\d{1,2}(\.\d{1,2})?$/.test(t)) return null;
+  const v = Number(t);
+  return v >= 0 && v <= MAX_CARD_FEE_PERCENT ? v : null;
+}
+
 export function PaymentsSettingsCard({
   value,
   secretsSet,
+  bankAccountSaved = false,
+  shopWhatsApp = '',
   onSave,
   auto,
 }: {
   value: PaymentSettings;
   secretsSet: Record<string, boolean>;
+  /** The bank account is saved (Settings → Branding & bank): its details can be sent automatically. */
+  bankAccountSaved?: boolean;
+  /** The shop's WhatsApp number (Settings → Store & contact): customers can ask there. */
+  shopWhatsApp?: string;
   /** Saves; a warning from the server (keys of another mode while card orders are open) is passed on. */
   onSave: (v: PaymentSettings, onWarning: (warning: string) => void) => Promise<string | null>;
   auto?: AutoSaveHooks;
@@ -64,6 +88,14 @@ export function PaymentsSettingsCard({
   const [registering, setRegistering] = useState(false);
   const [copied, setCopied] = useState(false);
   const set = <K extends keyof PaymentSettings>(k: K, v: PaymentSettings[K]) => setD((x) => ({ ...x, [k]: v }));
+  const [feeText, setFeeText] = useState(() => percentText(value.cardFeePercent ?? 0));
+  const feeTyped = parsePercent(feeText);
+  const feeProblem = feeTyped === null;
+  const commitFee = () => {
+    if (feeTyped !== null && feeTyped !== d.cardFeePercent) set('cardFeePercent', feeTyped);
+  };
+  const whatsappSet = Boolean(waMeLink(shopWhatsApp, ''));
+  const bankShown = effectiveBankMode(d.bankTransferMode ?? 'default', bankAccountSaved, whatsappSet);
 
   const secretSaved = Boolean(secretsSet.stripeSecretKey);
   useEffect(() => {
@@ -80,9 +112,13 @@ export function PaymentsSettingsCard({
     setSaving(true);
     setStatus(null);
     setWarning('');
-    const problem = await onSave(d, setWarning);
+    if (feeTyped === null) {
+      setSaving(false);
+      return setStatus({ ok: false, text: `Card payment fee: a percent from 0 to ${MAX_CARD_FEE_PERCENT}, with up to 2 decimals.` });
+    }
+    const problem = await onSave({ ...d, cardFeePercent: feeTyped }, setWarning);
     setSaving(false);
-    if (!problem) setD((x) => ({ ...x, stripeSecretKey: '', stripeWebhookSecret: '' }));
+    if (!problem) setD((x) => ({ ...x, cardFeePercent: feeTyped, stripeSecretKey: '', stripeWebhookSecret: '' }));
     setStatus(problem ? { ok: false, text: problem } : { ok: true, text: d.cardEnabled ? 'Saved. Checkout now offers card, Apple Pay and Google Pay.' : 'Saved. Card payments are off.' });
   };
 
@@ -139,6 +175,78 @@ export function PaymentsSettingsCard({
           <input type="checkbox" checked={d.cardEnabled} onChange={(e) => set('cardEnabled', e.target.checked)} />
           Take card payments at checkout
         </label>
+      </section>
+
+      <section className="space-y-1.5 rounded-2xl border border-line bg-surface p-3">
+        <label className={label} htmlFor="pay-card-fee">Card payment fee (%)</label>
+        <div className="flex flex-wrap items-center gap-2">
+          <input
+            id="pay-card-fee"
+            data-testid="card-fee-input"
+            className={`${field} w-28`}
+            inputMode="decimal"
+            autoComplete="off"
+            maxLength={5}
+            value={feeText}
+            aria-invalid={feeProblem}
+            aria-describedby="pay-card-fee-help"
+            onChange={(e) => setFeeText(e.target.value)}
+            // Goes live (and is audited) when the owner leaves the field, never half-typed ("3" on the way to "3.7").
+            onBlur={commitFee}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter') commitFee();
+            }}
+          />
+          <span className="text-xs text-ink-soft">{feeTyped === null ? '' : feeTyped > 0 ? `On AED 100: AED ${formatAed(cardFeeFils(10000, feeTyped))}` : 'No card fee'}</span>
+        </div>
+        <p id="pay-card-fee-help" className={`text-[11px] ${feeProblem ? 'text-danger font-semibold' : 'text-ink-muted'}`}>
+          {feeProblem
+            ? `A percent from 0 to ${MAX_CARD_FEE_PERCENT}, with up to 2 decimals.`
+            : 'Added at the end of card orders (items + delivery), shown to the customer before they pay. 0 turns it off. Cash on delivery and bank transfer have no fee.'}
+        </p>
+      </section>
+
+      <section className="space-y-2 rounded-2xl border border-line bg-surface p-3" aria-labelledby="pay-bank-title">
+        <h4 id="pay-bank-title" className="text-xs font-bold text-ink flex items-center gap-1.5">
+          <Building2 className="w-4 h-4 text-gold" aria-hidden="true" /> Bank transfer
+        </h4>
+        <label className="flex items-center gap-2 text-xs font-semibold">
+          <input
+            type="checkbox"
+            data-testid="bank-show"
+            checked={d.bankTransferMode !== 'off'}
+            onChange={(e) => set('bankTransferMode', e.target.checked ? 'default' : 'off')}
+          />
+          Show bank transfer at checkout
+        </label>
+        {d.bankTransferMode !== 'off' && (
+          <fieldset className="space-y-1.5 pl-1">
+            <legend className="sr-only">How customers get the bank details</legend>
+            <label className={`flex items-start gap-2 text-xs ${bankAccountSaved ? '' : 'opacity-60'}`}>
+              <input type="radio" name="bank-mode" className="mt-0.5" disabled={!bankAccountSaved} checked={bankShown === 'send_details'} onChange={() => set('bankTransferMode', 'send_details')} />
+              <span>
+                <strong className="block text-ink">Send our bank details automatically</strong>
+                <span className="text-ink-muted">{bankAccountSaved ? 'By email and on the order’s private page.' : 'Needs the account saved first (Settings → Branding & bank).'}</span>
+              </span>
+            </label>
+            <label className={`flex items-start gap-2 text-xs ${whatsappSet ? '' : 'opacity-60'}`}>
+              <input type="radio" name="bank-mode" className="mt-0.5" disabled={!whatsappSet} checked={bankShown === 'ask_whatsapp'} onChange={() => set('bankTransferMode', 'ask_whatsapp')} />
+              <span>
+                <strong className="block text-ink">Customer asks us on WhatsApp for the details</strong>
+                <span className="text-ink-muted">{whatsappSet ? 'No account needs to be saved: you reply from the order with one tap.' : 'Needs the shop’s WhatsApp number (Settings → Store & contact).'}</span>
+              </span>
+            </label>
+          </fieldset>
+        )}
+        <p data-testid="bank-mode-status" role="status" className="text-[11px] text-ink-soft">
+          {bankShown === 'send_details'
+            ? 'Checkout offers bank transfer; the details are sent automatically.'
+            : bankShown === 'ask_whatsapp'
+              ? 'Checkout offers bank transfer; customers message you on WhatsApp for the details.'
+              : d.bankTransferMode === 'off'
+                ? 'Bank transfer is not offered at checkout.'
+                : 'Bank transfer is not offered: save the bank account, or the shop’s WhatsApp number.'}
+        </p>
       </section>
 
       <section className="grid grid-cols-1 sm:grid-cols-2 gap-3">

@@ -9,6 +9,7 @@ import { acceptImageRef } from './images';
 import { bump, changedElsewhere } from './live';
 import { getSettings } from './settings';
 import { logEvent } from './log';
+import { stagedPhotosFor } from './stagedPhotos';
 import { isDuvetProduct } from '@/lib/measurements';
 import { WEIGHT_GRAMS_MAX, WEIGHT_GRAMS_MIN } from '@/lib/shipmentWeight';
 import { auditBacklog, auditMove, insertMove, type SizeChange, type StockMove } from './stockLedger';
@@ -526,6 +527,12 @@ export function validateProduct(input: unknown): StoredProduct {
 
   const gallery = Array.isArray(p.galleryImages) ? p.galleryImages : [];
   if (gallery.length > 8) throw new HttpError(400, 'At most 8 gallery images.');
+  const featuredImage = acceptImageRef(p.featuredImage, 'Main photo', { required: true });
+  const galleryImages = gallery.map((g, i) => acceptImageRef(g, `Gallery photo ${i + 1}`)).filter(Boolean);
+  const aiTransformedImage = acceptImageRef(p.aiTransformedImage, 'Styled photo') || undefined;
+  // Photos made by "Style in a bedroom" stay marked as styled: decided here from the shop's own
+  // record and the product as saved before, never from what the browser sends.
+  const stagedPhotos = stagedPhotosFor([featuredImage, ...galleryImages, aiTransformedImage ?? ''], existing?.stagedPhotos);
 
   return {
     id: typeof p.id === 'string' ? p.id : '',
@@ -542,10 +549,11 @@ export function validateProduct(input: unknown): StoredProduct {
     weave,
     // Colours are optional: none means the shop shows no colour choice.
     colors,
-    featuredImage: acceptImageRef(p.featuredImage, 'Main photo', { required: true }),
-    galleryImages: gallery.map((g, i) => acceptImageRef(g, `Gallery photo ${i + 1}`)).filter(Boolean),
+    featuredImage,
+    galleryImages,
     // The raw phone snap is not kept: only the photos shown in the shop.
-    aiTransformedImage: acceptImageRef(p.aiTransformedImage, 'Styled photo') || undefined,
+    aiTransformedImage,
+    stagedPhotos,
     aiStagingPrompt: text(p.aiStagingPrompt, 'Staging prompt', 1000) || undefined,
     isAiEnhanced: p.isAiEnhanced === true,
     stockCount: 0,

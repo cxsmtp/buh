@@ -100,7 +100,7 @@ test('the describe route: hidden from strangers, sign-in required, size cap, ima
   const off = await api('POST', '/api/admin/products/describe', { image: PHOTO_URL });
   assert.equal(off.status, 409);
   assert.match((await off.json()).message, /Settings → AI writing/);
-  assert.deepEqual(await (await api('GET', '/api/admin/products/describe')).json(), { ready: false, reason: 'no_key', model: 'claude-opus-5-5' });
+  assert.deepEqual(await (await api('GET', '/api/admin/products/describe')).json(), { ready: false, reason: 'no_key', provider: 'anthropic', model: 'claude-opus-5-5' });
   // Save the key: shown back as ••••last4 only.
   const saved = await api('PUT', '/api/admin/settings/ai', { settings: { anthropicApiKey: KEY, enabled: true, model: 'claude-sonnet-5-5' } });
   const savedText = await saved.text();
@@ -174,9 +174,9 @@ for (const width of [375, 1280]) {
     await openSettings(page, 'AI writing');
     const card = page.getByTestId('ai-settings');
     assert.match((await card.getByLabel('Anthropic API key').getAttribute('placeholder'))!, /^••••L4ST saved$/);
-    assert.equal(await card.getByLabel('Model').inputValue(), 'claude-sonnet-5-5');
+    assert.equal(await card.getByLabel('Model', { exact: true }).inputValue(), 'claude-sonnet-5-5');
     assert.ok(await card.getByLabel('Use AI writing').isChecked());
-    await card.getByRole('button', { name: 'Test' }).click();
+    await card.getByRole('button', { name: 'Test Anthropic' }).click();
     await card.getByTestId('ai-test-result').filter({ hasText: /^Works/ }).waitFor();
     assert.deepEqual(await overflow(page), []);
     await shot(page, `ai-settings-${width}`, page.locator('section[aria-labelledby="settings-title"]'));

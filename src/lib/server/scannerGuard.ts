@@ -35,7 +35,7 @@ export const SLOW_MS = 1000;
 /** Does a 404 at this path count as probing? */
 export function countsAsProbe(path: string): boolean {
   if (path.startsWith('/_next/') || path.startsWith('/api/images/') || path.startsWith('/icons/') || path.startsWith('/p/')) return false;
-  if (path.startsWith('/api/')) return path.startsWith('/api/admin') || path.startsWith('/api/pay/') || path === '/api/courier/dispatch' || path === '/api/courier/test' || path === '/api/courier/live' || path === '/api/courier/sandbox-check' || path === '/api/ai-transform';
+  if (path.startsWith('/api/')) return path.startsWith('/api/admin') || path.startsWith('/api/pay/') || path === '/api/courier/dispatch' || path === '/api/courier/test' || path === '/api/courier/live' || path === '/api/courier/sandbox-check';
   return true;
 }
 

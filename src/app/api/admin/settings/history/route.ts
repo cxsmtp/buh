@@ -1,6 +1,7 @@
 import { audit } from '@/lib/server/audit';
 import { requireAdmin } from '@/lib/server/guard';
 import { handleRouteError, HttpError, json, readJsonBody } from '@/lib/server/http';
+import { auditPaymentOptions, paymentOptions } from '@/lib/server/payments';
 import { restoreSettingsVersion, settingsHistory } from '@/lib/server/settings';
 
 /** Earlier versions of the settings (keys are never kept in history). */
@@ -19,8 +20,10 @@ export async function POST(req: Request) {
     const session = await requireAdmin(req);
     const body = await readJsonBody(req, 256);
     if (!Number.isInteger(body.id) || (body.id as number) < 1) throw new HttpError(400, 'Give the version id.');
+    const optionsBefore = paymentOptions();
     const key = await restoreSettingsVersion(body.id as number, session.email);
     audit('settings.restored', { by: session.email, key, versionId: body.id });
+    if (key === 'payments') auditPaymentOptions(optionsBefore, session.email);
     return json({ success: true, key });
   } catch (err) {
     return handleRouteError(err, 'admin/settings/history/restore');

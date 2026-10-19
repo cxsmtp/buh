@@ -22,6 +22,7 @@ export function WhatsAppConfirm({
   bankDetails = false,
   cancelHours,
   openHours,
+  buttonLabel = 'Confirm on WhatsApp',
 }: {
   orderId: string;
   phone: string;
@@ -30,6 +31,8 @@ export function WhatsAppConfirm({
   cancelHours?: number | null;
   /** Sooner: the order is cancelled after this many hours if the button is never tapped. */
   openHours?: number | null;
+  /** "Confirm & ask for bank details on WhatsApp" for a bank transfer "on request" (the one button). */
+  buttonLabel?: string;
 }) {
   const link = confirmLink(useShop().store.whatsappNumber, orderId, check.code, { bankDetails });
   if (!link) return null;
@@ -80,7 +83,7 @@ export function WhatsAppConfirm({
         className="w-full min-h-12 bg-whatsapp hover:brightness-110 text-paper font-semibold text-sm py-3 px-4 rounded-xl flex items-center justify-center gap-2 transition-all focus:outline-none focus-visible:ring-2 focus-visible:ring-gold focus-visible:ring-offset-2"
       >
         <MessageCircle className="w-5 h-5 shrink-0" aria-hidden="true" />
-        <span>Confirm on WhatsApp</span>
+        <span>{buttonLabel}</span>
       </a>
       <p className="text-[11px] text-ink-muted text-center break-anywhere">
         It says: &ldquo;Confirm my order <span className="font-mono">{orderId}</span> · code <span className="font-mono">{check.code}</span>{bankDetails ? ', and please send me the bank details' : ''}&rdquo;. Just tap Send.

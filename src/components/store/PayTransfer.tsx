@@ -2,7 +2,7 @@
 
 import React, { useRef, useState } from 'react';
 import Link from 'next/link';
-import { Building2, Check, CheckCircle2, Copy, Loader2, Upload } from 'lucide-react';
+import { Building2, Check, CheckCircle2, Copy, Loader2, MessageCircle, Upload } from 'lucide-react';
 import type { BankState, BankTransferDetails } from '@/types';
 import { postJson } from '@/lib/apiClient';
 import { formatAed, toFils } from '@/lib/money';
@@ -12,6 +12,14 @@ interface PayTransferProps {
   shopName: string;
   order: { id: string; total: number; firstName: string; state: BankState; uploads: number };
   bank: BankTransferDetails;
+  /** Bank transfer "on request": no account on this page; the customer asks for it. */
+  onRequest?: boolean;
+  /** The shop's WhatsApp, with the request typed (null without the shop's number). */
+  askLink?: string | null;
+  /** The link is the order's WhatsApp confirmation (with its code), which also asks for the details. */
+  askConfirms?: boolean;
+  /** Where to ask instead when the shop has no WhatsApp number. */
+  supportEmail?: string;
 }
 
 const MAX_BYTES = 5 * 1024 * 1024;
@@ -52,7 +60,7 @@ function CopyLine({ label, value, mono }: { label: string; value: string; mono?:
  * reference, and an upload for the transfer screenshot (an image or a PDF, up to 5 MB). Sending
  * another replaces it; the shop keeps the earlier ones.
  */
-export function PayTransfer({ token, shopName, order, bank }: PayTransferProps) {
+export function PayTransfer({ token, shopName, order, bank, onRequest = false, askLink, askConfirms = false, supportEmail = '' }: PayTransferProps) {
   const [uploads, setUploads] = useState(order.uploads);
   const [state, setState] = useState<BankState>(order.state);
   const [busy, setBusy] = useState(false);
@@ -129,6 +137,38 @@ export function PayTransfer({ token, shopName, order, bank }: PayTransferProps) 
           {details.filter(([, v]) => v && v.trim()).map(([label, value, mono]) => (
             <CopyLine key={label} label={label} value={value} mono={mono} />
           ))}
+          {onRequest && !askLink && (
+            <p data-testid="pay-ask-bank-email" className="text-xs text-ink-soft leading-relaxed pb-1 break-anywhere">
+              {supportEmail ? (
+                <>
+                  Email us at{' '}
+                  <a className="font-semibold text-ink underline" href={`mailto:${supportEmail}?subject=${encodeURIComponent(`Bank details for order ${order.id}`)}`}>
+                    {supportEmail}
+                  </a>{' '}
+                  and we&rsquo;ll send you our bank details.
+                </>
+              ) : (
+                'We’ll contact you on the phone number of your order with our bank details.'
+              )}
+            </p>
+          )}
+          {askLink && (
+            <div className="space-y-2 pb-1">
+              <p className="text-xs text-ink-soft leading-relaxed">
+                {askConfirms ? 'Confirm your order on WhatsApp and we’ll send you our bank details. The message is already typed: just tap Send.' : 'Message us on WhatsApp and we’ll send you our bank details.'}
+              </p>
+              <a
+                data-testid="pay-ask-bank"
+                href={askLink}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="w-full min-h-12 bg-whatsapp hover:brightness-110 text-paper font-semibold text-sm py-3 px-4 rounded-xl flex items-center justify-center gap-2 focus:outline-none focus-visible:ring-2 focus-visible:ring-gold focus-visible:ring-offset-2"
+              >
+                <MessageCircle className="w-4 h-4 shrink-0" aria-hidden="true" />
+                <span>{askConfirms ? 'Confirm & ask for bank details on WhatsApp' : 'Ask for bank details on WhatsApp'}</span>
+              </a>
+            </div>
+          )}
           <div className="pt-2">
             <CopyLine label="Reference" value={order.id} mono />
             <p className="text-[11px] text-ink-soft leading-relaxed mt-1">Please use your order number as the transfer reference, so we can match it.</p>

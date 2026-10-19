@@ -306,8 +306,12 @@ for (const colorScheme of ['dark', 'light'] as const) {
 }
 
 // The other looks (Settings → Look), light and dark: every screen on a phone, and dark on a computer.
-for (const preset of ['noir-champagne', 'pearl-emerald', 'sand-rose']) {
-  for (const [colorScheme, width] of [['light', 375], ['dark', 375], ['dark', 1280]] as const) {
+// The bright looks (Jumeirah Azure, Civic Gold, Digital Skyline, Palm Fresh) in light on a computer too.
+const BRIGHT_LOOKS = ['jumeirah-azure', 'civic-gold', 'digital-skyline', 'palm-fresh'];
+for (const preset of ['noir-champagne', 'pearl-emerald', 'sand-rose', ...BRIGHT_LOOKS]) {
+  const runs: Array<readonly ['light' | 'dark', number]> = [['light', 375], ['dark', 375], ['dark', 1280]];
+  if (BRIGHT_LOOKS.includes(preset)) runs.push(['light', 1280]);
+  for (const [colorScheme, width] of runs) {
     test(`every screen is readable in ${preset} (${colorScheme} mode, ${width} px)`, { skip }, async () => {
       await setLook(preset);
       try {
@@ -329,6 +333,10 @@ const NEWER_RUNS: Array<{ preset: string; colorScheme: 'light' | 'dark'; width: 
   { preset: 'ivory-gold', colorScheme: 'dark', width: 1280 },
   { preset: 'noir-champagne', colorScheme: 'dark', width: 375 },
   { preset: 'sand-rose', colorScheme: 'dark', width: 1280 },
+  ...BRIGHT_LOOKS.flatMap((preset) => [
+    { preset, colorScheme: 'light' as const, width: 375 },
+    { preset, colorScheme: 'dark' as const, width: 1280 },
+  ]),
 ];
 for (const { preset, colorScheme, width } of NEWER_RUNS) {
   test(`newer screens are readable in ${preset} (${colorScheme} mode, ${width} px): card option, confirmation, /pay, order panels, Money, Phone check, Payments, Look`, { skip }, async () => {
@@ -351,8 +359,9 @@ for (const { preset, colorScheme, width } of NEWER_RUNS) {
 const FESTIVAL_RUNS: Array<{ width: number; colorScheme: 'light' | 'dark'; preset: string }> = [
   { width: 360, colorScheme: 'light', preset: 'ivory-gold' },
   { width: 1280, colorScheme: 'light', preset: 'ivory-gold' },
-  ...['ivory-gold', 'noir-champagne', 'pearl-emerald', 'sand-rose'].map((preset) => ({ width: 360, colorScheme: 'dark' as const, preset })),
+  ...['ivory-gold', 'noir-champagne', 'pearl-emerald', 'sand-rose', ...BRIGHT_LOOKS].map((preset) => ({ width: 360, colorScheme: 'dark' as const, preset })),
   { width: 360, colorScheme: 'light', preset: 'noir-champagne' },
+  ...BRIGHT_LOOKS.map((preset) => ({ width: 360, colorScheme: 'light' as const, preset })),
 ];
 for (const { width, colorScheme, preset } of FESTIVAL_RUNS) {
   test(`festival looks are readable (${preset}, ${colorScheme} mode, ${width} px)`, { skip }, async () => {

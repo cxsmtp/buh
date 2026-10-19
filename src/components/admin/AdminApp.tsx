@@ -30,6 +30,8 @@ import { DeliverySettingsCard } from './settings/DeliverySettingsCard';
 import { EmailSettingsCard } from './settings/EmailSettingsCard';
 import { MarqueeSettingsCard } from './settings/MarqueeSettingsCard';
 import { PaymentsSettingsCard } from './settings/PaymentsSettingsCard';
+import { bankDetailsSaved } from '@/lib/bankMessages';
+import { DEFAULT_CARD_FEE_PERCENT } from '@/lib/money';
 import { SettingsConsole } from './settings/SettingsConsole';
 import { DEFAULT_PHONE_CHECK, PhoneCheckCard } from './settings/PhoneCheckCard';
 import { SettingsHistoryCard } from './settings/SettingsHistoryCard';
@@ -62,7 +64,7 @@ interface AdminSettings {
   ai: AdminSetting<AiSettings>;
 }
 
-const NO_PAYMENTS: PaymentSettings = { cardEnabled: false, stripePublishableKey: '', stripeSecretKey: '', stripeWebhookSecret: '' };
+const NO_PAYMENTS: PaymentSettings = { cardEnabled: false, stripePublishableKey: '', stripeSecretKey: '', stripeWebhookSecret: '', cardFeePercent: DEFAULT_CARD_FEE_PERCENT, bankTransferMode: 'default' };
 
 type AdminTab = 'orders' | 'add-product' | 'inventory' | 'crm' | 'money' | 'settings' | 'chats';
 export type HubView = 'phone' | 'laptop';
@@ -104,7 +106,7 @@ async function fetchPublic() {
 }
 
 /** The calls the front gate answers as an unknown address without a door (src/lib/server/frontGate.ts). */
-const ADMIN_CALL = /^\/api\/(?:admin(?:\/|$|\?)|courier\/(?:dispatch|test)(?:$|\?)|ai-transform(?:$|\?))/;
+const ADMIN_CALL = /^\/api\/(?:admin(?:\/|$|\?)|courier\/(?:dispatch|test)(?:$|\?))/;
 
 /** Is this page the admin link itself (not a password-reset email's single-reset path)? */
 const onAdminLink = () => /^\/[A-Za-z0-9_-]{32}$/.test(window.location.pathname);
@@ -580,6 +582,8 @@ export function AdminApp() {
                       key={`payments-${adminSettingsLoaded}-${settingsEpoch}-${undone['payments'] ?? 0}`}
                       value={adminSettings.payments.value}
                       secretsSet={adminSettings.payments.secretsSet}
+                      bankAccountSaved={bankDetailsSaved(bankDetails)}
+                      shopWhatsApp={adminSettings.store.value.whatsappNumber}
                       onSave={(v, onWarning) => saveSettings('payments', v, onWarning)}
                       auto={autoSaveHooks}
                     />
@@ -611,7 +615,7 @@ export function AdminApp() {
                   id: 'ai',
                   label: 'AI writing',
                   icon: <Sparkles />,
-                  hint: 'Product names and descriptions written from a photo, with your own Anthropic key (off until you add one).',
+                  hint: 'Product names and descriptions written from a photo (Claude or Gemini), and styled bedroom photos (Gemini), with your own keys (off until you add one).',
                   content: (
                     <AiSettingsCard
                       key={`ai-${adminSettingsLoaded}-${settingsEpoch}-${undone['ai'] ?? 0}`}

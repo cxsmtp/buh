@@ -1,5 +1,20 @@
 # Changelog
 
+## BUH-02.16.00 — 2026-10-19 09:30 UTC · [#34](https://github.com/cxsmtp/buh/pull/34)
+
+- **Style in a bedroom (Gemini).** In the product editor, Gemini places your bedding in a styled bedroom (Dubai luxury master, Palm villa, Hotel suite, Clean catalogue, Kids' room) from a plain camera photo. You see the original and the result side by side and choose Add, Try again or Discard, and your real photo is never replaced.
+- **Honest about styled photos.** Styled photos show a small "Styled image" tag in the shop (on by default) and keep Gemini's AI-made marker for Google and Meta. They stay out of the product feed when the tag is off. The old fake "AI staging" that showed stock pictures is gone.
+- **Gemini for writing too.** Settings → AI writing lets you pick Claude or Gemini, and Test lists the models your key can use.
+- **Four bright looks.** Jumeirah Azure, Civic Gold, Digital Skyline and Palm Fresh, each with a dark version, in Settings → Look. Ivory & Gold stays the default.
+- **3.5% card payment fee.** When a customer pays by card, a "Card payment fee" line is added before the total, worked out on the shop's server; Stripe charges it, refunds include it, and reports show it as "Card fees". Change it or set 0 in Settings → Payments.
+- **Bank transfer on request.** Bank transfer can be offered without putting your account on the website. The customer taps "Confirm & ask for bank details on WhatsApp" after ordering, and you reply from the hub with one tap.
+- **Beautiful Home Assistant.** The chat assistant has a new name; a name you chose yourself is kept.
+- **Status.**
+  - **Benchmark:** 3 alternating rounds (main first), 0 failed requests. Storefront branch 705 / 714 / 747 req/s vs main 759 / 748 / 720; catalogue API branch 602 / 694 / 661 vs main 752 / 652 / 694; serviceability API branch 553 / 554 / 566 vs main 616 / 556 / 539. Focused re-runs, alternating, 4 each: serviceability (5,000 requests) branch 664 / 667 / 585 / 677 vs main 665 / 670 / 632 / 649; catalogue (4,000) branch 656 / 594 / 647 / 622 vs main 614 / 608 / 663 / 656, the same within noise. The host ran slower overall this time, for both builds.
+  - **Tests:** 922 passed, 0 failed (unit and end-to-end).
+  - **Dependency audit:** production 0 vulnerabilities; no new packages.
+  - **Security scan:** two independent reviews (payments; Gemini), 0 high. 4 medium and 12 low findings fixed, each with a test that fails before and passes after. Gemini has not been tried with a real key yet.
+
 ## BUH-02.15.00 — 2026-10-19 06:10 UTC · [#33](https://github.com/cxsmtp/buh/pull/33)
 
 - **Write name & descriptions from a photo.** In the product editor's Photos step, one tap reads the design in your photo (pattern, motif, colours, texture) and fills in the name, short description and full description. It never invents thread count, material, origin or care claims, and nothing is saved until you publish.

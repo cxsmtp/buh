@@ -52,6 +52,11 @@ export interface Product {
   aiTransformedImage?: string; // AI enhanced luxury bedroom mockup
   aiStagingPrompt?: string;
   isAiEnhanced?: boolean;
+  /**
+   * Photos made by "Style in a bedroom", by their address (/api/images/<name>). Set by the server
+   * only; shoppers see the map (as { staged: true }) only while "Label styled photos" is on.
+   */
+  stagedPhotos?: Record<string, StagedPhoto | { staged: true }>;
   /** Total pieces in stock across all sizes (the sum of stockBySize). */
   stockCount: number;
   /** Pieces in stock per size id. Most designs are one or two pieces, so stock is kept per size. */
@@ -169,9 +174,15 @@ export interface Order {
   /** standard (free, standardDays) or same_day (with Settings → Delivery's charge). */
   deliveryOption?: 'standard' | 'same_day';
   codFee: number;
+  /** Card payment fee (Settings → Payments, % of items + delivery), in AED; absent or 0 for other payments. Part of total. */
+  cardFee?: number;
+  /** The fee's percent when the order was placed. */
+  cardFeePercent?: number;
   discount: number;
   total: number;
   paymentMethod: PaymentMethod;
+  /** Bank transfer "on request": no account was saved, so the customer asks for it on the shop's WhatsApp. */
+  bankDetailsBy?: 'whatsapp';
   paymentStatus: 'pending' | 'receipt_uploaded' | 'verified' | 'cod_pending' | 'paid';
   paymentReceiptUrl?: string;
   bankTransferRef?: string;
@@ -249,12 +260,39 @@ export interface OrderAttention {
 export const AI_MODELS = ['claude-opus-5-5', 'claude-sonnet-5-5', 'claude-haiku-5-5'] as const;
 export type AiModel = (typeof AI_MODELS)[number];
 
-/** Settings → AI writing: names and descriptions written from a product photo (off until a key is saved). */
+/** Who writes "Write from photo": Anthropic (Claude) or Google Gemini. Styled photos are Gemini only. */
+export const AI_PROVIDERS = ['anthropic', 'gemini'] as const;
+export type AiProvider = (typeof AI_PROVIDERS)[number];
+
+/** A Gemini model id as the shop stores it (checked on the server; filled from Google's live list by Test). */
+export const GEMINI_MODEL_ID = /^gemini-[a-z0-9.\-]{1,60}$/;
+
+/** Settings → AI writing: names and descriptions written from a product photo (off until a key is saved), and styled photos. */
 export interface AiSettings {
   enabled: boolean;
+  /** Which AI writes the text (default Anthropic). */
+  provider: AiProvider;
   model: AiModel;
   /** The owner's Anthropic API key (secret: write-only, never sent to a browser or a backup). */
   anthropicApiKey: string;
+  /** The owner's Google Gemini API key, AIza… (secret: write-only, never sent to a browser or a backup). */
+  geminiApiKey: string;
+  /** Gemini model for writing ('' until Test fills the list). */
+  geminiModel: string;
+  /** Gemini model for "Style in a bedroom". */
+  geminiImageModel: string;
+  /** The shop shows a small "Styled image" tag on styled photos (default on). */
+  labelStyledPhotos: boolean;
+}
+
+/** A photo made by "Style in a bedroom" (Gemini): never the original, always marked. */
+export interface StagedPhoto {
+  staged: true;
+  /** The photo it was made from (a stored image name), or '' for a photo not kept in the shop. */
+  source: string;
+  /** One of STAGING_PRESETS' ids. */
+  preset: string;
+  at: string;
 }
 
 export interface PaymentSettings {
@@ -266,7 +304,18 @@ export interface PaymentSettings {
   stripeSecretKey: string;
   /** whsec_… (secret: proves a webhook came from Stripe). */
   stripeWebhookSecret: string;
+  /** Added to card orders (items + delivery), 0–10 with up to 2 decimals; 0: no fee. Default 3.5. */
+  cardFeePercent: number;
+  /**
+   * Bank transfer at checkout: send_details (the saved account is emailed and on the order's private
+   * page), ask_whatsapp (the customer messages the shop's WhatsApp for the details; no account needs
+   * to be saved), off; default: send_details with an account saved, else ask_whatsapp with a WhatsApp
+   * number, else off.
+   */
+  bankTransferMode: BankTransferMode;
 }
+
+export type BankTransferMode = 'default' | 'send_details' | 'ask_whatsapp' | 'off';
 
 export type BankState = 'awaiting' | 'uploaded' | 'not_received' | 'paid';
 

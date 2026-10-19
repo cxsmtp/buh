@@ -29,6 +29,8 @@ export const ProductCard: React.FC<ProductCardProps> = ({ product, onSelect, eag
   const fewLeft = !soldOut && product.stockCount <= lowStockThreshold;
   const sale = isOnSale(product);
   const photo = photoSources(productPhoto(product));
+  // Made by AI from the real photo ("Style in a bedroom"): said so, small and plain.
+  const styled = Boolean(product.stagedPhotos?.[productPhoto(product)]);
   const one = layout === 'one';
   const round = one ? 'sm:rounded-lg' : 'rounded-lg';
 
@@ -60,6 +62,11 @@ export const ProductCard: React.FC<ProductCardProps> = ({ product, onSelect, eag
               draggable={false}
               className={`photo absolute inset-0 w-full h-full object-cover transition-transform duration-500 motion-safe:group-hover:scale-[1.03] ${soldOut ? 'grayscale-[60%]' : ''}`}
             />
+          )}
+          {styled && (
+            <span className="pointer-events-none absolute left-2 bottom-2 rounded-full bg-surface/90 px-2 py-0.5 text-[11px] font-semibold text-ink shadow-sm" data-testid="styled-tag">
+              Styled image
+            </span>
           )}
         </div>
         <div className={`pt-3 space-y-1 ${one ? 'px-4 sm:px-0.5' : 'px-0.5'}`}>

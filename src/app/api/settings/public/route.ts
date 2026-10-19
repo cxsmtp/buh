@@ -1,5 +1,5 @@
 import { handleRouteError, json } from '@/lib/server/http';
-import { bankTransferReady, cardPaymentsReady, contactEmail, getSettings, phoneCodesOn, phoneVerificationConfig } from '@/lib/server/settings';
+import { bankTransferMode, cardFeePercent, cardPaymentsReady, contactEmail, getSettings, phoneCodesOn, phoneVerificationConfig } from '@/lib/server/settings';
 import { storefrontTheme } from '@/lib/server/theme';
 
 /**
@@ -9,7 +9,7 @@ import { storefrontTheme } from '@/lib/server/theme';
  * low-stock threshold, the support email, today's festival look, and how
  * checkout verifies phones (the Firebase web config only when Firebase is the
  * switched-on SMS option), and whether checkout takes cards (with the Stripe
- * publishable key, which is public by design). Nothing here is secret.
+ * publishable key, which is public by design, and the card fee's percent). Nothing here is secret.
  */
 export function GET() {
   try {
@@ -17,7 +17,9 @@ export function GET() {
     const catalog = getSettings('catalog');
     return json({
       brand: getSettings('brand'),
-      bankTransfer: bankTransferReady(getSettings('bank')),
+      // Offered at all, and how: our details sent automatically, or asked for on the shop's WhatsApp.
+      bankTransfer: bankTransferMode() !== null,
+      bankTransferMode: bankTransferMode(),
       // Pages from before this version read bank.iban: an empty object keeps them working
       // (they simply don't offer bank transfer) until they reload.
       bank: {},
@@ -41,7 +43,7 @@ export function GET() {
  */
 function paymentsView() {
   const p = getSettings('payments');
-  return cardPaymentsReady(p) ? { card: true, publishableKey: p.stripePublishableKey, ...(phoneCodesOn() ? { phoneCheck: true } : {}) } : { card: false };
+  return cardPaymentsReady(p) ? { card: true, publishableKey: p.stripePublishableKey, cardFeePercent: cardFeePercent(p), ...(phoneCodesOn() ? { phoneCheck: true } : {}) } : { card: false };
 }
 
 function chatView() {

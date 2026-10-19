@@ -19,7 +19,16 @@ export const DEFAULT_CATALOG: CatalogSettings = {
 };
 
 /** Settings → AI writing before the owner adds a key: off. */
-export const DEFAULT_AI: AiSettings = { enabled: false, model: 'claude-opus-5-5', anthropicApiKey: '' };
+export const DEFAULT_AI: AiSettings = {
+  enabled: false,
+  provider: 'anthropic',
+  model: 'claude-opus-5-5',
+  anthropicApiKey: '',
+  geminiApiKey: '',
+  geminiModel: '',
+  geminiImageModel: 'gemini-3.1-flash-image',
+  labelStyledPhotos: true,
+};
 
 /** Settings → Store & contact before the owner fills it in. */
 export const DEFAULT_STORE: StoreSettings = {
@@ -66,7 +75,7 @@ export const DEFAULT_EMAIL_SETTINGS: EmailSettings = {
 /** The chat's starting "memory": the owner edits, adds and removes entries in Settings → Chat assistant. */
 export const DEFAULT_ASSISTANT: AssistantSettings = {
   enabled: true,
-  name: 'Shop assistant',
+  name: 'Beautiful Home Assistant',
   greeting: 'Hello! I can help with sizes, delivery, payment and care. Ask me anything, or tap "Talk to a person".',
   answerSizes: true,
   waitSeconds: 150,

@@ -7,8 +7,9 @@ import { LOOK_PRESET_IDS, LOOK_PRESETS, MODE_LABELS, paletteStyle, type LookMode
 import { getJson, sendJson } from '@/lib/apiClient';
 
 /**
- * Settings → Look: the shop's look (Ivory & Gold, Noir & Champagne, Pearl & Emerald, Sand & Rose),
- * each with a light and a dark variant, and whether the device picks light or dark. Applies to
+ * Settings → Look: the shop's look (the warm Ivory & Gold, Noir & Champagne, Pearl & Emerald and
+ * Sand & Rose; the bright Jumeirah Azure, Civic Gold, Digital Skyline and Palm Fresh), each with a
+ * light and a dark variant, and whether the device picks light or dark. Applies to
  * the shop and to this hub. Every change is kept with its time and who made it; any earlier look
  * (the one from before looks existed among them) can be put back with Switch back. Festival
  * themes (their own section) still colour the shop on their dates, in every look.

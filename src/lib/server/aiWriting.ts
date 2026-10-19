@@ -1,5 +1,5 @@
 import http from 'node:http';
-import { AI_MODELS, type AiModel, type AiSettings } from '@/types';
+import { AI_MODELS, GEMINI_MODEL_ID, type AiModel, type AiProvider, type AiSettings } from '@/types';
 import { stripEmoji } from '@/lib/marquee';
 import { FABRIC_COLOURS as NAMED } from '@/data/fabricColours';
 import { audit } from './audit';
@@ -9,12 +9,14 @@ import { IMAGE_NAME, readImage } from './images';
 import { logEvent } from './log';
 import { safeFetch } from './outbound';
 import { rateLimit } from './rateLimit';
-import { getSettings, withStoredSecrets } from './settings';
+import { answerOf, generateContent, listGeminiModels, textOf, type ModelLists } from './gemini';
+import { GEMINI_KEY, getSettings, withStoredSecrets } from './settings';
 
 /**
  * "Write from photo" (Admin Hub → Inventory → product editor): the product's photo goes to
- * Anthropic's Messages API, from the server only, with the owner's own key (Settings → AI
- * writing), and comes back as a suggested name, short and full description, colours and weave.
+ * Anthropic's Messages API or Google Gemini (src/lib/server/gemini.ts), as chosen in Settings → AI
+ * writing, from the server only, with the owner's own key, and comes back as a suggested name,
+ * short and full description, colours and weave. Both use the same rules and the same checks.
  * Nothing is saved here: the editor shows the suggestions for the owner to edit or ignore.
  *
  * - One fixed address (api.anthropic.com), through safeFetch: https only, no redirects, public
@@ -312,31 +314,39 @@ export function resolveImage(body: Record<string, unknown>): ImageSource {
   throw new HttpError(400, 'Choose a photo first (PNG, JPEG or WebP).');
 }
 
+/** The chosen writer's key. */
+const writerKey = (ai: AiSettings) => (ai.provider === 'gemini' ? ai.geminiApiKey : ai.anthropicApiKey);
+/** The model "Write from photo" uses: Claude's, or the Gemini one chosen after Test. */
+const writerModel = (ai: AiSettings): string => (ai.provider === 'gemini' ? ai.geminiModel : ai.model);
+
 /** Settings → AI writing, or a readable reason why "Write from photo" can't run yet. */
 function readySettings(): AiSettings {
   const ai = getSettings('ai');
-  if (!ai.anthropicApiKey) throw new HttpError(409, 'Add your AI key in Settings → AI writing, then switch it on.', {}, { code: 'ai_off' });
+  if (!writerKey(ai)) throw new HttpError(409, 'Add your AI key in Settings → AI writing, then switch it on.', {}, { code: 'ai_off' });
   if (!ai.enabled) throw new HttpError(409, 'AI writing is switched off. Switch it on in Settings → AI writing.', {}, { code: 'ai_off' });
+  if (ai.provider === 'gemini' && !GEMINI_MODEL_ID.test(ai.geminiModel)) throw new HttpError(409, 'Choose a Gemini writing model: press Test in Settings → AI writing, pick one and save.', {}, { code: 'ai_off' });
   return ai;
 }
 
-/** For the editor's button: ready, or why not (no key, or switched off). */
-export function aiStatus(): { ready: boolean; reason: 'no_key' | 'off' | null; model: AiModel } {
+/** For the editor's button: ready, or why not (no key, switched off, or no Gemini model chosen yet). */
+export function aiStatus(): { ready: boolean; reason: 'no_key' | 'off' | 'no_model' | null; provider: AiProvider; model: string } {
   const ai = getSettings('ai');
-  const reason = !ai.anthropicApiKey ? 'no_key' : !ai.enabled ? 'off' : null;
-  return { ready: !reason, reason, model: ai.model };
+  const reason = !writerKey(ai) ? 'no_key' : !ai.enabled ? 'off' : ai.provider === 'gemini' && !GEMINI_MODEL_ID.test(ai.geminiModel) ? 'no_model' : null;
+  return { ready: !reason, reason, provider: ai.provider, model: writerModel(ai) };
 }
 
 const BODY_FIELDS = new Set(['image', 'imageId', 'imageUrl', 'hints']);
 
 /** POST /api/admin/products/describe, after the admin check and the size-capped read. */
-export async function describeProduct(body: Record<string, unknown>, actor: string): Promise<Suggestion & { model: AiModel }> {
+export async function describeProduct(body: Record<string, unknown>, actor: string): Promise<Suggestion & { model: string; provider: AiProvider }> {
   for (const k of Object.keys(body)) if (!BODY_FIELDS.has(k)) throw new HttpError(400, `Unexpected field: ${k.slice(0, 30)}.`);
   const ai = readySettings();
   const image = resolveImage(body);
+  if (ai.provider === 'gemini' && image.kind === 'url') throw new HttpError(400, 'With Gemini, use a photo uploaded to the shop (add it again from the gallery).');
   const hints = cleanHints(body.hints);
   enforceLimit(`ai-describe:${actor}`, DESCRIBE_LIMIT.max, DESCRIBE_LIMIT.windowMs, 'That is 20 descriptions this hour. Please wait a while before the next one.');
   const weaves = getSettings('catalog').weaves;
+  if (ai.provider === 'gemini' && image.kind !== 'url') return describeWithGemini(ai, image, hints, weaves, actor);
   const source = image.kind === 'url' ? { type: 'url', url: image.url } : { type: 'base64', media_type: image.mime, data: image.bytes.toString('base64') };
   const { text, stopReason } = await callAnthropic(ai.anthropicApiKey, ai.model, {
     max_tokens: MAX_TOKENS,
@@ -353,8 +363,42 @@ export async function describeProduct(body: Record<string, unknown>, actor: stri
     if (stopReason === 'max_tokens') throw new HttpError(502, 'The AI’s answer was cut short. Please try again.', {}, { code: 'ai_bad_reply' });
     throw err;
   }
-  audit('product.ai_described', { by: actor, model: ai.model, photo: image.kind, ...(image.kind === 'url' ? {} : { photoBytes: image.bytes.length }), hints: Object.keys(hints), suggested: { titleLength: suggestion.title.length, colors: suggestion.colors.length, weave: suggestion.weave } });
-  return { ...suggestion, model: ai.model };
+  audit('product.ai_described', { by: actor, provider: 'anthropic', model: ai.model, photo: image.kind, ...(image.kind === 'url' ? {} : { photoBytes: image.bytes.length }), hints: Object.keys(hints), suggested: { titleLength: suggestion.title.length, colors: suggestion.colors.length, weave: suggestion.weave } });
+  return { ...suggestion, model: ai.model, provider: 'anthropic' };
+}
+
+/**
+ * The same request to Gemini: the same rules (system instruction), the photo as inlineData, JSON
+ * asked for with responseMimeType, and the answer through the same checks (parseSuggestion).
+ */
+async function describeWithGemini(ai: AiSettings, image: { kind: 'upload' | 'stored'; mime: string; bytes: Buffer }, hints: Hints, weaves: string[], actor: string): Promise<Suggestion & { model: string; provider: AiProvider }> {
+  const data = await generateContent(
+    ai.geminiApiKey,
+    ai.geminiModel,
+    {
+      systemInstruction: { parts: [{ text: SYSTEM }] },
+      contents: [{ role: 'user', parts: [{ inlineData: { mimeType: image.mime, data: image.bytes.toString('base64') } }, { text: userText(hints, weaves) }] }],
+      // Room for the JSON (about 400 tokens) and the model's own thinking.
+      generationConfig: { responseMimeType: 'application/json', maxOutputTokens: 8192 },
+    },
+    { timeoutMs: TIMEOUT_MS, maxBytes: 256 * 1024 }
+  );
+  const { parts, finishReason, blocked } = answerOf(data);
+  if (blocked || /SAFETY|PROHIBITED|BLOCKLIST|SPII|RECITATION/.test(finishReason)) {
+    logEvent('warn', 'gemini_refused', { blocked, finishReason });
+    throw new HttpError(502, 'The AI would not describe this photo. Try another photo, or write the text yourself.', {}, { code: 'ai_refused' });
+  }
+  const text = textOf(parts);
+  let suggestion: Suggestion;
+  try {
+    suggestion = parseSuggestion(text, weaves);
+  } catch (err) {
+    logEvent('warn', 'gemini_bad_reply', { finishReason, length: text.length });
+    if (finishReason === 'MAX_TOKENS') throw new HttpError(502, 'The AI’s answer was cut short. Please try again.', {}, { code: 'ai_bad_reply' });
+    throw err;
+  }
+  audit('product.ai_described', { by: actor, provider: 'gemini', model: ai.geminiModel, photo: image.kind, photoBytes: image.bytes.length, hints: Object.keys(hints), suggested: { titleLength: suggestion.title.length, colors: suggestion.colors.length, weave: suggestion.weave } });
+  return { ...suggestion, model: ai.geminiModel, provider: 'gemini' };
 }
 
 /**
@@ -371,4 +415,19 @@ export async function testAiSettings(input: unknown, actor: string): Promise<{ o
   await callAnthropic(key, model, { max_tokens: 64, output_config: { effort: 'low' }, messages: [{ role: 'user', content: 'Reply with the word OK.' }] });
   audit('settings.ai_tested', { by: actor, model, ok: true });
   return { ok: true, model };
+}
+
+/**
+ * Settings → AI writing → Test for Gemini: Google's list of the models the key (typed, or the
+ * saved one) can use, for the two lists (writing, images). A refused key says so (without the key).
+ */
+export async function testGeminiSettings(input: unknown, actor: string): Promise<{ ok: true; models: ModelLists }> {
+  const typed = withStoredSecrets('ai', input) as Partial<AiSettings>;
+  const key = typeof typed.geminiApiKey === 'string' ? typed.geminiApiKey.trim() : '';
+  if (!key) throw new HttpError(400, 'Type your Gemini API key first (aistudio.google.com → Get API key).', {}, { code: 'ai_off' });
+  if (!GEMINI_KEY.test(key)) throw new HttpError(400, 'A Gemini API key starts with AIza (aistudio.google.com → Get API key).');
+  enforceLimit(`ai-test:${actor}`, TEST_LIMIT.max, TEST_LIMIT.windowMs, 'Too many tests. Please wait a few minutes.');
+  const models = await listGeminiModels(key);
+  audit('settings.ai_tested', { by: actor, provider: 'gemini', ok: true, writingModels: models.writing.length, imageModels: models.image.length });
+  return { ok: true, models };
 }

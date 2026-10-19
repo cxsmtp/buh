@@ -147,7 +147,11 @@ export function WriteFromPhoto({
       {!photos.length && <p className="text-xs text-ink-muted">Add a photo first: the AI writes from what it sees.</p>}
       {status && !status.ready && !error && (
         <p className="text-xs text-ink-soft" data-testid="ai-off-note">
-          {status.reason === 'off' ? 'AI writing is switched off: switch it on in Settings → AI writing.' : 'To use this, add your Anthropic key in Settings → AI writing (it stays on the shop’s server).'}
+          {status.reason === 'off'
+            ? 'AI writing is switched off: switch it on in Settings → AI writing.'
+            : status.reason === 'no_model'
+            ? 'Choose a Gemini writing model: press Test in Settings → AI writing, pick one and save.'
+            : 'To use this, add your AI key (Anthropic or Gemini) in Settings → AI writing (it stays on the shop’s server).'}
         </p>
       )}
       {error && (
