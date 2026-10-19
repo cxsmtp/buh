@@ -56,11 +56,18 @@ export function parseCourierSettings(value: unknown): CourierSettings {
     jeebly: {
       apiKey: text(j.apiKey, 'Jeebly API key', 200, false),
       clientKey: text(j.clientKey, 'Jeebly client key', 200, false),
+      sandboxApiKey: text(j.sandboxApiKey, 'Jeebly sandbox API key', 200, false),
+      sandboxClientKey: text(j.sandboxClientKey, 'Jeebly sandbox client key', 200, false),
       serviceType: j.serviceType === 'Express' ? 'Express' : 'Scheduled',
       isLive: j.isLive === true,
       pickupLocationName: text(j.pickupLocationName, 'Pickup location', 120, false),
       pickupPhone: text(j.pickupPhone, 'Pickup phone', 32, false),
       pickupAddress: text(j.pickupAddress, 'Pickup address', 200, false),
+      liveBaseUrl: text(j.liveBaseUrl, 'Jeebly live address', 200, false),
+      pickupBuilding: text(j.pickupBuilding, 'Pickup building', 120, false),
+      pickupArea: text(j.pickupArea, 'Pickup area', 120, false),
+      pickupUnit: text(j.pickupUnit, 'Pickup unit', 40, false),
+      pickupLandmark: text(j.pickupLandmark, 'Pickup landmark', 120, false),
       pickupEmirate: emirate(j.pickupEmirate, 'Pickup emirate', 'Dubai') as CourierSettings['jeebly']['pickupEmirate'],
     },
     echo: {

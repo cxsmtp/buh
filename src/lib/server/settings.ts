@@ -6,6 +6,8 @@ import { marqueeItems, marqueeProblem, stripEmoji } from '@/lib/marquee';
 import { DEFAULT_ASSISTANT, DEFAULT_CATALOG, DEFAULT_DELIVERY, DEFAULT_EMAIL_SETTINGS, DEFAULT_STORE, DEFAULT_THEME_SETTINGS } from '@/data/catalogDefaults';
 import { INITIAL_BANK_DETAILS, INITIAL_BRAND_SETTINGS, INITIAL_COURIER_SETTINGS, INITIAL_SMS_SETTINGS } from '@/data/initialData';
 import { getDb } from './db';
+import { kvGet } from './kv';
+import { jeeblyLiveBase } from '@/lib/jeeblyApi';
 import { SMTP_PORTS, assertPublicMailHost } from './mail';
 import { FIREBASE_PROJECT_ID } from './firebaseAuth';
 import { bump, changedElsewhere } from './live';
@@ -47,10 +49,10 @@ const DEFAULTS: SettingsMap = {
   // Empty until the owner enters the real account: bank transfer stays hidden until then.
   bank: INITIAL_BANK_DETAILS,
 
-  // Never start with the sample keys from the demo data.
+  // No keys, no pickup address and test mode until the owner enters their own.
   courier: {
     ...INITIAL_COURIER_SETTINGS,
-    jeebly: { ...INITIAL_COURIER_SETTINGS.jeebly, apiKey: '', clientKey: '', isLive: false },
+    jeebly: { ...INITIAL_COURIER_SETTINGS.jeebly, apiKey: '', clientKey: '', sandboxApiKey: '', sandboxClientKey: '', isLive: false },
     echo: { ...INITIAL_COURIER_SETTINGS.echo, apiKey: '', isLive: false },
   },
   sms: {
@@ -89,7 +91,7 @@ export function contactEmail(): string {
 const SECRETS: Record<SettingsKey, string[]> = {
   brand: [],
   bank: [],
-  courier: ['jeebly.apiKey', 'jeebly.clientKey', 'echo.apiKey'],
+  courier: ['jeebly.apiKey', 'jeebly.clientKey', 'jeebly.sandboxApiKey', 'jeebly.sandboxClientKey', 'echo.apiKey'],
   sms: ['twilio.authToken', 'infobip.apiKey', 'customWebhook.bearerToken', 'unifonic.appSid'],
   catalog: [],
   store: [],
@@ -104,6 +106,10 @@ const SECRETS: Record<SettingsKey, string[]> = {
 
 const cache = new Map<SettingsKey, unknown>();
 
+// The demo data's invented pickup (never the owner's): read as empty, so it never reaches a carrier or a label.
+const SAMPLE_PICKUP_NAMES = new Set(['Beautiful UAE Home Artisan Studio', 'Beautiful UAE Home Central Warehouse']);
+const SAMPLE_PICKUP_ADDRESSES = new Set(['Studio 08, Alserkal Avenue Creative Zone, Al Quoz 1', 'Warehouse 14, Al Quoz Industrial Area 3']);
+
 export function getSettings<K extends SettingsKey>(key: K): SettingsMap[K] {
   if (cache.size && changedElsewhere('settings')) cache.clear();
   if (cache.has(key)) return cache.get(key) as SettingsMap[K];
@@ -111,6 +117,14 @@ export function getSettings<K extends SettingsKey>(key: K): SettingsMap[K] {
   const stored = row ? JSON.parse(row.data) : {};
   const merged = deepMerge(DEFAULTS[key], stored) as SettingsMap[K];
   // Shops still showing the old, long announcement lines get today's short ones.
+  // Sample pickup details and account numbers older versions started with are not the owner's.
+  if (key === 'courier') {
+    const c = merged as unknown as CourierSettings;
+    if (SAMPLE_PICKUP_NAMES.has(c.jeebly.pickupLocationName)) c.jeebly.pickupLocationName = '';
+    if (SAMPLE_PICKUP_ADDRESSES.has(c.jeebly.pickupAddress)) c.jeebly.pickupAddress = '';
+    if (c.echo.accountId === 'ECH-DXB-91402') c.echo.accountId = '';
+    if (c.echo.hubCode === 'DXB-HUB-01') c.echo.hubCode = '';
+  }
   if (key === 'brand') {
     const brand = merged as unknown as BrandSettings;
     brand.marquee = { ...brand.marquee, messages: marqueeItems(brand.marquee?.messages) };
@@ -230,6 +244,23 @@ export interface UpdateOptions<K extends SettingsKey> {
   auto?: boolean;
   /** Runs on the complete new settings (keys included) before they are stored; throwing keeps the current ones. */
   beforeSave?: (next: SettingsMap[K], current: SettingsMap[K]) => Promise<void>;
+  /**
+   * Courier only: the owner's audited "Turn on without a sandbox check" (POST /api/courier/live).
+   * Nothing else can switch Jeebly Live on without a passed Sandbox check.
+   */
+  liveOverride?: boolean;
+}
+
+/** How long a passed Sandbox check lets Jeebly Live mode be switched on. */
+export const SANDBOX_CHECK_DAYS = 30;
+export const SANDBOX_CHECK_KV = 'courier:sandbox-check';
+
+/** True when the last Sandbox check passed within SANDBOX_CHECK_DAYS. */
+export function sandboxCheckFresh(now = Date.now()): boolean {
+  const last = kvGet<{ passed?: boolean; at?: string }>(SANDBOX_CHECK_KV)?.data;
+  if (!last?.passed || !last.at) return false;
+  const at = Date.parse(last.at);
+  return Number.isFinite(at) && now - at <= SANDBOX_CHECK_DAYS * 86_400_000 && at <= now + 60_000;
 }
 
 export async function updateSettings<K extends SettingsKey>(key: K, input: unknown, options: UpdateOptions<K> = {}): Promise<void> {
@@ -262,6 +293,16 @@ export async function updateSettings<K extends SettingsKey>(key: K, input: unkno
       sms.customWebhook.bearerToken = '';
     }
   }
+  if (key === 'courier') {
+    // The live keys follow Jeebly's live address: moved to another host, they are dropped unless typed again.
+    const c = next as unknown as CourierSettings;
+    const was = (current as CourierSettings).jeebly.liveBaseUrl || '';
+    const i = input as { jeebly?: { apiKey?: unknown; clientKey?: unknown } };
+    if (was && hostOf(c.jeebly.liveBaseUrl || '') !== hostOf(was)) {
+      if (!nonEmpty(i.jeebly?.apiKey)) c.jeebly.apiKey = '';
+      if (!nonEmpty(i.jeebly?.clientKey)) c.jeebly.clientKey = '';
+    }
+  }
   // An autosave never removes a saved key (a half-typed new address would): that takes Save with the key.
   if (options.auto) {
     for (const p of SECRETS[key]) {
@@ -291,6 +332,16 @@ export async function updateSettings<K extends SettingsKey>(key: K, input: unkno
     if (p.cardEnabled && !cardKeysComplete(p)) throw new HttpError(400, 'Add the publishable key, the secret key and the webhook signing secret before switching card payments on.');
     if (p.stripePublishableKey && p.stripeSecretKey && stripeMode(p.stripePublishableKey) !== stripeMode(p.stripeSecretKey)) {
       throw new HttpError(400, 'The publishable key and the secret key are from different modes (one test, one live). Use the pair from the same Stripe page.');
+    }
+  }
+  // Jeebly Live books real shipments: only after a passed Sandbox check (or the owner's audited override).
+  if (key === 'courier') {
+    const c = next as unknown as CourierSettings;
+    if (c.jeebly.isLive && !(current as CourierSettings).jeebly.isLive && !c.jeebly.liveBaseUrl) {
+      throw new HttpError(409, "Add Jeebly's live address (Jeebly gives it with your production keys) before turning on Live mode.", {}, { code: 'live_base_required' });
+    }
+    if (c.jeebly.isLive && !(current as CourierSettings).jeebly.isLive && !options.liveOverride && !sandboxCheckFresh()) {
+      throw new HttpError(409, `Run the Sandbox check first: Jeebly Live mode can be switched on after a Sandbox check has passed (within ${SANDBOX_CHECK_DAYS} days).`, {}, { code: 'sandbox_check_required' });
     }
   }
   if (options.beforeSave) await options.beforeSave(next as SettingsMap[K], current);
@@ -325,7 +376,7 @@ export function withStoredSecrets<K extends SettingsKey>(key: K, input: unknown)
 const SECRET_HOSTS: Record<SettingsKey, Record<string, string>> = {
   brand: {},
   bank: {},
-  courier: {},
+  courier: { 'jeebly.apiKey': 'jeebly.liveBaseUrl', 'jeebly.clientKey': 'jeebly.liveBaseUrl' },
   sms: { 'infobip.apiKey': 'infobip.baseUrl', 'customWebhook.bearerToken': 'customWebhook.endpointUrl' },
   catalog: {},
   store: {},
@@ -478,13 +529,24 @@ const VALIDATORS: { [K in SettingsKey]: (input: Obj, current: SettingsMap[K]) =>
   },
 
   async courier(input, current) {
+    // Jeebly's production address, from Jeebly: https on a jeebly.com host only (keys are sent there).
+    const liveBase = (v: unknown, fallback: string) => {
+      const typed = text(v, 'Jeebly live address', 200, fallback);
+      if (!typed) return '';
+      const ok = jeeblyLiveBase(typed);
+      if (!ok) throw new HttpError(400, 'Jeebly live address must be an https address on jeebly.com (as Jeebly gave it, e.g. https://….jeebly.com).');
+      return ok;
+    };
     const rules = obj(input.autoAssignRules);
     const j = obj(input.jeebly);
     const e = obj(input.echo);
     const provider = (v: unknown, fallback: 'jeebly' | 'echo' | 'manual') => (v === 'jeebly' || v === 'echo' || v === 'manual' ? v : fallback);
     const pickupEmirate = text(j.pickupEmirate, 'Pickup emirate', 40, current.jeebly.pickupEmirate);
     if (!EMIRATES.includes(pickupEmirate)) throw new HttpError(400, 'Pickup emirate must be one of the seven Emirates.');
+    const packaging = input.packagingGrams === undefined || input.packagingGrams === null || input.packagingGrams === '' ? current.packagingGrams ?? 200 : Number(input.packagingGrams);
+    if (!Number.isInteger(packaging) || packaging < 0 || packaging > 5000) throw new HttpError(400, 'Packaging weight must be whole grams from 0 to 5000.');
     return {
+      packagingGrams: packaging,
       autoAssignRules: {
         codCourier: provider(rules.codCourier, current.autoAssignRules.codCourier),
         prepaidCourier: provider(rules.prepaidCourier, current.autoAssignRules.prepaidCourier),
@@ -492,11 +554,18 @@ const VALIDATORS: { [K in SettingsKey]: (input: Obj, current: SettingsMap[K]) =>
       jeebly: {
         apiKey: '',
         clientKey: '',
+        sandboxApiKey: '',
+        sandboxClientKey: '',
         serviceType: j.serviceType === 'Express' ? 'Express' : j.serviceType === 'Scheduled' ? 'Scheduled' : current.jeebly.serviceType,
         isLive: bool(j.isLive, current.jeebly.isLive),
         pickupLocationName: text(j.pickupLocationName, 'Pickup location', 120, current.jeebly.pickupLocationName),
         pickupPhone: text(j.pickupPhone, 'Pickup phone', 32, current.jeebly.pickupPhone),
         pickupAddress: text(j.pickupAddress, 'Pickup address', 200, current.jeebly.pickupAddress),
+        liveBaseUrl: liveBase(j.liveBaseUrl, current.jeebly.liveBaseUrl ?? ''),
+        pickupBuilding: text(j.pickupBuilding, 'Pickup building', 120, current.jeebly.pickupBuilding ?? ''),
+        pickupArea: text(j.pickupArea, 'Pickup area', 120, current.jeebly.pickupArea ?? ''),
+        pickupUnit: text(j.pickupUnit, 'Pickup unit', 40, current.jeebly.pickupUnit ?? ''),
+        pickupLandmark: text(j.pickupLandmark, 'Pickup landmark', 120, current.jeebly.pickupLandmark ?? ''),
         pickupEmirate: pickupEmirate as CourierSettings['jeebly']['pickupEmirate'],
       },
       echo: {
@@ -771,7 +840,16 @@ function validateSizePreset(v: unknown, i: number): BedProfileMeasurement {
     cushionCovers: text(o.cushionCovers, `${n} cushion covers`, 80) || undefined,
     piecesIncluded: pieces,
     priceDelta: Math.round(delta * 100) / 100,
+    ...weightOf(o.weightGrams, n),
   };
+}
+
+/** A size's packed weight in whole grams (optional): 1 to 50 000. */
+function weightOf(v: unknown, n: string): { weightGrams?: number } {
+  if (v === undefined || v === null || v === '') return {};
+  const g = Number(v);
+  if (!Number.isInteger(g) || g < 1 || g > 50_000) throw new HttpError(400, `${n}: weight must be whole grams from 1 to 50000.`);
+  return { weightGrams: g };
 }
 
 // ── Firebase web config (public values, validated strictly) ────────────────

@@ -10,6 +10,7 @@ import { bump, changedElsewhere } from './live';
 import { getSettings } from './settings';
 import { logEvent } from './log';
 import { isDuvetProduct } from '@/lib/measurements';
+import { WEIGHT_GRAMS_MAX, WEIGHT_GRAMS_MIN } from '@/lib/shipmentWeight';
 import { auditBacklog, auditMove, insertMove, type SizeChange, type StockMove } from './stockLedger';
 
 /**
@@ -465,6 +466,10 @@ function validateProfile(v: unknown, i: number): BedProfileMeasurement {
     otherPieces: text(p.otherPieces, `Size ${i + 1} other pieces`, 80) || undefined,
     piecesIncluded: num(p.piecesIncluded ?? 1, `Size ${i + 1} pieces`, 1, 20, { integer: true }),
     priceDelta: num(p.priceDelta ?? 0, `Size ${i + 1} price difference`, -10_000, 10_000),
+    // Packed weight of one set (for the parcel's weight); optional, admin only.
+    ...(p.weightGrams === undefined || p.weightGrams === null || p.weightGrams === ''
+      ? {}
+      : { weightGrams: num(p.weightGrams, `Size ${i + 1} weight (g)`, WEIGHT_GRAMS_MIN, WEIGHT_GRAMS_MAX, { integer: true }) }),
   };
 }
 

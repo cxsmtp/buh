@@ -163,7 +163,7 @@ test('the owner’s confirm route: "call" and "use_sender" (number validated, fi
   assert.equal(askBody.code, 'whatsapp_unconfirmed');
   assert.match(askBody.message, /hasn't confirmed .* on WhatsApp yet — ship anyway\?/);
   const mark = auditLines().length;
-  const yes = await api('POST', '/api/courier/dispatch', { orderId: u.id, provider: 'jeebly', shipUnconfirmed: true });
+  const yes = await api('POST', '/api/courier/dispatch', { orderId: u.id, provider: 'jeebly', shipUnconfirmed: true, testBooking: true });
   assert.equal(yes.status, 200, await yes.clone().text());
   const actions = auditLines().slice(mark).map((l) => JSON.parse(l).action);
   assert.equal(actions[0], 'order.ship_unconfirmed');

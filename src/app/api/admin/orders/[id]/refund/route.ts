@@ -1,6 +1,7 @@
 import { requireAdmin } from '@/lib/server/guard';
 import { allowFields, handleRouteError, HttpError, json, readJsonBody } from '@/lib/server/http';
 import { getOrder, refundableFils } from '@/lib/server/orders';
+import { cancelJeeblyBooking } from '@/lib/server/jeeblyOps';
 import { cancelPaidCardWithoutStripe, refundCardOrder } from '@/lib/server/payments';
 
 /** What the owner must send to cancel a paid card order without a Stripe refund: typed on purpose. */
@@ -31,11 +32,15 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
       if (body.withoutStripeRefund !== true || body.confirm !== NO_STRIPE_REFUND_CONFIRM) {
         throw new HttpError(400, `To cancel without a Stripe refund, send withoutStripeRefund: true and confirm: "${NO_STRIPE_REFUND_CONFIRM}".`);
       }
-      return json({ order: await cancelPaidCardWithoutStripe(id, session.email), outcome: 'cancelled_without_refund' });
+      const cancelledOrder = await cancelPaidCardWithoutStripe(id, session.email);
+      const carrierCancel = await cancelJeeblyBooking(cancelledOrder, session.email);
+      return json({ order: carrierCancel.attempted || carrierCancel.message ? getOrder(id) : cancelledOrder, outcome: 'cancelled_without_refund', ...(carrierCancel.message ? { carrierCancel } : {}) });
     }
     if (body.confirm !== undefined) throw new HttpError(400, 'Unexpected field: confirm.');
     const { order: updated, outcome } = await refundCardOrder(id, session.email, shown);
-    return json({ order: updated, outcome });
+    // Cancelled with the refund: a Jeebly booking is cancelled too (audited; never claimed if Jeebly refuses).
+    const carrierCancel = updated.status === 'cancelled' && order.status !== 'cancelled' ? await cancelJeeblyBooking(updated, session.email) : null;
+    return json({ order: carrierCancel?.message ? getOrder(id) : updated, outcome, ...(carrierCancel?.message ? { carrierCancel } : {}) });
   } catch (err) {
     return handleRouteError(err, 'admin/orders/refund');
   }

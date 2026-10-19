@@ -31,7 +31,7 @@ import { SLOW_MS, addressOf, countsAsProbe, recordMiss, verdictFor } from './sca
  * - The private admin link (one 32-character path) and a password-reset email's
  *   own path (43 characters, open only while that reset is): the hub page (/hub inside), with the door cookie,
  *   Referrer-Policy: no-referrer, X-Robots-Tag: noindex, nofollow and no-store.
- * - Every admin address (/api/admin/…, /api/courier/dispatch and /test,
+ * - Every admin address (/api/admin/…, /api/courier/dispatch, /test, /live and /sandbox-check,
  *   /api/ai-transform) without a valid door cookie, and the hub page's own name: the
  *   request is handed on as an address that does not exist, so Next.js answers it
  *   exactly as it answers any unknown address (the same 404 page, byte for byte, with
@@ -56,7 +56,7 @@ const INSTALLED = Symbol.for('buh.frontGate');
 export const NOWHERE_PAGE = '/_buh/nowhere';
 export const NOWHERE_API = '/api/_buh/nowhere';
 
-const ADMIN_APIS = ['/api/courier/dispatch', '/api/courier/test', '/api/ai-transform'];
+const ADMIN_APIS = ['/api/courier/dispatch', '/api/courier/test', '/api/courier/live', '/api/courier/sandbox-check', '/api/ai-transform'];
 
 export function isAdminApi(path: string): boolean {
   return path === '/api/admin' || path.startsWith('/api/admin/') || ADMIN_APIS.includes(path) || ADMIN_APIS.some((p) => path.startsWith(`${p}/`));

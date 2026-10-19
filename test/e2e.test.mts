@@ -109,14 +109,18 @@ async function placeTestOrder(phone: string, quantity = 1) {
   return (await res.json()).order as { id: string; total: number };
 }
 
-test('dispatch: books a stored order (sandbox, labelled simulated); bad input is refused', { skip: !hasBuild }, async () => {
+test('dispatch: books a stored order (no keys: a practice booking, only on an explicit yes); bad input is refused', { skip: !hasBuild }, async () => {
   const cookie = await adminCookie();
   const order = await placeTestOrder('0507000001');
-  const ok = await post('/api/courier/dispatch', { orderId: order.id, provider: 'jeebly' }, { cookie });
+  const ask = await post('/api/courier/dispatch', { orderId: order.id, provider: 'jeebly' }, { cookie });
+  assert.equal(ask.status, 409, 'Test mode: the owner is asked first');
+  assert.equal((await ask.json()).needsTestConfirm, true);
+  const ok = await post('/api/courier/dispatch', { orderId: order.id, provider: 'jeebly', testBooking: true }, { cookie });
   assert.equal(ok.status, 200);
   const booked = await ok.json();
   assert.equal(booked.isSimulated, true);
-  assert.match(booked.awbNumber, /^GPY-DXB-\d{6}$/);
+  assert.equal(booked.testKind, 'practice');
+  assert.match(booked.awbNumber, /^PRACTICE-\d{6}$/);
   assert.equal(booked.order.status, 'confirmed');
   assert.equal(booked.rawResponse, undefined, 'carrier raw replies stay on the server');
 
@@ -186,12 +190,18 @@ test('backups: "Back up now" works for the admin only', { skip: !hasBuild }, asy
   assert.match(health.lastSummary, /orders/);
 });
 
-test('courier connection test masks keys in its reply', { skip: !hasBuild }, async () => {
+test("courier connection test reports Jeebly's own reply (or that it could not be reached), never the keys", { skip: !hasBuild }, async () => {
   const cookie = await adminCookie();
-  const res = await post('/api/courier/test', { provider: 'jeebly', settings: { jeebly: { apiKey: 'SUPERSECRETKEY1234', clientKey: 'CLIENTKEY9876' }, echo: {} } }, { cookie });
+  const res = await post('/api/courier/test', { provider: 'jeebly', settings: { jeebly: { sandboxApiKey: 'SUPERSECRETKEY1234', sandboxClientKey: 'CLIENTKEY9876' }, echo: {} } }, { cookie });
   const text = await res.text();
   assert.ok(!text.includes('SUPERSECRETKEY') && !text.includes('CLIENTKEY98'), 'keys are not echoed');
-  assert.match(text, /1234/);
+  const body = JSON.parse(text);
+  assert.equal(body.target, 'sandbox', 'Live mode off: the sandbox keys, on the sandbox');
+  assert.match(body.summary, body.reached ? /^Reached Jeebly's sandbox \(HTTP \d+\); Jeebly said: / : /^Could not reach Jeebly's sandbox/);
+  assert.doesNotMatch(text, /LIVE_ENDPOINT_ACTIVE/);
+  const eco = await (await post('/api/courier/test', { provider: 'echo', settings: {} }, { cookie })).json();
+  assert.equal(eco.reached, false);
+  assert.match(eco.summary, /isn't connected yet/);
 });
 
 test('AI studio accepts only real images', { skip: !hasBuild }, async () => {

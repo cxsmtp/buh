@@ -21,9 +21,12 @@ import {
   CreditCard,
   X,
 } from 'lucide-react';
-import { postJson, safeLinkHref, sendJson } from '@/lib/apiClient';
+import { postJson, safeHref, safeLinkHref, sendJson } from '@/lib/apiClient';
 import { awaitingWhatsApp, heldForWhatsApp, OrderTimeline, OrderWhatsAppCheck } from './OrderWhatsAppCheck';
 import { OrderBankTransfer, transferToCheck } from './OrderBankTransfer';
+import { DEFAULT_PACKAGING_GRAMS, shipmentWeight } from '@/lib/shipmentWeight';
+import { aed2, BLOCKED_MESSAGE, carrierLabel, ECO_LIVE_NOT_CONNECTED, jeeblyMode, LIVE_OFF_WARNING } from '@/lib/courierMode';
+import { EnterTrackingDialog } from './EnterTrackingDialog';
 
 interface AdminOrdersTabProps {
   orders: Order[];
@@ -33,7 +36,53 @@ interface AdminOrdersTabProps {
   /** The shop's bank account (Settings), for the "Send bank details on WhatsApp" message. */
   bank?: BankTransferDetails;
   shopName?: string;
+  /** Which courier keys are saved (Couriers), to say whether a booking is real or a test. */
+  courierSecretsSet?: Record<string, boolean>;
 }
+
+/** How a booking with this courier goes now (src/lib/courierMode.ts), for the dispatch dialog. */
+export type BookingMode = 'live' | 'sandbox' | 'practice' | 'blocked' | 'not_connected';
+export function bookingModeOf(provider: CourierProvider, settings: CourierSettings, secretsSet: Record<string, boolean> = {}): BookingMode {
+  if (provider === 'echo') return settings.echo.isLive ? 'not_connected' : 'practice';
+  return jeeblyMode({
+    isLive: settings.jeebly.isLive,
+    hasLiveKeys: Boolean(secretsSet['jeebly.apiKey'] && secretsSet['jeebly.clientKey']),
+    hasSandboxKeys: Boolean(secretsSet['jeebly.sandboxApiKey'] && secretsSet['jeebly.sandboxClientKey']),
+  });
+}
+
+/** A booking the carrier really has (not a test, not an unanswered attempt). */
+export function realBooking(order: Order): boolean {
+  return order.courier.bookingState === 'booked' && !order.courier.simulated && Boolean(order.courier.awbNumber);
+}
+
+/** The customer's WhatsApp update, from what is real: an AWB and link only for a real booking. */
+export function whatsAppUpdateText(order: Order, shopName = 'Beautiful UAE Home'): string {
+  const c = order.courier;
+  const pay = order.paymentMethod === 'cod' ? `Cash on delivery: AED ${aed2(order.total)}` : `Total: AED ${aed2(order.total)} (prepaid)`;
+  const lines = [`Dear ${order.customer.fullName}, greetings from ${shopName}!`, ''];
+  if (realBooking(order)) {
+    lines.push(`Your order ${order.id} is booked with ${carrierLabel(c.provider, c.carrierName)}.`, `Tracking number (AWB): ${c.awbNumber}`);
+    if (c.trackingUrl) lines.push(`Track it: ${c.trackingUrl}`);
+  } else if (order.status === 'dispatched' || order.status === 'out_for_delivery') {
+    lines.push(`Your order ${order.id} is with our delivery team. We will send the tracking number as soon as the courier has it.`);
+  } else {
+    lines.push(`Your order ${order.id} is confirmed and being prepared for delivery. We will send the tracking number once it is booked with the courier.`);
+  }
+  lines.push(pay, '', `Thank you for shopping with ${shopName}!`);
+  return lines.join('\n');
+}
+
+const MODE_TEXT: Record<BookingMode, { tone: 'success' | 'warning' | 'danger'; label: string; text: string }> = {
+  live: { tone: 'success', label: 'Live', text: 'Live mode: this books a real shipment with the courier.' },
+  sandbox: { tone: 'warning', label: 'Test (sandbox)', text: "Test mode: a test shipment in Jeebly's sandbox. Not a real shipment, and the customer sees no tracking." },
+  practice: { tone: 'warning', label: 'Test (practice)', text: 'Test mode: a practice booking. Nothing is sent to the courier, and the customer sees no tracking.' },
+  blocked: { tone: 'danger', label: 'Test – no test keys', text: BLOCKED_MESSAGE },
+  not_connected: { tone: 'danger', label: 'Not connected', text: ECO_LIVE_NOT_CONNECTED },
+};
+
+/** Statuses where a courier can be booked or a tracking number entered (src/lib/server/orders.ts). */
+const SHIPPING_STATUSES: Order['status'][] = ['confirmed', 'dispatched', 'out_for_delivery'];
 
 /** A card order's payment, as the hub shows it (only Stripe's word moves it: src/lib/server/payments.ts). */
 export function cardBadge(order: Order): { text: string; tone: 'success' | 'warning' | 'danger' | 'muted' } | null {
@@ -76,6 +125,7 @@ export const AdminOrdersTab: React.FC<AdminOrdersTabProps> = ({
   courierSettings,
   bank,
   shopName,
+  courierSecretsSet = {},
 }) => {
   const [busyOrderId, setBusyOrderId] = useState('');
 
@@ -93,6 +143,19 @@ export const AdminOrdersTab: React.FC<AdminOrdersTabProps> = ({
     setBusyOrderId('');
     if (ok && data.order) onOrderChanged(data.order);
     else alert(data.message || 'The order could not be updated.');
+    // Cancelled with a Jeebly booking: what Jeebly said (a refusal means: cancel it in the portal).
+    const carrier = (data as { carrierCancel?: { message?: string } }).carrierCancel;
+    if (ok && carrier?.message) alert(carrier.message);
+  };
+
+  /** "Refresh tracking": Jeebly's status and events now (shown only; the owner marks delivered). */
+  const [tracking, setTracking] = useState<Record<string, { lastStatus: string; events: Array<{ status: string; desc: string; hub: string; at: string }> } | { error: string }>>({});
+  const refreshTracking = async (order: Order) => {
+    setBusyOrderId(order.id);
+    const res = await fetch(`/api/admin/orders/${encodeURIComponent(order.id)}/carrier-tracking`, { credentials: 'same-origin' }).catch(() => null);
+    const data = res ? await res.json().catch(() => ({})) : {};
+    setBusyOrderId('');
+    setTracking((t) => ({ ...t, [order.id]: res?.ok && data.tracking ? data.tracking : { error: data.message || 'Could not reach Jeebly.' } }));
   };
 
   /** "Cancel & refund AED X": refunds what is left through Stripe, recorded from Stripe's answer; the order is cancelled. */
@@ -108,8 +171,9 @@ export const AdminOrdersTab: React.FC<AdminOrdersTabProps> = ({
     )
       return;
     setBusyOrderId(order.id);
-    const { ok, data } = await postJson<{ order?: Order; message?: string; code?: string }>(`/api/admin/orders/${encodeURIComponent(order.id)}/refund`, { amount });
+    const { ok, data } = await postJson<{ order?: Order; message?: string; code?: string; carrierCancel?: { message?: string } }>(`/api/admin/orders/${encodeURIComponent(order.id)}/refund`, { amount });
     setBusyOrderId('');
+    if (ok && data.carrierCancel?.message) alert(data.carrierCancel.message);
     if (ok && data.order) return onOrderChanged(data.order);
     // The keys now saved can't reach this payment (switched between test and live): the owner may
     // cancel it here and refund it in the Stripe dashboard of the account it was paid to.
@@ -151,11 +215,15 @@ export const AdminOrdersTab: React.FC<AdminOrdersTabProps> = ({
   };
   const [selectedOrderForConfirm, setSelectedOrderForConfirm] = useState<Order | null>(null);
   const [labelOrder, setLabelOrder] = useState<Order | null>(null);
+  const [trackingOrder, setTrackingOrder] = useState<Order | null>(null);
+  const modeFor = (provider: CourierProvider) => bookingModeOf(provider, courierSettings, courierSecretsSet);
+  const liveKeysSaved = Boolean(courierSecretsSet['jeebly.apiKey'] && courierSecretsSet['jeebly.clientKey']);
 
   // Confirmation Modal Form State
   const [chosenCourier, setChosenCourier] = useState<CourierProvider>('jeebly');
   const [pickupDate, setPickupDate] = useState<string>('');
-  const [weightKg, setWeightKg] = useState<number>(2.5);
+  // Kilograms as typed ('' while unknown: a size has no weight, never a silent default).
+  const [weightKg, setWeightKg] = useState<string>('');
   const [pieces, setPieces] = useState<number>(1);
   const [adminNotes, setAdminNotes] = useState<string>('');
   const [isDispatching, setIsDispatching] = useState<boolean>(false);
@@ -184,7 +252,8 @@ export const AdminOrdersTab: React.FC<AdminOrdersTabProps> = ({
 
     setChosenCourier(defaultProvider);
     setPickupDate(order.courier.pickupDate || new Date(Date.now() + 86400000).toISOString().split('T')[0]);
-    setWeightKg(order.courier.weightKg || 2.5);
+    const w = shipmentWeight(order, courierSettings.packagingGrams ?? DEFAULT_PACKAGING_GRAMS);
+    setWeightKg(w.kg !== null ? String(w.kg) : order.courier.weightKg > 0 ? String(order.courier.weightKg) : '');
     setPieces(order.courier.pieces || 1);
     setAdminNotes(order.adminNotes || '');
   };
@@ -192,6 +261,11 @@ export const AdminOrdersTab: React.FC<AdminOrdersTabProps> = ({
   const handleConfirmAndDispatch = async () => {
     if (!selectedOrderForConfirm) return;
     const o = selectedOrderForConfirm;
+    // The weight goes to Jeebly: never a guess (a practice booking sends nothing).
+    if (chosenCourier === 'jeebly' && ['live', 'sandbox'].includes(modeFor('jeebly')) && !(Number(weightKg) > 0)) {
+      alert('Enter the parcel weight (kg) first: some sizes in this order have no weight yet.');
+      return;
+    }
     if (
       o.paymentMethod === 'bank_transfer' &&
       o.paymentStatus !== 'verified' &&
@@ -207,12 +281,35 @@ export const AdminOrdersTab: React.FC<AdminOrdersTabProps> = ({
       orderId: selectedOrderForConfirm.id,
       provider: chosenCourier,
       pickupDate,
-      weightKg,
+      weightKg: weightKg.trim() === '' ? undefined : Number(weightKg),
       pieces,
       adminNotes,
     };
-    type DispatchReply = { success?: boolean; message?: string; code?: string; awbNumber?: string; isSimulated?: boolean; needsConfirm?: boolean; alreadyBooked?: boolean; order?: Order };
+    type DispatchReply = { success?: boolean; message?: string; code?: string; awbNumber?: string; isSimulated?: boolean; testKind?: string; needsConfirm?: boolean; needsTestConfirm?: boolean; alreadyBooked?: boolean; order?: Order };
+    const mode = modeFor(chosenCourier);
+    const courierName = carrierLabel(chosenCourier);
+    // Not Live: a test booking only on the owner's explicit yes (the server asks again if not given).
+    const confirmTest = () =>
+      window.confirm(
+        `${MODE_TEXT[mode === 'sandbox' ? 'sandbox' : 'practice'].text}\n\nMake a TEST booking for ${o.id}? Nothing reaches ${courierName} for real.` +
+          (chosenCourier === 'jeebly' && liveKeysSaved ? `\n\n${LIVE_OFF_WARNING}` : '')
+      );
+    if (mode === 'sandbox' || mode === 'practice') {
+      if (!confirmTest()) {
+        setIsDispatching(false);
+        return;
+      }
+      Object.assign(request, { testBooking: true });
+    }
     let { ok, status, data } = await postJson<DispatchReply>('/api/courier/dispatch', request);
+    if (status === 409 && data.needsTestConfirm) {
+      if (!confirmTest()) {
+        setIsDispatching(false);
+        return;
+      }
+      Object.assign(request, { testBooking: true });
+      ({ ok, status, data } = await postJson<DispatchReply>('/api/courier/dispatch', request));
+    }
     // The customer hasn't confirmed on WhatsApp (cash on delivery, no code): the owner may have
     // confirmed by phone, so ask; "ship anyway" is recorded in the order's history and the audit log.
     if (status === 409 && data.code === 'whatsapp_unconfirmed') {
@@ -241,14 +338,19 @@ export const AdminOrdersTab: React.FC<AdminOrdersTabProps> = ({
       return;
     }
     setSelectedOrderForConfirm(null);
+    if (data.isSimulated) {
+      alert(
+        `TEST booking made (${data.awbNumber}). It was NOT sent to ${courierName}: nobody will collect the parcel, and the customer sees no tracking.` +
+          (chosenCourier === 'jeebly'
+            ? '\n\nTo ship for real: run the Sandbox check and turn on Live mode in Couriers, then use “Book for real” on the order; or book in the Jeebly portal and use “Enter tracking number”.'
+            : '\n\nTo ship: book in the Eco Express portal and use “Enter tracking number” on the order.')
+      );
+    }
     setLabelOrder(data.order);
   };
 
   const sendWhatsAppUpdate = (order: Order) => {
-    const courierName = order.courier.provider === 'jeebly' ? 'Jeebly Logistics' : 'Eco Express Courier';
-    const text = encodeURIComponent(
-      `Dear ${order.customer.fullName}, Greetings from Beautiful UAE Home!\n\nYour luxury bedding order #${order.id} has been confirmed and scheduled for dispatch via ${courierName}.\n\nAirway Bill (AWB): ${order.courier.awbNumber}\nTrack shipment: ${order.courier.trackingUrl}\nTotal: AED ${order.total} (${order.paymentMethod === 'cod' ? 'Cash on Delivery' : 'Prepaid'})\n\nThank you for shopping with Beautiful UAE Home!`
-    );
+    const text = encodeURIComponent(whatsAppUpdateText(order, shopName || undefined));
     window.open(`https://wa.me/${order.customer.phone.replace(/[^0-9]/g, '')}?text=${text}`, '_blank');
   };
 
@@ -406,16 +508,27 @@ export const AdminOrdersTab: React.FC<AdminOrdersTabProps> = ({
 
                 {/* Courier Assignment Bar */}
                 <div className="bg-ivory rounded-xl p-2.5 flex flex-wrap items-center justify-between gap-2 text-xs border border-line/80">
-                  <div className="flex items-center gap-2">
+                  <div className="flex flex-wrap items-center gap-2 min-w-0">
                     <Truck className="w-4 h-4 text-gold" />
-                    <span className="text-ink-soft">Assigned Courier:</span>
-                    <strong className="text-ink capitalize">
-                      {order.courier.provider === 'jeebly' ? 'Jeebly Logistics' : 'Eco Express'}
+                    <span className="text-ink-soft">Courier:</span>
+                    <strong className="text-ink">
+                      {carrierLabel(order.courier.provider, order.courier.carrierName)}
                     </strong>
                     {order.courier.awbNumber && (
-                      <span className="font-mono text-[11px] text-warning bg-warning-soft px-2 py-0.5 rounded font-bold">
+                      <span className={`font-mono text-[11px] px-2 py-0.5 rounded font-bold break-anywhere ${order.courier.simulated ? 'text-ink-soft bg-sand line-through decoration-1' : 'text-warning bg-warning-soft'}`}>
                         AWB: {order.courier.awbNumber}
                       </span>
+                    )}
+                    {order.courier.simulated && (
+                      <span data-testid="test-booking-badge" className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-danger-soft text-danger border border-danger-line">
+                        Test booking – not sent to the courier
+                      </span>
+                    )}
+                    {realBooking(order) && order.courier.enteredByHand && (
+                      <span className="text-[10px] font-semibold px-2 py-0.5 rounded-full bg-sand text-ink-soft border border-line">Entered by hand</span>
+                    )}
+                    {order.courier.bookingState === 'uncertain' && (
+                      <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-warning-soft text-warning border border-warning-line">No answer from the courier – check its portal</span>
                     )}
                   </div>
 
@@ -424,6 +537,84 @@ export const AdminOrdersTab: React.FC<AdminOrdersTabProps> = ({
                     Pickup: <strong>{order.courier.pickupDate || 'Tomorrow'}</strong>
                   </div>
                 </div>
+
+                {/* Booked, or not yet: book with the courier, or type in a number from its portal */}
+                {SHIPPING_STATUSES.includes(order.status) && !realBooking(order) && (
+                  <div className="flex flex-wrap items-center gap-2 text-[11px]">
+                    {order.courier.simulated && modeFor('jeebly') !== 'live' ? (
+                      <span className="text-ink-muted">To book for real, run the Sandbox check and turn on Live mode in Couriers.</span>
+                    ) : (
+                      <button
+                        type="button"
+                        onClick={() => openConfirmationModal(order)}
+                        className="px-2 py-1 rounded-lg font-semibold border border-line-strong bg-ink text-paper hover:bg-ink-2"
+                      >
+                        {order.courier.simulated ? 'Book for real' : 'Book courier'}
+                      </button>
+                    )}
+                    <button
+                      type="button"
+                      onClick={() => setTrackingOrder(order)}
+                      className="px-2 py-1 rounded-lg font-semibold border border-line-strong bg-surface text-ink hover:bg-sand"
+                    >
+                      Enter tracking number
+                    </button>
+                  </div>
+                )}
+                {SHIPPING_STATUSES.includes(order.status) && realBooking(order) && (
+                  <div className="flex flex-wrap items-center gap-2 text-[11px]">
+                    {order.courier.provider === 'jeebly' && (
+                      <button
+                        type="button"
+                        disabled={busyOrderId === order.id}
+                        onClick={() => void refreshTracking(order)}
+                        className="px-2 py-1 rounded-lg font-semibold border border-line-strong bg-surface text-ink hover:bg-sand disabled:opacity-50"
+                      >
+                        Refresh tracking
+                      </button>
+                    )}
+                    <button
+                      type="button"
+                      onClick={() => setTrackingOrder(order)}
+                      className="px-2 py-1 rounded-lg font-semibold border border-line bg-surface text-ink-soft hover:bg-sand"
+                    >
+                      Change tracking number
+                    </button>
+                    {safeHref(order.courier.trackingUrl) && (
+                      <a href={safeHref(order.courier.trackingUrl)} target="_blank" rel="noopener noreferrer" className="inline-flex items-center gap-1 px-2 py-1 rounded-lg font-semibold border border-line bg-surface text-ink-soft hover:bg-sand">
+                        Tracking page <ExternalLink className="w-3 h-3" aria-hidden="true" />
+                      </a>
+                    )}
+                  </div>
+                )}
+
+                {tracking[order.id] && (
+                  <div data-testid="carrier-tracking" role="status" className="rounded-xl border border-line bg-ivory p-2.5 text-[11px] space-y-1">
+                    {'error' in tracking[order.id] ? (
+                      <span className="text-danger font-semibold">{(tracking[order.id] as { error: string }).error}</span>
+                    ) : (
+                      (() => {
+                        const t = tracking[order.id] as { lastStatus: string; events: Array<{ status: string; desc: string; hub: string; at: string }> };
+                        return (
+                          <>
+                            <div className="font-semibold text-ink">
+                              Jeebly: {t.lastStatus || 'no status yet'}
+                              {/^delivered$/i.test(t.lastStatus) && order.status !== 'delivered' ? ' — check it, then tap “Mark delivered”.' : ''}
+                            </div>
+                            <ul className="space-y-0.5 text-ink-soft">
+                              {t.events.slice(0, 4).map((e, i) => (
+                                <li key={i}>
+                                  {e.at ? new Date(e.at).toLocaleString() : ''} · {e.status}
+                                  {e.hub ? ` · ${e.hub}` : ''}
+                                </li>
+                              ))}
+                            </ul>
+                          </>
+                        );
+                      })()
+                    )}
+                  </div>
+                )}
 
                 {/* Something the owner must look at (a refund that failed, a booking after a cancel…) */}
                 {order.attention && order.attention.kind !== 'call_customer' && (
@@ -537,10 +728,10 @@ export const AdminOrdersTab: React.FC<AdminOrdersTabProps> = ({
                       <button
                         onClick={() => setLabelOrder(order)}
                         className="flex items-center gap-1.5 text-xs text-ink bg-sand hover:bg-sand-deep border border-line-strong font-semibold px-3 py-1.5 rounded-xl transition-colors"
-                        title="Print Courier AWB Label"
+                        title={order.courier.simulated ? 'Test label: not a real shipment' : 'Print the 4 × 6 in shipping label'}
                       >
                         <Printer className="w-3.5 h-3.5 text-gold" />
-                        <span>Print Shipping Label</span>
+                        <span>{order.courier.simulated ? 'Test label' : 'Print Shipping Label'}</span>
                       </button>
                     )}
 
@@ -589,7 +780,7 @@ export const AdminOrdersTab: React.FC<AdminOrdersTabProps> = ({
             <div className="sticky top-0 z-10 -mx-5 -mt-5 px-5 pt-4 pb-3 bg-surface flex items-start justify-between gap-2 border-b border-line">
               <div className="min-w-0">
                 <h3 id="confirm-order-title" className="font-serif text-xl text-ink">
-                  Confirm Order & Generate AWB Label
+                  {selectedOrderForConfirm.status === 'pending_confirmation' ? 'Confirm order & book the courier' : 'Book the courier'}
                 </h3>
                 <p className="text-xs text-ink-muted">
                   Order #{selectedOrderForConfirm.id} • {selectedOrderForConfirm.customer.fullName}
@@ -653,7 +844,7 @@ export const AdminOrdersTab: React.FC<AdminOrdersTabProps> = ({
                     {chosenCourier === 'jeebly' && <span className="text-gold-light">✓</span>}
                   </div>
                   <div className={`text-[10px] mt-0.5 ${chosenCourier === 'jeebly' ? 'text-gold-light' : 'text-ink-muted'}`}>
-                    Default for COD
+                    Default for COD · {MODE_TEXT[modeFor('jeebly')].label}
                   </div>
                 </button>
 
@@ -672,11 +863,29 @@ export const AdminOrdersTab: React.FC<AdminOrdersTabProps> = ({
                     {chosenCourier === 'echo' && <span className="text-gold-light">✓</span>}
                   </div>
                   <div className={`text-[10px] mt-0.5 ${chosenCourier === 'echo' ? 'text-gold-light' : 'text-ink-muted'}`}>
-                    Default for Prepaid
+                    Default for Prepaid · {MODE_TEXT[modeFor('echo')].label}
                   </div>
                 </button>
               </div>
             </div>
+
+            {/* Live or Test: said plainly, before anything is booked */}
+            {(() => {
+              const mode = modeFor(chosenCourier);
+              const m = MODE_TEXT[mode];
+              return (
+                <div data-testid="booking-mode" role={m.tone === 'success' ? 'status' : 'alert'} className={`p-3 rounded-2xl border text-xs space-y-1 ${TONES[m.tone]}`}>
+                  <div className="font-bold">{carrierLabel(chosenCourier)}: {m.label} mode</div>
+                  <p>{m.text}</p>
+                  {chosenCourier === 'jeebly' && mode !== 'live' && liveKeysSaved && <p className="font-semibold">{LIVE_OFF_WARNING}</p>}
+                  {chosenCourier === 'jeebly' && (mode === 'live' || mode === 'sandbox') && (() => {
+                    const j = courierSettings.jeebly;
+                    const missing = [!j.pickupPhone && 'phone', !j.pickupUnit && 'unit', !j.pickupBuilding && 'building', !j.pickupArea && 'area', !j.pickupLandmark && 'landmark'].filter(Boolean);
+                    return missing.length ? <p className="font-semibold">Add your pickup {missing.join(', ')} in Couriers first: Jeebly needs them to collect the parcel.</p> : null;
+                  })()}
+                </div>
+              );
+            })()}
 
             {/* Shipment Dispatch Parameters */}
             <div className="grid grid-cols-3 gap-2 text-xs">
@@ -693,14 +902,19 @@ export const AdminOrdersTab: React.FC<AdminOrdersTabProps> = ({
               </div>
 
               <div>
-                <label className="block text-ink-soft font-semibold mb-1">
-                  Weight (KG)
+                <label htmlFor="dispatch-weight" className="block text-ink-soft font-semibold mb-1">
+                  Weight (kg)
                 </label>
                 <input
+                  id="dispatch-weight"
                   type="number"
                   step="0.1"
+                  min={0.1}
+                  inputMode="decimal"
                   value={weightKg}
-                  onChange={(e) => setWeightKg(Number(e.target.value))}
+                  placeholder="kg"
+                  aria-describedby="dispatch-weight-breakdown"
+                  onChange={(e) => setWeightKg(e.target.value)}
                   className="w-full px-2.5 py-1.5 rounded-xl border border-line-strong text-xs"
                 />
               </div>
@@ -716,6 +930,17 @@ export const AdminOrdersTab: React.FC<AdminOrdersTabProps> = ({
                   className="w-full px-2.5 py-1.5 rounded-xl border border-line-strong text-xs"
                 />
               </div>
+
+              {(() => {
+                const w = shipmentWeight(selectedOrderForConfirm, courierSettings.packagingGrams ?? DEFAULT_PACKAGING_GRAMS);
+                const typed = Number(weightKg);
+                return (
+                  <p id="dispatch-weight-breakdown" data-testid="weight-breakdown" className={`col-span-3 text-[11px] ${w.missing.length ? 'text-warning font-semibold' : 'text-ink-soft'}`}>
+                    {w.missing.length ? `${w.breakdown}. Enter the weight above for now.` : w.breakdown}
+                    {weightKg.trim() !== '' && typed > 0 && (w.kg === null || Math.abs(typed - w.kg) > 0.001) ? ` · Booking with ${typed} kg → ${Math.max(1, Math.ceil(typed))} kg for Jeebly.` : ''}
+                  </p>
+                );
+              })()}
 
               <div className="col-span-3">
                 <label className="block text-ink-soft font-semibold mb-1">
@@ -733,21 +958,46 @@ export const AdminOrdersTab: React.FC<AdminOrdersTabProps> = ({
 
             {/* Submit Action */}
             <div className="pt-2">
-              <button
-                type="button"
-                disabled={isDispatching}
-                onClick={handleConfirmAndDispatch}
-                className="w-full bg-ink hover:bg-ink text-paper font-bold text-xs py-3.5 rounded-xl shadow-lg flex items-center justify-center gap-2 transition-all disabled:opacity-50"
-              >
-                {isDispatching ? (
-                  <span>Connecting to Courier API & Booking Dispatch...</span>
-                ) : (
-                  <>
-                    <CheckCircle2 className="w-4 h-4 text-gold-light" />
-                    <span>Confirm Order & Dispatch to {chosenCourier === 'jeebly' ? 'Jeebly' : 'Eco Express'}</span>
-                  </>
-                )}
-              </button>
+              {(() => {
+                const mode = modeFor(chosenCourier);
+                const cannot = mode === 'blocked' || mode === 'not_connected';
+                const test = mode === 'sandbox' || mode === 'practice';
+                return (
+                  <button
+                    type="button"
+                    disabled={isDispatching || cannot}
+                    onClick={handleConfirmAndDispatch}
+                    className={`w-full text-paper font-bold text-xs py-3.5 rounded-xl shadow-lg flex items-center justify-center gap-2 transition-all disabled:opacity-50 focus:outline-none focus-visible:ring-2 focus-visible:ring-gold focus-visible:ring-offset-2 ${test ? 'bg-warning' : 'bg-ink'}`}
+                  >
+                    {isDispatching ? (
+                      <span>Booking with {carrierLabel(chosenCourier)}…</span>
+                    ) : (
+                      <>
+                        <CheckCircle2 className="w-4 h-4 text-gold-light" />
+                        <span>
+                          {cannot
+                            ? `Cannot book with ${carrierLabel(chosenCourier)} here`
+                            : test
+                            ? `Make a TEST booking (not sent to ${carrierLabel(chosenCourier)})`
+                            : `${selectedOrderForConfirm.status === 'pending_confirmation' ? 'Confirm & book' : 'Book'} with ${carrierLabel(chosenCourier)} (real shipment)`}
+                        </span>
+                      </>
+                    )}
+                  </button>
+                );
+              })()}
+              {SHIPPING_STATUSES.includes(selectedOrderForConfirm.status) && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    setTrackingOrder(selectedOrderForConfirm);
+                    setSelectedOrderForConfirm(null);
+                  }}
+                  className="mt-2 w-full min-h-10 text-xs font-semibold text-ink-soft underline rounded-xl focus:outline-none focus-visible:ring-2 focus-visible:ring-gold"
+                >
+                  Booked it in the courier&apos;s portal? Enter tracking number
+                </button>
+              )}
             </div>
           </div>
         </div>
@@ -758,6 +1008,19 @@ export const AdminOrdersTab: React.FC<AdminOrdersTabProps> = ({
         <ShippingLabelModal
           order={labelOrder}
           onClose={() => setLabelOrder(null)}
+          shopName={shopName}
+          pickup={courierSettings.jeebly}
+        />
+      )}
+
+      {trackingOrder && (
+        <EnterTrackingDialog
+          order={trackingOrder}
+          onClose={() => setTrackingOrder(null)}
+          onSaved={(o) => {
+            onOrderChanged(o);
+            setTrackingOrder(null);
+          }}
         />
       )}
     </div>

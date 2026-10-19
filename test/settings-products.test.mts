@@ -21,7 +21,7 @@ test('keys are write-only: blank keeps, a value replaces, null clears; reads nev
   await settings.updateSettings('courier', { jeebly: { apiKey: 'KEY-1', clientKey: 'C-1' }, echo: { apiKey: 'E-1' } });
   let view = settings.adminView('courier');
   assert.equal(view.value.jeebly.apiKey, '');
-  assert.deepEqual(view.secretsSet, { 'jeebly.apiKey': true, 'jeebly.clientKey': true, 'echo.apiKey': true });
+  assert.deepEqual(view.secretsSet, { 'jeebly.apiKey': true, 'jeebly.clientKey': true, 'jeebly.sandboxApiKey': false, 'jeebly.sandboxClientKey': false, 'echo.apiKey': true });
   await settings.updateSettings('courier', { jeebly: { apiKey: '', pickupLocationName: 'Studio' }, echo: {} });
   assert.equal(settings.getSettings('courier').jeebly.apiKey, 'KEY-1', 'blank keeps');
   await settings.updateSettings('courier', { jeebly: { apiKey: 'KEY-2' }, echo: { apiKey: null } });

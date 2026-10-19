@@ -258,22 +258,25 @@ fieldset {
   }
 }
 
-/* Print styles for Shipping Labels */
+/* Shipping label (src/components/admin/ShippingLabelModal.tsx): while it is open, printing gives only
+   the label, at 4 × 6 in (the modal adds the @page size). Other pages print as they are. */
+#shipping-label-print {
+  display: none;
+}
 @media print {
-  body * {
-    visibility: hidden;
+  body:has(#shipping-label-print) > *:not(#shipping-label-print) {
+    display: none !important;
   }
-  #printable-shipping-label,
-  #printable-shipping-label * {
-    visibility: visible;
+  #shipping-label-print {
+    display: block;
   }
   #printable-shipping-label {
-    position: absolute;
-    left: 0;
-    top: 0;
-    width: 100%;
-    margin: 0;
-    padding: 10px;
+    width: 4in;
+    height: 6in;
+    overflow: hidden;
+    break-inside: avoid;
+    -webkit-print-color-adjust: exact;
+    print-color-adjust: exact;
   }
 }
 

@@ -32,6 +32,8 @@ export async function POST(request: Request) {
       actor: session.email,
       // true once the owner has answered "ship anyway" for an order not confirmed on WhatsApp
       shipUnconfirmed: body.shipUnconfirmed === true,
+      // true once the owner has said yes to a test (sandbox or practice) booking
+      testBooking: body.testBooking === true,
     });
     if (outcome.attempt) {
       audit('courier.dispatch', { by: session.email, orderId, provider, rebook: body.rebook === true, ...outcome.attempt });

@@ -1,56 +1,13 @@
 import crypto from 'node:crypto';
 import { Order, CourierSettings } from '@/types';
+import { ECO_LIVE_NOT_CONNECTED } from './courierMode';
 
-/** `uncertain`: no answer from the carrier, so the shipment may or may not exist. */
-function liveFailure(message: string, httpStatus?: number, uncertain = false): EchoApiResponse {
-  return { success: false, awbNumber: '', trackingNumber: '', trackingUrl: '', message, isSimulated: false, httpStatus, uncertain };
-}
-
-export interface EcoExpressCreateShipmentPayload {
-  account_No: string;
-  service_type: 'NDD' | 'RTS';
-  product_type: 'PT1' | 'PT2';
-  reference_number: string;
-  cod?: number;
-  cod_currency?: string;
-  special_instruction?: string;
-  invoice_value: number;
-  invoice_currency: string;
-  invoice_date: string;
-  shipper_details: {
-    company_name: string;
-    name: string;
-    address: string;
-    country: string;
-    state: string;
-    city: string;
-    mobile_no_1: string;
-    mobile_no_2?: string;
-  };
-  consignee_details: {
-    company_name: string;
-    name: string;
-    address: string;
-    country: string;
-    state: string;
-    city: string;
-    mobile_no_1: string;
-    mobile_no_2?: string;
-  };
-  package_details: {
-    description: string;
-    quantity: number;
-    weight: number;
-  }[];
-  invoice_items?: {
-    description: string;
-    hsCode?: string;
-    origin?: string;
-    units: number;
-    unitPrice: number;
-    unitOfMeasurement: string;
-  }[];
-}
+/**
+ * Eco Express. Its published API spec (ecoexpress-api.json) points at an Apiary MOCK server, not
+ * Eco Express itself, so there is no real booking connection yet: live mode refuses (book in the
+ * Eco portal, then "Enter tracking number" on the order), and a test booking is an offline
+ * practice one. Nothing, keys included, is sent to the mock: its answers are not shipments.
+ */
 
 export interface EchoApiResponse {
   success: boolean;
@@ -59,125 +16,27 @@ export interface EchoApiResponse {
   trackingUrl: string;
   message: string;
   isSimulated: boolean;
+  testKind?: 'sandbox' | 'practice';
   httpStatus?: number;
-  rawPayload?: Record<string, unknown>;
   rawResponse?: Record<string, unknown>;
   uncertain?: boolean;
+  /** Eco live mode: not connected, nothing was sent. */
+  notConnected?: boolean;
 }
 
-export async function createEchoShipment(
-  order: Order,
-  settings: CourierSettings['echo']
-): Promise<EchoApiResponse> {
-  const invoiceDate = new Date().toISOString().split('T')[0];
-  const cleanPhone = (order.customer.phone || '').replace(/[^0-9]/g, '').replace(/^971/, '');
-  const isCod = order.paymentMethod === 'cod';
-
-  const payload: EcoExpressCreateShipmentPayload = {
-    account_No: settings.accountId || 'ECH-DXB-91402',
-    service_type: 'NDD',
-    product_type: 'PT2',
-    reference_number: order.id,
-    cod: isCod ? order.total : 0,
-    cod_currency: 'AED',
-    special_instruction: order.adminNotes || 'Luxury UAE Home Bedding - Fragile handling',
-    invoice_value: order.total,
-    invoice_currency: 'AED',
-    invoice_date: invoiceDate,
-    shipper_details: {
-      company_name: 'Beautiful UAE Home Trading LLC',
-      name: 'BUHome Fulfillment Central',
-      address: 'Studio 08, Alserkal Creative Zone, Al Quoz',
-      country: 'UNITED ARAB EMIRATES',
-      state: 'DUBAI',
-      city: 'AL QUOZ',
-      mobile_no_1: '508294110',
-    },
-    consignee_details: {
-      company_name: order.customer.fullName,
-      name: order.customer.fullName,
-      address: `${order.customer.buildingVilla}, ${order.customer.flatVillaNo}, ${order.customer.streetAddress}`,
-      country: 'UNITED ARAB EMIRATES',
-      state: (order.customer.emirate || 'DUBAI').toUpperCase(),
-      city: (order.customer.area || 'DUBAI').toUpperCase(),
-      mobile_no_1: cleanPhone || '500000000',
-    },
-    package_details: [
-      {
-        description: `Handcrafted Bedding: ${order.items.map((i) => `${i.quantity}x ${i.title} [${i.profileName}]`).join(', ')}`,
-        quantity: order.items.reduce((acc, curr) => acc + curr.quantity, 0),
-        weight: order.courier?.weightKg || 2.5,
-      },
-    ],
-    invoice_items: order.items.map((item) => ({
-      description: item.title,
-      units: item.quantity,
-      unitPrice: item.unitPrice,
-      unitOfMeasurement: 'SET',
-      origin: 'UNITED ARAB EMIRATES',
-    })),
-  };
-
-  // Primary: Live Apiary mock endpoint from official documentation; Secondary: staging server
-  const endpoint = 'https://private-anon-c02b65ac7e-ecoexpress.apiary-mock.com/connect/client/order/shipment/create';
-
-  try {
-    const response = await fetch(endpoint, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'Authorization': `Bearer ${settings.apiKey || 'test_token'}`,
-      },
-      body: JSON.stringify(payload),
-      redirect: 'manual',
-      signal: AbortSignal.timeout(15_000),
-    });
-
-    const data = await response.json().catch(() => null);
-
-    if (response.ok && data) {
-      const liveAwb = data.data?.[0]?.awbNo || data.awb ? String(data.data?.[0]?.awbNo || data.awb) : '';
-      if (!liveAwb) {
-        if (settings.isLive) return liveFailure('Eco Express accepted the request but returned no AWB number.', response.status);
-      } else {
-      return {
-        success: true,
-        awbNumber: liveAwb,
-        trackingNumber: liveAwb,
-        trackingUrl: `https://ecoexpress.ae/tracking?awb=${encodeURIComponent(liveAwb)}`,
-        message: 'Shipment created successfully via Eco Express Merchant API.',
-        isSimulated: false,
-        httpStatus: response.status,
-        rawResponse: data,
-      };
-      }
-    }
-    if (settings.isLive) {
-      // Live mode never invents an AWB the carrier does not know.
-      return liveFailure(`Eco Express did not accept the shipment (HTTP ${response.status}).`, response.status);
-    }
-  } catch (err) {
-    console.warn('Eco Express API call error:', (err as Error).message);
-    if (settings.isLive) {
-      return liveFailure(
-        `No answer from Eco Express (timeout or network), so the shipment may or may not have been created. Check the Eco Express portal for reference ${order.id} before booking again.`,
-        undefined,
-        true
-      );
-    }
+export async function createEchoShipment(order: Order, settings: CourierSettings['echo']): Promise<EchoApiResponse> {
+  void order;
+  if (settings.isLive) {
+    return { success: false, awbNumber: '', trackingNumber: '', trackingUrl: '', message: ECO_LIVE_NOT_CONNECTED, isSimulated: false, notConnected: true };
   }
-
-  // Sandbox only: a clearly simulated AWB so the flow can be tried end to end.
-  const randomSuffix = crypto.randomInt(100000, 1000000);
-  const prefix = order.customer.emirate === 'Abu Dhabi' ? 'ECH-AUH' : 'ECH-DXB';
-  const awbNumber = `${prefix}-${randomSuffix}`;
-
+  const awbNumber = `PRACTICE-${crypto.randomInt(100000, 1000000)}`;
   return {
     success: true,
     awbNumber,
     trackingNumber: awbNumber,
-    trackingUrl: `https://ecoexpress.ae/tracking?awb=${awbNumber}`,
-    message: 'Sandbox: simulated Eco Express AWB (no live booking was made). Turn on live mode to book with the carrier.',
+    trackingUrl: '',
+    message: 'Practice booking: nothing was sent to Eco Express. This is not a shipment.',
     isSimulated: true,
+    testKind: 'practice',
   };
 }

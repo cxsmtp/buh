@@ -336,7 +336,7 @@ test('shipping an unconfirmed COD order takes an explicit "ship anyway", recorde
   assert.equal(await codeOf(() => dispatchOrder({ orderId: o.id, provider: 'jeebly', rebook: false, actor: 'owner@shop.test' })), 'whatsapp_unconfirmed');
   assert.equal(orders.getOrder(o.id)!.courier.awbNumber, '', 'nothing booked');
   const before = auditEntries().length;
-  const booked = await dispatchOrder({ orderId: o.id, provider: 'jeebly', rebook: false, actor: 'owner@shop.test', shipUnconfirmed: true });
+  const booked = await dispatchOrder({ orderId: o.id, provider: 'jeebly', rebook: false, actor: 'owner@shop.test', shipUnconfirmed: true, testBooking: true });
   assert.equal(booked.status, 200);
   const added = auditEntries().slice(before);
   assert.equal(added[0].action, 'order.ship_unconfirmed', 'recorded before the booking');

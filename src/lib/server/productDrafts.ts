@@ -64,6 +64,7 @@ export function cleanDraft(input: unknown): Record<string, unknown> {
           otherPieces: s(o.otherPieces, 80),
           piecesIncluded: n(o.piecesIncluded, 1, 20) ?? 1,
           priceDelta: n(o.priceDelta, -10_000, 10_000) ?? 0,
+          weightGrams: n(o.weightGrams, 1, 50_000) === undefined ? undefined : Math.round(o.weightGrams as number),
         };
       })
     : [];

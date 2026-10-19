@@ -445,7 +445,7 @@ export function AdminApp() {
           />
           {adminLoadError && <p role="alert" className="text-xs text-danger bg-danger-soft border border-danger-line rounded-xl px-3 py-2">{adminLoadError}</p>}
 
-          {adminTab === 'orders' && <AdminOrdersTab orders={orders} onOrderChanged={(changed) => { setOrders((prev) => prev.map((o) => (o.id === changed.id ? changed : o))); void loadAdminData(); }} courierSettings={adminSettings.courier.value} bank={bankDetails} shopName={brandSettings.storeName} />}
+          {adminTab === 'orders' && <AdminOrdersTab orders={orders} onOrderChanged={(changed) => { setOrders((prev) => prev.map((o) => (o.id === changed.id ? changed : o))); void loadAdminData(); }} courierSettings={adminSettings.courier.value} courierSecretsSet={adminSettings.courier.secretsSet} bank={bankDetails} shopName={brandSettings.storeName} />}
 
           {(adminTab === 'add-product' || adminTab === 'inventory') && (
             <AdminInventoryTab
@@ -560,6 +560,7 @@ export function AdminApp() {
                       settings={adminSettings.courier.value}
                       secretsSet={adminSettings.courier.secretsSet}
                       onUpdateSettings={(s: CourierSettings) => saveSettings('courier', s)}
+                      onReload={() => void reloadAll()}
                       auto={autoSaveHooks}
                     />
                   ),

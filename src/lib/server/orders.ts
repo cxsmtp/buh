@@ -20,6 +20,7 @@ import { logEvent as logEvent_ } from './log';
 import { issuePayLink, payPathOf } from './bankPay';
 import { waMeLink } from '@/lib/whatsappConfirm';
 import { validatePhone } from '@/lib/otpService';
+import { DEFAULT_PACKAGING_GRAMS, shipmentWeight } from '@/lib/shipmentWeight';
 
 /**
  * Orders, stored on the server. Everything that decides what a customer pays
@@ -570,6 +571,8 @@ export function placeOrder(input: unknown, context: PlaceOrderContext = {}): Pla
           unitPrice: aed(unitFils),
           quantity: line.quantity,
           totalPrice: aed(unitFils * line.quantity),
+          // The size's packed weight now (a snapshot: editing the product later does not change this order).
+          ...(Number(profile.weightGrams) > 0 ? { weightGrams: Math.round(Number(profile.weightGrams)) } : {}),
         });
       }
 
@@ -610,7 +613,8 @@ export function placeOrder(input: unknown, context: PlaceOrderContext = {}): Pla
           status: 'Order placed – awaiting confirmation',
           // Same day: collected today (UAE date); otherwise tomorrow.
           pickupDate: uaeDate(Date.now(), deliveryOption === 'same_day' ? 0 : 1),
-          weightKg: Math.min(500, 2.5 * items.reduce((s, i) => s + i.quantity, 0)),
+          // From the sizes' weights and the packaging allowance; 0 (unknown, entered when booking) when a size has none.
+          weightKg: Math.min(500, shipmentWeight({ items }, courierSettings.packagingGrams ?? DEFAULT_PACKAGING_GRAMS).kg ?? 0),
           pieces: items.reduce((s, i) => s + i.quantity, 0),
           labelGenerated: false,
           codAmountCollected: paymentMethod === 'cod' ? aed(totalFils) : 0,
@@ -1348,6 +1352,8 @@ export function recordBooking(id: string, actor: string, booking: Partial<Order[
     const order = getOrder(id);
     if (!order) throw new HttpError(404, 'Order not found.');
     const { notes, ...courier } = booking;
+    // A test or practice result never clears what a live attempt left (an unanswered one may exist).
+    if (courier.bookingState === undefined) delete courier.bookingState;
     const cardState = order.paymentMethod === 'online_card' ? order.card?.state : undefined;
     const why = order.status === 'cancelled' ? 'the order was cancelled' : cardState !== undefined && cardState !== 'paid' ? `its card payment is ${cardState === 'refund_pending' || cardState === 'refunded' ? 'refunded' : 'not paid'}` : '';
     order.courier = { ...order.courier, ...courier };
@@ -1369,6 +1375,112 @@ export function recordBooking(id: string, actor: string, booking: Partial<Order[
   });
   if (raced) notifyAttention(saved);
   return saved;
+}
+
+/** Courier choices for a tracking number typed in by the owner. */
+export const HAND_CARRIERS = ['jeebly', 'echo', 'other'] as const;
+export type HandCarrier = (typeof HAND_CARRIERS)[number];
+const HAND_STATUSES: OrderStatus[] = ['confirmed', 'dispatched', 'out_for_delivery'];
+export const AWB_PATTERN = /^[A-Za-z0-9-]{4,40}$/;
+const CARRIER_NAME = /^[\p{L}\p{N}][\p{L}\p{N} &.'-]{1,39}$/u;
+
+/**
+ * "Enter tracking number": the owner booked in the carrier's own portal (the API is not set up,
+ * or another courier) and types the real AWB in. Checked here: the order's status, the AWB, the
+ * courier, and an https link already vetted by the route (assertPublicHttpsUrl). A real booking
+ * already on the order is replaced only with `replace` (the owner's confirm). Written to the audit
+ * log before it counts; the customer's Track Order then shows it.
+ */
+export function enterTracking(
+  id: string,
+  actor: string,
+  input: { carrier: HandCarrier; carrierName?: string; awb: string; trackingUrl?: string; replace?: boolean }
+): Order {
+  if (!HAND_CARRIERS.includes(input.carrier)) throw new HttpError(400, 'Choose Jeebly, Eco Express or another courier.');
+  const awb = String(input.awb ?? '').trim();
+  if (!AWB_PATTERN.test(awb)) throw new HttpError(400, 'The tracking number is 4 to 40 letters, digits or dashes.');
+  const carrierName = input.carrier === 'other' ? String(input.carrierName ?? '').trim() : '';
+  if (input.carrier === 'other' && !CARRIER_NAME.test(carrierName)) throw new HttpError(400, "Type the courier's name (2 to 40 letters).");
+  const trackingUrl = String(input.trackingUrl ?? '').trim();
+  if (trackingUrl && (!trackingUrl.startsWith('https://') || trackingUrl.length > 500)) throw new HttpError(400, 'The tracking link must start with https://.');
+
+  const saved = auditedTransaction((auditFn) => {
+    const order = getOrder(id);
+    if (!order) throw new HttpError(404, 'Order not found.');
+    if (!HAND_STATUSES.includes(order.status)) {
+      throw new HttpError(409, `A tracking number can be entered for a confirmed, dispatched or out-for-delivery order; ${order.id} is ${order.status.replace(/_/g, ' ')}.`);
+    }
+    const before = order.courier;
+    const hadReal = before.bookingState === 'booked' && !before.simulated && Boolean(before.awbNumber);
+    if (hadReal && before.awbNumber === awb && (before.trackingUrl || '') === trackingUrl && (before.carrierName || '') === carrierName) return order; // the same entry twice
+    if (hadReal && input.replace !== true) {
+      const name = before.provider === 'manual' ? before.carrierName || 'a courier' : before.provider === 'jeebly' ? 'Jeebly' : 'Eco Express';
+      throw new HttpError(
+        409,
+        `${order.id} is already booked with ${name} (AWB ${before.awbNumber}). Replace it with ${awb}? Cancel the old booking with the courier if it is not used.`,
+        {},
+        { code: 'tracking_replace', needsReplaceConfirm: true, current: before.awbNumber }
+      );
+    }
+    const provider = input.carrier === 'other' ? 'manual' : input.carrier;
+    order.courier = {
+      ...before,
+      provider,
+      carrierName,
+      awbNumber: awb,
+      trackingUrl,
+      // A Jeebly AWB from Jeebly's portal is a live shipment: its label, tracking and cancel work through the API.
+      carrierEnv: provider === 'jeebly' ? 'live' : undefined,
+      status: 'Booked with the carrier (entered by hand)',
+      bookingState: 'booked',
+      simulated: false,
+      testKind: undefined,
+      enteredByHand: true,
+      labelGenerated: true,
+      dispatchedAt: before.dispatchedAt || new Date().toISOString(),
+    };
+    auditFn(hadReal ? 'order.tracking_replaced' : 'order.tracking_entered', {
+      by: actor,
+      orderId: id,
+      provider,
+      ...(carrierName ? { carrierName } : {}),
+      awb,
+      link: Boolean(trackingUrl),
+      ...(hadReal ? { replaced: before.awbNumber } : {}),
+      ...(before.simulated && before.awbNumber ? { replacedTest: before.awbNumber } : {}),
+    });
+    writeOrder(order);
+    logEvent(id, actor, 'tracking_entered', { provider, awb, ...(hadReal ? { replaced: before.awbNumber } : {}) });
+    return getOrder(id)!;
+  });
+  bump('orders');
+  return saved;
+}
+
+/**
+ * The carrier's answer to cancelling a booking (src/lib/server/jeeblyOps.ts, audited there first): on
+ * the order's courier status and history. A real booking Jeebly did not cancel flags the order for
+ * the owner (cancel it in the portal).
+ */
+export function noteCarrierCancel(id: string, actor: string, cancelled: boolean, message: string): void {
+  let flagged = false as boolean;
+  inTransaction(() => {
+    const order = getOrder(id);
+    if (!order) return;
+    order.courier.status = cancelled ? 'Cancelled with the carrier' : 'Not cancelled with the carrier – cancel it in the portal';
+    const uncertain = order.courier.bookingState === 'uncertain';
+    if (cancelled) order.courier.bookingState = undefined;
+    writeOrder(order);
+    logEvent(id, actor, 'carrier_cancel', { cancelled, awb: order.courier.awbNumber });
+    // Jeebly confirmed the cancel: a "booked after it was cancelled" flag has nothing left to do.
+    if (cancelled && order.attention?.kind === 'booked_after_cancel') getDb().prepare('UPDATE orders SET needs_attention = NULL WHERE id = ?').run(id);
+    if (!cancelled && (!order.courier.simulated || uncertain)) {
+      setAttention(id, 'booked_after_cancel', message.slice(0, 400));
+      flagged = true;
+    }
+  });
+  if (flagged) notifyAttention(getOrder(id));
+  else bump('orders');
 }
 
 /** Flag an order for the owner (shown in the hub until "Mark as handled"). Inside the caller's transaction. */
@@ -1667,6 +1779,12 @@ export function recordCardRefund(orderId: string, refund: { id: string; status: 
   return result;
 }
 
+/** A real (or unanswered) Jeebly booking that cancelling the order must cancel with Jeebly too. */
+export function jeeblyToCancel(order: Order): boolean {
+  const c = order.courier;
+  return c.provider === 'jeebly' && ((c.bookingState === 'booked' && Boolean(c.awbNumber) && !c.simulated) || c.bookingState === 'uncertain');
+}
+
 /**
  * Stripe says a charge was refunded (its webhook; also refunds made in the Stripe dashboard).
  * A full refund marks the order refunded, once; a partial one is only noted (the shop refunds in full).
@@ -1699,6 +1817,11 @@ export function markCardRefunded(ref: string, charge: { amount: number; amountRe
       releaseStock(order, 'cancelled');
       order.status = 'cancelled';
       writeOrder(order);
+      // Its Jeebly booking is cancelled with Jeebly next (once Stripe is answered: the webhook
+      // route), flagged until Jeebly confirms, so a cancel that never runs is not missed.
+      if (jeeblyToCancel(order)) {
+        setAttention(order.id, 'booked_after_cancel', `Refunded in Stripe, so the order was cancelled: its Jeebly booking${order.courier.awbNumber ? ` (AWB ${order.courier.awbNumber})` : ''} is being cancelled with Jeebly. If this note stays, check the Jeebly portal for reference ${order.id} and cancel it there.`);
+      }
     }
     logEvent(order.id, actor, 'card_refunded', { amount: aed(charge.amountRefunded) });
     auditOrThrow('payment.refunded', { orderId: order.id, ref, amountFils: charge.amountRefunded, via: actor, ...(event ? { event: event.id } : {}) });
@@ -1840,15 +1963,31 @@ function whatsAppView(check: NonNullable<Order['whatsappCheck']>) {
 }
 
 function trackingView(order: Order) {
-  // The courier's name is not shown to customers (the tracking link is enough).
+  const c = order.courier;
+  // Only a real booking reaches the customer: a test (sandbox or practice) AWB is not a shipment.
+  const real = !c.simulated && c.bookingState !== 'uncertain' && Boolean(c.awbNumber);
   return {
-    awbNumber: order.courier.simulated ? '' : order.courier.awbNumber,
-    trackingUrl: order.courier.simulated ? '' : order.courier.trackingUrl,
-    status: order.courier.status,
-    dispatchedAt: order.courier.dispatchedAt,
-    deliveredAt: order.courier.deliveredAt,
+    awbNumber: real ? c.awbNumber : '',
+    trackingUrl: real ? c.trackingUrl : '',
+    // The courier's name is not shown to customers (the tracking link is enough), except with a
+    // link the owner typed in themselves (another courier's page needs its name).
+    ...(real && c.enteredByHand && c.trackingUrl ? { carrier: c.provider === 'manual' ? c.carrierName || '' : c.provider === 'jeebly' ? 'Jeebly' : 'Eco Express' } : {}),
+    status: real ? (order.status === 'delivered' ? 'Delivered' : 'Booked with the courier') : CUSTOMER_STATUS[order.status],
+    dispatchedAt: c.dispatchedAt,
+    deliveredAt: c.deliveredAt,
   };
 }
+
+/** What Track Order says about delivery while there is no real tracking number. */
+const CUSTOMER_STATUS: Record<OrderStatus, string> = {
+  pending_payment: 'Waiting for payment',
+  pending_confirmation: 'Order placed – awaiting confirmation',
+  confirmed: 'Confirmed – being prepared for delivery',
+  dispatched: 'With our delivery team',
+  out_for_delivery: 'Out for delivery',
+  delivered: 'Delivered',
+  cancelled: 'Cancelled',
+};
 
 /**
  * Track Order: needs both the order number and the phone number on it (the one on it now, or one

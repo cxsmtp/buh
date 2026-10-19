@@ -1,5 +1,21 @@
 # Changelog
 
+## BUH-02.14.00 — 2026-10-19 08:40 UTC · [#32](https://github.com/cxsmtp/buh/pull/32)
+
+- **Real Jeebly bookings.** Booking a courier now uses Jeebly's own API, exactly as documented and tested against Jeebly's demo system (create, label, tracking and cancel all passed). Before, the key labels and every booking field were wrong, so nothing ever reached Jeebly.
+- **Test first, then Live.** Test mode books in Jeebly's demo system with separate test keys. Live mode needs Jeebly's live address and a Sandbox check passed in the last 30 days. Every screen says plainly which mode is on, and test bookings never reach customers.
+- **Real labels.** "Print Jeebly label (PDF)" prints Jeebly's own label. The shop's packing slip has real, scannable barcodes, your own pickup details and the real contents, and test bookings are marked TEST.
+- **Live tracking.** Track Order shows Jeebly's latest status and events to the customer (no phone numbers, rider or proof photos). The hub has Refresh tracking, and cancelling an order also cancels its Jeebly booking.
+- **Enter tracking number.** A parcel booked in a courier's own portal can be given its tracking number on the order, and the customer sees it straight away.
+- **Weight per size.** Each size can carry its packed weight. The booking weight is worked out from the order plus packaging (200 g, changeable) and rounded up to whole kilos for Jeebly; a size with no weight is pointed out, never guessed.
+- **No invented details.** Made-up warehouse addresses, phone numbers, hubs and sample accounts are gone from bookings, labels and messages, and Eco Express no longer books against a demo server.
+- **Already in Live mode?** Add Jeebly's live address in Couriers; bookings wait for it.
+- **Status.**
+  - **Benchmark:** 3 alternating rounds (main first), 0 failed requests. Storefront branch 839 / 909 / 805 req/s vs main 814 / 778 / 889; catalogue API branch 817 / 806 / 848 vs main 795 / 803 / 806. The serviceability API was mixed in the short 1,000-request run (branch 556 / 734 / 614 vs main 804 / 655 / 637), so it was re-run on its own: 4 × 5,000 requests each, alternating, gave branch 799 / 835 / 781 / 820 vs main 773 / 827 / 854 / 817 req/s (p95 88–98 vs 90–96 ms), the same within noise.
+  - **Tests:** 805 of 806 passed in the full run. The card-payment browser check at 375 px timed out waiting for the homepage under load, then passed 10/10 twice on its own. The security review's 13 findings were fixed, each with a test that fails before and passes after.
+  - **Dependency audit:** production 0 vulnerabilities; no new packages.
+  - **Security scan:** new admin routes (carrier label, carrier tracking, enter tracking number, Sandbox check, Live switch) check the session, size-cap and allow-list their input, and are audited. Carrier keys stay on the server and are blanked in backups. Real run against Jeebly's demo: create, label PDF, tracking and cancel passed (test AWBs JB115105, JB115106, both cancelled).
+
 ## BUH-02.13.00 — 2026-10-19 03:50 UTC · [#30](https://github.com/cxsmtp/buh/pull/30)
 
 - **Newer, slimmer server software.** The shop now runs on Node 24 (Node 20 is out of support), and npm, yarn and corepack are removed from the running shop, which only needs `node`. This clears the known holes Checkmarx found in the old base image.

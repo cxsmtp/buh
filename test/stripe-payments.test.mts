@@ -816,3 +816,49 @@ test('the test-only Stripe address is honoured only on this machine', async () =
     process.env.BUH_TEST_STRIPE_API = saved;
   }
 });
+
+test('review M3: a full refund in Stripe’s dashboard cancels the order and its Jeebly booking (audited); flagged if Jeebly does not confirm', async () => {
+  await keysOn();
+  const { installJeeblyMock } = await import('./fixtures/jeebly-mock.mjs');
+  const pickup = { pickupPhone: '+971501112222', pickupUnit: 'Shop 4', pickupBuilding: 'Barsha Tower', pickupArea: 'Al Barsha 1', pickupLandmark: 'Near the mall', pickupEmirate: 'Dubai' };
+  await settings.updateSettings('courier', { jeebly: { ...pickup, isLive: true, liveBaseUrl: 'https://live.jeebly.com', apiKey: 'LIVE-KEY-1', clientKey: 'LIVE-CLIENT-1' } }, { liveOverride: true });
+  try {
+    for (const refuse of [false, true]) {
+      const jeebly = installJeeblyMock(refuse ? { cancel: () => ({ status: 400, body: { success: 'false1', message: 'Shipment can not be Cancel' } }) } : undefined);
+      try {
+        const { id, pi } = await paidCard();
+        const booked = await dispatchOrder({ orderId: id, provider: 'jeebly', rebook: false, actor: 'owner@shop.test', weightKg: 1 });
+        assert.equal(booked.status, 200, String(booked.body.message));
+        const awb = String(booked.body.awbNumber);
+        const full = mock.dashboardRefund(pi.id, pi.amount);
+        const ev = mock.event('charge.refunded', full.charge);
+        assert.equal((await webhook(ev.body, ev.signature)).status, 200);
+        for (let i = 0; i < 100 && !jeebly.calls.some((c: { path: string }) => c.path === 'cancel_shipment'); i++) await new Promise((r) => setTimeout(r, 10));
+        for (let i = 0; i < 100 && !auditLinesWith('courier.cancel').some((l) => l.includes(id)); i++) await new Promise((r) => setTimeout(r, 10));
+        const o = orders.getOrder(id)!;
+        assert.equal(o.status, 'cancelled');
+        const sent = jeebly.calls.filter((c: { path: string; body: Record<string, unknown> }) => c.path === 'cancel_shipment');
+        assert.equal(sent.length, 1, `${refuse}: the Jeebly booking is cancelled too`);
+        assert.equal(sent[0].body.reference_number, awb);
+        const entry = JSON.parse(auditLinesWith('courier.cancel').find((l) => l.includes(id))!);
+        assert.deepEqual([entry.details.by, entry.details.cancelled], ['stripe', !refuse]);
+        if (refuse) {
+          assert.equal(o.attention?.kind, 'booked_after_cancel');
+          assert.match(o.attention!.text, /Cancel it in the Jeebly portal/);
+          orders.updateOrderByAdmin(id, { clearAttention: true }, 'owner@shop.test');
+        } else {
+          assert.equal(o.courier.status, 'Cancelled with the carrier');
+          assert.equal(o.attention, undefined);
+        }
+        // Stripe sends it again: nothing more goes to Jeebly.
+        await webhook(ev.body, ev.signature);
+        await new Promise((r) => setTimeout(r, 30));
+        assert.equal(jeebly.calls.filter((c: { path: string }) => c.path === 'cancel_shipment').length, 1);
+      } finally {
+        jeebly.restore();
+      }
+    }
+  } finally {
+    await settings.updateSettings('courier', { jeebly: { isLive: false } });
+  }
+});

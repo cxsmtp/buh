@@ -3,6 +3,7 @@ import fs from 'node:fs';
 import net from 'node:net';
 import os from 'node:os';
 import path from 'node:path';
+import { pathToFileURL } from 'node:url';
 
 /** The production build (`npm run build`), started on a free port with its own empty DATA_DIR. */
 export const SERVER = path.resolve('.next/standalone/server.js');
@@ -55,7 +56,11 @@ export function adminPathIn(log: string): string | null {
   return log.match(/Admin link: (?:https?:\/\/[^/\s]+)?(\/[A-Za-z0-9_-]{32})(?![A-Za-z0-9_-])/)?.[1] ?? null;
 }
 
-export async function startServer(env: Record<string, string> = {}, opts: { port?: number; adminPath?: string } = {}): Promise<RunningServer> {
+/**
+ * `preload`: modules the server process imports first (node --import), e.g. the Jeebly stand-in
+ * test/fixtures/jeebly-mock.mjs (with JEEBLY_MOCK=1 in env).
+ */
+export async function startServer(env: Record<string, string> = {}, opts: { port?: number; adminPath?: string; preload?: string[] } = {}): Promise<RunningServer> {
   for (const dir of ['public', '.next/static']) {
     fs.cpSync(dir, path.join('.next/standalone', dir), { recursive: true });
   }
@@ -65,7 +70,7 @@ export async function startServer(env: Record<string, string> = {}, opts: { port
   const base = `http://127.0.0.1:${port}`;
   const dataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'buh-e2e-'));
   let log = '';
-  const child: ChildProcess = spawn(process.execPath, [SERVER], {
+  const child: ChildProcess = spawn(process.execPath, [...(opts.preload ?? []).flatMap((m) => ['--import', pathToFileURL(path.resolve(m)).href]), SERVER], {
     cwd: path.dirname(SERVER),
     env: { ...process.env, PORT: String(port), HOSTNAME: '127.0.0.1', DATA_DIR: dataDir, INSECURE_COOKIES: '1', OTP_DEV_MODE: 'true', TRUST_PROXY: '', BACKUP_DISABLED: 'true', SEED_STOCK: '50', FX_DISABLED: 'true', FESTIVAL_REFRESH_DISABLED: 'true', MONITOR_DISABLED: 'true', ...env },
     stdio: ['ignore', 'pipe', 'pipe'],
