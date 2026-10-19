@@ -496,10 +496,10 @@ An off-server copy: if the server is lost, the shop can be rebuilt from Drive on
 3. In a **shared drive**, add the service account's email (in the JSON file) as **Content manager**, and make a folder. (A personal Drive folder refuses its uploads: Google gives a service account no storage of its own.)
 4. In the Admin Hub, choose **A service account and a shared drive**, paste the whole JSON file and the folder's link, press **Test connection**, tick **Copy each backup to Google Drive**, and press **Save**.
 
-- The status line at the top of the Admin Hub says when the last copy reached Drive; the card shows its time and size.
+- The status line at the top of the Admin Hub says when the last copy reached Drive; the card shows its time and size. **Back up now** finishes as soon as the backup is made: the copy then goes up on its own, and the status line shows how far it is ("Copying to Google Drive: … of …").
 - A failed copy never stops the local backup: you get an alert (email, and Settings → System & backups → Health) until a copy works again. If Google stops accepting the connection (you removed the app's access, or it ran out), the alert says **Reconnect Google Drive**: press it and enter the new code.
 - Older copies the shop made are deleted once there are more than you keep (30 by default); nothing else in your Drive is touched.
-- The client secret, the connection and the key are never shown again, never in a backup and never in the logs. A restored shop keeps the settings but not the connection: connect again (or paste the key again).
+- The client secret, the connection and the key are never shown again, never in a backup and never in the logs (they are kept in their own file on the server, not in the database). **Disconnect** also asks Google to remove the shop's access. A restored shop keeps the settings but not the connection: connect again (or paste the key again).
 - Rebuilding a lost server from Drive: HOSTINGER_DEPLOYMENT_GUIDE.md, "Rebuilding on a new server from Google Drive".
 
 ### Phone check and the SMS gateway

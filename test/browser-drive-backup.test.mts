@@ -54,6 +54,18 @@ after(async () => {
 const api = (method: string, p: string, body?: unknown, headers: Record<string, string> = {}) =>
   fetch(`${server.base}${p}`, { method, headers: { 'content-type': 'application/json', origin: server.base, cookie, ...headers }, body: body === undefined ? undefined : JSON.stringify(body) });
 
+/** "Back up now": the backup (it does not wait for Google), then the copy to Drive, followed until done. */
+async function backUpNow() {
+  const res = await api('POST', '/api/admin/backup', {});
+  const body = await res.json();
+  let drive = body.drive;
+  for (let i = 0; i < 150 && drive?.copying; i++) {
+    await new Promise((r) => setTimeout(r, 100));
+    drive = (await (await api('GET', '/api/admin/backup')).json()).drive;
+  }
+  return { status: res.status, body: { ...body, drive } };
+}
+
 test('the Drive routes: hidden from strangers, sign-in required, allow-listed; the key never returned or logged; Back up now copies to Drive', { skip }, async () => {
   assert.equal((await rawFetch(`${server.base}/api/admin/backup/drive`)).status, 404);
   assert.equal((await rawFetch(`${server.base}/api/admin/backup/drive/test`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: '{}' })).status, 404);
@@ -79,9 +91,8 @@ test('the Drive routes: hidden from strangers, sign-in required, allow-listed; t
   assert.equal(s.folderId, FOLDER);
   assert.equal(s.keySaved, true);
 
-  const run = await api('POST', '/api/admin/backup', {});
-  const runBody = await run.json();
-  assert.equal(run.status, 200);
+  const { status: runStatus, body: runBody } = await backUpNow();
+  assert.equal(runStatus, 200);
   assert.ok(runBody.lastSuccessAt);
   assert.ok(runBody.drive.lastSuccessAt, JSON.stringify(runBody.drive));
   assert.equal(runBody.drive.level, 'ok');
@@ -140,7 +151,7 @@ for (const width of [375, 1280]) {
 
 test('a failed copy shows in the card and the status line, the local backup still green-dated', { skip }, async () => {
   google.failStart = { status: 403, reason: 'storageQuotaExceeded', message: 'Service Accounts do not have storage quota.' };
-  const run = await (await api('POST', '/api/admin/backup', {})).json();
+  const run = (await backUpNow()).body;
   assert.ok(run.lastSuccessAt && !run.lastError, 'the local backup succeeded');
   assert.equal(run.drive.level, 'failing');
   for (const width of [375, 1280]) {
@@ -153,5 +164,34 @@ test('a failed copy shows in the card and the status line, the local backup stil
     if (SHOTS) await card.screenshot({ path: path.join(SHOTS, `drive-card-failed-${width}.png`) });
     assert.deepEqual(errors, []);
     await ctx.close();
+  }
+});
+
+test('Back up now in the hub returns at once; the copy to Google Drive shows while it goes up, then the copy', { skip }, async () => {
+  let open!: () => void;
+  const held = new Promise<void>((r) => (open = r));
+  google.before = async (r) => {
+    if (r.method === 'PUT' && r.path.startsWith('/upload/') && r.bodySize > 0) await held;
+  };
+  try {
+    for (const width of [375, 1280]) {
+      const { ctx, page, errors } = await hub(width);
+      const line = page.getByTestId('backup-drive').first();
+      // By keyboard.
+      await page.getByRole('button', { name: 'Back up now' }).first().focus();
+      await page.keyboard.press('Enter');
+      await line.filter({ hasText: /Copying to Google Drive: / }).waitFor();
+      assert.deepEqual(await overflow(page), []);
+      if (SHOTS) await page.getByRole('status').filter({ hasText: /Backup/ }).first().screenshot({ path: path.join(SHOTS, `drive-copying-${width}.png`) });
+      if (width === 1280) {
+        open();
+        await line.filter({ hasText: /Copied to Google Drive just now/ }).waitFor({ timeout: 15_000 });
+      }
+      assert.deepEqual(errors, []);
+      await ctx.close();
+    }
+  } finally {
+    open();
+    google.before = null;
   }
 });

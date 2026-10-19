@@ -553,8 +553,10 @@ export function runBackup(reason: 'scheduled' | 'manual' | 'startup'): Promise<B
       audit('backup.taken', { reason, file: patch.lastFile, size: result.size, encrypted: result.encrypted, emailed: Boolean(patch.lastEmailedAt && !patch.lastEmailError), emailError: patch.lastEmailError });
       if (patch.lastEmailError) logEvent('warn', 'backup_not_emailed', { error: patch.lastEmailError });
       else logEvent('info', 'backup_done', { file: patch.lastFile, summary: result.summary });
-      // The off-server copy (when switched on): its failure is its own (an owner alert), never the backup's.
-      await copyBackupToDrive(result.file, reason);
+      // The off-server copy (when switched on): its failure is its own (an owner alert), never the
+      // backup's. Not waited for: "Back up now" and the next backup never wait on Google (the hub
+      // shows the copy in progress); it never throws and runs one at a time.
+      void copyBackupToDrive(result.file, reason);
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
       const before = readBackupState();

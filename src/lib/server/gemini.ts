@@ -1,6 +1,7 @@
 import http from 'node:http';
 import { GEMINI_MODEL_ID } from '@/types';
 import { HttpError } from './http';
+import { testStandIn } from './testStandIn';
 import { logEvent, maskGoogleKeys } from './log';
 import { safeFetch } from './outbound';
 
@@ -45,12 +46,8 @@ export function _setGeminiTransport(fn: Transport | null) {
 function testApi(): URL | null {
   const v = process.env.BUH_TEST_GEMINI_API;
   if (!v) return null;
-  try {
-    const u = new URL(v);
-    if (u.protocol === 'http:' && (u.hostname === '127.0.0.1' || u.hostname === 'localhost') && u.port && u.pathname === '/' && !u.search) return u;
-  } catch {
-    // ignored below
-  }
+  const u = testStandIn('BUH_TEST_GEMINI_API');
+  if (u) return u;
   logEvent('warn', 'gemini_test_api_ignored', {});
   return null;
 }

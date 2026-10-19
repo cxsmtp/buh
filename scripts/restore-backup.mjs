@@ -102,7 +102,9 @@ let driveCopy = '';
 if (fromDrive !== null) {
   const { downloadFromDrive } = await import('./restore-from-drive.mjs');
   fs.mkdirSync(replace ? finalTarget : target, { recursive: true, mode: 0o700 });
-  downloaded = path.join(replace ? finalTarget : target, `.drive-download-${process.pid}.tar.gz.enc`);
+  // A name nobody can guess or have made already; Ctrl-C (or a stop) removes it and what was restored.
+  downloaded = path.join(replace ? finalTarget : target, `.drive-download-${crypto.randomBytes(12).toString('hex')}.tar.gz.enc`);
+  for (const signal of ['SIGINT', 'SIGTERM']) process.on(signal, () => fail('Stopped.'));
   try {
     const copy = await downloadFromDrive(fromDrive, downloaded, { dataDir: process.env.DATA_DIR || '', minFree: MIN_FREE });
     console.log(`Downloaded ${copy.name} (${(copy.size / 1024 / 1024).toFixed(1)} MB) from Google Drive; size and checksum match.`);
@@ -141,6 +143,8 @@ let sealed = false;
     // Until the end the data is not proven (the tag is checked last): nothing is used before then.
     source = fs.createReadStream(file, { start: MAGIC.length + nl + 1 }).pipe(decipher);
   } else {
+    // The shop only ever puts encrypted copies in Drive: a plain one there was not made by it.
+    if (driveCopy && !sealed) fail('Copies from Google Drive are always encrypted: this one is not, so it was not restored.');
     source = fs.createReadStream(file);
   }
 }

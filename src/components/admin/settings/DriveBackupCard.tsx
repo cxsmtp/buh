@@ -32,6 +32,8 @@ export interface DriveStatus {
   oauthFolderId: string;
   folderName: string;
   connecting: { userCode: string; verificationUrl: string; expiresAt: string; interval: number } | null;
+  /** A copy going up now (the backup itself is done). */
+  copying: DriveCopying | null;
   lastAttemptAt?: string;
   lastSuccessAt?: string;
   lastFile?: string;
@@ -49,6 +51,18 @@ const label = 'block text-xs font-semibold text-ink-soft mb-1';
 export function mb(n?: number): string {
   if (n === undefined) return '';
   return n < 1024 * 1024 ? `${Math.max(1, Math.round(n / 1024))} KB` : `${(n / 1024 / 1024).toFixed(n < 10 * 1024 * 1024 ? 1 : 0)} MB`;
+}
+
+export interface DriveCopying {
+  file: string;
+  size: number;
+  sent: number;
+}
+
+/** "Copying to Google Drive: 4.0 MB of 12.0 MB (33%)." */
+export function copyingText(c: DriveCopying): string {
+  const pct = c.size ? Math.min(100, Math.floor((c.sent / c.size) * 100)) : 0;
+  return `Copying to Google Drive: ${c.size ? `${mb(c.sent)} of ${mb(c.size)} (${pct}%)` : 'starting'}.`;
 }
 
 export function when(iso?: string): string {
@@ -102,6 +116,13 @@ export function DriveBackupCard() {
     }, Math.max(1, nextPoll.interval) * 1000);
     return () => clearTimeout(t);
   }, [nextPoll, apply, schedule]);
+
+  // A copy going up: follow it every few seconds (the status only; the form stays as typed).
+  useEffect(() => {
+    if (!status?.copying) return;
+    const t = setTimeout(() => void getJson<DriveStatus>('/api/admin/backup/drive').then(({ ok, data }) => ok && setStatus(data)), 3000);
+    return () => clearTimeout(t);
+  }, [status]);
 
   useEffect(() => {
     let cancelled = false;
@@ -222,8 +243,14 @@ export function DriveBackupCard() {
           <Icon className="w-4 h-4 shrink-0" aria-hidden="true" />
           <span className="min-w-0">
             {status.level === 'failing' && status.lastError ? <>Last copy failed: {status.lastError} </> : null}
-            {status.lastSuccessAt ? <>{status.level === 'failing' ? 'Last good copy' : 'Last copy'} {when(status.lastSuccessAt)}, {mb(status.lastSize)} ({status.copies} in Drive).</> : status.level !== 'failing' ? <>No copy yet: press Back up now above, or wait for the next backup.</> : null}
+            {status.lastSuccessAt ? <>{status.level === 'failing' ? 'Last good copy' : 'Last copy'} {when(status.lastSuccessAt)}, {mb(status.lastSize)} ({status.copies} in Drive).</> : status.level !== 'failing' && !status.copying ? <>No copy yet: press Back up now above, or wait for the next backup.</> : null}
           </span>
+        </p>
+      )}
+      {status.enabled && status.copying && (
+        <p data-testid="drive-copying" role="status" className="text-xs flex items-start gap-1.5 rounded-xl border border-line px-3 py-2 break-words text-ink-soft">
+          <Loader2 className="w-4 h-4 shrink-0 animate-spin" aria-hidden="true" />
+          <span className="min-w-0">{copyingText(status.copying)}</span>
         </p>
       )}
 

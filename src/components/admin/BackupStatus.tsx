@@ -3,7 +3,7 @@
 import React, { useEffect, useState } from 'react';
 import { AlertTriangle, CheckCircle2, DatabaseBackup, Loader2, XCircle } from 'lucide-react';
 import { getJson, postJson } from '@/lib/apiClient';
-import { mb } from './settings/DriveBackupCard';
+import { copyingText, mb, type DriveCopying } from './settings/DriveBackupCard';
 
 interface Health {
   level: 'ok' | 'warning' | 'failing';
@@ -18,7 +18,7 @@ interface Health {
   lastEmailError?: string;
   notice?: string;
   /** The off-server copy (Settings → System & backups → Google Drive). */
-  drive?: { enabled: boolean; level: 'off' | 'ok' | 'failing'; lastSuccessAt?: string; lastSize?: number; lastError?: string };
+  drive?: { enabled: boolean; level: 'off' | 'ok' | 'failing'; lastSuccessAt?: string; lastSize?: number; lastError?: string; copying?: DriveCopying | null };
 }
 
 function ago(iso?: string) {
@@ -44,6 +44,20 @@ export const BackupStatus: React.FC = () => {
     const t = setInterval(load, 5 * 60_000);
     return () => clearInterval(t);
   }, []);
+
+  // A copy to Google Drive going up after the backup: follow it every few seconds until it is done.
+  const copying = Boolean(health?.drive?.copying);
+  useEffect(() => {
+    if (!copying) return;
+    const t = setInterval(
+      () =>
+        void getJson<Health>('/api/admin/backup').then(({ ok, data }) => {
+          if (ok) setHealth(data);
+        }),
+      3000
+    );
+    return () => clearInterval(t);
+  }, [copying]);
 
   const runNow = async () => {
     setRunning(true);
@@ -99,7 +113,9 @@ export const BackupStatus: React.FC = () => {
       </p>
       {drive && (
         <p data-testid="backup-drive" className="opacity-80 break-words">
-          {drive.level === 'failing'
+          {drive.copying
+            ? copyingText(drive.copying)
+            : drive.level === 'failing'
             ? `Google Drive copy failed: ${drive.lastError || 'see Settings → System & backups'}.`
             : drive.lastSuccessAt
             ? `Copied to Google Drive ${ago(drive.lastSuccessAt)}${drive.lastSize ? ` (${mb(drive.lastSize)})` : ''}.`

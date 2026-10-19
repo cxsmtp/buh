@@ -6,6 +6,7 @@ import { audit } from './audit';
 import { HttpError } from './http';
 import { parseImageDataUrl } from './imageInput';
 import { IMAGE_NAME, readImage } from './images';
+import { testStandIn } from './testStandIn';
 import { logEvent, maskGoogleKeys } from './log';
 import { safeFetch } from './outbound';
 import { rateLimit } from './rateLimit';
@@ -65,12 +66,8 @@ export function _setAnthropicTransport(fn: Transport | null) {
 function testApi(): URL | null {
   const v = process.env.BUH_TEST_ANTHROPIC_API;
   if (!v) return null;
-  try {
-    const u = new URL(v);
-    if (u.protocol === 'http:' && (u.hostname === '127.0.0.1' || u.hostname === 'localhost') && u.port && u.pathname === '/' && !u.search) return u;
-  } catch {
-    // ignored below
-  }
+  const u = testStandIn('BUH_TEST_ANTHROPIC_API');
+  if (u) return u;
   logEvent('warn', 'anthropic_test_api_ignored', {});
   return null;
 }

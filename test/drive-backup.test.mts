@@ -267,6 +267,7 @@ test('a failed copy raises the owner alert without failing the local backup; a g
   enable(30);
   google.failStart = { status: 403, reason: 'storageQuotaExceeded', message: 'Service Accounts do not have storage quota.' };
   const local = await backup.runBackup('manual');
+  await drive.waitForDriveCopy(); // the copy runs on after the backup
   assert.ok(local.lastSuccessAt && !local.lastError, 'the local backup succeeded');
   assert.equal(backup.backupHealth().level === 'failing', false);
   const status = drive.driveStatus();
@@ -287,6 +288,7 @@ test('a failed copy raises the owner alert without failing the local backup; a g
   process.env.BACKUP_PASSPHRASE = PASS;
 
   await backup.runBackup('manual');
+  await drive.waitForDriveCopy(); // the copy runs on after the backup
   assert.equal(drive.driveStatus().level, 'ok');
   assert.equal(monitor.currentProblems().find((x) => x.id === 'drive_backup'), undefined);
 });
@@ -340,6 +342,7 @@ test('one-command rebuild: --from-drive latest into an empty folder brings back 
   const count = (live.prepare('SELECT COUNT(*) AS n FROM orders').get() as { n: number }).n;
   live.close();
   const state = await backup.runBackup('manual');
+  await drive.waitForDriveCopy(); // the copy runs on after the backup
   assert.equal(drive.driveStatus().lastFile, state.lastFile);
   // Two backups in the same minute replace each other on the server: in Drive too (no duplicates of ours).
   const names = ours().map((f) => f.name);

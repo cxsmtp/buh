@@ -47,7 +47,10 @@ export interface DriveFile {
   by: string;
 }
 
-export type DeviceStep = 'pending' | 'slow_down' | 'denied' | 'expired' | 'ok';
+/** An answer a test gives instead of the stand-in. */
+export type MockAnswer = { status: number; headers?: Record<string, string>; json?: unknown } | undefined;
+
+export type DeviceStep ='pending' | 'slow_down' | 'denied' | 'expired' | 'ok';
 
 export interface GoogleMock {
   url: string;
@@ -70,6 +73,15 @@ export interface GoogleMock {
   refreshToken: string;
   userToken: string;
   revoked: Set<string>;
+  /**
+   * Called before each request is answered (after its body is read): may wait (to hold a request
+   * while a test acts), or answer instead of the stand-in ({ status, headers?, json? }).
+   */
+  before: ((req: { method: string; path: string; headers: http.IncomingHttpHeaders; bodySize: number; form?: Record<string, string> }) => void | MockAnswer | Promise<void | MockAnswer>) | null;
+  /** files.list answers with an empty page and the same nextPageToken, again and again. */
+  pageLoop: boolean;
+  /** A download sends its first piece, then waits for this before the rest. */
+  slowMedia: Promise<void> | null;
   close: () => Promise<void>;
 }
 
@@ -92,6 +104,9 @@ export async function startGoogleMock(sa: { publicKey: crypto.KeyObject; email: 
     refreshToken: `1//0gMockRefresh${crypto.randomBytes(16).toString('base64url')}`,
     userToken: `ya29.mock-user-${crypto.randomBytes(12).toString('hex')}`,
     revoked: new Set<string>(),
+    before: null,
+    pageLoop: false,
+    slowMedia: null,
   } as unknown as GoogleMock;
   const newId = () => `1${crypto.randomBytes(16).toString('base64url')}`;
   const md5 = (b: Buffer) => crypto.createHash('md5').update(b).digest('hex');
@@ -99,7 +114,7 @@ export async function startGoogleMock(sa: { publicKey: crypto.KeyObject; email: 
   const server = http.createServer((req, res) => {
     const chunks: Buffer[] = [];
     req.on('data', (c: Buffer) => chunks.push(c));
-    req.on('end', () => {
+    req.on('end', async () => {
       const body = Buffer.concat(chunks);
       const u = new URL(req.url || '/', 'http://x');
       const isForm = String(req.headers['content-type'] || '').startsWith('application/x-www-form-urlencoded');
@@ -109,6 +124,15 @@ export async function startGoogleMock(sa: { publicKey: crypto.KeyObject; email: 
         res.writeHead(status, { ...(data !== undefined ? { 'content-type': 'application/json' } : {}), ...headers });
         res.end(data !== undefined ? JSON.stringify(data) : undefined);
       };
+      if (mock.before) {
+        const instead = await mock.before({ method: req.method || '', path: u.pathname + u.search, headers: req.headers, bodySize: body.length, form });
+        if (instead) return send(instead.status, instead.json, instead.headers);
+      }
+      if (u.pathname === '/revoke' && req.method === 'POST') {
+        if (!form?.token) return send(400, { error: 'invalid_request' });
+        mock.revoked.add(form.token);
+        return send(200, {});
+      }
       const err = (status: number, reason: string, message: string) => send(status, { error: { code: status, message, errors: [{ reason, message }] } });
 
       if (u.pathname === '/device/code' && req.method === 'POST') {
@@ -205,18 +229,23 @@ export async function startGoogleMock(sa: { publicKey: crypto.KeyObject; email: 
         if (u.searchParams.get('alt') !== 'media') return send(200, { id: f!.id, name: f!.name, mimeType: f!.mimeType ?? 'application/octet-stream', trashed: false });
         res.writeHead(200, { 'content-type': 'application/octet-stream', 'content-length': String(f!.data.length) });
         // In pieces, like a real download.
-        for (let i = 0; i < f!.data.length; i += 64 * 1024) res.write(f!.data.subarray(i, i + 64 * 1024));
+        for (let i = 0; i < f!.data.length; i += 64 * 1024) {
+          res.write(f!.data.subarray(i, i + 64 * 1024));
+          if (i === 0 && mock.slowMedia) await mock.slowMedia;
+        }
         return res.end();
       }
       if (u.pathname === '/drive/v3/files' && req.method === 'GET') {
+        if (mock.pageLoop) return send(200, { files: [], nextPageToken: 'same-page-again' });
         const q = u.searchParams.get('q') || '';
+        const marked = /appProperties has \{ key='buhBackup' and value='1' \}/.test(q);
         const parents = [...q.matchAll(/'([^']+)' in parents/g)].map((m) => m[1]);
         const byName = /name = '([^']+)'/.exec(q)?.[1];
         const folderOnly = /mimeType = 'application\/vnd\.google-apps\.folder'/.test(q);
         const list = [...files.values()]
           .filter(sees)
-          .filter((f) => (!parents.length || f.parents.some((p) => parents.includes(p))) && (!byName || f.name === byName) && (!folderOnly || f.mimeType === 'application/vnd.google-apps.folder') && (!/name contains 'buh-backup-'/.test(q) || f.name.includes('buh-backup-')))
-          .map((f) => ({ id: f.id, name: f.name, size: String(f.data.length), md5Checksum: md5(f.data), createdTime: f.createdTime, mimeType: f.mimeType }));
+          .filter((f) => (!parents.length || f.parents.some((p) => parents.includes(p))) && (!byName || f.name === byName) && (!folderOnly || f.mimeType === 'application/vnd.google-apps.folder') && (!/name contains 'buh-backup-'/.test(q) || f.name.includes('buh-backup-')) && (!marked || f.appProperties?.buhBackup === '1'))
+          .map((f) => ({ id: f.id, name: f.name, size: String(f.data.length), md5Checksum: md5(f.data), createdTime: f.createdTime, mimeType: f.mimeType, ...(f.appProperties ? { appProperties: f.appProperties } : {}) }));
         return send(200, { files: list });
       }
       return err(404, 'notFound', `no route ${req.method} ${u.pathname}`);
@@ -229,8 +258,8 @@ export async function startGoogleMock(sa: { publicKey: crypto.KeyObject; email: 
 }
 
 /** Put a file in the mock folder as someone else would (the owner's own files). */
-export function addForeignFile(mock: GoogleMock, folderId: string, name: string, data = Buffer.from('not ours'), mimeType?: string): string {
+export function addForeignFile(mock: GoogleMock, folderId: string, name: string, data = Buffer.from('not ours'), mimeType?: string, extra: { appProperties?: Record<string, string>; by?: string } = {}): string {
   const id = `1${crypto.randomBytes(16).toString('base64url')}`;
-  mock.files.set(id, { id, name, parents: [folderId], data, createdTime: new Date().toISOString(), mimeType, by: 'owner' });
+  mock.files.set(id, { id, name, parents: [folderId], data, createdTime: new Date().toISOString(), mimeType, by: extra.by ?? 'owner', appProperties: extra.appProperties });
   return id;
 }

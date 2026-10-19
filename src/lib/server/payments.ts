@@ -1,6 +1,7 @@
 import Stripe from 'stripe';
 import { HttpError } from './http';
 import { logEvent } from './log';
+import { testStandIn } from './testStandIn';
 import { audit } from './audit';
 import {
   CARD_PAYMENT_TTL_MINUTES,
@@ -62,14 +63,8 @@ const fils = (aed: number) => Math.round(aed * 100);
 function testApi(): { host: string; port: number; protocol: 'http' } | null {
   const v = process.env.BUH_TEST_STRIPE_API;
   if (!v) return null;
-  try {
-    const u = new URL(v);
-    if (u.protocol === 'http:' && (u.hostname === '127.0.0.1' || u.hostname === 'localhost') && u.port && u.pathname === '/' && !u.search) {
-      return { host: u.hostname, port: Number(u.port), protocol: 'http' };
-    }
-  } catch {
-    // ignored below
-  }
+  const u = testStandIn('BUH_TEST_STRIPE_API');
+  if (u) return { host: u.hostname, port: Number(u.port), protocol: 'http' };
   logEvent('warn', 'stripe_test_api_ignored', {});
   return null;
 }

@@ -55,6 +55,18 @@ after(async () => {
 const api = (method: string, p: string, body?: unknown, headers: Record<string, string> = {}) =>
   fetch(`${server.base}${p}`, { method, headers: { 'content-type': 'application/json', origin: server.base, cookie, ...headers }, body: body === undefined ? undefined : JSON.stringify(body) });
 
+/** "Back up now": the backup (it does not wait for Google), then the copy to Drive, followed until done. */
+async function backUpNow() {
+  const res = await api('POST', '/api/admin/backup', {});
+  const body = await res.json();
+  let drive = body.drive;
+  for (let i = 0; i < 150 && drive?.copying; i++) {
+    await new Promise((r) => setTimeout(r, 100));
+    drive = (await (await api('GET', '/api/admin/backup')).json()).drive;
+  }
+  return { status: res.status, body: { ...body, drive } };
+}
+
 async function hub(width: number) {
   const ctx = await browser.newContext({ viewport: { width, height: 900 }, hasTouch: width < 800 });
   const [name, value] = cookie.split('=');
@@ -133,7 +145,7 @@ for (const width of [375, 1280]) {
 }
 
 test('after connecting: Back up now copies to the shop’s folder; nothing secret in the status, the log or the audit; the reveal is audited', { skip }, async () => {
-  const run = await (await api('POST', '/api/admin/backup', {})).json();
+  const run = (await backUpNow()).body;
   assert.equal(run.drive.level, 'ok', JSON.stringify(run.drive));
   const folder = google.files.get(run.drive.oauthFolderId)!;
   assert.equal(folder.name, 'Beautiful UAE Home backups');

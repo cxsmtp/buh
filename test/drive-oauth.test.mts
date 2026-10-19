@@ -33,7 +33,6 @@ for (const k of ['log', 'warn', 'error'] as const) {
 
 const drive = await import('@/lib/server/driveBackup');
 const backup = await import('@/lib/server/backup');
-const { kvGet } = await import('@/lib/server/kv');
 const { redact } = await import('@/lib/server/log');
 const { issuePhoneToken } = await import('@/lib/server/phoneToken');
 const { placeOrder } = await import('@/lib/server/orders');
@@ -61,7 +60,7 @@ async function connect(steps: Array<'pending' | 'slow_down' | 'denied' | 'expire
   await drive.startDriveConnect({ clientId: OAUTH_CLIENT.id, clientSecret: OAUTH_CLIENT.secret }, 'owner@shop.ae');
   let now = Date.now();
   for (let i = 0; i < 20; i++) {
-    const p = kvGet<{ nextPollAt: number }>('backup:drive-device')?.data;
+    const p = (JSON.parse(fs.readFileSync(path.join(dir, 'drive-secrets.json'), 'utf8')) as { device: { nextPollAt: number } | null }).device;
     if (!p) break;
     now = Math.max(now, p.nextPollAt);
     const r = await drive.pollDriveConnect('owner@shop.ae', now);
@@ -191,6 +190,7 @@ test('a revoked refresh token (invalid_grant): the copy fails, the alert says Re
   drive._resetDriveUserToken();
   google.revoked.add(google.refreshToken);
   const local = await backup.runBackup('manual');
+  await drive.waitForDriveCopy(); // the copy runs on after the backup
   assert.ok(local.lastSuccessAt && !local.lastError, 'the local backup is fine');
   const st = drive.driveStatus();
   assert.equal(st.needsReconnect, true);
@@ -211,6 +211,7 @@ test('a revoked refresh token (invalid_grant): the copy fails, the alert says Re
   assert.equal(after.needsReconnect, false);
   assert.equal(after.oauthFolderId, folder);
   await backup.runBackup('manual');
+  await drive.waitForDriveCopy(); // the copy runs on after the backup
   assert.equal(drive.driveStatus().level, 'ok');
   assert.equal(monitor.currentProblems().find((x) => x.id === 'drive_backup'), undefined);
 });
@@ -271,6 +272,7 @@ test('restore details, and the rebuild from Drive in this mode: from the saved c
   const orders = (live.prepare('SELECT COUNT(*) AS n FROM orders').get() as { n: number }).n;
   live.close();
   const state = await backup.runBackup('manual');
+  await drive.waitForDriveCopy(); // the copy runs on after the backup
   assert.equal(drive.driveStatus().lastFile, state.lastFile);
 
   const text = drive.driveRestoreDetails();

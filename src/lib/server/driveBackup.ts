@@ -3,9 +3,10 @@ import fs from 'node:fs';
 import http from 'node:http';
 import path from 'node:path';
 import { audit } from './audit';
-import { dataDir } from './dataDir';
+import { dataDir, dataFile, writePrivateFile } from './dataDir';
 import { HttpError } from './http';
 import { kvGet, kvSet } from './kv';
+import { testStandIn } from './testStandIn';
 import { logEvent } from './log';
 import { safeRequest, type SafeResponse } from './outbound';
 
@@ -34,9 +35,15 @@ import { safeRequest, type SafeResponse } from './outbound';
  *   can't be switched on and stop (an alert) if it is later removed.
  * - The newest `keep` copies (default 30) are kept; older ones that this feature uploaded (their
  *   Drive file ids are recorded) are deleted. Nothing else in the folder is ever touched.
- * - The key is a secret: stored on the server only (kv `backup:drive`), never in a reply (the hub
- *   sees the service account's email), blanked in every backup, never logged (log.ts removes PEM
- *   keys and Google access tokens wherever they appear).
+ * - The key, the OAuth client secret, the refresh token and a device sign-in in progress are
+ *   secrets: kept in their own file, DATA_DIR/drive-secrets.json (owner-only, written atomically),
+ *   never in the database (kv `backup:drive` holds only the rest), so no backup, made by this
+ *   version or an older one, can hold them (the backup also blanks any found in the database, and
+ *   a first start moves those of the first version to the file). Never in a reply (the hub sees the
+ *   service account's email), never logged (log.ts removes PEM keys and Google tokens).
+ * - Copies run after the backup, not as part of it: "Back up now" and the backup lock never wait for
+ *   Google; the hub shows a copy in progress (driveStatus().copying). A backup taken while one is
+ *   being copied is copied next.
  * - A failed copy never undoes the local backup: it is recorded, audited and raised as an owner
  *   alert (monitor.ts).
  * - Fixed hosts only (oauth2.googleapis.com, www.googleapis.com), through safeRequest; the
@@ -49,14 +56,15 @@ export const GOOGLE_TOKEN_URL = 'https://oauth2.googleapis.com/token';
 export const DRIVE_UPLOAD_URL = 'https://www.googleapis.com/upload/drive/v3/files';
 export const DRIVE_FILES_URL = 'https://www.googleapis.com/drive/v3/files';
 export const GOOGLE_DEVICE_CODE_URL = 'https://oauth2.googleapis.com/device/code';
+export const GOOGLE_REVOKE_URL = 'https://oauth2.googleapis.com/revoke';
 /** Full Drive scope: the service account only sees what is shared with it (the one folder). */
 export const DRIVE_SCOPE = 'https://www.googleapis.com/auth/drive';
 /** "Connect my Google Drive": the shop sees only the files it made itself (non-sensitive, allowed in the device flow). */
 export const DRIVE_FILE_SCOPE = 'https://www.googleapis.com/auth/drive.file';
 /** The folder the shop makes in the owner's Drive on first connect. */
 export const APP_FOLDER_NAME = 'Beautiful UAE Home backups';
-/** Resumable upload pieces: a multiple of 256 KiB, as Google asks. (Changeable by tests only.) */
-export const DRIVE_LIMITS = { chunkBytes: 8 * 1024 * 1024 };
+/** Resumable upload pieces: a multiple of 256 KiB, as Google asks; the wait before a retry grows by retryMs each time. (Changeable by tests only.) */
+export const DRIVE_LIMITS = { chunkBytes: 8 * 1024 * 1024, retryMs: 1000 };
 export const DRIVE_KEEP_DEFAULT = 30;
 export const DRIVE_KEEP_MAX = 365;
 const BACKUP_MAGIC = 'BUHBK1\n'; // as in backup.ts: an encrypted backup's first bytes
@@ -64,7 +72,10 @@ const BACKUP_MAGIC = 'BUHBK1\n'; // as in backup.ts: an encrypted backup's first
 const CONFIG_KEY = 'backup:drive';
 const STATE_KEY = 'backup:drive-state';
 const FILES_KEY = 'backup:drive-files';
+/** The first version kept a device sign-in here (now in the secrets file; moved, then removed). */
 const DEVICE_KEY = 'backup:drive-device';
+/** The secrets, outside the database: never in a backup (createBackup takes only shop.db and the shop's folders). */
+export const DRIVE_SECRETS_FILE = 'drive-secrets.json';
 
 /** service_account: a key and a folder shared with it (shared drives). oauth: the owner's own Drive, connected with a code. */
 export type DriveMode = 'oauth' | 'service_account';
@@ -121,11 +132,81 @@ interface DriveCopy {
 
 const EMPTY: DriveConfig = { enabled: false, mode: 'oauth', keep: DRIVE_KEEP_DEFAULT, folderId: '', clientEmail: '', privateKey: '', keyId: '', oauthClientId: '', oauthClientSecret: '', refreshToken: '', oauthFolderId: '' };
 
+// ── The secrets file ────────────────────────────────────────────────────────
+
+const SECRET_FIELDS = ['privateKey', 'keyId', 'oauthClientSecret', 'refreshToken'] as const;
+type SecretField = (typeof SECRET_FIELDS)[number];
+type DriveSecrets = Record<SecretField, string> & { device: DevicePending | null };
+const NO_SECRETS: DriveSecrets = { privateKey: '', keyId: '', oauthClientSecret: '', refreshToken: '', device: null };
+
+function readSecrets(): DriveSecrets {
+  let saved: Record<string, unknown> = {};
+  try {
+    const v = JSON.parse(fs.readFileSync(dataFile(DRIVE_SECRETS_FILE), 'utf8'));
+    if (v && typeof v === 'object' && !Array.isArray(v)) saved = v;
+  } catch {
+    // none yet (or unreadable): no secrets
+  }
+  const out: DriveSecrets = { ...NO_SECRETS };
+  for (const k of SECRET_FIELDS) if (typeof saved[k] === 'string') out[k] = saved[k] as string;
+  const d = saved.device as DevicePending | null | undefined;
+  out.device = d && typeof d === 'object' && typeof d.deviceCode === 'string' && d.deviceCode ? d : null;
+  return out;
+}
+
+/** The secrets file is written first (owner-only, atomically), then the database. */
+function writeSecrets(patch: Partial<DriveSecrets>) {
+  writePrivateFile(dataFile(DRIVE_SECRETS_FILE), JSON.stringify({ ...readSecrets(), ...patch }));
+}
+
+function withoutSecrets(cfg: Partial<DriveConfig>): Partial<DriveConfig> {
+  const out: Partial<DriveConfig> = { ...cfg };
+  for (const k of SECRET_FIELDS) delete out[k];
+  return out;
+}
+
+/**
+ * The first version kept the secrets in the database (kv `backup:drive`, `backup:drive-device`):
+ * move them to the secrets file, then remove them from the database. Runs on start and before
+ * every read (cheap when there is nothing to move), so an older version's writes during an update
+ * or after a rollback are moved too.
+ */
+export function migrateDriveSecrets(): void {
+  const saved = kvGet<Partial<DriveConfig>>(CONFIG_KEY)?.data;
+  const device = kvGet<DevicePending>(DEVICE_KEY)?.data;
+  const inDb = Boolean(saved && SECRET_FIELDS.some((k) => k in saved));
+  if (!inDb && !device) return;
+  const patch: Partial<DriveSecrets> = {};
+  if (saved) for (const k of SECRET_FIELDS) if (typeof saved[k] === 'string' && saved[k]) patch[k] = saved[k] as string;
+  if (device && typeof device.deviceCode === 'string' && device.deviceCode) patch.device = device;
+  if (Object.keys(patch).length) writeSecrets(patch);
+  if (saved && inDb) kvSet(CONFIG_KEY, withoutSecrets(saved));
+  if (device) kvSet(DEVICE_KEY, null);
+  logEvent('info', 'backup_drive_secrets_moved', { fields: Object.keys(patch) });
+}
+
 function config(): DriveConfig {
-  const saved = kvGet<Partial<DriveConfig>>(CONFIG_KEY)?.data ?? {};
+  migrateDriveSecrets();
+  const saved = withoutSecrets(kvGet<Partial<DriveConfig>>(CONFIG_KEY)?.data ?? {});
+  const s = readSecrets();
   // Saved before there were two ways: a service account.
   const mode: DriveMode = saved.mode === 'oauth' || saved.mode === 'service_account' ? saved.mode : saved.clientEmail ? 'service_account' : 'oauth';
-  return { ...EMPTY, ...saved, mode };
+  return { ...EMPTY, ...saved, privateKey: s.privateKey, keyId: s.keyId, oauthClientSecret: s.oauthClientSecret, refreshToken: s.refreshToken, mode };
+}
+
+/** Save the setting: the secrets to their file, the rest to the database. */
+function saveConfig(cfg: DriveConfig) {
+  writeSecrets({ privateKey: cfg.privateKey, keyId: cfg.keyId, oauthClientSecret: cfg.oauthClientSecret, refreshToken: cfg.refreshToken });
+  kvSet(CONFIG_KEY, withoutSecrets(cfg));
+}
+
+function setPending(p: DevicePending | null) {
+  writeSecrets({ device: p });
+}
+
+/** The same Google account, folder and mode (a copy made for one is not the other's to keep or delete). */
+function sameTarget(a: DriveConfig, b: DriveConfig): boolean {
+  return a.mode === b.mode && activeFolder(a) === activeFolder(b) && (a.mode === 'oauth' ? a.oauthClientId === b.oauthClientId : a.clientEmail === b.clientEmail);
 }
 
 /** The folder copies go to, and who Google sees, in the mode in use. */
@@ -141,8 +222,8 @@ interface Who {
 }
 
 function pendingDevice(): DevicePending | null {
-  const d = kvGet<DevicePending>(DEVICE_KEY)?.data;
-  return d && typeof d.deviceCode === 'string' && d.deviceCode ? d : null;
+  migrateDriveSecrets();
+  return readSecrets().device;
 }
 
 function state(): DriveState {
@@ -159,8 +240,9 @@ function copies(): DriveCopy[] {
 }
 
 /**
- * Backups: the copy of the database keeps the folder, the mode and the switch, never the key, the
- * OAuth client secret or the refresh token; a device sign-in in progress is left out.
+ * Backups: the copy of the database keeps the folder, the mode and the switch. The secrets are not
+ * in the database (the secrets file is never backed up); any an older version left there are
+ * blanked in the copy all the same, and a device sign-in in progress is left out.
  */
 export function blankDriveKeyIn(db: import('better-sqlite3').Database): void {
   db.prepare("UPDATE kv SET data = json_set(data, '$.privateKey', '', '$.keyId', '', '$.oauthClientSecret', '', '$.refreshToken', '') WHERE key = ? AND json_valid(data)").run(CONFIG_KEY);
@@ -217,17 +299,13 @@ export function parseServiceAccountKey(text: string): { clientEmail: string; pri
 /**
  * Tests only: BUH_TEST_GOOGLE_API=http://127.0.0.1:<port>/ sends every Google call to a stand-in
  * on the same machine (each address by its path: /token, /device/code, /drive/v3/…). Anything but a plain-http
- * loopback address is ignored.
+ * loopback address is ignored, and so is any in production without the test server's flag (testStandIn.ts).
  */
 function testApi(): URL | null {
   const v = process.env.BUH_TEST_GOOGLE_API;
   if (!v) return null;
-  try {
-    const u = new URL(v);
-    if (u.protocol === 'http:' && (u.hostname === '127.0.0.1' || u.hostname === 'localhost') && u.port && u.pathname === '/' && !u.search) return u;
-  } catch {
-    // ignored below
-  }
+  const u = testStandIn('BUH_TEST_GOOGLE_API');
+  if (u) return u;
   logEvent('warn', 'google_test_api_ignored', {});
   return null;
 }
@@ -372,7 +450,7 @@ async function tokenFor(cfg: DriveConfig): Promise<string> {
   try {
     return await oauthAccessToken({ clientId: cfg.oauthClientId, clientSecret: cfg.oauthClientSecret, refreshToken: cfg.refreshToken });
   } catch (err) {
-    if (err instanceof DriveReconnectError) kvSet(CONFIG_KEY, { ...config(), needsReconnect: true });
+    if (err instanceof DriveReconnectError) saveConfig({ ...config(), needsReconnect: true });
     throw err;
   }
 }
@@ -443,7 +521,7 @@ export async function startDriveConnect(input: Record<string, unknown>, by = '')
   const interval = Math.min(60, Math.max(1, Number(data.interval) || 5));
   const now = Date.now();
   const pending: DevicePending = { clientId, clientSecret, deviceCode, userCode, verificationUrl, expiresAt: now + expiresIn * 1000, interval, nextPollAt: now + interval * 1000, by };
-  kvSet(DEVICE_KEY, pending);
+  setPending(pending);
   audit('backup.drive_connect_started', { by, clientId });
   return driveStatus();
 }
@@ -451,7 +529,7 @@ export async function startDriveConnect(input: Record<string, unknown>, by = '')
 /** Stop a connection in progress. */
 export function cancelDriveConnect(by = ''): DriveStatus {
   if (pendingDevice()) {
-    kvSet(DEVICE_KEY, null);
+    setPending(null);
     audit('backup.drive_connect_cancelled', { by });
   }
   return driveStatus();
@@ -468,8 +546,10 @@ export type ConnectOutcome = 'none' | 'pending' | 'connected' | 'denied' | 'expi
 export async function pollDriveConnect(by = '', now = Date.now()): Promise<{ outcome: ConnectOutcome; status: DriveStatus }> {
   const p = pendingDevice();
   if (!p) return { outcome: 'none', status: driveStatus() };
+  // Still this sign-in (not cancelled, nor replaced by a new Connect, while Google was answering)?
+  const mine = () => pendingDevice()?.deviceCode === p.deviceCode;
   const end = (outcome: ConnectOutcome) => {
-    kvSet(DEVICE_KEY, null);
+    if (mine()) setPending(null);
     return { outcome, status: driveStatus() };
   };
   if (now >= p.expiresAt) {
@@ -478,7 +558,7 @@ export async function pollDriveConnect(by = '', now = Date.now()): Promise<{ out
   }
   if (now < p.nextPollAt) return { outcome: 'pending', status: driveStatus() };
   // Claim this poll before asking (two hub tabs, two copies of the shop: one request per interval).
-  kvSet(DEVICE_KEY, { ...p, nextPollAt: now + p.interval * 1000 });
+  setPending({ ...p, nextPollAt: now + p.interval * 1000 });
   let res: SafeResponse;
   try {
     res = await google(GOOGLE_TOKEN_URL, {
@@ -491,12 +571,14 @@ export async function pollDriveConnect(by = '', now = Date.now()): Promise<{ out
   } catch {
     return { outcome: 'pending', status: driveStatus() };
   }
+  // Cancelled, or a new Connect started, while Google answered: this answer is not used.
+  if (!mine()) return { outcome: 'none', status: driveStatus() };
   const data = jsonOf(res);
   const error = String(data.error ?? '');
   if (error === 'authorization_pending') return { outcome: 'pending', status: driveStatus() };
   if (error === 'slow_down') {
     const interval = Math.min(60, p.interval + 5);
-    kvSet(DEVICE_KEY, { ...p, interval, nextPollAt: now + interval * 1000 });
+    setPending({ ...p, interval, nextPollAt: now + interval * 1000 });
     return { outcome: 'pending', status: driveStatus() };
   }
   if (error === 'access_denied') {
@@ -510,23 +592,17 @@ export async function pollDriveConnect(by = '', now = Date.now()): Promise<{ out
   const refreshToken = typeof data.refresh_token === 'string' ? data.refresh_token : '';
   const access = typeof data.access_token === 'string' ? data.access_token : '';
   if (!res.ok || !REFRESH_TOKEN.test(refreshToken) || !access) {
-    kvSet(DEVICE_KEY, null);
+    setPending(null);
     throw new HttpError(502, `Google did not finish the connection (${said(data.error_description || error || res.status)}). Press Connect Google Drive to try again.`);
   }
   const scopes = String(data.scope ?? DRIVE_FILE_SCOPE).split(/\s+/);
   if (!scopes.includes(DRIVE_FILE_SCOPE)) {
-    kvSet(DEVICE_KEY, null);
+    setPending(null);
     throw new HttpError(400, 'Google connected without the Drive permission (the box was unticked?). Press Connect Google Drive and allow access to the files the shop makes.');
   }
   const cur = config();
   // The same client keeps its folder (it can still see it); another client can't, and gets a new one.
-  let folder: string;
-  try {
-    folder = await ensureAppFolder(access, p.clientId === cur.oauthClientId ? cur.oauthFolderId : '');
-  } catch (err) {
-    kvSet(DEVICE_KEY, null);
-    throw new HttpError(502, err instanceof Error ? err.message : String(err));
-  }
+  const keepFolder = p.clientId === cur.oauthClientId ? cur.oauthFolderId : '';
   const at = new Date(now).toISOString();
   const next: DriveConfig = {
     ...cur,
@@ -534,7 +610,7 @@ export async function pollDriveConnect(by = '', now = Date.now()): Promise<{ out
     oauthClientId: p.clientId,
     oauthClientSecret: p.clientSecret,
     refreshToken,
-    oauthFolderId: folder,
+    oauthFolderId: keepFolder,
     connectedAt: at,
     needsReconnect: false,
     // Connecting is the owner asking for copies: on, when they can be encrypted.
@@ -542,11 +618,28 @@ export async function pollDriveConnect(by = '', now = Date.now()): Promise<{ out
     savedAt: at,
     savedBy: by,
   };
-  if (activeFolder(cur) !== folder || cur.mode !== 'oauth') kvSet(FILES_KEY, []);
-  kvSet(CONFIG_KEY, next);
+  // The connection is saved first: Google issued the refresh token once, it is never thrown away.
+  if (activeFolder(cur) !== keepFolder || cur.mode !== 'oauth') kvSet(FILES_KEY, []);
+  saveConfig(next);
+  setPending(null);
   cachedUserToken = { client: p.clientId, refresh: crypto.createHash('sha256').update(refreshToken).digest('hex'), token: access, until: now + Math.max(60, (Number(data.expires_in) || 3600) - 60) * 1000 };
+  // Then the shop's folder: checked (or made) now; if Google fails here, the next copy or Test connection makes it.
+  let folder = keepFolder;
+  try {
+    folder = await ensureAppFolder(access, keepFolder);
+  } catch (err) {
+    logEvent('warn', 'backup_drive_folder_later', { error: err instanceof Error ? err.message : String(err) });
+  }
+  if (folder !== keepFolder) {
+    const latest = config();
+    // Unless the setting changed meanwhile (disconnected, another client).
+    if (sameTarget(latest, next)) {
+      saveConfig({ ...latest, oauthFolderId: folder });
+      kvSet(FILES_KEY, []);
+    }
+  }
   audit('backup.drive_connected', { by, clientId: p.clientId, folderId: folder, enabled: next.enabled });
-  return end('connected');
+  return { outcome: 'connected', status: driveStatus() };
 }
 
 /** Tests: forget the OAuth access token in hand. */
@@ -598,62 +691,103 @@ function sessionUrl(location: string | undefined): string {
   return u.href;
 }
 
-async function md5Of(file: string): Promise<string> {
+const CHANGED = 'The backup file changed while it was being copied (it is shorter than it was): not copied. The next backup tries again.';
+
+/** Read exactly `length` bytes at `position`, or fail (the file was cut short): never a loop on 0 bytes. */
+async function readExactly(fh: fs.promises.FileHandle, buf: Buffer, length: number, position: number): Promise<void> {
+  let got = 0;
+  while (got < length) {
+    const { bytesRead } = await fh.read(buf, got, length - got, position + got);
+    if (bytesRead === 0) throw new Error(CHANGED);
+    got += bytesRead;
+  }
+}
+
+/** The MD5 of the file open in `fh` (its first `size` bytes). */
+async function md5Of(fh: fs.promises.FileHandle, size: number): Promise<string> {
   const hash = crypto.createHash('md5');
-  for await (const chunk of fs.createReadStream(file, { highWaterMark: 1024 * 1024 }) as AsyncIterable<Buffer>) hash.update(chunk);
+  const buf = Buffer.alloc(Math.min(1024 * 1024, Math.max(size, 1)));
+  for (let at = 0; at < size; at += buf.length) {
+    const n = Math.min(buf.length, size - at);
+    await readExactly(fh, buf, n, at);
+    hash.update(buf.subarray(0, n));
+  }
   return hash.digest('hex');
 }
 
 const wait = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
+/** A failed delete; `status` is Google's answer (0: no answer). */
+export class DriveDeleteError extends Error {
+  constructor(
+    message: string,
+    readonly status: number
+  ) {
+    super(message);
+  }
+}
+
 export async function deleteDriveFile(token: string, id: string, clientEmail: string): Promise<void> {
   if (!DRIVE_ID.test(id)) throw new Error('Not a Drive file id.');
-  const res = await google(`${DRIVE_FILES_URL}/${id}?supportsAllDrives=true`, { method: 'DELETE', headers: { Authorization: `Bearer ${token}` }, timeoutMs: 20_000, maxBytes: 64 * 1024 });
+  let res: SafeResponse;
+  try {
+    res = await google(`${DRIVE_FILES_URL}/${id}?supportsAllDrives=true`, { method: 'DELETE', headers: { Authorization: `Bearer ${token}` }, timeoutMs: 20_000, maxBytes: 64 * 1024 });
+  } catch (err) {
+    throw new DriveDeleteError(`Could not reach Google Drive (${(err as { code?: string }).code || 'network'}).`, 0);
+  }
   if (res.ok || res.status === 404) return; // gone already (the owner removed it)
-  throw driveError(res, 'delete an old copy', clientEmail);
+  throw new DriveDeleteError(driveError(res, 'delete an old copy', clientEmail).message, res.status);
 }
 
 /**
  * Upload one file into the folder (resumable, DRIVE_LIMITS.chunkBytes at a time, read from disk),
  * then check Google's size and MD5 against the file's. A mismatch removes the upload and fails.
+ * The file is opened once: its size, MD5 and every piece come from that same open file (a backup
+ * replaced at the same path meanwhile is not mixed in; one cut short fails).
  */
-export async function uploadToDrive(token: string, folderId: string, file: string, name: string, clientEmail: string): Promise<{ id: string; size: number }> {
-  const size = fs.statSync(file).size;
-  const md5 = await md5Of(file);
-  const start = await google(`${DRIVE_UPLOAD_URL}?uploadType=resumable&supportsAllDrives=true&fields=id,name,size,md5Checksum`, {
-    method: 'POST',
-    headers: {
-      Authorization: `Bearer ${token}`,
-      'Content-Type': 'application/json; charset=UTF-8',
-      'X-Upload-Content-Type': 'application/octet-stream',
-      'X-Upload-Content-Length': String(size),
-    },
-    body: JSON.stringify({ name, parents: [folderId], mimeType: 'application/octet-stream', appProperties: { buhBackup: '1' } }),
-    timeoutMs: 30_000,
-    maxBytes: 64 * 1024,
-  });
-  if (!start.ok) throw driveError(start, 'start the upload', clientEmail);
-  const session = sessionUrl(start.headers.location);
-
-  const chunk = Math.max(256 * 1024, DRIVE_LIMITS.chunkBytes - (DRIVE_LIMITS.chunkBytes % (256 * 1024)));
-  const buf = Buffer.alloc(Math.min(chunk, Math.max(size, 1)));
-  const fd = fs.openSync(file, 'r');
+export async function uploadToDrive(token: string, folderId: string, file: string, name: string, clientEmail: string, onProgress?: (sent: number, size: number) => void): Promise<{ id: string; size: number }> {
+  const fh = await fs.promises.open(file, 'r');
   let done: SafeResponse | null = null;
+  let size = 0;
+  let md5 = '';
   try {
+    size = (await fh.stat()).size;
+    md5 = await md5Of(fh, size);
+    const start = await google(`${DRIVE_UPLOAD_URL}?uploadType=resumable&supportsAllDrives=true&fields=id,name,size,md5Checksum`, {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${token}`,
+        'Content-Type': 'application/json; charset=UTF-8',
+        'X-Upload-Content-Type': 'application/octet-stream',
+        'X-Upload-Content-Length': String(size),
+      },
+      body: JSON.stringify({ name, parents: [folderId], mimeType: 'application/octet-stream', appProperties: { buhBackup: '1' } }),
+      timeoutMs: 30_000,
+      maxBytes: 64 * 1024,
+    });
+    if (!start.ok) throw driveError(start, 'start the upload', clientEmail);
+    const session = sessionUrl(start.headers.location);
+
+    const chunk = Math.max(256 * 1024, DRIVE_LIMITS.chunkBytes - (DRIVE_LIMITS.chunkBytes % (256 * 1024)));
+    const buf = Buffer.alloc(Math.min(chunk, Math.max(size, 1)));
     let offset = 0;
+    // Failed attempts since the upload last moved forward (it starts again from 0 on progress).
     let retries = 0;
+    onProgress?.(0, size);
     while (!done) {
       const n = Math.min(chunk, size - offset);
-      let got = 0;
-      while (got < n) got += fs.readSync(fd, buf, got, n - got, offset + got);
-      const range = size === 0 ? 'bytes */0' : `bytes ${offset}-${offset + n - 1}/${size}`;
+      await readExactly(fh, buf, n, offset);
+      // Nothing left to send (an empty file, or Google has every byte but has not finished): ask where it stands.
+      const range = n === 0 ? `bytes */${size}` : `bytes ${offset}-${offset + n - 1}/${size}`;
       let res: SafeResponse;
+      let asked = false;
       try {
         res = await google(session, { method: 'PUT', headers: { 'Content-Type': 'application/octet-stream', 'Content-Range': range }, body: buf.subarray(0, n), timeoutMs: 300_000, maxBytes: 64 * 1024 });
       } catch (err) {
         if (++retries > 5) throw new Error(`The upload to Google Drive was cut off (${(err as { code?: string }).code || 'network'}).`);
-        await wait(1000 * retries);
+        await wait(DRIVE_LIMITS.retryMs * retries);
         // Ask Google how much it has, and carry on from there.
+        asked = true;
         res = await google(session, { method: 'PUT', headers: { 'Content-Range': `bytes */${size}` }, body: Buffer.alloc(0), timeoutMs: 30_000, maxBytes: 64 * 1024 }).catch(() => ({ status: 0 }) as SafeResponse);
         if (res.status !== 308 && !res.ok) continue;
       }
@@ -661,9 +795,11 @@ export async function uploadToDrive(token: string, folderId: string, file: strin
         const m = /bytes=0-(\d+)/.exec(res.headers.range ?? '');
         const next = m ? Number(m[1]) + 1 : 0;
         if (next > size) throw new Error('Google Drive reported an impossible upload position.');
-        // No progress (Google kept less than was sent, again and again): give up rather than loop.
-        if (next <= offset && n > 0 && ++retries > 5) throw new Error('The upload to Google Drive is not moving forward.');
+        if (next > offset) retries = 0;
+        // No progress (Google kept less than was sent, or keeps saying it has it all without finishing): give up rather than loop.
+        else if (!asked && ++retries > 5) throw new Error('The upload to Google Drive is not moving forward.');
         offset = next;
+        onProgress?.(offset, size);
         continue;
       }
       if (res.ok) {
@@ -671,14 +807,15 @@ export async function uploadToDrive(token: string, folderId: string, file: strin
         break;
       }
       if ((res.status >= 500 || res.status === 429) && ++retries <= 5) {
-        await wait(1000 * retries);
+        await wait(DRIVE_LIMITS.retryMs * retries);
         continue;
       }
       throw driveError(res, 'upload the backup', clientEmail);
     }
   } finally {
-    fs.closeSync(fd);
+    await fh.close();
   }
+  onProgress?.(size, size);
   const meta = jsonOf(done);
   const id = String(meta.id ?? '');
   if (!DRIVE_ID.test(id)) throw new Error('Google Drive did not say which file it made.');
@@ -708,14 +845,17 @@ function isSealed(file: string): boolean {
   }
 }
 
-let running: Promise<DriveState> | null = null;
+/** The copy in progress (one at a time), the next one waiting (only the newest backup), and how far it is. */
+let running: Promise<DriveState | null> | null = null;
+let queued: { file: string; reason: string; promise: Promise<DriveState | null>; resolve: (s: DriveState | null) => void } | null = null;
+let progress: { file: string; size: number; sent: number; startedAt: string } | null = null;
 
 /** What is missing for the mode in use, or '' when copies can be made. */
 function missingFor(cfg: DriveConfig): string {
   if (cfg.mode === 'oauth') {
     if (!cfg.refreshToken || !cfg.oauthClientId || !cfg.oauthClientSecret) return 'Google Drive is not connected (a restored shop has no connection): press Connect Google Drive in Settings → System & backups.';
     if (cfg.needsReconnect) return RECONNECT;
-    if (!cfg.oauthFolderId) return 'The shop’s Google Drive folder is not set: press Reconnect Google Drive.';
+    // No folder yet (Google failed to make it while connecting): the copy makes it.
     return '';
   }
   if (!cfg.privateKey || !cfg.clientEmail) return 'The service account key is missing (a restored shop has none): paste it again in Settings → System & backups.';
@@ -723,66 +863,116 @@ function missingFor(cfg: DriveConfig): string {
   return '';
 }
 
+/** Google's answer to a delete that will not change by trying again (403: no longer ours to delete; 400). */
+function refusedForGood(err: unknown): boolean {
+  const status = err instanceof DriveDeleteError ? err.status : 0;
+  return status >= 400 && status < 500 && status !== 401 && status !== 408 && status !== 429;
+}
+
 /**
  * Copy a backup just taken to Drive (when switched on), keep the newest `keep`, record the outcome.
  * Never throws: a failure is in the state (and the owner alert), the local backup stays as it is.
+ * The backup does not wait for it (backup.ts starts it and moves on). One copy at a time: a backup
+ * taken while one is being copied waits for it, and only the newest of those waiting is copied.
  */
 export function copyBackupToDrive(file: string, reason = 'backup'): Promise<DriveState | null> {
-  const cfg = config();
-  if (!cfg.enabled) return Promise.resolve(null);
-  if (running) return running;
-  running = (async () => {
-    const attemptAt = new Date().toISOString();
-    try {
-      if (!passphraseSet()) throw new Error(NO_PASSPHRASE);
-      if (!file.endsWith('.tar.gz.enc') || !isSealed(file)) throw new Error('This backup is not encrypted, so it was not copied to Google Drive.');
-      const missing = missingFor(cfg);
-      if (missing) throw new Error(missing);
-      const token = await tokenFor(cfg);
-      const account = who(cfg).email;
-      const folder = activeFolder(cfg);
-      const name = path.basename(file);
-      const up = await uploadToDrive(token, folder, file, name, account);
-      const before = copies();
-      kvSet(FILES_KEY, [...before.filter((c) => c.id !== up.id), { id: up.id, name, size: up.size, at: new Date().toISOString() }]);
-      audit('backup.drive_copied', { reason, mode: cfg.mode, file: name, size: up.size, fileId: up.id });
-      setState({ lastAttemptAt: attemptAt, lastSuccessAt: new Date().toISOString(), lastFile: name, lastSize: up.size, lastError: undefined });
-      logEvent('info', 'backup_drive_copied', { file: name, size: up.size });
-      // An earlier copy with the same name (two backups in one minute: the local file was replaced) goes.
-      for (const same of before.filter((c) => c.name === name && c.id !== up.id)) {
-        try {
-          await deleteDriveFile(token, same.id, account);
-          kvSet(FILES_KEY, copies().filter((c) => c.id !== same.id));
-        } catch (err) {
-          logEvent('warn', 'backup_drive_prune_failed', { file: same.name, error: err instanceof Error ? err.message : String(err) });
-        }
-      }
-      // Retention: only copies this feature made, oldest first; a delete that fails is tried next time.
-      const keep = Math.max(1, cfg.keep || DRIVE_KEEP_DEFAULT);
-      let kept = copies();
-      while (kept.length > keep) {
-        const old = kept[0];
-        try {
-          await deleteDriveFile(token, old.id, account);
-        } catch (err) {
-          logEvent('warn', 'backup_drive_prune_failed', { file: old.name, error: err instanceof Error ? err.message : String(err) });
-          break;
-        }
-        kept = kept.slice(1);
-        kvSet(FILES_KEY, kept);
-        audit('backup.drive_removed', { file: old.name, fileId: old.id, keep });
-      }
-    } catch (err) {
-      const message = err instanceof Error ? err.message : String(err);
-      setState({ lastAttemptAt: attemptAt, lastError: message });
-      audit('backup.drive_failed', { reason, mode: cfg.mode, error: message });
-      logEvent('error', 'backup_drive_failed', { error: message });
+  if (!config().enabled) return Promise.resolve(null);
+  if (running) {
+    if (queued) {
+      queued.file = file;
+      queued.reason = reason;
+    } else {
+      let resolve!: (s: DriveState | null) => void;
+      const promise = new Promise<DriveState | null>((r) => (resolve = r));
+      queued = { file, reason, promise, resolve };
     }
-    return state();
-  })().finally(() => {
+    return queued.promise;
+  }
+  running = copyOnce(file, reason).finally(() => {
     running = null;
+    progress = null;
+    const next = queued;
+    queued = null;
+    if (next) void copyBackupToDrive(next.file, next.reason).then(next.resolve);
   });
   return running;
+}
+
+/** Wait until no copy is in progress or waiting (tests, and a clean stop). */
+export async function waitForDriveCopy(): Promise<void> {
+  while (running || queued) await (running ?? queued?.promise);
+}
+
+async function copyOnce(file: string, reason: string): Promise<DriveState | null> {
+  let cfg = config();
+  if (!cfg.enabled) return null;
+  const attemptAt = new Date().toISOString();
+  progress = { file: path.basename(file), size: 0, sent: 0, startedAt: attemptAt };
+  try {
+    if (!passphraseSet()) throw new Error(NO_PASSPHRASE);
+    if (!file.endsWith('.tar.gz.enc') || !isSealed(file)) throw new Error('This backup is not encrypted, so it was not copied to Google Drive.');
+    const missing = missingFor(cfg);
+    if (missing) throw new Error(missing);
+    const token = await tokenFor(cfg);
+    const account = who(cfg).email;
+    if (cfg.mode === 'oauth' && !cfg.oauthFolderId) {
+      // Connected, but Google did not make the shop's folder then: make it now.
+      const folder = await ensureAppFolder(token, '');
+      const latest = config();
+      if (sameTarget(latest, cfg)) saveConfig({ ...latest, oauthFolderId: folder });
+      cfg = { ...cfg, oauthFolderId: folder };
+    }
+    const folder = activeFolder(cfg);
+    const name = path.basename(file);
+    const up = await uploadToDrive(token, folder, file, name, account, (sent, size) => {
+      progress = { file: name, size, sent, startedAt: attemptAt };
+    });
+    setState({ lastAttemptAt: attemptAt, lastSuccessAt: new Date().toISOString(), lastFile: name, lastSize: up.size, lastError: undefined });
+    logEvent('info', 'backup_drive_copied', { file: name, size: up.size });
+    // The setting changed while this copy was going (another account, folder or mode): the copy is
+    // in Drive, but not the new setting's to keep or delete.
+    if (!sameTarget(config(), cfg)) {
+      audit('backup.drive_copied', { reason, mode: cfg.mode, file: name, size: up.size, fileId: up.id, tracked: false });
+      return state();
+    }
+    const before = copies();
+    kvSet(FILES_KEY, [...before.filter((c) => c.id !== up.id), { id: up.id, name, size: up.size, at: new Date().toISOString() }]);
+    audit('backup.drive_copied', { reason, mode: cfg.mode, file: name, size: up.size, fileId: up.id });
+    // An earlier copy with the same name (two backups in one minute: the local file was replaced) goes.
+    for (const same of before.filter((c) => c.name === name && c.id !== up.id)) {
+      try {
+        await deleteDriveFile(token, same.id, account);
+        kvSet(FILES_KEY, copies().filter((c) => c.id !== same.id));
+      } catch (err) {
+        logEvent('warn', 'backup_drive_prune_failed', { file: same.name, error: err instanceof Error ? err.message : String(err) });
+      }
+    }
+    // Retention: only copies this feature made, oldest first. A delete that fails for now (no
+    // answer, Google busy) is tried next time; one Google refuses for good (403: the file is no
+    // longer ours to delete) is no longer tracked (audited), so retention never stalls on it.
+    const keep = Math.max(1, cfg.keep || DRIVE_KEEP_DEFAULT);
+    let kept = copies();
+    while (kept.length > keep) {
+      const old = kept[0];
+      try {
+        await deleteDriveFile(token, old.id, account);
+        audit('backup.drive_removed', { file: old.name, fileId: old.id, keep });
+      } catch (err) {
+        const message = err instanceof Error ? err.message : String(err);
+        logEvent('warn', 'backup_drive_prune_failed', { file: old.name, error: message });
+        if (!refusedForGood(err)) break;
+        audit('backup.drive_remove_failed', { file: old.name, fileId: old.id, status: (err as DriveDeleteError).status, error: message, tracked: false });
+      }
+      kept = copies().filter((c) => c.id !== old.id);
+      kvSet(FILES_KEY, kept);
+    }
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    setState({ lastAttemptAt: attemptAt, lastError: message });
+    audit('backup.drive_failed', { reason, mode: cfg.mode, error: message });
+    logEvent('error', 'backup_drive_failed', { error: message });
+  }
+  return state();
 }
 
 // ── Settings → System & backups ─────────────────────────────────────────────
@@ -808,6 +998,8 @@ export interface DriveStatus {
   folderName: string;
   /** A connection in progress: the code to enter and where (never the device code). */
   connecting: { userCode: string; verificationUrl: string; expiresAt: string; interval: number } | null;
+  /** A copy going up now (the backup is already done): its file, bytes sent of its size. */
+  copying: { file: string; size: number; sent: number; startedAt: string } | null;
   lastAttemptAt?: string;
   lastSuccessAt?: string;
   lastFile?: string;
@@ -840,6 +1032,7 @@ export function driveStatus(): DriveStatus {
     oauthFolderId: cfg.oauthFolderId,
     folderName: APP_FOLDER_NAME,
     connecting: p && p.expiresAt > Date.now() ? { userCode: p.userCode, verificationUrl: p.verificationUrl, expiresAt: new Date(p.expiresAt).toISOString(), interval: p.interval } : null,
+    copying: running && progress ? { ...progress } : null,
     lastAttemptAt: s.lastAttemptAt,
     lastSuccessAt: s.lastSuccessAt,
     lastFile: s.lastFile,
@@ -872,6 +1065,33 @@ export function driveProblem(localLastSuccessAt: string | undefined, intervalHou
 }
 
 const FIELDS = ['enabled', 'mode', 'folderId', 'keep', 'serviceAccountKey', 'disconnect'];
+
+/**
+ * Disconnect, first part: ask Google to revoke the refresh token (best effort, fixed host, through
+ * safeRequest; audited either way, never the token), so the access ends at Google too, not only
+ * here. The token is forgotten here whatever Google answers.
+ */
+async function revokeDriveAccess(by: string): Promise<void> {
+  const token = config().refreshToken;
+  if (!token) return;
+  let status = 0;
+  try {
+    const res = await google(GOOGLE_REVOKE_URL, { method: 'POST', headers: { 'Content-Type': 'application/x-www-form-urlencoded' }, body: new URLSearchParams({ token }).toString(), timeoutMs: 10_000, maxBytes: 16 * 1024 });
+    status = res.status;
+  } catch {
+    // no answer: forgotten here all the same
+  }
+  const ok = status === 200;
+  audit('backup.drive_revoked', { by, ok, status });
+  if (!ok) logEvent('warn', 'backup_drive_revoke_failed', { status });
+}
+
+/** The Settings route: saveDriveSettings, revoking the connection at Google first on Disconnect. */
+export async function updateDriveSettings(input: Record<string, unknown>, by = ''): Promise<DriveStatus> {
+  for (const k of Object.keys(input)) if (!FIELDS.includes(k)) throw new HttpError(400, `Unexpected field: ${k.slice(0, 40)}.`);
+  if (input.disconnect === true) await revokeDriveAccess(by);
+  return saveDriveSettings(input, by);
+}
 
 /**
  * Save Settings → Google Drive: { enabled?, mode?, folderId?, keep?, serviceAccountKey?, disconnect? }.
@@ -921,7 +1141,7 @@ export function saveDriveSettings(input: Record<string, unknown>, by = ''): Driv
     next.refreshToken = '';
     next.needsReconnect = false;
     if (next.mode === 'oauth') next.enabled = false;
-    kvSet(DEVICE_KEY, null);
+    setPending(null);
     _resetDriveUserToken();
   }
   if (next.enabled) {
@@ -936,7 +1156,7 @@ export function saveDriveSettings(input: Record<string, unknown>, by = ''): Driv
   if (!sameAccount || activeFolder(next) !== activeFolder(cur)) kvSet(FILES_KEY, []);
   next.savedAt = new Date().toISOString();
   next.savedBy = by;
-  kvSet(CONFIG_KEY, next);
+  saveConfig(next);
   if (keyChanged) _resetDriveToken();
   audit('backup.drive_saved', { by, enabled: next.enabled, mode: next.mode, folderId: activeFolder(next), keep: next.keep, serviceAccount: next.clientEmail, keyChanged, disconnected: input.disconnect === true });
   return driveStatus();
@@ -979,14 +1199,14 @@ export async function testDriveConnection(input: Record<string, unknown>, by = '
       // The shop's folder gone (deleted by hand)? Make it again, as a backup would need.
       const folder = await ensureAppFolder(token, folderId);
       if (folder !== folderId) {
-        kvSet(CONFIG_KEY, { ...config(), oauthFolderId: folder });
+        saveConfig({ ...config(), oauthFolderId: folder });
         kvSet(FILES_KEY, []);
         folderId = folder;
       }
     }
     const up = await uploadToDrive(token, folderId, scratch, `buh-connection-test-${Date.now()}.txt`, account);
     await deleteDriveFile(token, up.id, account);
-    if (mode === 'oauth' && cur.needsReconnect) kvSet(CONFIG_KEY, { ...config(), needsReconnect: false });
+    if (mode === 'oauth' && cur.needsReconnect) saveConfig({ ...config(), needsReconnect: false });
     audit('backup.drive_tested', { by, ok: true, mode, serviceAccount: account, folderId });
     return { mode, clientEmail: account, folderId };
   } catch (err) {
