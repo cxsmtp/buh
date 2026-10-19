@@ -14,6 +14,12 @@ function octal(n: number, width: number): string {
 }
 
 function header(entry: TarEntry): Buffer {
+  return tarHeader(entry.name, entry.data.length, entry.mtime);
+}
+
+/** The 512-byte header of one file (its data follows, padded to 512 bytes; see tarPadding). */
+export function tarHeader(name: string, size: number, mtime?: Date): Buffer {
+  const entry = { name, data: { length: size }, mtime };
   if (Buffer.byteLength(entry.name) >= 100) throw new Error(`Name too long for tar: ${entry.name}`);
   const h = Buffer.alloc(512, 0);
   h.write(entry.name, 0, 100, 'utf8');
@@ -31,6 +37,14 @@ function header(entry: TarEntry): Buffer {
   h.write(octal(sum, 7) + ' ', 148, 8, 'ascii');
   return h;
 }
+
+/** The zeros after a file's data, to the next 512 bytes. */
+export function tarPadding(size: number): Buffer {
+  return Buffer.alloc((512 - (size % 512)) % 512, 0);
+}
+
+/** The end of an archive: two empty blocks. */
+export const TAR_END = Buffer.alloc(1024, 0);
 
 export function writeTar(entries: TarEntry[]): Buffer {
   const parts: Buffer[] = [];

@@ -9,21 +9,29 @@
 //   Encrypted backups need the passphrase:
 //     BACKUP_PASSPHRASE='…' node scripts/restore-backup.mjs buh-backup-….tar.gz.enc …
 //
-// Every file is checked against the backup's manifest, and the database is
-// integrity-checked, before anything is written. Then stop the shop, point
-// DATA_DIR at the new folder (or swap folders), and start it again. Admin
-// sign-in: the first start prints a new one-time password. The admin account
-// is not in backups, and courier / SMS keys are blanked in them, on purpose:
-// re-enter the keys in the Admin Hub after a restore. The owner's passkeys and
-// recovery codes are in the database, but the backup may predate a revocation:
-// restored recovery codes are voided and restored passkeys are switched off
-// until the owner confirms them in the Admin Hub (see below).
+// The backup is read as a stream (decrypted, uncompressed and unpacked a piece at a time, one file
+// after another), so a big one needs disk, not memory; it stops if the disk would be left with
+// less than 256 MB. Every file is checked against the backup's manifest, and the database is
+// integrity-checked, before anything is used; on any problem everything it wrote is removed.
+// Then stop the shop, point DATA_DIR at the new folder (or swap folders), and start it again.
+// Admin sign-in: the first start prints a new one-time password. The admin account is not in
+// backups, and courier / SMS keys are blanked in them, on purpose: re-enter the keys in the Admin
+// Hub after a restore. The owner's passkeys and recovery codes are in the database, but the backup
+// may predate a revocation: restored recovery codes are voided and restored passkeys are switched
+// off until the owner confirms them in the Admin Hub (see below). Expenses come back with every
+// earlier version and every bill (expenses/). The server's audit key stays (with --replace), or is
+// copied from the running shop's DATA_DIR into the new folder, so the restored audit log still
+// checks out on this server; on a new server the hub says the log was signed by another server's
+// key (restored from a backup), and new entries start a fresh chain.
 import crypto from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
 import zlib from 'node:zlib';
 
 const MAGIC = 'BUHBK1\n';
+const MIN_FREE = 256 * 1024 * 1024;
+const BILL_EXTS = ['jpg', 'png', 'webp', 'heic', 'pdf'];
+const BILL_FILE = new RegExp(`^expenses/[a-f0-9]{24}\\.(${BILL_EXTS.join('|')})$`);
 const args = process.argv.slice(2);
 const replace = args.includes('--replace');
 const [file, finalTarget] = args.filter((a) => a !== '--replace');
@@ -37,100 +45,215 @@ if (!replace && fs.existsSync(finalTarget) && fs.readdirSync(finalTarget).length
 }
 // With --replace, restore next to the data first, and swap only once everything checked out.
 const target = replace ? path.join(finalTarget, `.restore-${Date.now()}`) : finalTarget;
+const targetExisted = fs.existsSync(target);
 
-let payload = fs.readFileSync(file);
-if (payload.subarray(0, MAGIC.length).toString() === MAGIC) {
-  const passphrase = process.env.BACKUP_PASSPHRASE;
-  if (!passphrase) {
-    console.error('This backup is encrypted: set BACKUP_PASSPHRASE.');
-    process.exit(2);
-  }
-  const rest = payload.subarray(MAGIC.length);
-  const nl = rest.indexOf(0x0a);
-  const head = JSON.parse(rest.subarray(0, nl).toString());
-  if (![16384, 131072].includes(head.N) || head.r !== 8 || head.p !== 1) {
-    console.error('Unknown backup encryption settings.');
-    process.exit(1);
-  }
-  const key = crypto.scryptSync(passphrase, Buffer.from(head.salt, 'base64'), 32, { N: head.N, r: 8, p: 1, maxmem: 256 * 1024 * 1024 });
-  const decipher = crypto.createDecipheriv('aes-256-gcm', key, Buffer.from(head.iv, 'base64'));
-  decipher.setAuthTag(Buffer.from(head.tag, 'base64'));
+/** Stop: remove everything this restore wrote (the target was empty, or is our own staging folder). */
+function fail(message, code = 1) {
   try {
-    payload = Buffer.concat([decipher.update(rest.subarray(nl + 1)), decipher.final()]);
+    if (fs.existsSync(target)) {
+      if (targetExisted) for (const name of fs.readdirSync(target)) fs.rmSync(path.join(target, name), { recursive: true, force: true });
+      else fs.rmSync(target, { recursive: true, force: true });
+    }
   } catch {
-    console.error('Wrong passphrase, or the backup is damaged.');
-    process.exit(1);
+    // best effort
+  }
+  console.error(message);
+  process.exit(code);
+}
+
+// ── The stream: the file, decrypted if sealed, uncompressed ──────────────────
+let source;
+let sealed = false;
+{
+  const fd = fs.openSync(file, 'r');
+  const head = Buffer.alloc(4096);
+  const n = fs.readSync(fd, head, 0, head.length, 0);
+  fs.closeSync(fd);
+  if (head.subarray(0, MAGIC.length).toString() === MAGIC) {
+    sealed = true;
+    const passphrase = process.env.BACKUP_PASSPHRASE;
+    if (!passphrase) fail('This backup is encrypted: set BACKUP_PASSPHRASE.', 2);
+    const nl = head.subarray(MAGIC.length, n).indexOf(0x0a);
+    if (nl < 0) fail('Unknown backup encryption settings.');
+    let meta;
+    try {
+      meta = JSON.parse(head.subarray(MAGIC.length, MAGIC.length + nl).toString());
+    } catch {
+      fail('Unknown backup encryption settings.');
+    }
+    if (![16384, 131072].includes(meta.N) || meta.r !== 8 || meta.p !== 1) fail('Unknown backup encryption settings.');
+    const key = crypto.scryptSync(passphrase, Buffer.from(meta.salt, 'base64'), 32, { N: meta.N, r: 8, p: 1, maxmem: 256 * 1024 * 1024 });
+    const decipher = crypto.createDecipheriv('aes-256-gcm', key, Buffer.from(meta.iv, 'base64'));
+    decipher.setAuthTag(Buffer.from(meta.tag, 'base64'));
+    // Until the end the data is not proven (the tag is checked last): nothing is used before then.
+    source = fs.createReadStream(file, { start: MAGIC.length + nl + 1 }).pipe(decipher);
+  } else {
+    source = fs.createReadStream(file);
   }
 }
+const gunzip = zlib.createGunzip();
+source.on('error', (err) => gunzip.destroy(err));
+const tarStream = source.pipe(gunzip);
 
-// Read the tar.
-const tar = zlib.gunzipSync(payload, { maxOutputLength: 2 * 1024 * 1024 * 1024 });
-const entries = new Map();
-for (let off = 0; off + 512 <= tar.length; ) {
-  const h = tar.subarray(off, off + 512);
-  if (h.every((b) => b === 0)) break;
-  const name = h.subarray(0, 100).toString('utf8').replace(/\0.*$/s, '');
-  const size = parseInt(h.subarray(124, 136).toString('ascii').replace(/\0.*$/s, '').trim() || '0', 8);
-  entries.set(name, tar.subarray(off + 512, off + 512 + size));
-  off += 512 + Math.ceil(size / 512) * 512;
+// ── Unpacking, one file at a time ───────────────────────────────────────────
+// Only these names: never the shop's keys or admin account, never . or ..
+const ALLOWED = /^(shop\.db|[a-z_]+\.csv|(receipts|images)\/[A-Za-z0-9_-][A-Za-z0-9._-]*|expenses\/[A-Za-z0-9_-][A-Za-z0-9._-]*|audit\/audit-\d{4}-\d{2}\.jsonl)$/;
+const seen = new Map(); // name → { size, hash }
+let manifestText = '';
+let budget = Infinity;
+fs.mkdirSync(target, { recursive: true, mode: 0o700 });
+try {
+  const st = fs.statfsSync(target);
+  budget = Number(st.bavail) * Number(st.bsize) - MIN_FREE;
+} catch {
+  // statfs unavailable: no disk bound
+}
+let written = 0;
+
+function destOf(name) {
+  return path.join(target, name.startsWith('audit/') ? name.slice('audit/'.length) : name);
 }
 
-// Check everything against the manifest; refuse anything else or any path tricks.
-const manifest = entries.get('MANIFEST.sha256');
-if (!manifest) {
-  console.error('The backup has no manifest.');
-  process.exit(1);
+async function unpack() {
+  let header = Buffer.alloc(0);
+  let entry = null; // { name, remaining, pad, fd, hash, size, keep, manifest: [] }
+  let pad = 0;
+  let ended = false;
+  for await (let chunk of tarStream) {
+    while (chunk.length) {
+      if (ended) {
+        chunk = chunk.subarray(chunk.length);
+        break;
+      }
+      if (pad) {
+        const skip = Math.min(pad, chunk.length);
+        pad -= skip;
+        chunk = chunk.subarray(skip);
+        continue;
+      }
+      if (entry) {
+        const take = Math.min(entry.remaining, chunk.length);
+        const piece = chunk.subarray(0, take);
+        chunk = chunk.subarray(take);
+        entry.hash.update(piece);
+        entry.remaining -= take;
+        if (entry.fd !== null) {
+          written += take;
+          if (written > budget) fail('Not enough free disk space to restore this backup: free some space and try again.');
+          let done = 0;
+          while (done < piece.length) done += fs.writeSync(entry.fd, piece, done, piece.length - done);
+        } else if (entry.manifest) {
+          entry.manifest.push(Buffer.from(piece));
+          if (entry.manifest.reduce((n, b) => n + b.length, 0) > 16 * 1024 * 1024) fail('The backup is damaged (manifest too large).');
+        }
+        if (!entry.remaining) {
+          if (entry.fd !== null) fs.closeSync(entry.fd);
+          if (entry.manifest) manifestText = Buffer.concat(entry.manifest).toString();
+          seen.set(entry.name, { size: entry.size, hash: entry.hash.digest('hex') });
+          pad = (512 - (entry.size % 512)) % 512;
+          entry = null;
+        }
+        continue;
+      }
+      // A header (512 bytes, perhaps split across pieces).
+      const need = 512 - header.length;
+      header = Buffer.concat([header, chunk.subarray(0, need)]);
+      chunk = chunk.subarray(need);
+      if (header.length < 512) continue;
+      const h = header;
+      header = Buffer.alloc(0);
+      if (h.every((b) => b === 0)) {
+        ended = true;
+        continue;
+      }
+      const name = h.subarray(0, 100).toString('utf8').replace(/\0[\s\S]*$/, '');
+      const size = parseInt(h.subarray(124, 136).toString('ascii').replace(/\0[\s\S]*$/, '').trim() || '0', 8);
+      const stored = parseInt(h.subarray(148, 156).toString('ascii').replace(/\0[\s\S]*$/, '').trim(), 8);
+      const check = Buffer.from(h);
+      check.write('        ', 148, 8, 'ascii');
+      let sum = 0;
+      for (const b of check) sum += b;
+      if (sum !== stored || !Number.isFinite(size) || size < 0) fail(`Damaged backup (archive header) at ${name || 'an entry'}.`);
+      if (seen.has(name)) fail(`Damaged backup: ${name} appears twice.`);
+      if (name !== 'MANIFEST.sha256' && (!ALLOWED.test(name) || /\.\./.test(name))) fail(`Unexpected file in backup: ${name}`);
+      if (name.startsWith('expenses/') && !BILL_FILE.test(name)) fail(`Unexpected file in backup: ${name} (a bill is a photo or PDF named by its id).`);
+      let fd = null;
+      if (name !== 'MANIFEST.sha256' && !name.endsWith('.csv')) {
+        const dest = destOf(name);
+        fs.mkdirSync(path.dirname(dest), { recursive: true, mode: 0o700 });
+        fd = fs.openSync(dest, 'wx', 0o600);
+      }
+      entry = { name, size, remaining: size, fd, hash: crypto.createHash('sha256'), manifest: name === 'MANIFEST.sha256' ? [] : null };
+      if (!size) {
+        if (fd !== null) fs.closeSync(fd);
+        seen.set(name, { size: 0, hash: entry.hash.digest('hex') });
+        entry = null;
+      }
+    }
+  }
+  if (entry || header.length) fail('The backup is damaged (it ends in the middle of a file).');
 }
+
+try {
+  await unpack();
+} catch (err) {
+  const text = String(err?.message ?? err);
+  // Encrypted: anything unreadable is a wrong passphrase or damage (garbage in, before the tag says so).
+  fail(sealed || /auth|decrypt/i.test(text) ? 'Wrong passphrase, or the backup is damaged.' : `The backup could not be read: ${text}`);
+}
+// The stream is fully read: the encryption tag (if any) is now checked.
+await new Promise((resolve) => (source.readableEnded || source.destroyed ? resolve() : source.once('close', resolve)));
+if (source.errored) fail('Wrong passphrase, or the backup is damaged.');
+
+// Check everything against the manifest; refuse anything else.
+if (!manifestText) fail('The backup has no manifest.');
 const listed = new Set(['MANIFEST.sha256']);
-for (const line of manifest.toString().trim().split('\n')) {
+for (const line of manifestText.trim().split('\n')) {
   const [hash, size, name] = line.split(/ {2}/);
-  const data = entries.get(name);
-  if (!data || data.length !== Number(size) || crypto.createHash('sha256').update(data).digest('hex') !== hash) {
-    console.error(`Damaged backup: ${name} does not match its checksum.`);
-    process.exit(1);
-  }
-  // Only these names: never the shop's keys or admin account, never . or ..
-  if (!/^(shop\.db|[a-z_]+\.csv|(receipts|images)\/[A-Za-z0-9_-][A-Za-z0-9._-]*|audit\/audit-\d{4}-\d{2}\.jsonl)$/.test(name) || /\.\./.test(name)) {
-    console.error(`Unexpected file in backup: ${name}`);
-    process.exit(1);
-  }
+  const got = seen.get(name);
+  if (!got || got.size !== Number(size) || got.hash !== hash) fail(`Damaged backup: ${name} does not match its checksum.`);
   listed.add(name);
 }
-
-fs.mkdirSync(target, { recursive: true, mode: 0o700 });
-for (const [name, data] of entries) {
-  if (!listed.has(name) || name === 'MANIFEST.sha256' || name.endsWith('.csv')) continue;
-  const dest = path.join(target, name.startsWith('audit/') ? name.slice('audit/'.length) : name);
-  fs.mkdirSync(path.dirname(dest), { recursive: true, mode: 0o700 });
-  fs.writeFileSync(dest, data, { mode: 0o600 });
-}
+for (const name of seen.keys()) if (!listed.has(name)) fail(`Unexpected file in backup: ${name} (not in its manifest).`);
+if (!seen.has('shop.db')) fail('The backup has no database.');
 
 // Integrity check of the restored database.
 const { default: Database } = await import('better-sqlite3');
 const db = new Database(path.join(target, 'shop.db'));
 const ok = db.pragma('integrity_check', { simple: true });
+if (ok !== 'ok') {
+  db.close();
+  fail(`The restored database failed its integrity check: ${ok}`);
+}
 const orders = db.prepare('SELECT COUNT(*) AS n FROM orders').get().n;
 const products = db.prepare('SELECT COUNT(*) AS n FROM products').get().n;
 // The stock ledger and product drafts (backups from before BUH-02.05 have neither table).
 const tableExists = (name) => Boolean(db.prepare("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ?").get(name));
 const stockMoves = tableExists('stock_moves') ? db.prepare('SELECT COUNT(*) AS n FROM stock_moves').get().n : 0;
 const drafts = tableExists('product_drafts') ? db.prepare('SELECT COUNT(*) AS n FROM product_drafts').get().n : 0;
-if (ok !== 'ok') {
+// Expenses and their bills (backups from before BUH-02.10 have none). A bill is one of five kinds
+// of file named by its id: a row naming anything else is refused (it would be served from disk).
+const expenses = tableExists('expenses') ? db.prepare('SELECT COUNT(*) AS n FROM expenses').get().n : 0;
+const billRows = tableExists('expense_bills') ? db.prepare('SELECT id, ext FROM expense_bills').all() : [];
+const strange = billRows.filter((b) => typeof b.id !== 'string' || !/^[a-f0-9]{24}$/.test(b.id) || !BILL_EXTS.includes(b.ext));
+if (strange.length) {
   db.close();
-  console.error(`The restored database failed its integrity check: ${ok}`);
-  process.exit(1);
+  fail(`The backup is damaged: ${strange.length} bill${strange.length === 1 ? ' is' : 's are'} not a photo or PDF named by its id.`);
 }
+const bills = billRows.length;
+const missingBills = billRows.filter((b) => !fs.existsSync(path.join(target, 'expenses', `${b.id}.${b.ext}`))).length;
+// The refunds ledger (backups from before BUH-02.10 have none: the shop fills it in on its first start).
+const refunds = tableExists('card_refunds') ? db.prepare('SELECT COUNT(*) AS n FROM card_refunds').get().n : 0;
 // Ways back into the Admin Hub (backups from before BUH-02.04 have neither table). The backup
 // may be older than the owner's last "Remove" of a lost phone's passkey or last new set of
 // recovery codes, and nothing in it can tell. So: every restored recovery code is voided, and
 // every restored passkey is switched off until the owner confirms it in the Admin Hub (signed
 // in with the password: a restore always gives a fresh one-time password in the log, or the
 // ADMIN_PASSWORD_HASH one, so this can't lock the owner out).
-const hasTable = (name) => Boolean(db.prepare("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ?").get(name));
-const passkeyIds = hasTable('admin_passkeys') ? db.prepare('SELECT id FROM admin_passkeys').all().map((r) => r.id) : [];
-const voidedCodes = hasTable('admin_recovery_codes') ? db.prepare('DELETE FROM admin_recovery_codes WHERE used_at IS NULL').run().changes : 0;
-if (hasTable('admin_recovery_codes')) db.prepare('DELETE FROM admin_recovery_codes').run();
-if (hasTable('kv')) {
+const passkeyIds = tableExists('admin_passkeys') ? db.prepare('SELECT id FROM admin_passkeys').all().map((r) => r.id) : [];
+const voidedCodes = tableExists('admin_recovery_codes') ? db.prepare('DELETE FROM admin_recovery_codes WHERE used_at IS NULL').run().changes : 0;
+if (tableExists('admin_recovery_codes')) db.prepare('DELETE FROM admin_recovery_codes').run();
+if (tableExists('kv')) {
   const put = db.prepare('INSERT INTO kv (key, data, updated_at) VALUES (?, ?, ?) ON CONFLICT(key) DO UPDATE SET data = excluded.data, updated_at = excluded.updated_at');
   const now = new Date().toISOString();
   if (passkeyIds.length) put.run('admin:passkeys-suspended', JSON.stringify(passkeyIds), now);
@@ -140,9 +263,10 @@ if (hasTable('kv')) {
 // The Admin Hub's private link comes back with the backup (only its fingerprint is stored), so the
 // owner's bookmark keeps working. A backup without one (from before BUH-02.08) gets a new link,
 // printed on the first start.
-const hasAdminLink = hasTable('kv') && Boolean(db.prepare("SELECT 1 FROM kv WHERE key = 'admin:link' AND data != 'null'").get());
+const hasAdminLink = tableExists('kv') && Boolean(db.prepare("SELECT 1 FROM kv WHERE key = 'admin:link' AND data != 'null'").get());
 db.close();
 const passkeys = passkeyIds.length;
+const counts = `${orders} orders, ${refunds} card refunds, ${products} products, ${stockMoves} stock moves, ${drafts} product drafts, ${expenses} expenses, ${bills} bills`;
 if (replace) {
   // Move the current data aside (kept), then the restored files into place.
   const aside = path.join(finalTarget, `replaced-${new Date().toISOString().replace(/[:.]/g, '-')}`);
@@ -153,13 +277,25 @@ if (replace) {
   }
   for (const name of fs.readdirSync(target)) fs.renameSync(path.join(target, name), path.join(finalTarget, name));
   fs.rmdirSync(target);
-  console.log(`Restored into ${finalTarget}: ${orders} orders, ${products} products, ${stockMoves} stock moves, ${drafts} product drafts. Integrity check: ok.`);
+  // The same server: its audit key stays, so the restored audit log is still checked against it.
+  if (fs.existsSync(path.join(aside, 'audit.key'))) fs.copyFileSync(path.join(aside, 'audit.key'), path.join(finalTarget, 'audit.key'));
+  console.log(`Restored into ${finalTarget}: ${counts}. Integrity check: ok.`);
   console.log(`The previous data was moved to ${aside} (delete it once you are happy).`);
   console.log('Start the shop again. Admin sign-in: a new one-time password is printed in the log.');
 } else {
-  console.log(`Restored to ${target}: ${orders} orders, ${products} products, ${stockMoves} stock moves, ${drafts} product drafts. Integrity check: ok.`);
+  // This server's audit key (from the running shop's DATA_DIR), so the restored log still checks
+  // out when the shop is pointed at this folder. Never over a key already there.
+  const live = process.env.DATA_DIR ? path.resolve(process.env.DATA_DIR) : '';
+  const liveKey = live ? path.join(live, 'audit.key') : '';
+  if (liveKey && live !== path.resolve(target) && fs.existsSync(liveKey) && !fs.existsSync(path.join(target, 'audit.key'))) {
+    fs.copyFileSync(liveKey, path.join(target, 'audit.key'));
+    fs.chmodSync(path.join(target, 'audit.key'), 0o600);
+    console.log(`This server's audit key was copied from ${live}, so the restored audit log checks out here.`);
+  }
+  console.log(`Restored to ${target}: ${counts}. Integrity check: ok.`);
   console.log('Next: stop the shop, set DATA_DIR to this folder (or swap folders), start it, and sign in with the new one-time password from the log.');
 }
+if (missingBills) console.log(`Warning: ${missingBills} bill file${missingBills === 1 ? ' is' : 's are'} missing from this backup (the expense rows are there).`);
 console.log('');
 console.log(
   hasAdminLink

@@ -14,7 +14,8 @@ test('audit log is hash-chained and detects tampering', () => {
   audit('test.three', {});
   const file = fs.readdirSync(dir).find((f) => f.startsWith('audit-'))!;
   const full = path.join(dir, file);
-  assert.deepEqual(verifyAuditLog(full), { ok: true, entries: 3, problems: [] });
+  const fresh = verifyAuditLog(full);
+  assert.deepEqual([fresh.ok, fresh.status, fresh.entries, fresh.problems], [true, 'intact', 3, []]);
   assert.ok(!fs.readFileSync(full, 'utf8').includes('hunter2'), 'secrets redacted');
 
   const lines = fs.readFileSync(full, 'utf8').trim().split('\n');

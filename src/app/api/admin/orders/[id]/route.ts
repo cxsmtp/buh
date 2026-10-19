@@ -37,8 +37,8 @@ export async function PATCH(req: Request, { params }: { params: Promise<{ id: st
       audit('order.updated', { by: session.email, orderId: id, fields: ['status'] });
       return json({ order });
     }
+    // Audited (before → after) inside updateOrderByAdmin, before anything is saved.
     const order = updateOrderByAdmin(id, body, session.email);
-    audit('order.updated', { by: session.email, orderId: id, fields: Object.keys(body) });
     return json({ order });
   } catch (err) {
     return handleRouteError(err, 'admin/orders/patch');

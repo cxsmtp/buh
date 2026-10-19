@@ -1,6 +1,6 @@
 import type { NextConfig } from "next";
 import path from "path";
-import { contentSecurityPolicy } from "./src/lib/csp";
+import { BILL_CSP, contentSecurityPolicy } from "./src/lib/csp";
 import pkg from "./package.json";
 
 // Shown in the admin hub as BUH-xx.xx.xx, so "which build is this?" has one answer.
@@ -53,6 +53,12 @@ const nextConfig: NextConfig = {
           { key: "Cache-Control", value: "no-store" },
           { key: "Content-Security-Policy", value: "default-src 'none'; frame-ancestors 'none'" },
         ],
+      },
+      {
+        // A bill's photo opened on its own: sandboxed, the image and nothing else (after the API's
+        // policy above, so this one is sent; the route sets the same).
+        source: "/api/admin/expenses/:id/bills/:bill",
+        headers: [{ key: "Content-Security-Policy", value: BILL_CSP }],
       },
     ];
   },

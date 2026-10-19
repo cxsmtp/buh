@@ -348,6 +348,95 @@ const MIGRATIONS: Array<(db: DB) => void> = [
       CREATE INDEX orders_unopened_due ON orders(wa_unopened_cancel_at) WHERE wa_unopened_cancel_at IS NOT NULL AND phone_check IN ('awaiting', 'mismatch');
     `);
   },
+  // 12: expenses, with photos or PDFs of the bills (in DATA_DIR/expenses/), for the accountant's
+  //     reports. Nothing is ever overwritten or deleted: every state of an expense is a row in
+  //     expense_versions (made, each edit, removed), a removed expense keeps its row with who, when
+  //     and why, and a bill taken off an expense keeps its file. Amounts are whole fils. The
+  //     categories are the owner's list (these to start with; more can be added). card_refunds: the
+  //     refunds ledger, one row per refund to a card (and a negative row when one failed afterwards),
+  //     so a report books each refund on the day it was made. Orders refunded before it are filled
+  //     in by backfillRefundLedger() (src/lib/server/orders.ts), their dates marked approximate.
+  (db) => {
+    db.exec(`
+      CREATE TABLE expense_categories (
+        id          TEXT PRIMARY KEY,
+        name        TEXT NOT NULL UNIQUE COLLATE NOCASE,
+        position    INTEGER NOT NULL DEFAULT 0,
+        created_at  TEXT NOT NULL,
+        created_by  TEXT NOT NULL DEFAULT ''
+      );
+      CREATE TABLE expenses (
+        id               TEXT PRIMARY KEY,           -- EXP-YYMMDD-XXXXXX
+        spent_on         TEXT NOT NULL,              -- YYYY-MM-DD, the UAE date on the bill
+        amount_fils      INTEGER NOT NULL CHECK (amount_fils > 0),
+        category_id      TEXT NOT NULL REFERENCES expense_categories(id),
+        payee            TEXT NOT NULL DEFAULT '',
+        method           TEXT NOT NULL,              -- cash | card | bank_transfer | other
+        note             TEXT NOT NULL DEFAULT '',
+        version          INTEGER NOT NULL DEFAULT 1,
+        idempotency_key  TEXT UNIQUE,                -- one "Save" = one expense, even if sent twice
+        created_at       TEXT NOT NULL,
+        created_by       TEXT NOT NULL,
+        updated_at       TEXT NOT NULL,
+        updated_by       TEXT NOT NULL,
+        removed_at       TEXT,
+        removed_by       TEXT,
+        removed_why      TEXT
+      );
+      CREATE INDEX expenses_by_date ON expenses(spent_on);
+      CREATE TABLE expense_versions (
+        id          INTEGER PRIMARY KEY,
+        expense_id  TEXT NOT NULL REFERENCES expenses(id),
+        version     INTEGER NOT NULL,
+        change      TEXT NOT NULL,                   -- created | edited | removed
+        data        TEXT NOT NULL,                   -- the expense as it was after this change (JSON)
+        at          TEXT NOT NULL,
+        by          TEXT NOT NULL,
+        UNIQUE (expense_id, version)
+      );
+      CREATE TABLE expense_bills (
+        id             TEXT PRIMARY KEY,             -- also the file's name in expenses/ (with its extension)
+        expense_id     TEXT NOT NULL REFERENCES expenses(id),
+        ext            TEXT NOT NULL,                -- jpg | png | webp | heic | pdf
+        mime           TEXT NOT NULL,
+        size           INTEGER NOT NULL,
+        sha256         TEXT NOT NULL,
+        original_name  TEXT NOT NULL DEFAULT '',
+        added_at       TEXT NOT NULL,
+        added_by       TEXT NOT NULL,
+        removed_at     TEXT,
+        removed_by     TEXT,
+        removed_why    TEXT
+      );
+      CREATE INDEX expense_bills_by_expense ON expense_bills(expense_id);
+      CREATE TABLE card_refunds (
+        id                INTEGER PRIMARY KEY,
+        order_id          TEXT NOT NULL REFERENCES orders(id),
+        amount_fils       INTEGER NOT NULL CHECK (amount_fils <> 0),   -- negative: a refund that failed afterwards
+        at                TEXT NOT NULL,                               -- when the money went back (ISO, UTC)
+        source            TEXT NOT NULL CHECK (source IN ('stripe', 'hub')),
+        stripe_refund_id  TEXT,                                        -- Stripe's re_… (never made up here)
+        date_approx       INTEGER NOT NULL DEFAULT 0                   -- 1: filled in from an order made before this table
+      );
+      CREATE UNIQUE INDEX card_refunds_by_stripe_id ON card_refunds(stripe_refund_id) WHERE stripe_refund_id IS NOT NULL AND amount_fils > 0;
+      CREATE UNIQUE INDEX card_refunds_reversal_by_stripe_id ON card_refunds(stripe_refund_id) WHERE stripe_refund_id IS NOT NULL AND amount_fils < 0;
+      CREATE INDEX card_refunds_by_order ON card_refunds(order_id);
+      CREATE INDEX card_refunds_by_at ON card_refunds(at);
+    `);
+    const add = db.prepare("INSERT INTO expense_categories (id, name, position, created_at, created_by) VALUES (?, ?, ?, ?, 'shop')");
+    const now = new Date().toISOString();
+    [
+      ['stock', 'Stock & fabric'],
+      ['packaging', 'Packaging'],
+      ['courier', 'Courier & delivery'],
+      ['marketing', 'Marketing & ads'],
+      ['rent', 'Rent'],
+      ['utilities', 'Utilities'],
+      ['software', 'Software & fees'],
+      ['bank_fees', 'Bank & card charges'],
+      ['other', 'Other'],
+    ].forEach(([id, name], i) => add.run(id, name, i, now));
+  },
 ];
 
 let db: DB | null = null;

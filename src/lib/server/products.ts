@@ -1,5 +1,5 @@
 import crypto from 'node:crypto';
-import { audit } from './audit';
+import { audit, auditOrThrow } from './audit';
 import type { BedProfileMeasurement, Product } from '@/types';
 import { INITIAL_PRODUCTS } from '@/data/initialData';
 import { DEFAULT_BED_PROFILES } from '@/data/bedProfiles';
@@ -299,10 +299,28 @@ export function updateProduct(id: string, input: unknown, actor = 'admin'): Stor
     // Sizes no longer offered keep no stock.
     const offered = product.profiles.map((pr) => pr.id);
     db.prepare(`DELETE FROM product_stock WHERE product_id = ? AND size_id NOT IN (${offered.map(() => '?').join(',')})`).run(id, ...offered);
+    // What changed (price and sizes' extra charge above all), audited before it is saved: if the
+    // log can't be written, the change isn't either (503).
+    auditOrThrow('product.updated', { by: actor, productId: id, title: product.title, fields: Object.keys(changes).slice(0, 30), changes: productDiff(existing, product) });
   });
   invalidateProducts();
   recordMove(movedNow, product.title);
   return getProduct(id)!;
+}
+
+/** Before → after of what matters to the books: price, each size's extra charge, title, category, visibility. */
+function productDiff(before: StoredProduct, after: Product & { active?: boolean }): Record<string, { from: unknown; to: unknown }> {
+  const out: Record<string, { from: unknown; to: unknown }> = {};
+  const put = (k: string, from: unknown, to: unknown) => {
+    if (JSON.stringify(from) !== JSON.stringify(to)) out[k] = { from, to };
+  };
+  put('price', before.price, after.price);
+  put('title', before.title, after.title);
+  put('category', before.category, after.category);
+  put('active', before.active, after.active);
+  const deltas = (p: Product) => Object.fromEntries(p.profiles.map((pr) => [pr.id, pr.priceDelta || 0]));
+  put('sizePrices', deltas(before), deltas(after));
+  return out;
 }
 
 function expectedStockFromInput(input: Obj, product: StoredProduct): Record<string, number> | undefined {

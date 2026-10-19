@@ -1,5 +1,19 @@
 # Changelog
 
+## BUH-02.11.00 — 2026-10-18 22:44 UTC · [#28](https://github.com/cxsmtp/buh/pull/28)
+
+- **Expenses with photos of bills.** Admin Hub → Money → Expenses: add an expense from your phone with a photo or PDF of the bill (date, amount, category, who you paid, how). Nothing is ever silently deleted or overwritten: edits keep every version and a removed expense stays on record with who removed it and why.
+- **Reports for your accountant in one place.** Money → Reports: any month, quarter, financial year or dates — sales, refunds (on the date they happened), expenses by category, profit, payment methods — and one ZIP for your CA with Excel-ready sheets, a printable summary, every bill photo and the audit log for the period.
+- **VAT watch.** Your 12-month sales against the AED 375,000 registration threshold, with a warning at 80%; VAT itself stays off.
+- **Audit log you can read.** Money → Audit log: every order, payment, refund, stock, product, settings, sign-in and expense change, searchable, with a check that the log hasn't been tampered with (it stays correct after moving to a new server).
+- **Everything that moves money or stock is recorded first.** Order changes, product prices and refunds are written to the audit log, before and after, before they count; each refund has its own dated record.
+- **Safer backups.** Backups and the accountant's ZIP are written as a stream, so large bill folders never slow the shop or make a backup too big to restore; you're warned well before any limit.
+- **Status.**
+  - **Benchmark:** same host, main (BUH-02.10.00) vs this branch, 3 alternating rounds plus 2 with main first, nothing else running, 0 failed requests. Storefront main 895 / 883 / 901 req/s, branch 880 / 921 / 921 (p95 91–114 vs 89–142 ms; the 142 was the branch's cold first run); courier check main 733 / 722 / 769 / 760 / 734, branch 745 / 696 / 735 / 729 / 764 (p95 79–91 vs 77–101 ms, crossing over between rounds); catalogue main 901 / 786 / 849, branch 835 / 839 / 934. Level.
+  - **Tests:** 690 passed, including expenses, bills, reports and the accountant's ZIP, the refunds ledger, audit key ids and gaps, large streamed backups and restores, and the money screens at 375 and 1280 px.
+  - **Dependency audit:** production 0 vulnerabilities; no new packages (the ZIP writer is the shop's own).
+  - **Security scan:** an independent review (6 medium, 5 low findings: refund dates, more than 2,000 expenses, audit checks after a server move, backup size, export load, bill file checks), all fixed with tests that fail before and pass after.
+
 ## BUH-02.10.00 — 2026-10-18 22:17 UTC · [#27](https://github.com/cxsmtp/buh/pull/27)
 
 - **Customers confirm on WhatsApp, free: no SMS code.** Checkout asks only for the mobile number; the customer confirms by sending you one WhatsApp message. Settings → Phone check keeps the SMS-code options for later (off).

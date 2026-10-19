@@ -5,6 +5,7 @@ import path from 'node:path';
 import type { BankState, CardPayment, CardState, Customer, Emirate, Order, OrderAttention, OrderStatus } from '@/types';
 import { deliveryCheck, uaeDate } from '@/lib/delivery';
 import { dataDir } from './dataDir';
+import { folderRoomProblem } from './diskRoom';
 import { customerLink } from './runtimeConfig';
 import { getDb, inTransaction } from './db';
 import { HttpError } from './http';
@@ -13,7 +14,7 @@ import { verifyPhoneToken } from './phoneToken';
 import { getProduct, invalidateProducts, listProducts } from './products';
 import { bump } from './live';
 import { bankTransferReady, cardPaymentsReady, getSettings, phoneCheckMode, phoneCodesOn } from './settings';
-import { audit } from './audit';
+import { audit, auditedTransaction, auditOrThrow } from './audit';
 import { kvGet, kvSet } from './kv';
 import { logEvent as logEvent_ } from './log';
 import { issuePayLink, payPathOf } from './bankPay';
@@ -773,24 +774,7 @@ const NO_ROOM = 'We can’t take the upload right now, sorry. Please send the sc
 
 /** Why a new receipt can't be stored now (the folder is full, or the disk nearly is), or null. */
 function receiptRoomProblem(incoming: number): string | null {
-  const dir = receiptsDir();
-  try {
-    const st = fs.statfsSync(dir);
-    const free = Number(st.bavail) * Number(st.bsize);
-    if (free - incoming < RECEIPT_LIMITS.minFreeBytes) return `the disk has only ${Math.round(free / 1024 ** 2)} MB free`;
-  } catch {
-    // statfs unavailable: the folder cap below still applies
-  }
-  let used = 0;
-  for (const f of fs.readdirSync(dir)) {
-    try {
-      used += fs.statSync(path.join(dir, f)).size;
-    } catch {
-      // removed meanwhile
-    }
-  }
-  if (used + incoming > RECEIPT_LIMITS.folderBytes) return `the receipts folder holds ${Math.round(used / 1024 ** 2)} MB (the cap is ${Math.round(RECEIPT_LIMITS.folderBytes / 1024 ** 2)} MB)`;
-  return null;
+  return folderRoomProblem(receiptsDir(), incoming, RECEIPT_LIMITS, 'receipts');
 }
 
 /** An upload refused for room: logged, shown in Settings → System, and emailed to the owner (at most every 6 hours). */
@@ -916,34 +900,6 @@ export function checkBankTransfer(id: string, result: BankResult, actor: string)
   });
 }
 
-/**
- * A transaction whose changes are audited before they count: each auditOrThrow() writes its entry
- * (or throws 503, and nothing is saved). The entry is written before COMMIT, so if the commit
- * itself then fails (the disk is full, the database is busy), a "rolled_back" entry follows it at
- * once: the audit log never claims a change the database doesn't have.
- */
-function auditedTransaction<T>(fn: (auditOrThrow: (action: string, details: Record<string, unknown>) => void) => T): T {
-  const written: Array<{ action: string; details: Record<string, unknown> }> = [];
-  const record = (action: string, details: Record<string, unknown>) => {
-    auditOrThrow(action, details);
-    written.push({ action, details });
-  };
-  try {
-    return inTransaction(() => fn(record));
-  } catch (err) {
-    for (const w of written) {
-      const ok = audit('audit.rolled_back', {
-        action: w.action,
-        ...(typeof w.details.orderId === 'string' ? { orderId: w.details.orderId } : {}),
-        ...(typeof w.details.by === 'string' ? { by: w.details.by } : {}),
-        error: err instanceof Error ? err.message.slice(0, 200) : String(err).slice(0, 200),
-      });
-      if (!ok) logEvent_('error', 'audit_rollback_note_failed', { action: w.action });
-    }
-    throw err;
-  }
-}
-
 const OPEN_TRANSFER = "status <> 'cancelled' AND payment_status NOT IN ('verified', 'paid')";
 
 /** Bank transfers with a screenshot waiting for the owner's check. */
@@ -1013,11 +969,14 @@ const NEXT: Record<OrderStatus, OrderStatus[]> = {
 export function updateOrderByAdmin(id: string, patch: unknown, actor: string): Order {
   if (!patch || typeof patch !== 'object' || Array.isArray(patch)) throw new HttpError(400, 'Changes must be an object.');
   const p = patch as Obj;
-  // Audited inside the transaction (the owner's "ship anyway"), so a rollback can't leave its entry behind unnoted.
+  // Audited inside the transaction with what changed (before → after), and the owner's "ship
+  // anyway": if the log can't be written, nothing is saved (503), so a status or payment change is
+  // never done unrecorded, and a rollback can't leave an entry behind unnoted.
   const updated = auditedTransaction((auditFn) => {
     const order = getOrder(id);
     if (!order) throw new HttpError(404, 'Order not found.');
     const changes: Obj = {};
+    const notesBefore = order.adminNotes ?? '';
 
     if (p.status !== undefined && p.status !== order.status) {
       const status = p.status as OrderStatus;
@@ -1065,6 +1024,15 @@ export function updateOrderByAdmin(id: string, patch: unknown, actor: string): O
     if (Object.keys(changes).length) {
       writeOrder(order);
       logEvent(id, actor, 'updated', changes);
+      const { adminNotes: notesChanged, ...rest } = changes;
+      auditFn('order.updated', {
+        by: actor,
+        orderId: id,
+        amountFils: fils(order.total),
+        paymentMethod: order.paymentMethod,
+        ...rest,
+        ...(notesChanged ? { adminNotes: { from: notesBefore.slice(0, 300), to: (order.adminNotes ?? '').slice(0, 300) } } : {}),
+      });
     }
     return getOrder(id)!;
   });
@@ -1432,9 +1400,6 @@ export function ordersNeedingAttention(): number {
 
 const sha256 = (v: string) => crypto.createHash('sha256').update(v).digest('hex');
 
-function auditOrThrow(action: string, details: Record<string, unknown>): void {
-  if (!audit(action, details)) throw new HttpError(503, 'The audit log could not be written, so nothing was changed. Please try again.');
-}
 
 /** What Stripe says about a PaymentIntent (amount in fils; never what a browser says). */
 export interface IntentFacts {
@@ -1475,6 +1440,8 @@ export function recordCardIntent(id: string, ref: string, clientSecret: string, 
     .run(ref, sha256(clientSecret), livemode === undefined ? null : livemode ? 1 : 0, id, ref);
   if (r.changes !== 1) throw new HttpError(409, 'This card payment can no longer be started. Please start checkout again.', {}, { code: 'card_closed' });
   logEvent(id, 'stripe', 'card_intent', { ref });
+  // Best effort: nothing is paid yet (payment.paid is audited before it counts).
+  audit('payment.card_started', { orderId: id, ref, ...(livemode === undefined ? {} : { mode: livemode ? 'live' : 'test' }) });
 }
 
 /** Does this client secret belong to this order (the browser paying for it holds it)? */
@@ -1542,6 +1509,7 @@ export function markCardFailed(orderId: string, pi: { id: string; declineCode?: 
     if (order.card.state !== 'pending' && order.card.state !== 'failed') return 'ignored';
     const changed = getDb().prepare("UPDATE orders SET card_state = 'failed' WHERE id = ? AND card_state = 'pending'").run(orderId).changes;
     logEvent(orderId, actor, 'card_declined', pi.declineCode ? { reason: pi.declineCode.slice(0, 40) } : undefined);
+    auditOrThrow('payment.card_declined', { orderId, ref: pi.id, via: actor, ...(pi.declineCode ? { declineCode: pi.declineCode.slice(0, 40) } : {}), ...(event ? { event: event.id } : {}) });
     if (changed) bump('orders');
     return 'failed';
   });
@@ -1580,9 +1548,86 @@ export function refundableFils(order: Order): number {
   return Math.max(0, fils(order.card?.paidAmount ?? 0) - fils(order.card?.refundedAmount ?? 0));
 }
 
+// ── The refunds ledger ──────────────────────────────────────────────────────
+
+export interface RefundRow {
+  orderId: string;
+  /** Fils; negative when a refund failed afterwards (the money came back to the shop). */
+  amountFils: number;
+  at: string;
+  source: 'stripe' | 'hub';
+  stripeRefundId: string | null;
+  /** Filled in from an order refunded before the ledger existed: the date is the best known one. */
+  dateApprox: boolean;
+}
+
+/**
+ * Bring the refunds ledger (card_refunds) to `totalFils` refunded so far for this order: one row
+ * for the difference, dated now (a negative one when a refund failed). Called in the transaction
+ * that changes the order's refunded amount, so the two always agree. A Stripe refund id is kept
+ * once per direction (a refund, and its reversal if it failed).
+ */
+function ledgerRefund(orderId: string, totalFils: number, source: RefundRow['source'], refundId?: string | null): number {
+  const db = getDb();
+  const sum = db.prepare('SELECT COALESCE(SUM(amount_fils), 0) FROM card_refunds WHERE order_id = ?').pluck().get(orderId) as number;
+  const delta = totalFils - sum;
+  if (!delta) return 0;
+  let id = refundId ?? null;
+  if (id && db.prepare(`SELECT 1 FROM card_refunds WHERE stripe_refund_id = ? AND amount_fils ${delta > 0 ? '>' : '<'} 0`).get(id)) id = null;
+  db.prepare('INSERT INTO card_refunds (order_id, amount_fils, at, source, stripe_refund_id) VALUES (?, ?, ?, ?, ?)').run(orderId, delta, new Date().toISOString(), source, id);
+  return delta;
+}
+
+const LEDGER_GAPS = `
+  SELECT o.id, o.refunded_at, o.updated_at,
+    CASE WHEN o.card_state = 'refunded' THEN COALESCE(o.refunded_fils, o.paid_fils, 0) ELSE COALESCE(o.refunded_fils, 0) END AS want,
+    COALESCE((SELECT SUM(r.amount_fils) FROM card_refunds r WHERE r.order_id = o.id), 0) AS have
+  FROM orders o
+  WHERE o.payment_method = 'online_card' AND (o.refunded_fils IS NOT NULL OR o.card_state = 'refunded' OR EXISTS (SELECT 1 FROM card_refunds r WHERE r.order_id = o.id))`;
+
+/**
+ * Orders refunded before the ledger existed (or by an older version during an update's overlap):
+ * one row each for what the ledger is missing, dated when the order says it was refunded (or last
+ * changed), marked approximate. Idempotent: an order whose ledger already adds up is left alone.
+ */
+export function backfillRefundLedger(): number {
+  type Gap = { id: string; refunded_at: string | null; updated_at: string; want: number; have: number };
+  const gaps = () => (getDb().prepare(LEDGER_GAPS).all() as Gap[]).filter((g) => g.want !== g.have);
+  if (!gaps().length) return 0;
+  const added = inTransaction(() => {
+    const insert = getDb().prepare("INSERT INTO card_refunds (order_id, amount_fils, at, source, date_approx) VALUES (?, ?, ?, 'stripe', 1)");
+    const found = gaps();
+    for (const g of found) insert.run(g.id, g.want - g.have, g.refunded_at || g.updated_at);
+    return found.length;
+  });
+  if (added) logEvent_('info', 'refund_ledger_filled_in', { orders: added });
+  return added;
+}
+
+/** Every row of the refunds ledger, oldest first. */
+export function refundLedger(): RefundRow[] {
+  return (getDb().prepare('SELECT order_id, amount_fils, at, source, stripe_refund_id, date_approx FROM card_refunds ORDER BY at, id').all() as Array<{ order_id: string; amount_fils: number; at: string; source: RefundRow['source']; stripe_refund_id: string | null; date_approx: number }>).map((r) => ({
+    orderId: r.order_id,
+    amountFils: r.amount_fils,
+    at: r.at,
+    source: r.source,
+    stripeRefundId: r.stripe_refund_id,
+    dateApprox: r.date_approx === 1,
+  }));
+}
+
 /** Stripe says how much of the charge is refunded so far (e.g. a partial refund in its dashboard): noted. */
 export function noteRefundedSoFar(orderId: string, refundedFils: number): void {
-  if (getDb().prepare('UPDATE orders SET refunded_fils = ? WHERE id = ? AND COALESCE(refunded_fils, 0) <> ?').run(refundedFils, orderId, refundedFils).changes) bump('orders');
+  // Money back to a customer is in the audit log before it is on the order (or neither is), and a
+  // commit that fails after the entry is written gets its "rolled back" entry.
+  const changed = auditedTransaction((auditOrThrow) => {
+    const before = getDb().prepare('SELECT refunded_fils FROM orders WHERE id = ?').pluck().get(orderId) as number | null | undefined;
+    if (getDb().prepare('UPDATE orders SET refunded_fils = ? WHERE id = ? AND COALESCE(refunded_fils, 0) <> ?').run(refundedFils, orderId, refundedFils).changes !== 1) return false;
+    ledgerRefund(orderId, refundedFils, 'stripe');
+    auditOrThrow('payment.refunded_so_far', { orderId, fromFils: before ?? 0, toFils: refundedFils, via: 'stripe' });
+    return true;
+  });
+  if (changed) bump('orders');
 }
 
 /**
@@ -1606,6 +1651,8 @@ export function recordCardRefund(orderId: string, refund: { id: string; status: 
     getDb()
       .prepare("UPDATE orders SET card_state = ?, refund_ref = ?, refunded_at = ?, refunded_fils = ? WHERE id = ? AND card_state IN ('paid', 'refund_pending')")
       .run(done ? 'refunded' : 'refund_pending', refund.id, done ? new Date().toISOString() : null, done ? paidFils : paidFils - left || null, orderId);
+    // In the ledger once Stripe says the money went back (a pending one when its webhook says so).
+    ledgerRefund(orderId, done ? paidFils : paidFils - left, done ? 'hub' : 'stripe', done ? refund.id : null);
     if (order.status !== 'cancelled' && order.status !== 'delivered') {
       releaseStock(order, 'cancelled');
       order.status = 'cancelled';
@@ -1633,13 +1680,19 @@ export function markCardRefunded(ref: string, charge: { amount: number; amountRe
     if (order.card.state !== 'paid' && order.card.state !== 'refund_pending') return 'ignored';
     if (charge.amountRefunded < (order.card.paidAmount !== undefined ? fils(order.card.paidAmount) : charge.amount)) {
       // A partial refund (Stripe's dashboard): noted, so "Cancel & refund" offers only what is left.
-      if (order.card.state === 'paid') getDb().prepare('UPDATE orders SET refunded_fils = ? WHERE id = ?').run(charge.amountRefunded, order.id);
+      if (order.card.state === 'paid' && fils(order.card.refundedAmount ?? 0) !== charge.amountRefunded) {
+        getDb().prepare('UPDATE orders SET refunded_fils = ? WHERE id = ?').run(charge.amountRefunded, order.id);
+        ledgerRefund(order.id, charge.amountRefunded, 'stripe', charge.refundId);
+        auditOrThrow('payment.refunded_so_far', { orderId: order.id, ref, fromFils: fils(order.card.refundedAmount ?? 0), toFils: charge.amountRefunded, via: actor, ...(event ? { event: event.id } : {}) });
+      }
       logEvent(order.id, actor, 'card_partly_refunded', { amount: aed(charge.amountRefunded) });
       return 'partial';
     }
     getDb()
       .prepare("UPDATE orders SET card_state = 'refunded', refunded_at = ?, refunded_fils = ?, refund_ref = COALESCE(refund_ref, ?) WHERE id = ? AND card_state IN ('paid', 'refund_pending')")
       .run(new Date().toISOString(), charge.amountRefunded, charge.refundId ?? null, order.id);
+    // The hub's own refund (pending until now), or one made in Stripe's dashboard.
+    ledgerRefund(order.id, charge.amountRefunded, order.card.refundRef ? 'hub' : 'stripe', order.card.refundRef ?? charge.refundId);
     // Refunded in full (also from Stripe's dashboard): the order is cancelled, its pieces back on
     // sale if they never left, exactly once (a cancelled or delivered order stays as it is).
     if (order.status !== 'cancelled' && order.status !== 'delivered') {
@@ -1676,6 +1729,8 @@ export function markRefundFailed(ref: string, refund: { id: string; amount: numb
       .prepare("UPDATE orders SET card_state = 'paid', refunded_at = NULL, refund_ref = NULL, refunded_fils = ? WHERE id = ? AND card_state IN ('refunded', 'refund_pending')")
       .run(stillRefunded || null, order.id).changes;
     if (changed !== 1) return 'ignored';
+    // A refund already booked comes off again, on the day it failed (a negative row).
+    ledgerRefund(order.id, stillRefunded, 'stripe', refund.id);
     const text = `Stripe could not refund AED ${aed(refund.amount)} to the customer's card${refund.reason ? ` (${refund.reason.replace(/_/g, ' ')})` : ''}: the money is still in your Stripe account. Refund it again, or pay the customer back another way.`;
     setAttention(order.id, 'refund_failed', text);
     logEvent(order.id, actor, 'card_refund_failed', { refund: refund.id, amount: aed(refund.amount), reason: refund.reason });
@@ -1744,7 +1799,8 @@ export function setCardLabel(orderId: string, label: string): void {
 export function cardTakings(from: string, to: string): { paid: number; paidFils: number; refunded: number; refundedFils: number } {
   const db = getDb();
   const paid = db.prepare("SELECT COUNT(*) AS n, COALESCE(SUM(paid_fils), 0) AS f FROM orders WHERE paid_at >= ? AND paid_at < ? AND card_state IN ('paid', 'refund_pending', 'refunded')").get(from, to) as { n: number; f: number };
-  const refunded = db.prepare("SELECT COUNT(*) AS n, COALESCE(SUM(paid_fils), 0) AS f FROM orders WHERE refunded_at >= ? AND refunded_at < ? AND card_state = 'refunded'").get(from, to) as { n: number; f: number };
+  // Refunds by the day the money went back (the ledger: partial ones too, less any that failed).
+  const refunded = db.prepare('SELECT COUNT(DISTINCT CASE WHEN amount_fils > 0 THEN order_id END) AS n, COALESCE(SUM(amount_fils), 0) AS f FROM card_refunds WHERE at >= ? AND at < ?').get(from, to) as { n: number; f: number };
   return { paid: paid.n, paidFils: paid.f, refunded: refunded.n, refundedFils: refunded.f };
 }
 

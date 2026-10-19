@@ -11,6 +11,9 @@ const SAFE_KEYS = new Set(['stripeCode', 'declineCode']);
 // A phone number: 9+ digits (spaces and dashes allowed), not inside an identifier, so an order
 // number like BUH-261018-123456 or a date like 2026-10-18T09:00 stays readable.
 const PHONE = /(?<![\w-])\+?\d[\d\s-]{7,}\d(?![\w-]*\w)/g;
+// A calendar date (2026-10-18) has 8 digits and dashes too: it is not a phone number (audit entries
+// carry report periods and the dates on bills).
+const ISO_DATE = /^(?:19|20)\d\d-(?:0[1-9]|1[0-2])-(?:0[1-9]|[12]\d|3[01])$/;
 const EMAIL = /([A-Za-z0-9._%+-])[A-Za-z0-9._%+-]*@([A-Za-z0-9.-]+\.[A-Za-z]{2,})/g;
 // A long random path segment: the private admin link (32 characters) or a password-reset
 // email's single-reset path (43). Only its first 4 characters are ever logged.
@@ -29,22 +32,28 @@ export function maskSecretPaths(s: string): string {
   return s.replace(SECRET_PATH, '/$1…');
 }
 
-function scrubString(s: string): string {
-  return maskSecretPaths(s)
+function scrubString(s: string, max = 500): string {
+  // Masked before it is cut, so a cut can never leave half a phone number unmasked.
+  return maskSecretPaths(s.slice(0, max * 2))
     .replace(STRIPE_SECRET, (_m, key: string | undefined, intent: string | undefined) => (key ? `${key}[redacted]` : `${intent}_[redacted]`))
     .replace(EMAIL, '$1***@$2')
-    .replace(PHONE, (m) => maskPhone(m))
-    .slice(0, 500);
+    .replace(PHONE, (m) => (ISO_DATE.test(m) ? m : maskPhone(m)))
+    .slice(0, max);
 }
 
-export function redact(value: unknown, depth = 0): unknown {
+/**
+ * Secrets by key name, phones and emails masked, strings cut at 500 characters. `longText` lets
+ * some fields (by name, at any depth: an expense's note before → after in the audit log) keep up
+ * to `max` characters, masked the same way.
+ */
+export function redact(value: unknown, depth = 0, longText?: { keys: Set<string>; max: number }, long = false): unknown {
   if (depth > 4) return '[…]';
-  if (typeof value === 'string') return scrubString(value);
-  if (Array.isArray(value)) return value.slice(0, 20).map((v) => redact(v, depth + 1));
+  if (typeof value === 'string') return scrubString(value, long && longText ? longText.max : 500);
+  if (Array.isArray(value)) return value.slice(0, 20).map((v) => redact(v, depth + 1, longText, long));
   if (value && typeof value === 'object') {
     const out: Record<string, unknown> = {};
     for (const [k, v] of Object.entries(value)) {
-      out[k] = SECRET_KEY.test(k) && !SAFE_KEYS.has(k) ? '[redacted]' : redact(v, depth + 1);
+      out[k] = SECRET_KEY.test(k) && !SAFE_KEYS.has(k) ? '[redacted]' : redact(v, depth + 1, longText, long || Boolean(longText?.keys.has(k)));
     }
     return out;
   }

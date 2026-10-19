@@ -422,3 +422,56 @@ test('rollback safety: an order placed with no code is plain JSON an older versi
   for (const s of statements) assert.match(s, /^(ALTER TABLE orders ADD COLUMN|CREATE INDEX)/, s);
   closeOpen();
 });
+
+test('money views: an auto-cancelled unconfirmed order is no sale, a flagged unpaid bank transfer is not paid, and every phone-check action is in the audit viewer’s "order." group', async () => {
+  const reports = await import('@/lib/server/reports');
+  const view = await import('@/lib/server/auditView');
+  const { dubaiToday } = await import('@/lib/reportPeriods');
+  await updateSettings('store', { whatsappNumber: SHOP_WA, holdUntilWhatsAppConfirmed: false });
+  closeOpen();
+  const today = dubaiToday();
+  const report = () => reports.buildReport(today, today);
+
+  // Auto-cancelled (never confirmed): out of the sales, counted as cancelled, not paid.
+  const cod = place();
+  const before = report();
+  due(cod.id);
+  assert.equal(orders.sweepUnconfirmedOrders(), 1);
+  const after = report();
+  assert.equal(after.sales.orders, before.sales.orders - 1, 'no longer a sale');
+  assert.equal(after.sales.grossFils, before.sales.grossFils - Math.round(cod.total * 100));
+  assert.equal(after.excluded.cancelled, before.excluded.cancelled + 1);
+  assert.deepEqual(reports.classifyOrder(orders.getOrder(cod.id)!), { counted: false, reason: 'cancelled', paid: false });
+
+  // A bank transfer flagged at its deadline: still an order (pieces held), never paid by the flag.
+  const bank = place({ paymentMethod: 'bank_transfer' });
+  const beforeFlag = report();
+  assert.equal(orders.sweepUnconfirmedOrders(Date.now() + 25 * 3600_000), 0);
+  assert.equal(orders.getOrder(bank.id)!.attention?.kind, 'bank_unconfirmed');
+  const afterFlag = report();
+  assert.deepEqual(afterFlag.sales, beforeFlag.sales, 'the flag changes no money');
+  assert.deepEqual(afterFlag.byMethod.bank_transfer, beforeFlag.byMethod.bank_transfer);
+  assert.equal(reports.classifyOrder(orders.getOrder(bank.id)!).paid, false);
+
+  // Phone correction and "ship anyway": audited once each, next to the order change.
+  const m = place();
+  orders.checkWhatsApp(m.id, 'mismatch', 'owner@shop.test');
+  orders.checkWhatsApp(m.id, 'use_sender', 'owner@shop.test', { phone: '055 777 0001' });
+  const s = place();
+  orders.updateOrderByAdmin(s.id, { status: 'confirmed', shipUnconfirmed: true }, 'owner@shop.test');
+
+  const group = view.auditPage({ action: 'order.', pageSize: 200 });
+  for (const action of ['order.auto_cancelled_unconfirmed', 'order.bank_unconfirmed_flagged', 'order.phone_changed', 'order.whatsapp_mismatch', 'order.whatsapp_confirmed', 'order.ship_unconfirmed', 'order.updated']) {
+    assert.ok(group.actions.includes(action), `${action} in the action list`);
+  }
+  assert.ok(group.entries.every((e) => e.action.startsWith('order.')));
+  const forOrder = (id: string) => view.auditEntries({ order: id }).map((e) => e.action);
+  assert.deepEqual(forOrder(cod.id), ['order.auto_cancelled_unconfirmed'], 'the sweep logs the cancel once (no order.updated as well)');
+  assert.equal(view.whoOf(view.auditEntries({ order: cod.id })[0]), 'shop');
+  assert.deepEqual(forOrder(bank.id), ['order.bank_unconfirmed_flagged']);
+  assert.deepEqual(forOrder(m.id), ['order.whatsapp_mismatch', 'order.phone_changed', 'order.whatsapp_confirmed']);
+  assert.deepEqual(forOrder(s.id), ['order.ship_unconfirmed', 'order.updated'], 'the owner’s choice, then what changed');
+  const updated = view.auditEntries({ order: s.id, action: 'order.updated' })[0];
+  assert.deepEqual(updated.details.status, { from: 'pending_confirmation', to: 'confirmed' });
+  closeOpen();
+});

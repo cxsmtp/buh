@@ -1,6 +1,6 @@
 import fs from 'node:fs';
 import { audit } from './audit';
-import { backupHealth } from './backup';
+import { BACKUP_LIMITS, backupDataSize, backupHealth } from './backup';
 import { emailConfigured, ownerEmail, sender, transport } from './mail';
 import { dataDir } from './dataDir';
 import { getDb } from './db';
@@ -8,6 +8,7 @@ import { kvGet, kvSet } from './kv';
 import { logEvent } from './log';
 import { awaitingWhatsAppCount, cardTakings, ordersNeedingAttention, receiptsNoRoom, transfersAwaitedCount, transfersToCheckCount, unconfirmedPressure } from './orders';
 import { listProducts } from './products';
+import { vatStatus } from './reports';
 import { getSettings, phoneCheckMode } from './settings';
 
 /**
@@ -64,6 +65,16 @@ export function currentProblems(now = Date.now()): Problem[] {
   const backup = backupHealth(now);
   if (backup.level === 'failing') problems.push({ id: 'backup', level: 'failing', text: backup.lastError ? `Backups are failing: ${backup.lastError}` : 'No backup in the last day.' });
   else if (backup.level === 'warning') problems.push({ id: 'backup', level: 'warning', text: backup.lastEmailError || backup.notice || 'Backups need attention.' });
+  // The data to back up nears (80%) or passes the most one backup holds: said before backups stop.
+  try {
+    const size = backupDataSize();
+    const amount = `${(size.bytes / 1024 ** 3).toFixed(1)} GB`;
+    const limit = `${(size.limit / 1024 ** 3).toFixed(0)} GB`;
+    if (size.ratio > 1) problems.push({ id: 'backup_size', level: 'failing', text: `The shop's data (${amount}) is more than one backup can hold (${limit}): new backups are refused until some is removed (old product photos, bills no longer needed).` });
+    else if (size.ratio >= BACKUP_LIMITS.warnRatio) problems.push({ id: 'backup_size', level: 'warning', text: `The shop's data to back up is ${amount}, ${Math.floor(size.ratio * 100)}% of the most one backup can hold (${limit}). Remove old product photos or bills you no longer need before it is full.` });
+  } catch (err) {
+    logEvent('warn', 'backup_size_check_failed', { error: err instanceof Error ? err.message : String(err) });
+  }
   if (phoneCheckMode() === 'whatsapp') {
     // Settings → Phone check "WhatsApp (free)": no gateway needed, but the shop's WhatsApp number is.
     if (!getSettings('store').whatsappNumber) {
@@ -92,6 +103,13 @@ export function currentProblems(now = Date.now()): Problem[] {
   // A refund that failed, a booking after a cancel, a card order to refund in Stripe's dashboard.
   const attention = ordersNeedingAttention();
   if (attention) problems.push({ id: 'orders', level: 'warning', text: `${attention} order${attention === 1 ? ' needs' : 's need'} your attention (Orders: the red notes). Mark each as handled once done.` });
+  // Not VAT-registered: 12 months of sales near (80%) or over the AED 375,000 mandatory threshold.
+  try {
+    const vat = vatStatus(now);
+    if (vat.level !== 'ok') problems.push({ id: 'vat', level: 'warning', text: vat.text });
+  } catch (err) {
+    logEvent('warn', 'vat_check_failed', { error: err instanceof Error ? err.message : String(err) });
+  }
   return problems;
 }
 

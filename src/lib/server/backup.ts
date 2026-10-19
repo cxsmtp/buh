@@ -1,6 +1,8 @@
 import crypto from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
+import { PassThrough, Readable } from 'node:stream';
+import { pipeline } from 'node:stream/promises';
 import { promisify } from 'node:util';
 import zlib from 'node:zlib';
 import type { Order } from '@/types';
@@ -12,7 +14,11 @@ import { emailConfigured, ownerEmail, sender, transport } from './mail';
 import { allOrders, listCustomers } from './orders';
 import { blankSecretsIn } from './settings';
 import { listProducts } from './products';
-import { readTar, writeTar, type TarEntry } from './tar';
+import { readTar, TAR_END, tarHeader, tarPadding, type TarEntry } from './tar';
+import { diskRoomProblem } from './diskRoom';
+import { kvGet, kvSet } from './kv';
+import { expenseCsvFiles } from './expenses';
+import { toCsv } from './csv';
 
 /**
  * Backups, every 12 hours (BACKUP_INTERVAL_HOURS), taken by the running shop:
@@ -25,12 +31,18 @@ import { readTar, writeTar, type TarEntry } from './tar';
  *  - product drafts and the stock ledger are tables in the database copy;
  *  - the bank-transfer receipts (every screenshot a customer uploaded, the earlier ones
  *    too), the product photos and the audit log;
+ *  - the expenses (tables in the database copy, every earlier version and removed ones too),
+ *    expenses.csv and expense_bills.csv, and every bill photo or PDF (expenses/, replaced and
+ *    removed ones too);
  *  - the owner's passkeys (public keys only) and recovery codes (hashes
  *    only), in the database; a restore switches them off until reviewed,
  *    since the backup may predate a revocation.
  *
- * All packed in one .tar.gz; with BACKUP_PASSPHRASE set it is encrypted
- * (AES-256-GCM, key from scrypt) to .tar.gz.enc. It is emailed to
+ * All packed in one .tar.gz, streamed (each file read a piece at a time, compressed and encrypted
+ * as it goes, so a big bills folder never sits in memory); with BACKUP_PASSPHRASE set it is
+ * encrypted (AES-256-GCM, key from scrypt) to .tar.gz.enc. The data to back up may be at most
+ * BACKUP_LIMITS.totalBytes (6 GB): the monitor warns from 80%, and beyond it the backup is refused
+ * (and the owner told) rather than made too big to restore. It is emailed to
  * BACKUP_EMAIL through the SMTP server in SMTP_*, and the newest 14 are kept
  * in DATA_DIR/backups. Every run is recorded (backup-state.json and the audit
  * log) and shown in the admin hub; a failure is emailed when email works.
@@ -38,9 +50,15 @@ import { readTar, writeTar, type TarEntry } from './tar';
  * Restore: node scripts/restore-backup.mjs <file> <empty folder>.
  */
 
-const gzip = promisify(zlib.gzip);
+const scrypt = promisify(crypto.scrypt) as (pass: string, salt: Buffer, len: number, opts: crypto.ScryptOptions) => Promise<Buffer>;
 
 export const BACKUP_MAGIC = 'BUHBK1\n';
+/**
+ * The most data one backup takes (the database, receipts, photos, bills and the audit log), and
+ * where the monitor starts warning. A restore needs that much free disk twice over. (Changeable by
+ * tests only.)
+ */
+export const BACKUP_LIMITS = { totalBytes: 6 * 1024 ** 3, warnRatio: 0.8, minFreeBytes: 512 * 1024 ** 2 };
 const KEEP = 14;
 // Gmail and most mail servers accept 25 MB per message; base64 adds a third.
 const EMAIL_LIMIT_BYTES = 17 * 1024 * 1024;
@@ -83,17 +101,8 @@ function writeBackupState(patch: BackupState) {
 
 // ── CSV (safe to open in Excel) ─────────────────────────────────────────────
 
-function cell(v: unknown): string {
-  let s = v === undefined || v === null ? '' : String(v);
-  // A cell starting with = + - @ (or tab/CR) would run as a formula in Excel.
-  if (/^[=+\-@\t\r]/.test(s) && !/^-?\d+(\.\d+)?$/.test(s)) s = `'${s}`;
-  return /[",\n\r]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
-}
-
-export function toCsv(headers: string[], rows: unknown[][]): string {
-  // BOM so Excel reads Arabic names as UTF-8.
-  return '﻿' + [headers, ...rows].map((r) => r.map(cell).join(',')).join('\r\n') + '\r\n';
-}
+// toCsv lives in ./csv (shared with the accountant's export); kept importable from here.
+export { toCsv } from './csv';
 
 function csvFiles(): TarEntry[] {
   const orders = allOrders();
@@ -157,6 +166,7 @@ function csvFiles(): TarEntry[] {
         ])
       )),
     },
+    ...expenseCsvFiles(),
     {
       name: 'products.csv',
       data: Buffer.from(toCsv(
@@ -172,20 +182,82 @@ function csvFiles(): TarEntry[] {
   ];
 }
 
-function folderEntries(folder: string, prefix: string): TarEntry[] {
+/** A file to put in the backup: from disk (read a piece at a time when it is packed) or from memory. */
+interface PackItem {
+  name: string;
+  size: number;
+  file?: string;
+  data?: Buffer;
+}
+
+function folderItems(folder: string, prefix: string): PackItem[] {
   const dir = path.join(dataDir(), folder);
   if (!fs.existsSync(dir)) return [];
-  const out: TarEntry[] = [];
+  const out: PackItem[] = [];
   for (const f of fs.readdirSync(dir)) {
     // A file still being written (an upload in progress) is not part of the shop's data yet.
     if (f.endsWith('.tmp')) continue;
     try {
-      if (fs.statSync(path.join(dir, f)).isFile()) out.push({ name: `${prefix}/${f}`, data: fs.readFileSync(path.join(dir, f)) });
+      const st = fs.statSync(path.join(dir, f));
+      if (st.isFile()) out.push({ name: `${prefix}/${f}`, size: st.size, file: path.join(dir, f) });
     } catch {
       // removed meanwhile (an older screenshot pruned, a photo replaced)
     }
   }
   return out;
+}
+
+function auditItems(): PackItem[] {
+  return fs
+    .readdirSync(dataDir())
+    .filter((f) => /^audit-\d{4}-\d{2}\.jsonl$/.test(f))
+    .map((f) => ({ name: `audit/${f}`, size: fs.statSync(dataFile(f)).size, file: dataFile(f) }));
+}
+
+/** How much data a backup takes now (before compression), against the limit. */
+export function backupDataSize(): { bytes: number; limit: number; ratio: number } {
+  let bytes = 0;
+  try {
+    bytes += fs.statSync(dataFile('shop.db')).size;
+  } catch {
+    // no database yet
+  }
+  for (const i of [...folderItems('receipts', 'receipts'), ...folderItems('images', 'images'), ...folderItems('expenses', 'expenses'), ...auditItems()]) bytes += i.size;
+  return { bytes, limit: BACKUP_LIMITS.totalBytes, ratio: bytes / BACKUP_LIMITS.totalBytes };
+}
+
+const gb = (n: number) => `${(n / 1024 ** 3).toFixed(n < 1024 ** 3 ? 2 : 1)} GB`;
+
+/**
+ * The tar, made as it is read: each file's header, its bytes (from disk, a piece at a time, exactly
+ * the size it had when listed: a log appended to meanwhile is taken up to there), its padding; the
+ * manifest of checksums last.
+ */
+async function* tarStream(items: PackItem[]): AsyncGenerator<Buffer> {
+  const manifest: string[] = [];
+  for (const item of items) {
+    const hash = crypto.createHash('sha256');
+    yield tarHeader(item.name, item.size);
+    if (item.data) {
+      hash.update(item.data);
+      yield item.data;
+    } else if (item.size) {
+      let got = 0;
+      for await (const chunk of fs.createReadStream(item.file!, { start: 0, end: item.size - 1, highWaterMark: 256 * 1024 }) as AsyncIterable<Buffer>) {
+        got += chunk.length;
+        hash.update(chunk);
+        yield chunk;
+      }
+      if (got !== item.size) throw new Error(`${item.name} changed while it was backed up.`);
+    }
+    yield tarPadding(item.size);
+    manifest.push(`${hash.digest('hex')}  ${item.size}  ${item.name}`);
+  }
+  const text = Buffer.from(manifest.join('\n') + '\n');
+  yield tarHeader('MANIFEST.sha256', text.length);
+  yield text;
+  yield tarPadding(text.length);
+  yield TAR_END;
 }
 
 // ── Encryption ──────────────────────────────────────────────────────────────
@@ -195,6 +267,11 @@ const SCRYPT_N = 131072;
 const SCRYPT_MAXMEM = 256 * 1024 * 1024;
 /** Shorter passphrases are accepted but flagged in the admin hub and the log. */
 export const MIN_PASSPHRASE_LENGTH = 12;
+
+function sealHead(salt: Buffer, iv: Buffer, tag: Buffer): Buffer {
+  // Every field has a fixed length, so the head can be written before the tag is known and again after.
+  return Buffer.from(JSON.stringify({ kdf: 'scrypt', N: SCRYPT_N, r: 8, p: 1, salt: salt.toString('base64'), iv: iv.toString('base64'), tag: tag.toString('base64') }) + '\n');
+}
 
 export function seal(plain: Buffer, passphrase: string): Buffer {
   const salt = crypto.randomBytes(16);
@@ -236,7 +313,15 @@ export interface BackupResult {
 export async function createBackup(now = new Date()): Promise<BackupResult> {
   const stamp = now.toISOString().slice(0, 16).replace(/[-:]/g, '').replace('T', '-');
   const dir = backupsDir();
+  // Too much data to back up (and so to restore): refused, and the failure tells the owner.
+  const size = backupDataSize();
+  if (size.bytes > size.limit) {
+    throw new Error(`The shop's data is ${gb(size.bytes)}, more than one backup can hold (${gb(size.limit)}): no backup was made. Remove old product photos or bills you no longer need, or ask for the limit to be raised.`);
+  }
+  const room = diskRoomProblem(dir, size.bytes, BACKUP_LIMITS.minFreeBytes);
+  if (room) throw new Error(`There is no room for the backup: ${room}. Free some space on the server.`);
   const tmpDb = path.join(dir, `.snapshot-${process.pid}-${Date.now()}.db`);
+  const partial = path.join(dir, `.partial-${process.pid}-${Date.now()}`);
   try {
     await backupTo(tmpDb);
     const Database = (await import('better-sqlite3')).default;
@@ -264,37 +349,57 @@ export async function createBackup(now = new Date()): Promise<BackupResult> {
     if (ok !== 'ok') throw new Error(`Snapshot failed its integrity check: ${ok}`);
 
     const csv = csvFiles();
-    const entries: TarEntry[] = [
-      { name: 'shop.db', data: fs.readFileSync(tmpDb) },
-      ...csv,
-      ...folderEntries('receipts', 'receipts'),
-      ...folderEntries('images', 'images'),
-      ...fs
-        .readdirSync(dataDir())
-        .filter((f) => /^audit-\d{4}-\d{2}\.jsonl$/.test(f))
-        .map((f) => ({ name: `audit/${f}`, data: fs.readFileSync(dataFile(f)) })),
+    const items: PackItem[] = [
+      { name: 'shop.db', size: fs.statSync(tmpDb).size, file: tmpDb },
+      ...csv.map((c) => ({ name: c.name, size: c.data.length, data: c.data })),
+      ...folderItems('receipts', 'receipts'),
+      ...folderItems('images', 'images'),
+      ...folderItems('expenses', 'expenses'),
+      ...auditItems(),
     ];
-    const manifest = entries.map((e) => `${crypto.createHash('sha256').update(e.data).digest('hex')}  ${e.data.length}  ${e.name}`).join('\n') + '\n';
-    entries.push({ name: 'MANIFEST.sha256', data: Buffer.from(manifest) });
 
-    // Off the main thread, so checkout keeps answering while a big backup is packed.
-    // Level 6: photos and receipts are already compressed; level 9 only costs time.
-    const archive = await gzip(writeTar(entries), { level: 6 });
+    // Streamed: read, compressed (level 6: photos and receipts are already compressed; level 9
+    // only costs time) and encrypted a piece at a time, off the main thread where it counts.
     const passphrase = process.env.BACKUP_PASSPHRASE || '';
     const encrypted = passphrase.length > 0;
-    const payload = encrypted ? seal(archive, passphrase) : archive;
+    const out = fs.createWriteStream(partial, { mode: 0o600, flags: 'wx' });
+    let cipher: crypto.CipherGCM | null = null;
+    let salt = Buffer.alloc(16);
+    let iv = Buffer.alloc(12);
+    let key: Buffer | null = null;
+    if (encrypted) {
+      salt = crypto.randomBytes(16);
+      iv = crypto.randomBytes(12);
+      key = await scrypt(passphrase, salt, 32, { N: SCRYPT_N, r: 8, p: 1, maxmem: SCRYPT_MAXMEM });
+      cipher = crypto.createCipheriv('aes-256-gcm', key, iv);
+      // The head with a blank tag; the real tag is written over it once everything is encrypted.
+      out.write(Buffer.concat([Buffer.from(BACKUP_MAGIC), sealHead(salt, iv, Buffer.alloc(16))]));
+    }
+    await pipeline(Readable.from(tarStream(items)), zlib.createGzip({ level: 6 }), cipher ?? new PassThrough(), out);
+    if (cipher) {
+      const fd = fs.openSync(partial, 'r+');
+      try {
+        fs.writeSync(fd, sealHead(salt, iv, cipher.getAuthTag()), 0, undefined, Buffer.byteLength(BACKUP_MAGIC));
+        fs.fsyncSync(fd);
+      } finally {
+        fs.closeSync(fd);
+      }
+    }
     const file = path.join(dir, `buh-backup-${stamp}.tar.gz${encrypted ? '.enc' : ''}`);
-    fs.writeFileSync(file, payload, { mode: 0o600 });
+    fs.renameSync(partial, file);
+    const written = fs.statSync(file).size;
 
     const counts = (getDb().prepare('SELECT COUNT(*) AS n FROM orders').get() as { n: number }).n;
-    const summary = `${counts} orders, ${listProducts({ includeHidden: true }).length} products, ${entries.filter((e) => e.name.startsWith('receipts/')).length} receipts`;
+    const expenses = (getDb().prepare('SELECT COUNT(*) AS n FROM expenses').get() as { n: number }).n;
+    const summary = `${counts} orders, ${listProducts({ includeHidden: true }).length} products, ${items.filter((e) => e.name.startsWith('receipts/')).length} receipts, ${expenses} expenses, ${items.filter((e) => e.name.startsWith('expenses/')).length} bills`;
 
     // Keep the newest KEEP backups.
     const all = fs.readdirSync(dir).filter((f) => f.startsWith('buh-backup-')).sort();
     for (const old of all.slice(0, Math.max(0, all.length - KEEP))) fs.rmSync(path.join(dir, old), { force: true });
 
-    return { file, size: payload.length, encrypted, summary, csv };
+    return { file, size: written, encrypted, summary, csv };
   } finally {
+    fs.rmSync(partial, { force: true });
     fs.rmSync(tmpDb, { force: true });
     fs.rmSync(`${tmpDb}-wal`, { force: true });
     fs.rmSync(`${tmpDb}-shm`, { force: true });
@@ -302,12 +407,27 @@ export async function createBackup(now = new Date()): Promise<BackupResult> {
   }
 }
 
-/** Read a backup back: the archive's files, after checking every file against the manifest. */
+/**
+ * A restore (scripts/restore-backup.mjs, run while the shop is stopped) leaves a note in the
+ * database; the first start after it writes "backup.restored" to the audit log, once.
+ */
+export function auditRestoreOnce(): boolean {
+  const restored = kvGet<{ at: string; backup: string }>('admin:restored')?.data;
+  if (!restored?.at || kvGet<string>('audit:restore-noted')?.data === restored.at) return false;
+  if (!audit('backup.restored', { restoredAt: restored.at, backup: String(restored.backup ?? '').slice(0, 120) })) return false;
+  kvSet('audit:restore-noted', restored.at);
+  return true;
+}
+
+/**
+ * Read a small backup back into memory (tests, and looking inside one): the archive's files, after
+ * checking every file against the manifest. A real restore streams instead (scripts/restore-backup.mjs).
+ */
 export function openBackup(payload: Buffer, passphrase = ''): TarEntry[] {
   const isSealed = payload.subarray(0, BACKUP_MAGIC.length).toString() === BACKUP_MAGIC;
   if (isSealed && !passphrase) throw new Error('This backup is encrypted: give its BACKUP_PASSPHRASE.');
   const archive = isSealed ? unseal(payload, passphrase) : payload;
-  const entries = readTar(zlib.gunzipSync(archive, { maxOutputLength: 2 * 1024 * 1024 * 1024 }));
+  const entries = readTar(zlib.gunzipSync(archive, { maxOutputLength: BACKUP_LIMITS.totalBytes + 64 * 1024 ** 2 }));
   const manifest = entries.find((e) => e.name === 'MANIFEST.sha256');
   if (!manifest) throw new Error('The backup has no manifest.');
   for (const line of manifest.data.toString().trim().split('\n')) {

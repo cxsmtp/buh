@@ -62,3 +62,11 @@ export function contentSecurityPolicy(): string {
     ...(isDev ? [] : ['upgrade-insecure-requests']),
   ].join('; ');
 }
+
+/**
+ * A bill's photo, opened on its own from the hub (src/app/api/admin/expenses/[id]/bills/[bill]):
+ * the image itself and nothing else; sandboxed, so nothing in it can ever run; never framed. Set
+ * for that path in next.config.ts (after the API's own policy, so it is the one sent) and by the
+ * route. PDFs are downloaded, not shown: browsers don't open a PDF under a sandbox policy.
+ */
+export const BILL_CSP = "default-src 'none'; img-src 'self'; frame-ancestors 'none'; sandbox";
