@@ -66,7 +66,7 @@ export const DEFAULT_EMAIL_SETTINGS: EmailSettings = {
 /** The chat's starting "memory": the owner edits, adds and removes entries in Settings → Chat assistant. */
 export const DEFAULT_ASSISTANT: AssistantSettings = {
   enabled: true,
-  name: 'Shop assistant',
+  name: 'Beautiful Home Assistant',
   greeting: 'Hello! I can help with sizes, delivery, payment and care. Ask me anything, or tap "Talk to a person".',
   answerSizes: true,
   waitSeconds: 150,

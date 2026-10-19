@@ -133,6 +133,11 @@ export function getSettings<K extends SettingsKey>(key: K): SettingsMap[K] {
     if (c.echo.accountId === 'ECH-DXB-91402') c.echo.accountId = '';
     if (c.echo.hubCode === 'DXB-HUB-01') c.echo.hubCode = '';
   }
+  // The chat's old default name: shops that never changed it get today's.
+  if (key === 'assistant') {
+    const a = merged as unknown as AssistantSettings;
+    if (a.name === 'Shop assistant') a.name = DEFAULT_ASSISTANT.name;
+  }
   if (key === 'brand') {
     const brand = merged as unknown as BrandSettings;
     brand.marquee = { ...brand.marquee, messages: marqueeItems(brand.marquee?.messages) };
@@ -815,7 +820,7 @@ const VALIDATORS: { [K in SettingsKey]: (input: Obj, current: SettingsMap[K]) =>
     if (new Set(entries.map((e) => e.id)).size !== entries.length) throw new HttpError(400, 'Each answer needs its own id.');
     return {
       enabled: bool(input.enabled, current.enabled),
-      name: text(input.name, 'Assistant name', 40, current.name) || 'Shop assistant',
+      name: text(input.name, 'Assistant name', 40, current.name) || DEFAULT_ASSISTANT.name,
       greeting: longText(input.greeting, 'Greeting', 500, current.greeting),
       answerSizes: bool(input.answerSizes, current.answerSizes),
       waitSeconds,
