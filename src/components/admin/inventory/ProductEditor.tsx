@@ -446,7 +446,7 @@ export function ProductEditor({
                 aria-current={i === step ? 'step' : undefined}
                 className={`w-full min-h-11 px-1 text-[11px] sm:text-xs font-semibold border-b-2 flex items-center justify-center gap-1 ${i === step ? 'border-ink text-ink' : 'border-transparent text-ink-soft'}`}
               >
-                <span className={`w-5 h-5 shrink-0 rounded-full text-[10px] flex items-center justify-center ${i < step ? 'bg-success text-white' : i === step ? 'bg-ink text-white' : 'bg-sand-deep text-ink'}`}>
+                <span className={`w-5 h-5 shrink-0 rounded-full text-[10px] flex items-center justify-center ${i < step ? 'bg-success text-paper' : i === step ? 'bg-ink text-paper' : 'bg-sand-deep text-ink'}`}>
                   {i < step ? <Check className="w-3 h-3" aria-hidden="true" /> : i + 1}
                 </span>
                 <span className="truncate">{name}</span>
@@ -472,7 +472,7 @@ export function ProductEditor({
               Photos first. The <strong>cover</strong> (the first) is what shoppers see in the list. Drag to reorder, or use the arrows. Up to {MAX_PHOTOS}.
             </p>
             <div className="grid grid-cols-2 gap-2">
-              <label className="min-h-14 rounded-2xl bg-ink text-white font-bold flex items-center justify-center gap-2 cursor-pointer focus-within:ring-2 focus-within:ring-gold">
+              <label className="min-h-14 rounded-2xl bg-ink text-paper font-bold flex items-center justify-center gap-2 cursor-pointer focus-within:ring-2 focus-within:ring-gold">
                 <Camera className="w-5 h-5" aria-hidden="true" /> Take photo
                 <input type="file" accept="image/*" capture="environment" className="sr-only" aria-label="Take a photo with the camera" onChange={(e) => { void addPhotos(e.target.files); e.target.value = ''; }} disabled={draft.photos.length + uploading >= MAX_PHOTOS} />
               </label>
@@ -507,7 +507,7 @@ export function ProductEditor({
                   <img src={src} alt={i === 0 ? 'Cover photo' : `Photo ${i + 1}`} className="w-full aspect-square object-cover" draggable={false} />
                   <span className="absolute top-1 left-1 flex items-center gap-1">
                     <GripVertical className="w-4 h-4 text-white drop-shadow" aria-hidden="true" />
-                    {i === 0 && <span className="text-[11px] font-bold bg-ink text-white px-1.5 py-0.5 rounded">Cover</span>}
+                    {i === 0 && <span className="text-[11px] font-bold bg-ink text-paper px-1.5 py-0.5 rounded">Cover</span>}
                   </span>
                   <div className="grid grid-cols-4 bg-surface border-t border-line">
                     <button type="button" onClick={() => movePhoto(i, i - 1)} disabled={i === 0} className="min-h-11 flex items-center justify-center disabled:opacity-30" aria-label={`Move photo ${i + 1} earlier`}>
@@ -545,7 +545,7 @@ export function ProductEditor({
                       </option>
                     ))}
                   </select>
-                  <button type="button" onClick={() => void styleWithAi()} disabled={uploading > 0} className="min-h-11 px-3 rounded-xl bg-ink text-white font-semibold disabled:opacity-50">
+                  <button type="button" onClick={() => void styleWithAi()} disabled={uploading > 0} className="min-h-11 px-3 rounded-xl bg-ink text-paper font-semibold disabled:opacity-50">
                     Apply
                   </button>
                 </div>
@@ -675,7 +675,7 @@ export function ProductEditor({
                 <p>
                   <strong>Taken off the shop by the update:</strong> {legacyShown.map(([size, f]) => `${shortSizeName(draft.sizes.find((x) => x.id === size)!)} duvet cover ${f.duvetCover}`).join(' · ')}. It was the standard size&apos;s duvet cover, and this set isn&apos;t a duvet product. If the set does include one, put it back.
                 </p>
-                <button type="button" onClick={restoreLegacy} className="min-h-11 px-3 rounded-xl bg-ink text-white font-bold">
+                <button type="button" onClick={restoreLegacy} className="min-h-11 px-3 rounded-xl bg-ink text-paper font-bold">
                   Put {legacyShown.length === 1 ? 'it' : 'them'} back
                 </button>
               </div>
@@ -832,11 +832,11 @@ export function ProductEditor({
             </button>
           )}
           {step < STEPS.length - 1 ? (
-            <button type="button" onClick={() => go(step + 1)} disabled={step === 0 && uploading > 0} className="flex-1 min-h-12 rounded-xl bg-ink text-white text-sm font-bold flex items-center justify-center gap-1 disabled:opacity-50">
+            <button type="button" onClick={() => go(step + 1)} disabled={step === 0 && uploading > 0} className="flex-1 min-h-12 rounded-xl bg-ink text-paper text-sm font-bold flex items-center justify-center gap-1 disabled:opacity-50">
               Next: {STEPS[step + 1]} <ArrowRight className="w-4 h-4" aria-hidden="true" />
             </button>
           ) : (
-            <button type="button" onClick={() => void save()} disabled={saving || uploading > 0} className="flex-1 min-h-12 rounded-xl bg-ink text-white text-sm font-bold disabled:opacity-50 flex items-center justify-center gap-2">
+            <button type="button" onClick={() => void save()} disabled={saving || uploading > 0} className="flex-1 min-h-12 rounded-xl bg-ink text-paper text-sm font-bold disabled:opacity-50 flex items-center justify-center gap-2">
               {saving && <Loader2 className="w-4 h-4 animate-spin" aria-hidden="true" />}
               {product ? 'Save changes' : draft.active ? 'Publish' : 'Save hidden'}
             </button>

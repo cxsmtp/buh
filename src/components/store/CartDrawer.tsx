@@ -39,7 +39,7 @@ export const CartDrawer: React.FC<CartDrawerProps> = ({
     <div className="fixed inset-0 z-50 overflow-hidden overscroll-contain" role="dialog" aria-modal="true" aria-labelledby="bag-title">
       {/* Backdrop */}
       <div
-        className="absolute inset-0 bg-ink/45 transition-opacity"
+        className="absolute inset-0 bg-scrim/45 transition-opacity"
         aria-hidden="true"
         onClick={onClose}
       />

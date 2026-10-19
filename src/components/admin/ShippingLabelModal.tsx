@@ -21,7 +21,7 @@ export const ShippingLabelModal: React.FC<ShippingLabelModalProps> = ({ order, o
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-ink/45 p-3 sm:p-4 overscroll-contain" role="dialog" aria-modal="true" aria-labelledby="label-title">
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-scrim/45 p-3 sm:p-4 overscroll-contain" role="dialog" aria-modal="true" aria-labelledby="label-title">
       <div className="bg-surface rounded-3xl max-w-xl w-full min-w-0 max-h-[calc(100dvh-1.5rem)] overflow-y-auto overflow-x-hidden overscroll-contain p-4 sm:p-6 border border-line space-y-4">
         {/* Header Actions (stay in view) */}
         <div className="sticky top-0 z-10 -mx-4 -mt-4 px-4 pt-4 sm:-mx-6 sm:-mt-6 sm:px-6 sm:pt-6 pb-3 bg-surface flex items-start justify-between gap-2 border-b border-line">
@@ -36,7 +36,7 @@ export const ShippingLabelModal: React.FC<ShippingLabelModalProps> = ({ order, o
           <div className="flex items-center gap-2 shrink-0">
             <button
               onClick={handlePrint}
-              className="flex items-center gap-1.5 bg-ink hover:bg-ink text-white font-semibold text-xs px-3.5 py-2 rounded-xl shadow transition-all"
+              className="flex items-center gap-1.5 bg-ink hover:bg-ink text-paper font-semibold text-xs px-3.5 py-2 rounded-xl shadow transition-all"
             >
               <Printer className="w-4 h-4 text-gold-light" />
               <span>Print Label</span>
@@ -54,7 +54,7 @@ export const ShippingLabelModal: React.FC<ShippingLabelModalProps> = ({ order, o
         {/* PRINTABLE AWB CONTAINER */}
         <div
           id="printable-shipping-label"
-          className="border-2 border-black p-4 bg-surface text-black font-sans text-xs space-y-3 rounded-xl shadow-sm"
+          className="look-paper border-2 border-black p-4 bg-surface text-black font-sans text-xs space-y-3 rounded-xl shadow-sm"
         >
           {/* Top Carrier Header */}
           <div className="flex items-center justify-between border-b-2 border-black pb-2.5">

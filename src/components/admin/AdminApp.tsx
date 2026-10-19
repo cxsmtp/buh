@@ -1,7 +1,7 @@
 'use client';
 
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Archive, Box, Copy, CreditCard, Feather, KeyRound, LayoutGrid, Laptop, Link2, Mail, MessageSquare, Palette, ShieldCheck, Smartphone, Store, Truck } from 'lucide-react';
+import { Archive, Box, Copy, CreditCard, Feather, KeyRound, LayoutGrid, Laptop, Link2, Mail, MessageSquare, Palette, ShieldCheck, Smartphone, Store, SwatchBook, Truck } from 'lucide-react';
 import type { AssistantSettings, BankTransferDetails, BrandSettings, CatalogSettings, CourierSettings, Customer, DeliverySettings, EmailSettings, Order, PaymentSettings, PhoneCheckSettings, Product, SmsGatewaySettings, StoreSettings, ThemeSettings } from '@/types';
 import { DEFAULT_ASSISTANT, DEFAULT_CATALOG, DEFAULT_DELIVERY, DEFAULT_EMAIL_SETTINGS, DEFAULT_STORE, DEFAULT_THEME_SETTINGS } from '@/data/catalogDefaults';
 import { INITIAL_BANK_DETAILS, INITIAL_BRAND_SETTINGS, INITIAL_COURIER_SETTINGS, INITIAL_SMS_SETTINGS } from '@/data/initialData';
@@ -35,6 +35,7 @@ import { SettingsHistoryCard } from './settings/SettingsHistoryCard';
 import { SignInRecoveryCard } from './settings/SignInRecoveryCard';
 import { StoreSettingsCard } from './settings/StoreSettingsCard';
 import { SystemHealthCard } from './settings/SystemHealthCard';
+import { LookSettingsCard } from './settings/LookSettingsCard';
 import { ThemeSettingsCard } from './settings/ThemeSettingsCard';
 import { VersionsCard } from './settings/VersionsCard';
 
@@ -335,7 +336,7 @@ export function AdminApp() {
           type="button"
           aria-pressed={view === id}
           onClick={() => setView(id)}
-          className={`inline-flex items-center gap-1.5 min-h-9 px-3 rounded-full text-xs font-semibold ${view === id ? 'bg-ink text-white' : 'text-ink-soft hover:text-ink'}`}
+          className={`inline-flex items-center gap-1.5 min-h-9 px-3 rounded-full text-xs font-semibold ${view === id ? 'bg-ink text-paper' : 'text-ink-soft hover:text-ink'}`}
         >
           <Icon className="w-3.5 h-3.5" aria-hidden="true" />
           <span>{label}</span>
@@ -347,7 +348,7 @@ export function AdminApp() {
   return (
     <div className={`min-h-screen flex flex-col font-sans px-safe ${phone ? 'max-w-[480px] w-full mx-auto sm:border-x sm:border-line bg-ivory' : ''}`} data-hub-view={view}>
       {updateReady && (
-        <div role="status" className="bg-ink text-white text-xs px-3 py-1.5 flex items-center justify-center gap-3">
+        <div role="status" className="bg-ink text-paper text-xs px-3 py-1.5 flex items-center justify-center gap-3">
           <span>New version ready</span>
           <button type="button" className="font-bold underline min-h-8" onClick={() => window.location.reload()}>Refresh</button>
         </div>
@@ -367,7 +368,7 @@ export function AdminApp() {
                   onClick={() => setAdminTab(tab.id)}
                   aria-current={adminTab === tab.id ? 'page' : undefined}
                   className={`px-4 py-2 rounded-xl text-xs font-bold transition-all flex items-center gap-1.5 shrink-0 ${
-                    adminTab === tab.id ? 'bg-ink text-white shadow-sm' : 'bg-surface text-ink-soft hover:bg-sand border border-line'
+                    adminTab === tab.id ? 'bg-ink text-paper shadow-sm' : 'bg-surface text-ink-soft hover:bg-sand border border-line'
                   }`}
                 >
                   <span>{tab.label}</span>
@@ -397,7 +398,7 @@ export function AdminApp() {
                   <Copy className="w-4 h-4" aria-hidden="true" />
                   {copied ? 'Copied' : 'Copy link'}
                 </button>
-                <button type="button" onClick={dismissLinkNotice} className="min-h-10 px-3 rounded-xl bg-ink text-white text-xs font-bold">
+                <button type="button" onClick={dismissLinkNotice} className="min-h-10 px-3 rounded-xl bg-ink text-paper text-xs font-bold">
                   I&rsquo;ve bookmarked it
                 </button>
               </div>
@@ -420,7 +421,7 @@ export function AdminApp() {
                 >
                   Open Phone check
                 </button>
-                <button type="button" onClick={dismissPhoneCheckNotice} className="min-h-10 px-3 rounded-xl bg-ink text-white text-xs font-bold">
+                <button type="button" onClick={dismissPhoneCheckNotice} className="min-h-10 px-3 rounded-xl bg-ink text-paper text-xs font-bold">
                   Got it
                 </button>
               </div>
@@ -502,6 +503,13 @@ export function AdminApp() {
                       auto={autoSaveHooks}
                     />
                   ),
+                },
+                {
+                  id: 'look',
+                  label: 'Look',
+                  icon: <SwatchBook />,
+                  hint: 'The shop’s colours, in light and dark: matching each device, or always one. Every change is kept, so you can switch back.',
+                  content: <LookSettingsCard key={`look-${settingsEpoch}`} />,
                 },
                 {
                   id: 'themes',

@@ -2,6 +2,7 @@ import crypto from 'node:crypto';
 import type { MetadataRoute } from 'next';
 import type { BrandSettings } from '@/types';
 import { APP_BACKGROUND_COLOR, PALETTE, THEME_COLOR } from '@/lib/design/tokens';
+import { LOOK_PRESETS, type LookMode, type LookPresetId } from '@/lib/design/themes';
 
 /**
  * The installable app (web app manifest) and its icons, from Settings → Branding: the shop's name
@@ -47,7 +48,18 @@ export function isPhoneAgent(ua: string): boolean {
   return /iPhone|iPod/.test(ua) || (/Android/.test(ua) && /Mobile/.test(ua));
 }
 
-export function buildManifest(brand: BrandSettings, userAgent: string): MetadataRoute.Manifest {
+/**
+ * The look (Settings → Look) sets the title bar and the splash: a look fixed to dark opens dark;
+ * light, or matching the device (a manifest has one colour), opens in the look's light colours.
+ */
+export function lookColors(look?: { preset: LookPresetId; mode: LookMode }): { theme: string; background: string } {
+  const p = LOOK_PRESETS[look?.preset ?? 'ivory-gold'] ?? LOOK_PRESETS['ivory-gold'];
+  if (look?.mode === 'dark') return { theme: p.dark.colors.ivory, background: p.dark.colors.ivory };
+  return { theme: p.light.colors.ink, background: p.light.colors.ivory };
+}
+
+export function buildManifest(brand: BrandSettings, userAgent: string, look?: { preset: LookPresetId; mode: LookMode }): MetadataRoute.Manifest {
+  const colors = lookColors(look);
   const name = displayName(brand.storeName);
   const v = iconVersion(brand);
   const icon = (file: string, size: number, purpose: 'any' | 'maskable') => ({ src: `/icons/${file}?v=${v}`, sizes: `${size}x${size}`, type: 'image/png', purpose });
@@ -61,8 +73,8 @@ export function buildManifest(brand: BrandSettings, userAgent: string): Metadata
     display: 'standalone',
     // Upright on phones, like a shopping app; tablets turn freely (the product shows side by side when wide).
     orientation: isPhoneAgent(userAgent) ? 'portrait-primary' : 'any',
-    background_color: APP_BACKGROUND,
-    theme_color: APP_THEME,
+    background_color: colors.background,
+    theme_color: colors.theme,
     lang: 'en',
     dir: 'ltr',
     categories: ['shopping', 'lifestyle'],

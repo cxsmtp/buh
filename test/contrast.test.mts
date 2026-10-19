@@ -3,12 +3,17 @@
  * dark mode (a phone or laptop set to dark mode once made labels invisible on white cards),
  * at phone and desktop width. Covers the shop (its filter sheet, filtered view and search), the
  * "Install the app" offer, a product and its full-screen photo, the bag, checkout, the chat, the
- * admin sign-in, the offline page and every Admin Hub tab and settings section.
+ * admin sign-in, the offline page and every Admin Hub tab and settings section; and the screens
+ * added since (test/newer-screens.mts): checkout's Card option, the confirmation, the /pay page,
+ * order cards with the WhatsApp and bank-transfer panels, Money (Expenses, Reports, Audit log) and
+ * Settings → Phone check, Payments and Look, in Ivory & Gold light and dark and other looks in dark.
  */
 import assert from 'node:assert/strict';
 import { after, before, test } from 'node:test';
 import { hasBuild, startServer, type RunningServer } from './server.mjs';
 import { openAdminSection } from './helpers.mjs';
+import { prepareNewerScreens, walkNewerScreens, type NewerScreens } from './newer-screens.mjs';
+import { startStripeMock, type StripeMock } from './stripe-mock.mjs';
 
 type PW = typeof import('playwright');
 const pw: PW | null = hasBuild ? await import('playwright').catch(() => null) : null;
@@ -16,10 +21,13 @@ const skip = !pw;
 let server: RunningServer;
 let browser: import('playwright').Browser;
 let cookie = '';
+let stripe: StripeMock;
+let newer: NewerScreens;
 
 before(async () => {
   if (skip) return;
-  server = await startServer();
+  stripe = await startStripeMock();
+  server = await startServer({ BUH_TEST_STRIPE_API: stripe.url, CARD_SWEEP_DISABLED: '1' });
   browser = await pw!.chromium.launch();
   const h = { 'content-type': 'application/json', origin: server.base };
   await fetch(`${server.base}/api/admin/login`, { method: 'POST', headers: h, body: JSON.stringify({ email: 'x@y.z', password: 'x' }) });
@@ -29,10 +37,12 @@ before(async () => {
   const first = (login.headers.get('set-cookie') || '').split(';')[0];
   const changed = await fetch(`${server.base}/api/admin/password`, { method: 'POST', headers: { ...h, cookie: first }, body: JSON.stringify({ currentPassword: once, newPassword: 'Contrast-Owner-Pass-1' }) });
   cookie = (changed.headers.get('set-cookie') || '').split(';')[0];
+  newer = await prepareNewerScreens(server, cookie);
 });
 after(async () => {
   await browser?.close();
   server?.stop();
+  await stripe?.close();
 });
 
 /**
@@ -134,161 +144,221 @@ const AUDIT = `function (where, min) {
   return bad;
 }`;
 
+/** Walk every screen (shop, product, bag, checkout, chat, sign-in, offline, every hub tab and settings section). */
+async function everyScreen(colorScheme: 'light' | 'dark', width: number): Promise<string[]> {
+  const ctx = await browser.newContext({ viewport: { width, height: 900 }, colorScheme });
+  const page = await ctx.newPage();
+  const problems: string[] = [];
+  const ready = page.waitForResponse((r) => r.url().endsWith('/api/settings/public'));
+  await page.goto(server.base, { waitUntil: 'domcontentloaded' });
+  await ready;
+  await page.waitForTimeout(500);
+  problems.push(...(await lowContrast(page, 'shop')));
+  // The "Install the app" offer (the phone's install event, stood in for here).
+  await page.evaluate(() => {
+    const e = new Event('beforeinstallprompt') as Event & { prompt?: () => Promise<void>; userChoice?: Promise<unknown> };
+    e.prompt = async () => {};
+    e.userChoice = Promise.resolve({ outcome: 'dismissed' });
+    window.dispatchEvent(e);
+  });
+  const install = page.getByRole('region', { name: 'Install the app' });
+  await install.waitFor({ timeout: 9000 });
+  await page.waitForTimeout(400); // risen into place
+  problems.push(...(await lowContrast(page, 'install offer')));
+  await install.getByRole('button', { name: 'Not now' }).click();
+  // The Filter sheet, a story chosen with chips showing, and search with its matches.
+  await page.getByRole('button', { name: /^Filter and sort/ }).click();
+  const filters = page.getByRole('dialog', { name: 'Filter & sort' });
+  await filters.waitFor();
+  await filters.getByRole('button', { name: /^King/ }).click();
+  await page.waitForTimeout(400); // the chosen pill's colour change has finished
+  problems.push(...(await lowContrast(page, 'filters')));
+  await filters.getByRole('button', { name: /^Show/ }).click();
+  await page.getByRole('group', { name: 'Filters on' }).waitFor();
+  await page.getByRole('group', { name: 'Collections' }).getByRole('button').nth(1).click();
+  await page.waitForTimeout(300);
+  problems.push(...(await lowContrast(page, 'filtered shop')));
+  if (width < 768) await page.getByRole('navigation', { name: 'Shop' }).getByRole('button', { name: 'Search' }).click();
+  else await page.getByRole('button', { name: 'Search products' }).click();
+  await page.keyboard.type('set');
+  await page.getByRole('dialog', { name: 'Search the shop' }).getByRole('listitem').first().waitFor();
+  problems.push(...(await lowContrast(page, 'search')));
+  await page.keyboard.press('Escape');
+  await page.goto(server.base, { waitUntil: 'domcontentloaded' });
+  await page.locator('main h3').first().waitFor();
+  const p = (await (await fetch(`${server.base}/api/products`)).json()).products[0];
+  await page.locator('h3, h4').filter({ hasText: p.title }).first().click();
+  await page.getByRole('button', { name: /Add to Bag/ }).waitFor();
+  problems.push(...(await lowContrast(page, 'product')));
+  await page.getByRole('button', { name: 'Zoom photo' }).click();
+  await page.getByTestId('photo-zoom').waitFor();
+  problems.push(...(await lowContrast(page, 'photo zoom')));
+  await page.keyboard.press('Escape');
+  await page.getByTestId('photo-zoom').waitFor({ state: 'detached' });
+  await page.getByRole('button', { name: /Add to Bag/ }).click();
+  await page.getByRole('button', { name: /Proceed to Checkout/ }).waitFor();
+  problems.push(...(await lowContrast(page, 'bag')));
+  await page.getByRole('button', { name: /Proceed to Checkout/ }).click();
+  await page.locator('#checkout-phone').waitFor();
+  problems.push(...(await lowContrast(page, 'checkout')));
+  // The area suggestions, with one highlighted and another emirate's areas shown.
+  await page.locator('#checkout-area').click();
+  await page.keyboard.type('al n');
+  await page.getByRole('listbox', { name: 'Area suggestions' }).waitFor();
+  await page.keyboard.press('ArrowDown');
+  problems.push(...(await lowContrast(page, 'checkout area list')));
+  await page.keyboard.press('Escape'); // closes the list
+  await page.getByRole('listbox', { name: 'Area suggestions' }).waitFor({ state: 'hidden' });
+  await page.keyboard.press('Escape');
+  await page.getByRole('button', { name: 'Help and chat' }).click();
+  await page.getByRole('dialog', { name: 'Chat with the shop' }).waitFor();
+  problems.push(...(await lowContrast(page, 'chat')));
+  await page.keyboard.press('Escape');
+  // The Admin Hub's sign-in, at its private link (the shop itself has no way in).
+  await page.goto(server.adminUrl, { waitUntil: 'domcontentloaded' });
+  await page.getByText('Admin Hub Security Access').waitFor();
+  problems.push(...(await lowContrast(page, 'sign-in')));
+  // What the installed app shows without a connection.
+  await page.goto(`${server.base}/offline`, { waitUntil: 'domcontentloaded' });
+  await page.getByRole('heading', { name: 'You are offline' }).waitFor();
+  problems.push(...(await lowContrast(page, 'offline page')));
+  await ctx.close();
+
+  // The Admin Hub: every tab and every settings section.
+  const admin = await browser.newContext({ viewport: { width, height: 900 }, colorScheme });
+  const [n, v] = cookie.split('=');
+  await admin.addCookies([{ name: n, value: v, url: server.base }]);
+  const a = await admin.newPage();
+  const signed = a.waitForResponse((r) => r.url().endsWith('/api/admin/session'));
+  await a.goto(server.adminUrl, { waitUntil: 'domcontentloaded' });
+  await signed;
+  const nav = a.getByRole('navigation', { name: 'Admin sections' });
+  await nav.waitFor();
+  for (const tab of ['Orders', 'Chats', 'Inventory', 'Customers', 'Settings']) {
+    await openAdminSection(a, new RegExp(`^${tab}`));
+    await settled(a);
+    problems.push(...(await lowContrast(a, `admin ${tab}`)));
+    if (tab === 'Inventory') {
+      // The phone inventory: a product opened with its steppers, the Undo toast, Received stock,
+      // the history, the step-by-step editor, and the More menu.
+      await a.getByRole('button', { name: /^Stock and actions for/ }).first().click();
+      await a.getByRole('button', { name: /^One more/ }).first().click();
+      await a.getByRole('button', { name: 'Undo' }).waitFor();
+      await settled(a);
+      problems.push(...(await lowContrast(a, 'inventory open, Undo toast')));
+      await a.getByRole('button', { name: /^Received stock for/ }).first().click();
+      await a.getByRole('dialog', { name: 'Received stock' }).waitFor();
+      await settled(a);
+      problems.push(...(await lowContrast(a, 'received stock')));
+      await a.keyboard.press('Escape');
+      await a.getByRole('button', { name: /^Stock history of/ }).first().click();
+      await a.getByRole('dialog', { name: 'Stock history' }).getByText(/by /).first().waitFor();
+      await settled(a);
+      problems.push(...(await lowContrast(a, 'stock history')));
+      await a.keyboard.press('Escape');
+      await a.getByRole('button', { name: 'Add product' }).first().click();
+      const wizard = a.getByRole('dialog', { name: 'Add a product' });
+      await wizard.waitFor();
+      await settled(a);
+      problems.push(...(await lowContrast(a, 'editor: photos')));
+      for (const step of ['Details', 'Sizes', 'Publish']) {
+        await wizard.getByRole('navigation', { name: 'Steps' }).getByRole('button', { name: new RegExp(step) }).click();
+        await settled(a);
+      }
+      problems.push(...(await lowContrast(a, 'editor: step shown')));
+      await a.keyboard.press('Escape');
+      if (width < 640) {
+        await nav.getByRole('button', { name: 'More' }).click();
+        await a.getByRole('dialog', { name: 'More' }).waitFor();
+        await settled(a);
+        problems.push(...(await lowContrast(a, 'more menu')));
+        await a.keyboard.press('Escape');
+      }
+    }
+  }
+  await a.getByRole('navigation', { name: 'Settings sections' }).waitFor(); // loaded with the Admin Hub, on demand
+  const sections = a.getByRole('navigation', { name: 'Settings sections' }).getByRole('button');
+  const count = await sections.count();
+  assert.ok(count >= 10);
+  for (let i = 0; i < count; i++) {
+    const name = (await sections.nth(i).textContent())?.trim();
+    await sections.nth(i).click();
+    await a.waitForTimeout(400);
+    problems.push(...(await lowContrast(a, `settings ${name}`)));
+  }
+  await admin.close();
+  return problems;
+}
+
+/** Settings → Look, as the owner saves it. */
+async function setLook(preset: string, mode = 'system') {
+  const r = await fetch(`${server.base}/api/admin/look`, { method: 'PUT', headers: { 'content-type': 'application/json', origin: server.base, cookie }, body: JSON.stringify({ preset, mode }) });
+  assert.equal(r.status, 200, await r.text());
+}
+
 for (const colorScheme of ['dark', 'light'] as const) {
   for (const width of [375, 1280]) {
     test(`every screen is readable (${colorScheme} mode, ${width} px)`, { skip }, async () => {
-      const ctx = await browser.newContext({ viewport: { width, height: 900 }, colorScheme });
-      const page = await ctx.newPage();
-      const problems: string[] = [];
-      const ready = page.waitForResponse((r) => r.url().endsWith('/api/settings/public'));
-      await page.goto(server.base, { waitUntil: 'domcontentloaded' });
-      await ready;
-      await page.waitForTimeout(500);
-      problems.push(...(await lowContrast(page, 'shop')));
-      // The "Install the app" offer (the phone's install event, stood in for here).
-      await page.evaluate(() => {
-        const e = new Event('beforeinstallprompt') as Event & { prompt?: () => Promise<void>; userChoice?: Promise<unknown> };
-        e.prompt = async () => {};
-        e.userChoice = Promise.resolve({ outcome: 'dismissed' });
-        window.dispatchEvent(e);
-      });
-      const install = page.getByRole('region', { name: 'Install the app' });
-      await install.waitFor({ timeout: 9000 });
-      await page.waitForTimeout(400); // risen into place
-      problems.push(...(await lowContrast(page, 'install offer')));
-      await install.getByRole('button', { name: 'Not now' }).click();
-      // The Filter sheet, a story chosen with chips showing, and search with its matches.
-      await page.getByRole('button', { name: /^Filter and sort/ }).click();
-      const filters = page.getByRole('dialog', { name: 'Filter & sort' });
-      await filters.waitFor();
-      await filters.getByRole('button', { name: /^King/ }).click();
-      await page.waitForTimeout(400); // the chosen pill's colour change has finished
-      problems.push(...(await lowContrast(page, 'filters')));
-      await filters.getByRole('button', { name: /^Show/ }).click();
-      await page.getByRole('group', { name: 'Filters on' }).waitFor();
-      await page.getByRole('group', { name: 'Collections' }).getByRole('button').nth(1).click();
-      await page.waitForTimeout(300);
-      problems.push(...(await lowContrast(page, 'filtered shop')));
-      if (width < 768) await page.getByRole('navigation', { name: 'Shop' }).getByRole('button', { name: 'Search' }).click();
-      else await page.getByRole('button', { name: 'Search products' }).click();
-      await page.keyboard.type('set');
-      await page.getByRole('dialog', { name: 'Search the shop' }).getByRole('listitem').first().waitFor();
-      problems.push(...(await lowContrast(page, 'search')));
-      await page.keyboard.press('Escape');
-      await page.goto(server.base, { waitUntil: 'domcontentloaded' });
-      await page.locator('main h3').first().waitFor();
-      const p = (await (await fetch(`${server.base}/api/products`)).json()).products[0];
-      await page.locator('h3, h4').filter({ hasText: p.title }).first().click();
-      await page.getByRole('button', { name: /Add to Bag/ }).waitFor();
-      problems.push(...(await lowContrast(page, 'product')));
-      await page.getByRole('button', { name: 'Zoom photo' }).click();
-      await page.getByTestId('photo-zoom').waitFor();
-      problems.push(...(await lowContrast(page, 'photo zoom')));
-      await page.keyboard.press('Escape');
-      await page.getByTestId('photo-zoom').waitFor({ state: 'detached' });
-      await page.getByRole('button', { name: /Add to Bag/ }).click();
-      await page.getByRole('button', { name: /Proceed to Checkout/ }).waitFor();
-      problems.push(...(await lowContrast(page, 'bag')));
-      await page.getByRole('button', { name: /Proceed to Checkout/ }).click();
-      await page.locator('#checkout-phone').waitFor();
-      problems.push(...(await lowContrast(page, 'checkout')));
-      // The area suggestions, with one highlighted and another emirate's areas shown.
-      await page.locator('#checkout-area').click();
-      await page.keyboard.type('al n');
-      await page.getByRole('listbox', { name: 'Area suggestions' }).waitFor();
-      await page.keyboard.press('ArrowDown');
-      problems.push(...(await lowContrast(page, 'checkout area list')));
-      await page.keyboard.press('Escape'); // closes the list
-      await page.getByRole('listbox', { name: 'Area suggestions' }).waitFor({ state: 'hidden' });
-      await page.keyboard.press('Escape');
-      await page.getByRole('button', { name: 'Help and chat' }).click();
-      await page.getByRole('dialog', { name: 'Chat with the shop' }).waitFor();
-      problems.push(...(await lowContrast(page, 'chat')));
-      await page.keyboard.press('Escape');
-      // The Admin Hub's sign-in, at its private link (the shop itself has no way in).
-      await page.goto(server.adminUrl, { waitUntil: 'domcontentloaded' });
-      await page.getByText('Admin Hub Security Access').waitFor();
-      problems.push(...(await lowContrast(page, 'sign-in')));
-      // What the installed app shows without a connection.
-      await page.goto(`${server.base}/offline`, { waitUntil: 'domcontentloaded' });
-      await page.getByRole('heading', { name: 'You are offline' }).waitFor();
-      problems.push(...(await lowContrast(page, 'offline page')));
-      await ctx.close();
-
-      // The Admin Hub: every tab and every settings section.
-      const admin = await browser.newContext({ viewport: { width, height: 900 }, colorScheme });
-      const [n, v] = cookie.split('=');
-      await admin.addCookies([{ name: n, value: v, url: server.base }]);
-      const a = await admin.newPage();
-      const signed = a.waitForResponse((r) => r.url().endsWith('/api/admin/session'));
-      await a.goto(server.adminUrl, { waitUntil: 'domcontentloaded' });
-      await signed;
-      const nav = a.getByRole('navigation', { name: 'Admin sections' });
-      await nav.waitFor();
-      for (const tab of ['Orders', 'Chats', 'Inventory', 'Customers', 'Settings']) {
-        await openAdminSection(a, new RegExp(`^${tab}`));
-        await settled(a);
-        problems.push(...(await lowContrast(a, `admin ${tab}`)));
-        if (tab === 'Inventory') {
-          // The phone inventory: a product opened with its steppers, the Undo toast, Received stock,
-          // the history, the step-by-step editor, and the More menu.
-          await a.getByRole('button', { name: /^Stock and actions for/ }).first().click();
-          await a.getByRole('button', { name: /^One more/ }).first().click();
-          await a.getByRole('button', { name: 'Undo' }).waitFor();
-          await settled(a);
-          problems.push(...(await lowContrast(a, 'inventory open, Undo toast')));
-          await a.getByRole('button', { name: /^Received stock for/ }).first().click();
-          await a.getByRole('dialog', { name: 'Received stock' }).waitFor();
-          await settled(a);
-          problems.push(...(await lowContrast(a, 'received stock')));
-          await a.keyboard.press('Escape');
-          await a.getByRole('button', { name: /^Stock history of/ }).first().click();
-          await a.getByRole('dialog', { name: 'Stock history' }).getByText(/by /).first().waitFor();
-          await settled(a);
-          problems.push(...(await lowContrast(a, 'stock history')));
-          await a.keyboard.press('Escape');
-          await a.getByRole('button', { name: 'Add product' }).first().click();
-          const wizard = a.getByRole('dialog', { name: 'Add a product' });
-          await wizard.waitFor();
-          await settled(a);
-          problems.push(...(await lowContrast(a, 'editor: photos')));
-          for (const step of ['Details', 'Sizes', 'Publish']) {
-            await wizard.getByRole('navigation', { name: 'Steps' }).getByRole('button', { name: new RegExp(step) }).click();
-            await settled(a);
-          }
-          problems.push(...(await lowContrast(a, 'editor: step shown')));
-          await a.keyboard.press('Escape');
-          if (width < 640) {
-            await nav.getByRole('button', { name: 'More' }).click();
-            await a.getByRole('dialog', { name: 'More' }).waitFor();
-            await settled(a);
-            problems.push(...(await lowContrast(a, 'more menu')));
-            await a.keyboard.press('Escape');
-          }
-        }
-      }
-      await a.getByRole('navigation', { name: 'Settings sections' }).waitFor(); // loaded with the Admin Hub, on demand
-      const sections = a.getByRole('navigation', { name: 'Settings sections' }).getByRole('button');
-      const count = await sections.count();
-      assert.ok(count >= 10);
-      for (let i = 0; i < count; i++) {
-        const name = (await sections.nth(i).textContent())?.trim();
-        await sections.nth(i).click();
-        await a.waitForTimeout(400);
-        problems.push(...(await lowContrast(a, `settings ${name}`)));
-      }
-      await admin.close();
+      const problems = await everyScreen(colorScheme, width);
       assert.deepEqual(problems, [], `${problems.length} hard-to-read texts`);
     });
   }
 }
 
-// Every festival look on the shop (greeting band, story ring, announcement bar), at phone and
-// desktop width: the accents stay readable on the shop's ivory.
-for (const width of [360, 1280]) {
-  test(`festival looks are readable (${width} px)`, { skip }, async () => {
+// The other looks (Settings → Look), light and dark: every screen on a phone, and dark on a computer.
+for (const preset of ['noir-champagne', 'pearl-emerald', 'sand-rose']) {
+  for (const [colorScheme, width] of [['light', 375], ['dark', 375], ['dark', 1280]] as const) {
+    test(`every screen is readable in ${preset} (${colorScheme} mode, ${width} px)`, { skip }, async () => {
+      await setLook(preset);
+      try {
+        const problems = await everyScreen(colorScheme, width);
+        assert.deepEqual(problems, [], `${problems.length} hard-to-read texts`);
+      } finally {
+        await setLook('ivory-gold');
+      }
+    });
+  }
+}
+
+// The screens added since looks were first built: Ivory & Gold light and dark at both widths, and
+// other looks in dark.
+const NEWER_RUNS: Array<{ preset: string; colorScheme: 'light' | 'dark'; width: number }> = [
+  { preset: 'ivory-gold', colorScheme: 'light', width: 375 },
+  { preset: 'ivory-gold', colorScheme: 'light', width: 1280 },
+  { preset: 'ivory-gold', colorScheme: 'dark', width: 375 },
+  { preset: 'ivory-gold', colorScheme: 'dark', width: 1280 },
+  { preset: 'noir-champagne', colorScheme: 'dark', width: 375 },
+  { preset: 'sand-rose', colorScheme: 'dark', width: 1280 },
+];
+for (const { preset, colorScheme, width } of NEWER_RUNS) {
+  test(`newer screens are readable in ${preset} (${colorScheme} mode, ${width} px): card option, confirmation, /pay, order panels, Money, Phone check, Payments, Look`, { skip }, async () => {
+    await setLook(preset);
     const problems: string[] = [];
-    const ctx = await browser.newContext({ viewport: { width, height: 900 } });
+    try {
+      await walkNewerScreens(browser, server, cookie, newer, colorScheme, width, async (page, where) => {
+        problems.push(...(await lowContrast(page, where)));
+      });
+    } finally {
+      await setLook('ivory-gold');
+    }
+    assert.deepEqual(problems, [], `${problems.length} hard-to-read texts`);
+  });
+}
+
+// Every festival look on the shop (greeting band, story ring, announcement bar), at phone and
+// desktop width: the accents stay readable on the shop's ivory, and on every look's dark page
+// (the lifted dark accents, src/lib/design/themes.ts).
+const FESTIVAL_RUNS: Array<{ width: number; colorScheme: 'light' | 'dark'; preset: string }> = [
+  { width: 360, colorScheme: 'light', preset: 'ivory-gold' },
+  { width: 1280, colorScheme: 'light', preset: 'ivory-gold' },
+  ...['ivory-gold', 'noir-champagne', 'pearl-emerald', 'sand-rose'].map((preset) => ({ width: 360, colorScheme: 'dark' as const, preset })),
+  { width: 360, colorScheme: 'light', preset: 'noir-champagne' },
+];
+for (const { width, colorScheme, preset } of FESTIVAL_RUNS) {
+  test(`festival looks are readable (${preset}, ${colorScheme} mode, ${width} px)`, { skip }, async () => {
+    await setLook(preset);
+    const problems: string[] = [];
+    const ctx = await browser.newContext({ viewport: { width, height: 900 }, colorScheme });
     const page = await ctx.newPage();
     const h = { 'content-type': 'application/json', origin: server.base, cookie };
     const { FESTIVALS } = await import('@/lib/festivals/catalog');
@@ -307,6 +377,7 @@ for (const width of [360, 1280]) {
       problems.push(...(await lowContrast(page, `greeting in ${f.id}`, 4.5)).filter((p) => p.includes(f.theme.greeting.slice(0, 12)) || p.includes(f.theme.headline.slice(0, 12))));
     }
     await fetch(`${server.base}/api/admin/settings/theme`, { method: 'PUT', headers: h, body: JSON.stringify({ settings: { mode: 'auto' } }) });
+    await setLook('ivory-gold');
     await ctx.close();
     assert.deepEqual(problems, [], `${problems.length} hard-to-read texts`);
   });

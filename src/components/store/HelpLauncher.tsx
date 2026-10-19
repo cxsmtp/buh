@@ -141,7 +141,7 @@ export function HelpLauncher() {
     // The chat is off: the plain WhatsApp button, as before.
     if (!floatingWa) return null;
     return (
-      <a href={floatingWa} target="_blank" rel="noopener noreferrer" aria-label="Chat with us on WhatsApp" className="fixed z-[41] right-1 bottom-[calc(0.25rem+env(safe-area-inset-bottom,0px))] w-16 h-12 rounded-2xl md:right-6 md:bottom-6 md:w-12 md:h-12 md:rounded-full bg-whatsapp text-white md:shadow-lg flex items-center justify-center hover:brightness-110 focus:outline-none focus-visible:ring-4 focus-visible:ring-success-line">
+      <a href={floatingWa} target="_blank" rel="noopener noreferrer" aria-label="Chat with us on WhatsApp" className="fixed z-[41] right-1 bottom-[calc(0.25rem+env(safe-area-inset-bottom,0px))] w-16 h-12 rounded-2xl md:right-6 md:bottom-6 md:w-12 md:h-12 md:rounded-full bg-whatsapp text-paper md:shadow-lg flex items-center justify-center hover:brightness-110 focus:outline-none focus-visible:ring-4 focus-visible:ring-success-line">
         <MessageCircle className="w-6 h-6" />
       </a>
     );
@@ -208,7 +208,7 @@ export function HelpLauncher() {
             setUnseen(false);
           }}
           aria-label="Help and chat"
-          className="fixed z-[41] right-1 bottom-[calc(0.25rem+env(safe-area-inset-bottom,0px))] w-16 h-12 flex-col justify-center gap-0.5 rounded-2xl md:right-6 md:bottom-6 md:w-auto md:flex-row md:gap-2 md:pl-3.5 md:pr-4 md:rounded-full bg-ink text-white md:shadow-lg flex items-center hover:brightness-110 focus:outline-none focus-visible:ring-4 focus-visible:ring-warning-line"
+          className="fixed z-[41] right-1 bottom-[calc(0.25rem+env(safe-area-inset-bottom,0px))] w-16 h-12 flex-col justify-center gap-0.5 rounded-2xl md:right-6 md:bottom-6 md:w-auto md:flex-row md:gap-2 md:pl-3.5 md:pr-4 md:rounded-full bg-ink text-paper md:shadow-lg flex items-center hover:brightness-110 focus:outline-none focus-visible:ring-4 focus-visible:ring-warning-line"
         >
           <MessagesSquare className="w-5 h-5 text-gold-light" />
           <span className="text-xs font-semibold">Help</span>
@@ -222,7 +222,7 @@ export function HelpLauncher() {
           aria-label="Chat with the shop"
           className="fixed z-50 inset-x-2 bottom-[calc(0.5rem+env(safe-area-inset-bottom,0px))] top-[calc(4rem+env(safe-area-inset-top,0px))] overscroll-contain sm:inset-auto sm:right-6 sm:bottom-6 sm:w-[380px] sm:h-[600px] sm:max-h-[calc(100vh-3rem)] bg-surface rounded-3xl border border-line flex flex-col overflow-hidden"
         >
-          <header className="flex items-center gap-2 px-4 py-3 bg-ink text-white">
+          <header className="flex items-center gap-2 px-4 py-3 bg-ink text-paper">
             <Bot className="w-5 h-5 text-gold-light" />
             <div className="min-w-0">
               <div className="text-sm font-semibold truncate">{chat.name}</div>
@@ -262,7 +262,7 @@ export function HelpLauncher() {
                   <span className="text-ink-soft">Phone (WhatsApp) or email</span>
                   <input value={contact.contact} onChange={(e) => setContact((c) => ({ ...c, contact: e.target.value }))} required maxLength={254} placeholder="050 123 4567 or you@example.com" className="mt-0.5 w-full px-3 py-2 rounded-xl border border-line-strong text-sm" />
                 </label>
-                <button type="submit" disabled={busy} className="w-full py-2 rounded-xl bg-ink text-white font-semibold disabled:opacity-50">Save my details</button>
+                <button type="submit" disabled={busy} className="w-full py-2 rounded-xl bg-ink text-paper font-semibold disabled:opacity-50">Save my details</button>
               </form>
             )}
             {busy && (
@@ -317,7 +317,7 @@ export function HelpLauncher() {
               placeholder="Type your question…"
               className="flex-1 min-w-0 resize-none px-3 py-2.5 rounded-2xl border border-line-strong text-sm focus:outline-none focus:ring-2 focus:ring-gold"
             />
-            <button type="submit" disabled={busy || !draft.trim()} aria-label="Send" className="w-10 h-10 rounded-full bg-ink text-white flex items-center justify-center disabled:opacity-40">
+            <button type="submit" disabled={busy || !draft.trim()} aria-label="Send" className="w-10 h-10 rounded-full bg-ink text-paper flex items-center justify-center disabled:opacity-40">
               <Send className="w-4 h-4" />
             </button>
           </form>
@@ -356,7 +356,7 @@ function Bubble({ author, body }: { author: ChatMessage['author']; body: string 
   const mine = author === 'customer';
   return (
     <div className={`flex ${mine ? 'justify-end' : 'justify-start'}`}>
-      <div className={`max-w-[85%] rounded-2xl px-3 py-2 whitespace-pre-wrap break-words ${mine ? 'bg-ink text-white rounded-br-md' : fromTeam(author) ? 'bg-warning-soft border border-warning-line text-ink rounded-bl-md' : 'bg-surface border border-line text-ink rounded-bl-md'}`}>
+      <div className={`max-w-[85%] rounded-2xl px-3 py-2 whitespace-pre-wrap break-words ${mine ? 'bg-ink text-paper rounded-br-md' : fromTeam(author) ? 'bg-warning-soft border border-warning-line text-ink rounded-bl-md' : 'bg-surface border border-line text-ink rounded-bl-md'}`}>
         {fromTeam(author) && <div className="text-[10px] font-semibold text-warning mb-0.5">The team</div>}
         {body}
       </div>

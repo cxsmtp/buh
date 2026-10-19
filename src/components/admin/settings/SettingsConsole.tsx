@@ -52,7 +52,7 @@ export function SettingsConsole({ sections, openId }: { sections: SettingsSectio
             onClick={() => open(s.id)}
             aria-current={s.id === current?.id ? 'page' : undefined}
             className={`shrink-0 text-left px-3 py-2 rounded-xl text-xs font-medium flex items-center gap-2 transition-colors ${
-              s.id === current?.id ? 'bg-ink text-white' : 'bg-surface text-ink-soft border border-line hover:bg-ivory'
+              s.id === current?.id ? 'bg-ink text-paper' : 'bg-surface text-ink-soft border border-line hover:bg-ivory'
             }`}
           >
             <span aria-hidden="true" className="shrink-0 [&>svg]:w-4 [&>svg]:h-4 [&>svg]:stroke-[1.5]">{s.icon}</span>

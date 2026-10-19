@@ -770,6 +770,7 @@ test('migration 9 only adds (columns, indexes, a table); backups carry card paym
   const db = new Database(path.join(old, 'shop.db'));
   // Migration 10's columns go too (it runs again after 9).
   // Migrations 11 and 12 go too (they run again after 10): newest first.
+  db.exec("DELETE FROM settings_history WHERE key = 'look'; DELETE FROM settings WHERE key = 'look'"); // migration 13
   db.exec('DROP TABLE card_refunds; DROP TABLE expense_bills; DROP TABLE expense_versions; DROP TABLE expenses; DROP TABLE expense_categories;'); // migration 12
   db.exec('DROP INDEX orders_unconfirmed_due; DROP INDEX orders_unopened_due; ALTER TABLE orders DROP COLUMN phone_check_method; ALTER TABLE orders DROP COLUMN wa_cancel_at; ALTER TABLE orders DROP COLUMN wa_unopened_cancel_at;'); // migration 11
   db.exec(`DROP INDEX orders_by_pay_token; DROP INDEX orders_transfer_to_check; ${['pay_nonce', 'pay_token_hash', 'pay_expires_at', 'bank_state', 'transfer_uploads', 'transfer_uploaded_at', 'bank_emailed_at', 'bank_checked_at', 'bank_checked_by'].map((c) => `ALTER TABLE orders DROP COLUMN ${c};`).join(' ')}`);
@@ -779,7 +780,7 @@ test('migration 9 only adds (columns, indexes, a table); backups carry card paym
   db.close();
   const up = run(`const m = await import('@/lib/server/db'); const db = (m.getDb ?? m.default.getDb)(); console.log(JSON.stringify({ v: db.pragma('user_version', { simple: true }), row: db.prepare("SELECT status, data, card_state, payment_ref FROM orders WHERE id = 'BUH-OLD-9'").get() }));`);
   assert.equal(up.status, 0, up.stderr);
-  assert.deepEqual(JSON.parse(up.stdout.trim().split('\n').pop()!), { v: 12, row: { status: 'pending_confirmation', data: '{"id":"BUH-OLD-9"}', card_state: 'none', payment_ref: null } });
+  assert.deepEqual(JSON.parse(up.stdout.trim().split('\n').pop()!), { v: 13, row: { status: 'pending_confirmation', data: '{"id":"BUH-OLD-9"}', card_state: 'none', payment_ref: null } });
 });
 
 test('wallet addresses: emirates by any name, areas from the shop’s list, nothing guessed', () => {

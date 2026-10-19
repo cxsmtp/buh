@@ -164,7 +164,7 @@ export const AdminCouriersTab: React.FC<AdminCouriersTabProps> = ({
             }}
             className={`flex items-center justify-center gap-2 px-3 py-2 rounded-xl text-xs font-bold transition-all min-w-0 ${
               activeCarrier === 'jeebly'
-                ? 'bg-ink text-white shadow-sm'
+                ? 'bg-ink text-paper shadow-sm'
                 : 'bg-surface text-ink-soft hover:bg-sand border border-line'
             }`}
           >
@@ -181,12 +181,12 @@ export const AdminCouriersTab: React.FC<AdminCouriersTabProps> = ({
             }}
             className={`flex items-center justify-center gap-2 px-3 py-2 rounded-xl text-xs font-bold transition-all min-w-0 ${
               activeCarrier === 'echo'
-                ? 'bg-ink text-white shadow-sm'
+                ? 'bg-ink text-paper shadow-sm'
                 : 'bg-surface text-ink-soft hover:bg-sand border border-line'
             }`}
           >
             <span>Eco Express Courier</span>
-            <span className="hidden md:inline text-[10px] px-1.5 py-0.2 rounded-full bg-ink-soft text-white font-bold">
+            <span className="hidden md:inline text-[10px] px-1.5 py-0.2 rounded-full bg-ink-soft text-paper font-bold">
               Apiary / ecofreight.ae
             </span>
           </button>
@@ -206,7 +206,7 @@ export const AdminCouriersTab: React.FC<AdminCouriersTabProps> = ({
                 type="button"
                 onClick={() => handleTestConnection('jeebly')}
                 disabled={testing}
-                className="flex items-center gap-1.5 bg-ink hover:bg-ink text-white px-3 py-1.5 rounded-xl font-semibold transition-all disabled:opacity-50"
+                className="flex items-center gap-1.5 bg-ink hover:bg-ink text-paper px-3 py-1.5 rounded-xl font-semibold transition-all disabled:opacity-50"
               >
                 <RefreshCw className={`w-3.5 h-3.5 text-gold-light ${testing ? 'animate-spin' : ''}`} />
                 <span>{testing ? 'Testing...' : 'Test Jeebly API'}</span>
@@ -305,7 +305,7 @@ export const AdminCouriersTab: React.FC<AdminCouriersTabProps> = ({
                 type="button"
                 onClick={() => handleTestConnection('echo')}
                 disabled={testing}
-                className="flex items-center gap-1.5 bg-ink hover:bg-ink text-white px-3 py-1.5 rounded-xl font-semibold transition-all disabled:opacity-50"
+                className="flex items-center gap-1.5 bg-ink hover:bg-ink text-paper px-3 py-1.5 rounded-xl font-semibold transition-all disabled:opacity-50"
               >
                 <RefreshCw className={`w-3.5 h-3.5 text-gold-light ${testing ? 'animate-spin' : ''}`} />
                 <span>{testing ? 'Testing...' : 'Test Eco Express API'}</span>
@@ -420,7 +420,7 @@ export const AdminCouriersTab: React.FC<AdminCouriersTabProps> = ({
             type="button"
             onClick={handleSave}
             disabled={saving}
-            className="ml-auto bg-ink hover:bg-ink disabled:opacity-60 text-white font-bold text-xs px-5 py-2.5 rounded-xl shadow transition-all"
+            className="ml-auto bg-ink hover:bg-ink disabled:opacity-60 text-paper font-bold text-xs px-5 py-2.5 rounded-xl shadow transition-all"
           >
             {saving ? 'Saving…' : 'Save Carrier Settings'}
           </button>

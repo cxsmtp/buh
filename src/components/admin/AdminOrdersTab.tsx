@@ -281,7 +281,7 @@ export const AdminOrdersTab: React.FC<AdminOrdersTabProps> = ({
               onClick={() => setFilter(tab.id as typeof filter)}
               className={`px-3 py-1.5 rounded-xl text-xs font-semibold whitespace-nowrap transition-all flex items-center gap-1.5 ${
                 filter === tab.id
-                  ? 'bg-ink text-white shadow-sm'
+                  ? 'bg-ink text-paper shadow-sm'
                   : 'bg-surface text-ink-soft hover:bg-sand border border-line'
               }`}
             >
@@ -563,7 +563,7 @@ export const AdminOrdersTab: React.FC<AdminOrdersTabProps> = ({
                   ) : isPending ? (
                     <button
                       onClick={() => openConfirmationModal(order)}
-                      className="flex items-center gap-1.5 bg-ink hover:bg-ink text-white font-bold text-xs px-4 py-2 rounded-xl transition-all shadow active:scale-95"
+                      className="flex items-center gap-1.5 bg-ink hover:bg-ink text-paper font-bold text-xs px-4 py-2 rounded-xl transition-all shadow active:scale-95"
                     >
                       <CheckCircle2 className="w-4 h-4 text-gold-light" />
                       <span>Confirm & Assign Courier</span>
@@ -583,7 +583,7 @@ export const AdminOrdersTab: React.FC<AdminOrdersTabProps> = ({
 
       {/* ORDER CONFIRMATION & SMART COURIER ASSIGNMENT MODAL */}
       {selectedOrderForConfirm && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-ink/45 p-3 sm:p-4 overscroll-contain" role="dialog" aria-modal="true" aria-labelledby="confirm-order-title">
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-scrim/45 p-3 sm:p-4 overscroll-contain" role="dialog" aria-modal="true" aria-labelledby="confirm-order-title">
           <div className="bg-surface rounded-3xl max-w-lg w-full min-w-0 max-h-[calc(100dvh-1.5rem)] overflow-y-auto overflow-x-hidden overscroll-contain p-5 border border-line space-y-4">
             {/* Header (stays in view) */}
             <div className="sticky top-0 z-10 -mx-5 -mt-5 px-5 pt-4 pb-3 bg-surface flex items-start justify-between gap-2 border-b border-line">
@@ -644,7 +644,7 @@ export const AdminOrdersTab: React.FC<AdminOrdersTabProps> = ({
                   onClick={() => setChosenCourier('jeebly')}
                   className={`p-3 rounded-xl border text-left transition-all ${
                     chosenCourier === 'jeebly'
-                      ? 'border-ink bg-ink text-white shadow-md'
+                      ? 'border-ink bg-ink text-paper shadow-md'
                       : 'border-line bg-surface text-ink-soft hover:border-line-strong'
                   }`}
                 >
@@ -663,7 +663,7 @@ export const AdminOrdersTab: React.FC<AdminOrdersTabProps> = ({
                   onClick={() => setChosenCourier('echo')}
                   className={`p-3 rounded-xl border text-left transition-all ${
                     chosenCourier === 'echo'
-                      ? 'border-ink bg-ink text-white shadow-md'
+                      ? 'border-ink bg-ink text-paper shadow-md'
                       : 'border-line bg-surface text-ink-soft hover:border-line-strong'
                   }`}
                 >
@@ -737,7 +737,7 @@ export const AdminOrdersTab: React.FC<AdminOrdersTabProps> = ({
                 type="button"
                 disabled={isDispatching}
                 onClick={handleConfirmAndDispatch}
-                className="w-full bg-ink hover:bg-ink text-white font-bold text-xs py-3.5 rounded-xl shadow-lg flex items-center justify-center gap-2 transition-all disabled:opacity-50"
+                className="w-full bg-ink hover:bg-ink text-paper font-bold text-xs py-3.5 rounded-xl shadow-lg flex items-center justify-center gap-2 transition-all disabled:opacity-50"
               >
                 {isDispatching ? (
                   <span>Connecting to Courier API & Booking Dispatch...</span>

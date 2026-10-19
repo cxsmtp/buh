@@ -25,7 +25,7 @@ export function uaeTime(iso: string): string {
 
 export const inputClass = 'w-full min-h-11 px-3 rounded-xl border border-line-strong bg-surface text-sm text-ink focus:outline-none focus:ring-2 focus:ring-gold';
 export const labelClass = 'block text-xs font-semibold text-ink-soft mb-1';
-export const primaryButton = 'min-h-11 px-4 rounded-xl bg-ink text-white text-sm font-bold inline-flex items-center justify-center gap-1.5 disabled:opacity-50';
+export const primaryButton = 'min-h-11 px-4 rounded-xl bg-ink text-paper text-sm font-bold inline-flex items-center justify-center gap-1.5 disabled:opacity-50';
 export const secondaryButton = 'min-h-11 px-3 rounded-xl border border-line-strong bg-surface text-ink text-sm font-semibold inline-flex items-center justify-center gap-1.5 disabled:opacity-50';
 
 export function Card({ children, className = '', ...rest }: React.HTMLAttributes<HTMLDivElement>) {

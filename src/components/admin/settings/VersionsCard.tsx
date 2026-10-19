@@ -135,7 +135,7 @@ export function VersionsCard() {
             {running !== info.current && <> · the server now runs <strong className="font-mono">{label(running)}</strong> (reload to see it)</>}
           </span>
           {managed && (
-            <button type="button" onClick={() => void switchTo('latest')} disabled={Boolean(busy) || Boolean(info.pending) || info.updater?.lastRequest.result === 'working'} className="ml-auto px-3 py-1.5 rounded-lg bg-ink text-white font-bold flex items-center gap-1 disabled:opacity-50">
+            <button type="button" onClick={() => void switchTo('latest')} disabled={Boolean(busy) || Boolean(info.pending) || info.updater?.lastRequest.result === 'working'} className="ml-auto px-3 py-1.5 rounded-lg bg-ink text-paper font-bold flex items-center gap-1 disabled:opacity-50">
               {busy === 'latest' ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Sparkles className="w-3.5 h-3.5" />} Update to the latest
             </button>
           )}

@@ -6,7 +6,7 @@ import { getJson, postJson } from '@/lib/apiClient';
 import { passkeyErrorMessage, passkeysSupported, webauthnBrowser } from '@/lib/client/passkeys';
 
 const input = 'w-full px-3.5 py-2.5 rounded-xl border border-line-strong bg-surface text-ink placeholder:text-ink-muted focus:outline-none focus:ring-2 focus:ring-gold text-xs';
-const primary = 'w-full bg-ink hover:bg-ink disabled:opacity-60 text-white font-bold py-3.5 rounded-xl shadow-lg flex items-center justify-center gap-2 text-xs mt-2';
+const primary = 'w-full bg-ink hover:bg-ink disabled:opacity-60 text-paper font-bold py-3.5 rounded-xl shadow-lg flex items-center justify-center gap-2 text-xs mt-2';
 const quiet = 'text-ink-soft hover:text-ink font-semibold py-1 underline-offset-2 hover:underline';
 
 interface AdminLoginModalProps {
@@ -230,7 +230,7 @@ export const AdminLoginModal: React.FC<AdminLoginModalProps> = ({
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-ink/45 p-3 sm:p-4 overscroll-contain" role="dialog" aria-modal="true" aria-labelledby="admin-login-title">
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-scrim/45 p-3 sm:p-4 overscroll-contain" role="dialog" aria-modal="true" aria-labelledby="admin-login-title">
       <div className="bg-surface rounded-3xl max-w-md w-full min-w-0 max-h-[calc(100dvh-1.5rem)] overflow-y-auto overflow-x-hidden overscroll-contain p-6 space-y-5 border border-line">
         {/* Header (stays in view, with its close button) */}
         <div className="sticky top-0 z-10 -mx-6 -mt-6 px-6 pt-6 pb-2 bg-surface text-center space-y-1.5">
@@ -274,7 +274,7 @@ export const AdminLoginModal: React.FC<AdminLoginModalProps> = ({
               <label htmlFor="admin-reset-confirm" className="block text-ink font-semibold mb-1">Confirm new password</label>
               <input id="admin-reset-confirm" type="password" required minLength={12} maxLength={256} autoComplete="new-password" value={confirmPassword} onChange={(e) => setConfirmPassword(e.target.value)} className="w-full px-3.5 py-2.5 rounded-xl border border-line-strong bg-surface text-ink focus:outline-none focus:ring-2 focus:ring-gold text-xs" />
             </div>
-            <button type="submit" disabled={busy} className="w-full bg-ink hover:bg-ink disabled:opacity-60 text-white font-bold py-3.5 rounded-xl shadow-lg flex items-center justify-center gap-2 text-xs mt-2">
+            <button type="submit" disabled={busy} className="w-full bg-ink hover:bg-ink disabled:opacity-60 text-paper font-bold py-3.5 rounded-xl shadow-lg flex items-center justify-center gap-2 text-xs mt-2">
               <Check className="w-4 h-4 text-gold-light" />
               <span>{busy ? 'Saving…' : 'Set New Password'}</span>
             </button>
@@ -366,7 +366,7 @@ export const AdminLoginModal: React.FC<AdminLoginModalProps> = ({
               <label htmlFor="admin-forgot-email" className="block text-ink font-semibold mb-1">Admin Email</label>
               <input id="admin-forgot-email" type="email" required maxLength={254} autoComplete="username" value={email} onChange={(e) => setEmail(e.target.value)} className="w-full px-3.5 py-2.5 rounded-xl border border-line-strong bg-surface text-ink focus:outline-none focus:ring-2 focus:ring-gold text-xs" />
             </div>
-            <button type="submit" disabled={busy} className="w-full bg-ink hover:bg-ink disabled:opacity-60 text-white font-bold py-3.5 rounded-xl shadow-lg flex items-center justify-center gap-2 text-xs mt-2">
+            <button type="submit" disabled={busy} className="w-full bg-ink hover:bg-ink disabled:opacity-60 text-paper font-bold py-3.5 rounded-xl shadow-lg flex items-center justify-center gap-2 text-xs mt-2">
               <span>{busy ? 'Sending…' : 'Email Me a Reset Link'}</span>
             </button>
             <button type="button" onClick={() => { setForgot(false); setError(''); }} className="w-full text-ink-muted hover:text-ink font-semibold py-1">
@@ -409,7 +409,7 @@ export const AdminLoginModal: React.FC<AdminLoginModalProps> = ({
             <button
               type="submit"
               disabled={busy}
-              className="w-full bg-ink hover:bg-ink disabled:opacity-60 text-white font-bold py-3.5 rounded-xl shadow-lg flex items-center justify-center gap-2 transition-all active:scale-95 text-xs mt-2"
+              className="w-full bg-ink hover:bg-ink disabled:opacity-60 text-paper font-bold py-3.5 rounded-xl shadow-lg flex items-center justify-center gap-2 transition-all active:scale-95 text-xs mt-2"
             >
               <Check className="w-4 h-4 text-gold-light" />
               <span>{busy ? 'Saving…' : 'Save Password & Continue'}</span>
@@ -462,7 +462,7 @@ export const AdminLoginModal: React.FC<AdminLoginModalProps> = ({
           <button
             type="submit"
             disabled={busy}
-            className="w-full bg-ink hover:bg-ink disabled:opacity-60 text-white font-bold py-3.5 rounded-xl shadow-lg flex items-center justify-center gap-2 transition-all active:scale-95 text-xs mt-2"
+            className="w-full bg-ink hover:bg-ink disabled:opacity-60 text-paper font-bold py-3.5 rounded-xl shadow-lg flex items-center justify-center gap-2 transition-all active:scale-95 text-xs mt-2"
           >
             <span>{busy ? 'Checking…' : 'Unlock Admin Portal'}</span>
             <ArrowRight className="w-4 h-4 text-gold-light" />

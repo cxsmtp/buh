@@ -80,6 +80,11 @@ With `TRUST_PROXY=1` (behind the shop's proxy, which sets the real address), an 
 - New mail settings are tried (SMTP login) before they are stored; if that fails while the current settings are known to work (a passing trial or test email), the change is refused (409). Known-good is kept as a hash, never a copy of the password.
 - Autosaves within 2 minutes of each other are one history entry; Undo restores the entry before the session, and the restore itself is kept, so it can be undone.
 
+## Looks (Settings → Look)
+
+- `PUT /api/admin/look` (`{ preset, mode }`) and `POST /api/admin/look` (`{ switchBack: id }`): `requireAdmin`, `readJsonBody` (1 KB / 256 B), `allowFields`, `handleRouteError`. The preset and mode are checked against allow-lists on the server; the time is the server's and the author is the signed-in admin (neither is accepted from the browser). Every change is audited (`look.changed`, `look.switched_back`) and kept in the settings history; the look from before looks existed is pinned there and never pruned.
+- `/look.css` is public (the colours of the chosen look, nothing else) and computed from the allow-listed preset and mode only, so no text the owner types reaches it. It is linked in every page's head, which keeps the storefront a static page (a per-request page would cost the same as a nonce CSP, below); `max-age=0, must-revalidate` with an ETag, so an unchanged look is a 304.
+
 ## Delivery charges
 
 - Whether we deliver, and any same-day charge, are decided on the server from the address and Settings → Delivery, in fils; a GPS reading never decides it (devices often report a network location). The area is free text (up to 120 characters); the suggestion list and a GPS-suggested area are conveniences in the browser, never trusted by the server. GPS suggests an area only from a reading within 300 m accuracy and 1.5 km of a known community, and no map tiles or other third parties are loaded. The browser's total must match the server's or the order is refused before anything is charged; a same-day order after the cut-off is refused (409) and checkout moves back to standard.

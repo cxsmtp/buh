@@ -43,6 +43,13 @@ export const PALETTE = {
   'danger-line': '#e7c3bc',
   /** WhatsApp's own green, only on the WhatsApp button (people look for it). */
   whatsapp: '#1f7a47',
+  /**
+   * Lettering on ink, success, danger and WhatsApp buttons. White here; in a dark look
+   * (src/lib/design/themes.ts) it is the deepest shade, since those buttons turn light.
+   */
+  paper: '#ffffff',
+  /** The dimming behind a sheet or dialog (bg-scrim/45): the ink here; near-black in a dark look. */
+  scrim: '#2b2127',
 } as const;
 
 export type Token = keyof typeof PALETTE;

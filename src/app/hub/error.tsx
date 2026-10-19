@@ -24,7 +24,7 @@ export default function HubError({ error, retry }: { error: Error & { digest?: s
         <p className="text-sm text-ink-soft">Nothing was lost. Try again; if it happens again, send us a screenshot of this page.</p>
         <p className="text-xs text-ink-muted break-words font-mono bg-sand rounded-lg p-2">{error?.message || 'Unknown error'}</p>
         <div className="flex flex-wrap gap-2">
-          <button type="button" onClick={() => retry()} className="px-4 py-2 rounded-full bg-ink text-white text-sm font-semibold">Try again</button>
+          <button type="button" onClick={() => retry()} className="px-4 py-2 rounded-full bg-ink text-paper text-sm font-semibold">Try again</button>
           <button type="button" onClick={() => window.location.reload()} className="px-4 py-2 rounded-full border border-line-strong text-sm font-semibold">Reload</button>
         </div>
       </div>

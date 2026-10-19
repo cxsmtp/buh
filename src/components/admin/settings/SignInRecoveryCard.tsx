@@ -14,7 +14,7 @@ import { passkeyErrorMessage, passkeysSupported, webauthnBrowser } from '@/lib/c
 
 const field = 'w-full px-3 py-2 rounded-xl border border-line-strong bg-surface text-ink text-sm placeholder:text-ink-muted focus:outline-none focus:ring-2 focus:ring-gold';
 const label = 'block text-xs font-semibold text-ink-soft mb-1';
-const darkButton = 'px-4 py-2 rounded-xl bg-ink text-white text-xs font-bold flex items-center gap-1.5 disabled:opacity-60';
+const darkButton = 'px-4 py-2 rounded-xl bg-ink text-paper text-xs font-bold flex items-center gap-1.5 disabled:opacity-60';
 const lightButton = 'px-3 py-2 rounded-xl border border-line-strong bg-surface text-ink text-xs font-bold flex items-center gap-1.5 hover:bg-ivory disabled:opacity-60';
 
 interface Passkey {
@@ -168,7 +168,7 @@ function PasskeysSection() {
                       <input id={`passkey-confirm-${p.id}`} className={field} type="password" required autoComplete="current-password" maxLength={256} value={confirmPassword} onChange={(e) => setConfirmPassword(e.target.value)} />
                     </div>
                   )}
-                  <button type="submit" disabled={busy} className={`px-3 py-2 rounded-lg text-white text-xs font-bold disabled:opacity-60 ${confirming.action === 'remove' ? 'bg-danger' : 'bg-ink'}`}>
+                  <button type="submit" disabled={busy} className={`px-3 py-2 rounded-lg text-paper text-xs font-bold disabled:opacity-60 ${confirming.action === 'remove' ? 'bg-danger' : 'bg-ink'}`}>
                     {confirming.action === 'remove' ? 'Yes, remove' : 'Yes, keep it'}
                   </button>
                   <button type="button" onClick={() => { setConfirming(null); setConfirmPassword(''); }} className="px-3 py-2 rounded-lg border border-line-strong text-ink text-xs font-bold">Cancel</button>

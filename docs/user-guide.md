@@ -19,7 +19,16 @@ The shop looks and works like a boutique's Instagram page, on a phone first: qui
 
 ### The look
 
-One palette, defined once and used by every page, the Admin Hub, the offline page, the app icon and the phone's status bar:
+The shop has four looks, each in a light and a dark version; the owner picks one in **Settings → Look** (below). Unless the owner fixes one, each phone or computer shows the light or dark version as it is set itself. The festival accents (below) show in every look, light and dark.
+
+| Look | Light | Dark |
+| --- | --- | --- |
+| **Ivory & Gold** (the shop's look until now) | warm ivory and linen, aubergine ink, antique gold | deep aubergine, ivory lettering, champagne |
+| **Noir & Champagne** | pearl white, black-espresso ink, champagne | near-black, pearl lettering, champagne |
+| **Pearl & Emerald** | pearl and celadon, deep emerald, brass | forest-black, mint-emerald and brass |
+| **Sand & Rose** | desert sand and blush, cocoa ink, rose gold | cocoa, rose-gold lights |
+
+Every look uses the same tokens; Ivory & Gold in light is this palette, used by every page, the Admin Hub, the offline page, the app icon and the phone's status bar:
 
 | Token | Colour | Used for |
 | --- | --- | --- |
@@ -34,7 +43,7 @@ One palette, defined once and used by every page, the Admin Hub, the offline pag
 | success, warning, danger | #3d6a4e, #85601c, #9a3e39 | sage, ochre and brick, each with a soft tint and a line |
 | line / line-strong | #e5dac9 / #cbbba3 | hairline borders and dividers |
 
-Headings are set in **Cormorant Garamond** (an elegant serif) and everything else in **Inter**; both are served by the shop itself. Labels are small spaced capitals; borders are hairlines rather than shadows; corners are the same everywhere. Every text colour reaches the WCAG AA contrast the tests check.
+Headings are set in **Cormorant Garamond** (an elegant serif) and everything else in **Inter**; both are served by the shop itself. Labels are small spaced capitals; borders are hairlines rather than shadows; corners are the same everywhere. Every text colour reaches the WCAG AA contrast the tests check, in every look, light and dark (the dark versions turn the main buttons pearl with dark lettering, and lift each festival accent so it reads on the dark page).
 
 
 ## Install the shop as an app
@@ -285,11 +294,24 @@ A read-only list of everything that changes money or the shop, newest first: ord
 - **Passkeys & recovery codes:** your ways back in if you forget the password (see above).
 - **Catalogue:** the size presets offered when adding a product (name, measurements, price difference, pieces in the set), the categories shown in the shop (each category with pieces in it is a round story chip at the top of the shop, in this order, with its first piece's photo; **New in** and **On sale** chips come from each product's **New arrival** tick and its **Was (AED)** price), and the **Only N left** level.
 - **Branding & bank:** the shop's name, tagline and logo (the logo's letters sit on one of the palette's tones: champagne gold, antique gold, ink or dusty rose), and bank-transfer details.
+- **Look:** see below.
 - **Festival themes:** see below.
 - **Payments:** card, Apple Pay and Google Pay through your Stripe account (see "Card payments" above).
 - **Phone check:** WhatsApp (free, the default) or SMS code, the hours before unconfirmed orders cancel, and the SMS gateway (see below).
 - **Couriers:** see below.
 - **System & backups:** health (disk, database, backups, SMS), backups, and **Settings history**: every save keeps the version it replaced (keys excepted); **Restore** puts an earlier one back and can itself be undone.
+
+### Look
+
+Settings → **Look** chooses the shop's colours (the shop and the Admin Hub both follow it):
+
+- **Current** says which look is on, since when (Dubai time) and who chose it, for example *Current: Ivory & Gold · Match the device · since 18 Oct 2026, 20:31 by admin@…*.
+- **Look:** four cards (Ivory & Gold, Noir & Champagne, Pearl & Emerald, Sand & Rose), each with a small shop front in its light and its dark version. Pick one (a tap, or the arrow keys).
+- **Light or dark:** **Match the device** (the default: each visitor's phone or computer decides, dark at night if they set it so), **Always light** or **Always dark**.
+- Press **Save look**. This page changes at once; visitors see it on their next page load.
+- **Earlier looks:** every change keeps the look it replaced, with its date, time and who chose it. **Switch back** puts that one back exactly (the look you have now stays in the list). The first entry, **Ivory & Gold — the look before themes** (the shop exactly as it was, always light), is always kept, however many changes follow. Looks also appear in Settings → System & backups → history, and every change is in the audit log.
+
+Festival themes (below) are separate: their dates and choices are unchanged, and their accents show in every look.
 
 ### Festival themes
 

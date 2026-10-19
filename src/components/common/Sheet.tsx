@@ -102,7 +102,7 @@ export function Sheet({ labelledBy, onClose, children, variant = 'bottom', wide 
 
   return (
     <div className={`fixed inset-0 z-50 flex ${layout}`} onKeyDown={onKeyDown}>
-      <div className="absolute inset-0 bg-ink/45 sheet-fade" aria-hidden="true" onClick={() => close.current()} />
+      <div className="absolute inset-0 bg-scrim/45 sheet-fade" aria-hidden="true" onClick={() => close.current()} />
       <div
         ref={panel}
         role="dialog"

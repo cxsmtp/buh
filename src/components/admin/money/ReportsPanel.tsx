@@ -129,7 +129,7 @@ export function ReportsPanel() {
               ['custom', 'Dates'],
             ] as Array<[Kind, string]>
           ).map(([k, label]) => (
-            <button key={k} type="button" aria-pressed={kind === k} onClick={() => setKind(k)} className={`min-h-10 rounded-lg text-xs font-semibold ${kind === k ? 'bg-ink text-white' : 'text-ink-soft'}`}>
+            <button key={k} type="button" aria-pressed={kind === k} onClick={() => setKind(k)} className={`min-h-10 rounded-lg text-xs font-semibold ${kind === k ? 'bg-ink text-paper' : 'text-ink-soft'}`}>
               {label}
             </button>
           ))}

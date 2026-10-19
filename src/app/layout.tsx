@@ -1,6 +1,7 @@
 import type { Metadata, Viewport } from "next";
 import localFont from "next/font/local";
 import { THEME_COLOR } from "@/lib/design/tokens";
+import { LOOK_PRESETS } from "@/lib/design/themes";
 import "./globals.css";
 
 /*
@@ -27,7 +28,13 @@ const ui = localFont({
 });
 
 export const viewport: Viewport = {
-  themeColor: THEME_COLOR,
+  // The phone's status bar: the ink in a light look, the page's own dark in a dark one (the device
+  // decides which applies). This page is the same for every visitor, so the colours are Ivory &
+  // Gold's; the other looks' are near enough for a status bar.
+  themeColor: [
+    { media: "(prefers-color-scheme: light)", color: THEME_COLOR },
+    { media: "(prefers-color-scheme: dark)", color: LOOK_PRESETS["ivory-gold"].dark.colors.ivory },
+  ],
   width: "device-width",
   initialScale: 1,
   maximumScale: 5,
@@ -70,6 +77,11 @@ export default function RootLayout({
 }) {
   return (
     <html lang="en" className={`h-full antialiased ${display.variable} ${ui.variable}`} suppressHydrationWarning>
+      <head>
+        {/* The chosen look (Settings → Look), from the server before anything paints: src/app/look.css. */}
+        {/* eslint-disable-next-line @next/next/no-css-tags */}
+        <link rel="stylesheet" href="/look.css" />
+      </head>
       <body className="min-h-full flex flex-col bg-ivory text-ink selection:bg-gold/30">
         {children}
       </body>

@@ -46,6 +46,7 @@ test('hard-coded hex colours live only in the palette, the festival accents and 
   // Product colour swatches and photo backgrounds are content (the colours of real sheets).
   const allowed = new Set([
     'src/lib/design/tokens.ts',
+    'src/lib/design/themes.ts',
     'src/app/globals.css',
     'src/lib/festivals/catalog.ts',
     'src/data/initialData.ts',
@@ -86,7 +87,9 @@ test('the installed app and the status bar take the palette', () => {
   assert.equal(THEME_COLOR, PALETTE.ink);
   assert.equal(APP_BACKGROUND_COLOR, PALETTE.ivory);
   const layout = fs.readFileSync('src/app/layout.tsx', 'utf8');
-  assert.match(layout, /themeColor: THEME_COLOR/);
+  // Both schemes: the ink in light, the dark look's page colour in dark.
+  assert.match(layout, /media: "\(prefers-color-scheme: light\)", color: THEME_COLOR/);
+  assert.match(layout, /media: "\(prefers-color-scheme: dark\)", color: LOOK_PRESETS\["ivory-gold"\]\.dark\.colors\.ivory/);
   // Self-hosted fonts: the serif for headings and the sans for everything else.
   assert.match(layout, /cormorant-garamond-latin-500-normal\.woff2/);
   assert.match(layout, /inter-latin-wght-normal\.woff2/);

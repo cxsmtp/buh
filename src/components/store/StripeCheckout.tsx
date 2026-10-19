@@ -69,21 +69,31 @@ export interface CardResult {
 /** Pay with what is in the fields: checkout creates the order (on the server) when asked. */
 export type CardPay = (createOrder: () => Promise<StartedCardOrder>) => Promise<CardResult>;
 
-const appearance: StripeElementsOptions['appearance'] = {
-  theme: 'stripe',
-  variables: {
-    colorPrimary: PALETTE.ink,
-    colorText: PALETTE.ink,
-    colorTextSecondary: PALETTE['ink-soft'],
-    colorBackground: PALETTE.surface,
-    colorDanger: PALETTE.danger,
-    borderRadius: '12px',
-    fontSizeBase: '14px',
-  },
-};
+/**
+ * Stripe's fields in the shop's look: the colours are read from the page (the chosen look, light or
+ * dark, from /look.css), so a dark look gets dark card fields instead of a stark white box. Before
+ * the page has styles (or outside a browser) it falls back to Ivory & Gold light.
+ */
+function appearance(): StripeElementsOptions['appearance'] {
+  const css = typeof document === 'undefined' ? null : getComputedStyle(document.documentElement);
+  const token = (name: keyof typeof PALETTE) => css?.getPropertyValue(`--color-${name}`).trim() || PALETTE[name];
+  const dark = css?.colorScheme.includes('dark') ?? false;
+  return {
+    theme: dark ? 'night' : 'stripe',
+    variables: {
+      colorPrimary: token('ink'),
+      colorText: token('ink'),
+      colorTextSecondary: token('ink-soft'),
+      colorBackground: token('surface'),
+      colorDanger: token('danger'),
+      borderRadius: '12px',
+      fontSizeBase: '14px',
+    },
+  };
+}
 
 function options(amountFils: number): StripeElementsOptions {
-  return { mode: 'payment', amount: amountFils, currency: 'aed', paymentMethodTypes: ['card', 'link'], appearance };
+  return { mode: 'payment', amount: amountFils, currency: 'aed', paymentMethodTypes: ['card', 'link'], appearance: appearance() };
 }
 
 /** After Stripe has the payment: confirm it in the browser (3-D Secure in a frame, no redirect for cards). */

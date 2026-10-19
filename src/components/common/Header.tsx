@@ -62,7 +62,7 @@ export const Header: React.FC<HeaderProps> = ({ cartCount, onOpenCart, onOpenSea
             <MapPin className="w-4 h-4 text-gold-deep" aria-hidden="true" />
             <span>Track Order</span>
           </button>
-          <button type="button" onClick={onOpenCart} className="relative w-10 h-10 flex items-center justify-center rounded-full bg-ink text-white hover:bg-ink-2" aria-label={`View shopping bag${cartCount ? `, ${cartCount} ${cartCount === 1 ? 'piece' : 'pieces'}` : ''}`}>
+          <button type="button" onClick={onOpenCart} className="relative w-10 h-10 flex items-center justify-center rounded-full bg-ink text-paper hover:bg-ink-2" aria-label={`View shopping bag${cartCount ? `, ${cartCount} ${cartCount === 1 ? 'piece' : 'pieces'}` : ''}`}>
             <ShoppingBag className="w-5 h-5 text-gold-light" aria-hidden="true" />
             {cartCount > 0 && (
               <span className="absolute -top-1 -right-1 bg-gold text-ink text-[11px] font-semibold min-w-5 h-5 px-1 rounded-full flex items-center justify-center ring-2 ring-ivory" aria-hidden="true">

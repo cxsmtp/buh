@@ -11,5 +11,5 @@ export const dynamic = 'force-dynamic';
 
 export default async function manifest(): Promise<MetadataRoute.Manifest> {
   const ua = (await headers()).get('user-agent') || '';
-  return buildManifest(getSettings('brand'), ua);
+  return buildManifest(getSettings('brand'), ua, getSettings('look'));
 }

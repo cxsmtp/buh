@@ -4,7 +4,11 @@
  * works on its own: it says what happened, that the bag is safe, and tries again by itself when
  * the phone is back online.
  */
-import { PALETTE } from '@/lib/design/tokens';
+import { LOOK_PRESETS } from '@/lib/design/themes';
+
+/** The page can't know the chosen look (it is kept on the phone): Ivory & Gold, light or dark. */
+const L = LOOK_PRESETS['ivory-gold'].light.colors;
+const D = LOOK_PRESETS['ivory-gold'].dark.colors;
 
 export const dynamic = 'force-static';
 
@@ -13,26 +17,37 @@ const HTML = `<!doctype html>
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-<meta name="theme-color" content="${PALETTE.ink}">
+<meta name="theme-color" content="${L.ink}" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="${D.ivory}" media="(prefers-color-scheme: dark)">
 <meta name="robots" content="noindex">
 <title>You are offline</title>
 <style>
-  :root { color-scheme: light; }
+  :root {
+    color-scheme: light;
+    --ivory: ${L.ivory}; --sand: ${L.sand}; --ink: ${L.ink}; --ink-soft: ${L['ink-soft']}; --ink-muted: ${L['ink-muted']}; --gold-deep: ${L['gold-deep']}; --paper: ${L.paper};
+  }
+  /* A phone in dark mode: the shop's look at night (Ivory & Gold dark, src/lib/design/themes.ts). */
+  @media (prefers-color-scheme: dark) {
+    :root {
+      color-scheme: dark;
+      --ivory: ${D.ivory}; --sand: ${D.sand}; --ink: ${D.ink}; --ink-soft: ${D['ink-soft']}; --ink-muted: ${D['ink-muted']}; --gold-deep: ${D['gold-deep']}; --paper: ${D.paper};
+    }
+  }
   html, body { margin: 0; height: 100%; }
   body {
-    background: ${PALETTE.ivory}; color: ${PALETTE.ink};
+    background: var(--ivory); color: var(--ink);
     font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
     display: flex; align-items: center; justify-content: center;
     padding: max(24px, env(safe-area-inset-top)) max(20px, env(safe-area-inset-right)) max(24px, env(safe-area-inset-bottom)) max(20px, env(safe-area-inset-left));
     box-sizing: border-box; -webkit-tap-highlight-color: transparent; overscroll-behavior: none;
   }
   main { max-width: 22rem; text-align: center; }
-  .mark { width: 72px; height: 72px; border-radius: 50%; margin: 0 auto 20px; display: flex; align-items: center; justify-content: center; background: ${PALETTE.sand}; color: ${PALETTE['gold-deep']}; }
-  h1 { font-family: Georgia, "Times New Roman", serif; font-weight: 500; font-size: 1.5rem; line-height: 1.25; margin: 0 0 10px; color: ${PALETTE.ink}; }
-  p { font-size: 0.95rem; line-height: 1.55; margin: 0 0 12px; color: ${PALETTE['ink-soft']}; }
-  button { margin-top: 12px; font: inherit; font-weight: 600; font-size: 0.95rem; color: #fff; background: ${PALETTE.ink}; border: 0; border-radius: 999px; padding: 14px 28px; min-height: 48px; cursor: pointer; touch-action: manipulation; }
-  button:focus-visible { outline: 2px solid ${PALETTE['gold-deep']}; outline-offset: 3px; }
-  .small { font-size: 0.8rem; color: ${PALETTE['ink-muted']}; margin-top: 16px; }
+  .mark { width: 72px; height: 72px; border-radius: 50%; margin: 0 auto 20px; display: flex; align-items: center; justify-content: center; background: var(--sand); color: var(--gold-deep); }
+  h1 { font-family: Georgia, "Times New Roman", serif; font-weight: 500; font-size: 1.5rem; line-height: 1.25; margin: 0 0 10px; color: var(--ink); }
+  p { font-size: 0.95rem; line-height: 1.55; margin: 0 0 12px; color: var(--ink-soft); }
+  button { margin-top: 12px; font: inherit; font-weight: 600; font-size: 0.95rem; color: var(--paper); background: var(--ink); border: 0; border-radius: 999px; padding: 14px 28px; min-height: 48px; cursor: pointer; touch-action: manipulation; }
+  button:focus-visible { outline: 2px solid var(--gold-deep); outline-offset: 3px; }
+  .small { font-size: 0.8rem; color: var(--ink-muted); margin-top: 16px; }
 </style>
 </head>
 <body>

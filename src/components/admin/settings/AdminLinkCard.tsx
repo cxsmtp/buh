@@ -12,7 +12,7 @@ import { getJson, postJson } from '@/lib/apiClient';
  */
 
 const field = 'w-full px-3 py-2 rounded-xl border border-line-strong bg-surface text-ink text-sm placeholder:text-ink-muted focus:outline-none focus:ring-2 focus:ring-gold';
-const darkButton = 'min-h-11 px-4 py-2 rounded-xl bg-ink text-white text-xs font-bold inline-flex items-center gap-1.5 disabled:opacity-60';
+const darkButton = 'min-h-11 px-4 py-2 rounded-xl bg-ink text-paper text-xs font-bold inline-flex items-center gap-1.5 disabled:opacity-60';
 const lightButton = 'min-h-11 px-3 py-2 rounded-xl border border-line-strong bg-surface text-ink text-xs font-bold inline-flex items-center gap-1.5 hover:bg-ivory disabled:opacity-60';
 
 interface LinkStatus {

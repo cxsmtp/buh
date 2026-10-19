@@ -633,7 +633,7 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
     );
 
     return (
-      <div className="fixed inset-0 z-50 flex items-stretch sm:items-center justify-center bg-ink/45 sm:p-4" role="dialog" aria-modal="true" aria-labelledby="order-confirmed-title">
+      <div className="fixed inset-0 z-50 flex items-stretch sm:items-center justify-center bg-scrim/45 sm:p-4" role="dialog" aria-modal="true" aria-labelledby="order-confirmed-title">
         <div className="bg-surface sm:rounded-3xl max-w-lg w-full h-[100dvh] sm:h-auto sm:max-h-[92dvh] flex flex-col border border-line pt-safe sm:pt-0 overflow-hidden">
           <div className="flex-1 min-h-0 overflow-y-auto overflow-x-hidden p-6 text-center space-y-5">
           <div className="w-14 h-14 rounded-full border border-gold text-gold-deep flex items-center justify-center mx-auto">
@@ -743,7 +743,7 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
                 href={`https://wa.me/${shopWhatsApp}?text=${whatsappMessage}`}
                 target="_blank"
                 rel="noopener noreferrer"
-                className="flex-1 bg-whatsapp hover:brightness-110 text-white font-medium text-xs py-3 px-4 rounded-xl flex items-center justify-center gap-2 transition-all"
+                className="flex-1 bg-whatsapp hover:brightness-110 text-paper font-medium text-xs py-3 px-4 rounded-xl flex items-center justify-center gap-2 transition-all"
               >
                 <MessageCircle className="w-4 h-4" />
                 <span>Send WhatsApp Order Update</span>
@@ -763,7 +763,7 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
   }
 
   return (
-    <div className="fixed inset-0 z-50 flex items-stretch sm:items-center justify-center bg-ink/45 p-0 sm:p-4 overscroll-contain" role="dialog" aria-modal="true" aria-labelledby="checkout-title">
+    <div className="fixed inset-0 z-50 flex items-stretch sm:items-center justify-center bg-scrim/45 p-0 sm:p-4 overscroll-contain" role="dialog" aria-modal="true" aria-labelledby="checkout-title">
       <div className="bg-surface text-ink w-full max-w-xl sm:rounded-3xl h-[100dvh] sm:h-auto sm:max-h-[92dvh] flex flex-col overflow-hidden border border-line pt-safe sm:pt-0 sheet-up sm:[animation-name:sheet-fade]">
         
         {/* Header */}
@@ -971,7 +971,7 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
                         onClick={() => handleSelectMapLocation(loc)}
                         className={`px-2.5 py-1 rounded-lg text-[11px] font-semibold transition-all flex items-center gap-1 ${
                           isSelected
-                            ? 'bg-ink text-white '
+                            ? 'bg-ink text-paper '
                             : 'bg-ivory text-ink-soft hover:bg-warning-soft hover:text-warning border border-line'
                         }`}
                       >
@@ -1102,7 +1102,7 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
             <div className={`p-3.5 rounded-2xl border text-xs space-y-2.5 ${delivery.serviceable ? 'bg-success-soft/80 border-success-line' : 'bg-danger-soft border-danger-line'}`} role="status" aria-live="polite">
               <div className="flex items-center gap-2">
                 {delivery.serviceable ? (
-                  <span className="w-6 h-6 rounded-full bg-success text-white flex items-center justify-center shrink-0"><Check className="w-4 h-4" /></span>
+                  <span className="w-6 h-6 rounded-full bg-success text-paper flex items-center justify-center shrink-0"><Check className="w-4 h-4" /></span>
                 ) : (
                   <AlertCircle className="w-5 h-5 text-danger shrink-0" />
                 )}

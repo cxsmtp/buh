@@ -466,6 +466,21 @@ export interface ThemeSettings {
   showMarquee: boolean;
 }
 
+/**
+ * Settings → Look: the shop's look (src/lib/design/themes.ts) and whether the device picks light
+ * or dark. Who changed it and when are part of it, so each version in the settings history says so.
+ */
+export interface LookSettings {
+  preset: import('@/lib/design/themes').LookPresetId;
+  mode: import('@/lib/design/themes').LookMode;
+  /** What the owner sees in the list ("Noir & Champagne · Always dark", "Switched back to: …"). */
+  label: string;
+  /** When this look was chosen (ISO, UTC). */
+  changedAt: string;
+  /** Who chose it (the admin's email; empty for the shop itself). */
+  changedBy: string;
+}
+
 export interface BrandSettings {
   storeName: string;
   tagline: string;

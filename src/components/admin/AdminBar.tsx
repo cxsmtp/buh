@@ -33,7 +33,7 @@ export function AdminBar({
     `relative flex-1 min-w-0 flex-col items-center justify-center gap-0.5 min-h-14 px-1 rounded-xl text-[11px] ${active ? 'text-gold-deep font-semibold' : 'text-ink-soft'}`;
   const badge = (n: number, label: string) =>
     n > 0 ? (
-      <span className="absolute top-1 left-1/2 ml-2 bg-danger text-white text-[10px] min-w-4 h-4 px-1 rounded-full flex items-center justify-center font-bold" aria-label={label}>
+      <span className="absolute top-1 left-1/2 ml-2 bg-danger text-paper text-[10px] min-w-4 h-4 px-1 rounded-full flex items-center justify-center font-bold" aria-label={label}>
         {n}
       </span>
     ) : null;
