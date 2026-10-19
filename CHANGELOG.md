@@ -10,8 +10,8 @@
 - **Bank transfer on request.** Bank transfer can be offered without putting your account on the website. The customer taps "Confirm & ask for bank details on WhatsApp" after ordering, and you reply from the hub with one tap.
 - **Beautiful Home Assistant.** The chat assistant has a new name; a name you chose yourself is kept.
 - **Status.**
-  - **Benchmark:** BENCH
-  - **Tests:** TESTS
+  - **Benchmark:** 3 alternating rounds (main first), 0 failed requests. Storefront branch 705 / 714 / 747 req/s vs main 759 / 748 / 720; catalogue API branch 602 / 694 / 661 vs main 752 / 652 / 694; serviceability API branch 553 / 554 / 566 vs main 616 / 556 / 539. Focused re-runs, alternating, 4 each: serviceability (5,000 requests) branch 664 / 667 / 585 / 677 vs main 665 / 670 / 632 / 649; catalogue (4,000) branch 656 / 594 / 647 / 622 vs main 614 / 608 / 663 / 656, the same within noise. The host ran slower overall this time, for both builds.
+  - **Tests:** 922 passed, 0 failed (unit and end-to-end).
   - **Dependency audit:** production 0 vulnerabilities; no new packages.
   - **Security scan:** two independent reviews (payments; Gemini), 0 high. 4 medium and 12 low findings fixed, each with a test that fails before and passes after. Gemini has not been tried with a real key yet.
 
