@@ -19,7 +19,7 @@ The shop looks and works like a boutique's Instagram page, on a phone first: qui
 
 ### The look
 
-The shop has four looks, each in a light and a dark version; the owner picks one in **Settings → Look** (below). Unless the owner fixes one, each phone or computer shows the light or dark version as it is set itself. The festival accents (below) show in every look, light and dark.
+The shop has eight looks, each in a light and a dark version: four warm ones and four bright ones with a Dubai feel; the owner picks one in **Settings → Look** (below). Unless the owner fixes one, each phone or computer shows the light or dark version as it is set itself. The festival accents (below) show in every look, light and dark.
 
 | Look | Light | Dark |
 | --- | --- | --- |
@@ -27,6 +27,10 @@ The shop has four looks, each in a light and a dark version; the owner picks one
 | **Noir & Champagne** | pearl white, black-espresso ink, champagne | near-black, pearl lettering, champagne |
 | **Pearl & Emerald** | pearl and celadon, deep emerald, brass | forest-black, mint-emerald and brass |
 | **Sand & Rose** | desert sand and blush, cocoa ink, rose gold | cocoa, rose-gold lights |
+| **Jumeirah Azure** (bright) | sunlit white and pale sand, sea-blue ink, turquoise accent, soft gold | deep sea-blue, turquoise and gold lights |
+| **Civic Gold** (bright) | crisp white, deep charcoal ink, warm desert gold (#B68A35) | charcoal, gold |
+| **Digital Skyline** (bright) | white and cool grey, navy ink, teal-to-sky accent | navy, sky-blue lights |
+| **Palm Fresh** (bright) | bright white, palm-green ink and links, coral accent | deep palm, coral and mint lights |
 
 Every look uses the same tokens; Ivory & Gold in light is this palette, used by every page, the Admin Hub, the offline page, the app icon and the phone's status bar:
 
@@ -309,7 +313,7 @@ A read-only list of everything that changes money or the shop, newest first: ord
 Settings → **Look** chooses the shop's colours (the shop and the Admin Hub both follow it):
 
 - **Current** says which look is on, since when (Dubai time) and who chose it, for example *Current: Ivory & Gold · Match the device · since 18 Oct 2026, 20:31 by admin@…*.
-- **Look:** four cards (Ivory & Gold, Noir & Champagne, Pearl & Emerald, Sand & Rose), each with a small shop front in its light and its dark version. Pick one (a tap, or the arrow keys).
+- **Look:** eight cards, each with a small shop front in its light and its dark version: the warm looks (Ivory & Gold, Noir & Champagne, Pearl & Emerald, Sand & Rose) and the bright ones with a Dubai feel (Jumeirah Azure, Civic Gold, Digital Skyline, Palm Fresh). Pick one (a tap, or the arrow keys). Ivory & Gold stays the default; the others are only used when you choose them. The bright looks are inspired by the city's beach clubs, civic design and smart-city apps; they carry no names, logos or emblems of anyone else.
 - **Light or dark:** **Match the device** (the default: each visitor's phone or computer decides, dark at night if they set it so), **Always light** or **Always dark**.
 - Press **Save look**. This page changes at once; visitors see it on their next page load.
 - **Earlier looks:** every change keeps the look it replaced, with its date, time and who chose it. **Switch back** puts that one back exactly (the look you have now stays in the list). The first entry, **Ivory & Gold — the look before themes** (the shop exactly as it was, always light), is always kept, however many changes follow. Looks also appear in Settings → System & backups → history, and every change is in the audit log.

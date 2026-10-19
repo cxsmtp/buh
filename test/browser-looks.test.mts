@@ -175,7 +175,7 @@ test('light Ivory & Gold paints exactly the palette from before looks', { skip }
   await ctx.close();
 });
 
-for (const [preset, mode] of [['ivory-gold', 'system'], ['noir-champagne', 'system'], ['pearl-emerald', 'system'], ['sand-rose', 'system']] as const) {
+for (const [preset, mode] of [['ivory-gold', 'system'], ['noir-champagne', 'system'], ['pearl-emerald', 'system'], ['sand-rose', 'system'], ['jumeirah-azure', 'system'], ['civic-gold', 'system'], ['digital-skyline', 'system'], ['palm-fresh', 'system']] as const) {
   test(`${preset}: the shop and the hub match the device, light and dark, at 375 and 1280 px`, { skip }, async () => {
     await setLook(preset, mode);
     const problems: string[] = [];
@@ -194,6 +194,11 @@ const NEWER_RUNS: Array<{ preset: keyof typeof LOOK_PRESETS; colorScheme: 'light
   { preset: 'ivory-gold', colorScheme: 'dark', width: 1280 },
   { preset: 'noir-champagne', colorScheme: 'dark', width: 375 },
   { preset: 'pearl-emerald', colorScheme: 'dark', width: 1280 },
+  // The bright looks: light on a phone, dark on a computer.
+  ...(['jumeirah-azure', 'civic-gold', 'digital-skyline', 'palm-fresh'] as const).flatMap((preset) => [
+    { preset, colorScheme: 'light' as const, width: 375 },
+    { preset, colorScheme: 'dark' as const, width: 1280 },
+  ]),
 ];
 const SHOTS = process.env.LOOKS_SCREENSHOTS;
 for (const { preset, colorScheme, width } of NEWER_RUNS) {
