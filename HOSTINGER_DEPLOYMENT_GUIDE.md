@@ -114,6 +114,8 @@ The shop backs itself up every 12 hours, and straight after a restart if one is 
 
 **Size:** one backup holds at most 6 GB of data (database, photos, receipts, bills, audit log); it is made and restored a piece at a time, so it needs disk, not memory. From 80% the Admin Hub and an email warn you; beyond it the backup is refused (and you are told) instead of making one too big to restore.
 
+**Off-server copy (recommended):** the shop can also copy each backup, encrypted, to a Google Drive folder (Admin Hub → Settings → System & backups → **Copy each backup to Google Drive**; steps in docs/user-guide.md). Then a lost server can be rebuilt from Drive ("Hostinger VPS with Podman, images only" → "Rebuilding on a new server from Google Drive").
+
 **If something is wrong**, the status line at the top of the Admin Hub turns amber (taken but not emailed) or red (failed or overdue), and a failure is also emailed. **Back up now** runs one immediately.
 
 Before every update, the updater also saves a copy of the database on the server, as `backups/pre-update-<time>.db` (the newest 5 are kept).
@@ -504,6 +506,38 @@ Day to day: Settings → Versions in the Admin Hub; the commands in the section 
    podman start beautifuluaehome && podman start beautifuluaehome-updater
    ```
 3. Sign in with the new one-time password from `podman logs beautifuluaehome` (the admin account is not in backups) at your admin link (the backup keeps it; `podman exec beautifuluaehome node scripts/admin-link.mjs --new` makes a new one), re-enter the courier and SMS keys, and follow the Admin Hub's banner about passkeys (section 4).
+
+**Rebuilding on a new server from Google Drive** (the old server is lost; needs the Google Drive copies from Settings → System & backups, the service account's `.json` key file and your `BACKUP_PASSPHRASE`):
+
+1. Set up the new server with the steps above, up to the shop running (a new, empty shop).
+2. Put the key file on the server (from your computer):
+   ```bat
+   scp drive-key.json root@your-server-ip:/root/
+   ```
+3. On the server: stop the updater, then the shop:
+   ```bash
+   podman stop beautifuluaehome-updater && podman stop beautifuluaehome
+   ```
+4. Type the passphrase without showing it, and load the key, by name only (not on a command line):
+   ```bash
+   read -rs -p 'Backup passphrase: ' BACKUP_PASSPHRASE && export BACKUP_PASSPHRASE
+   ```
+   ```bash
+   export BUH_DRIVE_KEY="$(cat /root/drive-key.json)"
+   ```
+5. Restore the newest copy from Drive over the new shop's data (put your folder's link in; `--from-drive list` instead of `--from-drive latest` lists the copies, and a copy's name restores that one):
+   ```bash
+   podman run --rm -v beautifuluaehome-data:/data -e BACKUP_PASSPHRASE -e BUH_DRIVE_KEY -e BUH_DRIVE_FOLDER='https://drive.google.com/drive/folders/your-folder-id' --entrypoint node ghcr.io/cxsmtp/buh:latest scripts/restore-backup.mjs --from-drive latest /data --replace
+   ```
+   ```bash
+   unset BACKUP_PASSPHRASE BUH_DRIVE_KEY
+   ```
+   ```bash
+   podman start beautifuluaehome && podman start beautifuluaehome-updater
+   ```
+6. Sign in as in step 3 above, then paste the service account's key again in Settings → System & backups (backups never carry it), and press **Back up now**.
+
+To check the copies from the running shop (it uses its saved key and folder): `podman exec beautifuluaehome node scripts/restore-backup.mjs --from-drive list`.
 
 ## 6. Logs and health
 

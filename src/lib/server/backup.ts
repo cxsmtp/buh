@@ -19,6 +19,7 @@ import { diskRoomProblem } from './diskRoom';
 import { kvGet, kvSet } from './kv';
 import { expenseCsvFiles } from './expenses';
 import { toCsv } from './csv';
+import { blankDriveKeyIn, copyBackupToDrive } from './driveBackup';
 
 /**
  * Backups, every 12 hours (BACKUP_INTERVAL_HOURS), taken by the running shop:
@@ -48,7 +49,10 @@ import { toCsv } from './csv';
  * in DATA_DIR/backups. Every run is recorded (backup-state.json and the audit
  * log) and shown in the admin hub; a failure is emailed when email works.
  *
- * Restore: node scripts/restore-backup.mjs <file> <empty folder>.
+ * With Settings → System & backups → "Copy each backup to Google Drive" switched on (and
+ * BACKUP_PASSPHRASE set), each backup is also copied to a Drive folder (driveBackup.ts).
+ *
+ * Restore: node scripts/restore-backup.mjs <file> <empty folder>, or --from-drive latest.
  */
 
 const scrypt = promisify(crypto.scrypt) as (pass: string, salt: Buffer, len: number, opts: crypto.ScryptOptions) => Promise<Buffer>;
@@ -357,6 +361,8 @@ export async function createBackup(now = new Date()): Promise<BackupResult> {
       copy.pragma('journal_mode = DELETE');
       copy.pragma('secure_delete = ON');
       blankSecretsIn(copy);
+      // The Google Drive service account's key stays on the server too (the folder and switch stay).
+      blankDriveKeyIn(copy);
       // Passkeys (public keys) and recovery codes (hashes) stay in (the restore script switches
       // them off until the owner reviews them); half-finished passkey sign-ins are left out.
       copy.exec('DELETE FROM webauthn_challenges');
@@ -547,6 +553,8 @@ export function runBackup(reason: 'scheduled' | 'manual' | 'startup'): Promise<B
       audit('backup.taken', { reason, file: patch.lastFile, size: result.size, encrypted: result.encrypted, emailed: Boolean(patch.lastEmailedAt && !patch.lastEmailError), emailError: patch.lastEmailError });
       if (patch.lastEmailError) logEvent('warn', 'backup_not_emailed', { error: patch.lastEmailError });
       else logEvent('info', 'backup_done', { file: patch.lastFile, summary: result.summary });
+      // The off-server copy (when switched on): its failure is its own (an owner alert), never the backup's.
+      await copyBackupToDrive(result.file, reason);
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
       const before = readBackupState();

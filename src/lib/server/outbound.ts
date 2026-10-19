@@ -147,6 +147,8 @@ export interface SafeResponse {
 }
 
 export type SafeRequestInit = { method?: string; headers?: Record<string, string>; body?: string; timeoutMs?: number; maxBytes?: number };
+/** safeRequest's own `body` may also be a Buffer: a piece of a large upload, read from a file a piece at a time. */
+export type SafeRequestBodyInit = Omit<SafeRequestInit, 'body'> & { body?: string | Buffer };
 
 /**
  * HTTPS request with a timeout (for the whole exchange, the body included), no redirects (a
@@ -154,7 +156,7 @@ export type SafeRequestInit = { method?: string; headers?: Record<string, string
  * and every connection checked against the non-public address ranges above. A timeout rejects
  * (code ETIMEDOUT), also once the reply has started: a cut-off body is never taken as the answer.
  */
-export function safeRequest(url: string | URL, init: SafeRequestInit = {}): Promise<SafeResponse> {
+export function safeRequest(url: string | URL, init: SafeRequestBodyInit = {}): Promise<SafeResponse> {
   const { method = 'GET', headers = {}, body, timeoutMs = 10_000, maxBytes = 256 * 1024 } = init;
   const target = new URL(url);
   if (target.protocol !== 'https:') return Promise.reject(new Error('Only https is allowed.'));

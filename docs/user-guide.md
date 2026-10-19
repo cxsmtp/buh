@@ -362,7 +362,7 @@ While VAT is on the TRN and the date are fixed; to change them, turn VAT off fir
 - **Payments:** card, Apple Pay and Google Pay through your Stripe account (see "Card payments" above).
 - **Phone check:** WhatsApp (free, the default) or SMS code, the hours before unconfirmed orders cancel, and the SMS gateway (see below).
 - **Couriers:** see below.
-- **System & backups:** health (disk, database, backups, SMS), backups, and **Settings history**: every save keeps the version it replaced (keys excepted); **Restore** puts an earlier one back and can itself be undone.
+- **System & backups:** health (disk, database, backups, SMS), backups, the copy to Google Drive, and **Settings history**: every save keeps the version it replaced (keys excepted); **Restore** puts an earlier one back and can itself be undone.
 
 ### Look
 
@@ -464,6 +464,23 @@ The line at the top of the Admin Hub shows when the last backup ran:
 - **red:** failed or overdue.
 
 **Back up now** runs one immediately. Backups run every 12 hours on their own, with your expenses and every bill photo. Courier, SMS and Stripe keys are not in backups: after a restore, enter them again. Restoring: see HOSTINGER_DEPLOYMENT_GUIDE.md.
+
+#### Copy each backup to Google Drive
+
+An off-server copy: if the server is lost, the shop can be rebuilt from Drive on a new one. Copies are always encrypted, so `BACKUP_PASSPHRASE` must be set first (keep it in your password manager: without it a copy can't be opened).
+
+1. Go to console.cloud.google.com, make a project (any name), and switch on the **Google Drive API** (APIs & Services → Library).
+2. IAM & Admin → **Service accounts** → **Create service account** (any name, no roles) → open it → **Keys** → **Add key** → **JSON**: a `.json` file downloads. Keep it safe; you also need it to rebuild the shop.
+3. In Google Drive, make a folder for the backups and **Share** it with the service account's email (`…@….iam.gserviceaccount.com`, in the JSON file) as **Editor**.
+4. Google gives a service account no storage of its own: with a personal Gmail Drive, Google may refuse the upload ("service account has no storage"). Then use a folder in a **shared drive** (Google Workspace) and add the service account to the shared drive as **Content manager**.
+5. In the Admin Hub: Settings → System & backups → **Copy each backup to Google Drive**: paste the whole JSON file, paste the folder's link, and press **Test connection** (it uploads a tiny file and deletes it again).
+6. Tick **Copy each backup to Google Drive**, choose how many copies to keep (30 by default), and press **Save**. Press **Back up now** to make the first copy.
+
+- The status line at the top of the Admin Hub says when the last copy reached Drive; the card shows its time and size.
+- A failed copy never stops the local backup: you get an alert (email, and Settings → System & backups → Health) until a copy works again.
+- Older copies the shop made are deleted once there are more than you keep; nothing else in the folder is touched.
+- The key is shown only as the service account's email, is never in a backup, and **Remove the key** deletes it. A restored shop keeps the folder but not the key: paste it again.
+- Rebuilding a lost server from Drive: HOSTINGER_DEPLOYMENT_GUIDE.md, "Rebuilding on a new server from Google Drive".
 
 ### Phone check and the SMS gateway
 

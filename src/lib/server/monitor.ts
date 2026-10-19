@@ -3,6 +3,7 @@ import { audit } from './audit';
 import { BACKUP_LIMITS, backupDataSize, backupHealth } from './backup';
 import { emailConfigured, ownerEmail, sender, transport } from './mail';
 import { dataDir } from './dataDir';
+import { driveProblem } from './driveBackup';
 import { getDb } from './db';
 import { kvGet, kvSet } from './kv';
 import { logEvent } from './log';
@@ -65,6 +66,9 @@ export function currentProblems(now = Date.now()): Problem[] {
   const backup = backupHealth(now);
   if (backup.level === 'failing') problems.push({ id: 'backup', level: 'failing', text: backup.lastError ? `Backups are failing: ${backup.lastError}` : 'No backup in the last day.' });
   else if (backup.level === 'warning') problems.push({ id: 'backup', level: 'warning', text: backup.lastEmailError || backup.notice || 'Backups need attention.' });
+  // The off-server copy in Google Drive (when switched on): failing or paused, never the local backup's problem.
+  const drive = driveProblem(backup.lastSuccessAt, backup.intervalHours, now);
+  if (drive) problems.push(drive);
   // The data to back up nears (80%) or passes the most one backup holds: said before backups stop.
   try {
     const size = backupDataSize();

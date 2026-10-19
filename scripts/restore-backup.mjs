@@ -8,6 +8,10 @@
 //     node scripts/restore-backup.mjs buh-backup-….tar.gz /data --replace
 //   Encrypted backups need the passphrase:
 //     BACKUP_PASSPHRASE='…' node scripts/restore-backup.mjs buh-backup-….tar.gz.enc …
+//   From the shop's copies in Google Drive (always encrypted; the service account from
+//   BUH_DRIVE_KEY / BUH_DRIVE_KEY_FILE and BUH_DRIVE_FOLDER, or the shop's saved settings):
+//     node scripts/restore-backup.mjs --from-drive latest [empty folder, default DATA_DIR]
+//     node scripts/restore-backup.mjs --from-drive list
 //
 // The backup is read as a stream (decrypted, uncompressed and unpacked a piece at a time, one file
 // after another), so a big one needs disk, not memory; it stops if the disk would be left with
@@ -34,9 +38,33 @@ const BILL_EXTS = ['jpg', 'png', 'webp', 'heic', 'pdf'];
 const BILL_FILE = new RegExp(`^expenses/[a-f0-9]{24}\\.(${BILL_EXTS.join('|')})$`);
 const args = process.argv.slice(2);
 const replace = args.includes('--replace');
-const [file, finalTarget] = args.filter((a) => a !== '--replace');
-if (!file || !finalTarget) {
+// --from-drive latest | <copy's file name> | <Drive file id> | list: a copy from Google Drive
+// (scripts/restore-from-drive.mjs), downloaded next to the restore, checked, then restored as any
+// other backup. Without a folder, into DATA_DIR (it must be empty unless --replace).
+const driveAt = args.indexOf('--from-drive');
+const fromDrive = driveAt >= 0 ? args[driveAt + 1] || '' : null;
+const positional = args.filter((a, i) => a !== '--replace' && (driveAt < 0 || (i !== driveAt && i !== driveAt + 1)));
+let file = fromDrive === null ? positional[0] : '';
+const finalTarget = fromDrive === null ? positional[1] : positional[0] || process.env.DATA_DIR || '';
+if (fromDrive === 'list') {
+  const { listDriveCopies } = await import('./restore-from-drive.mjs');
+  try {
+    const { copies } = await listDriveCopies(process.env.DATA_DIR || '');
+    if (!copies.length) console.log('There are no backup copies in the Google Drive folder.');
+    for (const c of copies) console.log(`${c.name}  ${(c.size / 1024 / 1024).toFixed(1)} MB  ${c.id}`);
+    process.exit(0);
+  } catch (err) {
+    console.error(String(err?.message ?? err));
+    process.exit(1);
+  }
+}
+if (fromDrive === '' || (fromDrive === null && !file) || !finalTarget || (fromDrive !== null && positional.length > 1)) {
   console.error('Usage: node scripts/restore-backup.mjs <backup file> <empty folder | data folder with --replace>');
+  console.error('   or: node scripts/restore-backup.mjs --from-drive <latest | copy name | list> [empty folder, default DATA_DIR] [--replace]');
+  process.exit(2);
+}
+if (fromDrive !== null && !process.env.BACKUP_PASSPHRASE) {
+  console.error('Copies in Google Drive are encrypted: set BACKUP_PASSPHRASE (the shop’s own) to restore one.');
   process.exit(2);
 }
 if (!replace && fs.existsSync(finalTarget) && fs.readdirSync(finalTarget).length) {
@@ -46,9 +74,16 @@ if (!replace && fs.existsSync(finalTarget) && fs.readdirSync(finalTarget).length
 // With --replace, restore next to the data first, and swap only once everything checked out.
 const target = replace ? path.join(finalTarget, `.restore-${Date.now()}`) : finalTarget;
 const targetExisted = fs.existsSync(target);
+// A copy fetched from Drive (removed at the end, and on any failure).
+let downloaded = '';
 
 /** Stop: remove everything this restore wrote (the target was empty, or is our own staging folder). */
 function fail(message, code = 1) {
+  try {
+    if (downloaded) fs.rmSync(downloaded, { force: true });
+  } catch {
+    // best effort
+  }
   try {
     if (fs.existsSync(target)) {
       if (targetExisted) for (const name of fs.readdirSync(target)) fs.rmSync(path.join(target, name), { recursive: true, force: true });
@@ -60,6 +95,23 @@ function fail(message, code = 1) {
   console.error(message);
   process.exit(code);
 }
+
+// ── From Google Drive: fetched (and checked) into the folder being restored to ──
+let driveCopy = '';
+if (fromDrive !== null) {
+  const { downloadFromDrive } = await import('./restore-from-drive.mjs');
+  fs.mkdirSync(replace ? finalTarget : target, { recursive: true, mode: 0o700 });
+  downloaded = path.join(replace ? finalTarget : target, `.drive-download-${process.pid}.tar.gz.enc`);
+  try {
+    const copy = await downloadFromDrive(fromDrive, downloaded, { dataDir: process.env.DATA_DIR || '', minFree: MIN_FREE });
+    console.log(`Downloaded ${copy.name} (${(copy.size / 1024 / 1024).toFixed(1)} MB) from Google Drive; size and checksum match.`);
+    file = downloaded;
+    driveCopy = copy.name;
+  } catch (err) {
+    fail(String(err?.message ?? err));
+  }
+}
+const backupName = driveCopy ? `${driveCopy} (Google Drive)` : path.basename(file);
 
 // ── The stream: the file, decrypted if sealed, uncompressed ──────────────────
 let source;
@@ -259,7 +311,7 @@ if (tableExists('kv')) {
   const put = db.prepare('INSERT INTO kv (key, data, updated_at) VALUES (?, ?, ?) ON CONFLICT(key) DO UPDATE SET data = excluded.data, updated_at = excluded.updated_at');
   const now = new Date().toISOString();
   if (passkeyIds.length) put.run('admin:passkeys-suspended', JSON.stringify(passkeyIds), now);
-  put.run('admin:restored', JSON.stringify({ at: now, backup: path.basename(file) }), now);
+  put.run('admin:restored', JSON.stringify({ at: now, backup: backupName }), now);
   db.prepare("DELETE FROM kv WHERE key = 'admin:link-reveal'").run();
 }
 // The Admin Hub's private link comes back with the backup (only its fingerprint is stored), so the
@@ -268,6 +320,10 @@ if (tableExists('kv')) {
 const hasAdminLink = tableExists('kv') && Boolean(db.prepare("SELECT 1 FROM kv WHERE key = 'admin:link' AND data != 'null'").get());
 db.close();
 const passkeys = passkeyIds.length;
+if (downloaded) {
+  fs.rmSync(downloaded, { force: true });
+  downloaded = '';
+}
 const counts = `${orders} orders, ${refunds} card refunds, ${products} products, ${stockMoves} stock moves, ${drafts} product drafts, ${collections} shared selections, ${expenses} expenses, ${bills} bills`;
 if (replace) {
   // Move the current data aside (kept), then the restored files into place.
