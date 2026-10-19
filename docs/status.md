@@ -4,6 +4,7 @@ One row per release. Benchmarks run `npm run test:load` on the same 4 vCPU host,
 
 | Version | Date | Storefront req/s (p50 / p95 ms) | Serviceability API req/s (p50 / p95 ms) | Failed requests | Tests | Audit (production) | Security scan |
 | --- | --- | --- | --- | --- | --- | --- | --- |
+| BUH-02.12.00 | 2026-10-19 | branch 769 / 866 / 849; main 957 / 779 / 675 (p95 111–123 vs 114–171 ms) | branch 633 / 695 / 679; main 643 / 655 / 572 | 0 | 732 passed | 0 vulnerabilities | New owner route follows the hub's checks; every look checked for readability, light and dark, at 375 and 1280 px |
 | BUH-02.11.00 | 2026-10-18 | branch 880 / 921 / 921; main 895 / 883 / 901 (p95 89–142 vs 91–114 ms; 142 = branch cold start) | branch 745 / 696 / 735 / 729 / 764; main 733 / 722 / 769 / 760 / 734 (p95 crossing over) | 0 | 690 passed | 0 vulnerabilities | Independent review: 6 medium, 5 low, all fixed with tests |
 | BUH-02.10.00 | 2026-10-18 | branch 931 / 959 / 966; main 921 / 899 / 894 (p95 78–95 vs 85–98 ms) | branch 762 / 713 / 685; main 748 / 768 / 720 | 0 | 630/631 (1 load timeout, passes alone) | 0 vulnerabilities | Independent review: 1 high, 4 medium, 5 low, all fixed with tests |
 | BUH-02.09.01 | 2026-10-18 | not run: two small screen fixes (hub chats, Track Order box), no server code changed | not run | — | 582 passed (4 browser tests timed out under load from other builds, then passed on their own; one Stripe browser test made to wait for the redraw) | 0 vulnerabilities | Not applicable (no new input, route or data) |

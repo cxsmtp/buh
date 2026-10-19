@@ -8,8 +8,8 @@
 - **Festivals untouched.** Festival dates and settings are as they were; the festival colour sits on top of every look and stays readable in dark mode.
 - **Every screen follows the look,** including checkout's card fields, the bank-transfer page, the WhatsApp panels, Money and Settings.
 - **Status.**
-  - **Benchmark:** BENCH
-  - **Tests:** TESTS
+  - **Benchmark:** 3 alternating rounds, 0 failed requests. Storefront branch 769 / 866 / 849 req/s vs main 957 / 779 / 675 (p95 111–123 vs 114–171 ms); serviceability API branch 633 / 695 / 679 vs main 643 / 655 / 572; catalogue API branch 782 / 838 / 894 vs main 800 / 814 / 595.
+  - **Tests:** 732 passed, 0 failed (unit and end-to-end).
   - **Dependency audit:** production 0 vulnerabilities; no new packages.
   - **Security scan:** the new owner route (/api/admin/look) follows the hub's checks (door, session, same site, allow-list); /look.css serves only colours. Readability checked for every look, light and dark, on every screen at 375 and 1280 px.
 
