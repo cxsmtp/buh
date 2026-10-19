@@ -4,11 +4,13 @@ import React, { useState } from 'react';
 import { ArrowDown, ArrowUp, Loader2, Plus, Trash2 } from 'lucide-react';
 import { useAutoSave, type AutoSaveHooks } from './useAutoSave';
 import type { BedProfileMeasurement, CatalogSettings } from '@/types';
+import { DEFAULT_WEAVES } from '@/data/catalogDefaults';
+import { WeavesEditor } from './WeavesEditor';
 
 /**
  * Settings → Catalogue: the size presets offered when adding a product (name,
  * measurements, price difference), the shop's categories, and when to warn
- * "Only N left". Changing a preset does not change existing products: each
+ * "Only N left", and the weaves (Sateen, Percale, …). Changing a preset does not change existing products: each
  * product keeps its own copy of its sizes (edit them in the product).
  */
 
@@ -155,6 +157,13 @@ export function CatalogSettingsCard({ value, onSave, auto }: { value: CatalogSet
         )}
         <p className="text-ink-muted">A category with no products is not shown to customers. Deleting one keeps it on the products that use it until you change them.</p>
       </section>
+
+      <WeavesEditor
+        weaves={draft.weaves ?? [...DEFAULT_WEAVES]}
+        onChange={(weaves) => setDraft((d) => ({ ...d, weaves }))}
+        // Renamed on the server (products and list): the form follows, so the next save keeps it.
+        onRenamed={(from, to, saved) => setDraft((d) => ({ ...d, weaves: (d.weaves ?? saved).some((w) => w === to) ? (d.weaves ?? saved).filter((w) => w !== from) : (d.weaves ?? saved).map((w) => (w === from ? to : w)) }))}
+      />
 
       <section className="space-y-1">
         <label className="flex items-center gap-2">

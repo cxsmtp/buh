@@ -428,7 +428,6 @@ function getProductRaw(id: string): Product | undefined {
 }
 
 type Obj = Record<string, unknown>;
-const WEAVES = ['Sateen', 'Percale', 'Linen', 'Jacquard'];
 
 function text(v: unknown, field: string, max: number, { required = false } = {}): string {
   if (v === undefined || v === null || v === '') {
@@ -502,8 +501,10 @@ export function validateProduct(input: unknown): StoredProduct {
   if (category !== existing?.category && !getSettings('catalog').categories.some((c) => c.id === category)) throw new HttpError(400, 'Unknown category: add it in Settings → Catalogue first.');
   const sku = text(p.sku, 'SKU', 40);
   if (sku && !/^[A-Za-z0-9][A-Za-z0-9 ._\/-]*$/.test(sku)) throw new HttpError(400, 'SKU may use letters, digits, spaces and . _ / -');
-  const weave = text(p.weave, 'Weave', 20) || 'Sateen';
-  if (!WEAVES.includes(weave)) throw new HttpError(400, 'Unknown weave.');
+  // The weaves in Settings → Catalogue; a product may keep one the list no longer has (as with categories).
+  const weaves = getSettings('catalog').weaves;
+  const weave = text(p.weave, 'Weave', 30) || weaves[0] || 'Sateen';
+  if (weave !== existing?.weave && !weaves.includes(weave)) throw new HttpError(400, 'Unknown weave: add it in Settings → Catalogue → Weaves first.');
   const price = num(p.price, 'Price', 1, 100_000);
   const compareAt = p.compareAtPrice === undefined || p.compareAtPrice === null || p.compareAtPrice === '' ? undefined : num(p.compareAtPrice, 'Compare-at price', 0, 100_000);
 
@@ -538,7 +539,7 @@ export function validateProduct(input: unknown): StoredProduct {
     compareAtPrice: compareAt,
     material: text(p.material, 'Material', 120),
     threadCount: num(p.threadCount ?? 0, 'Thread count', 0, 3000, { integer: true }),
-    weave: weave as Product['weave'],
+    weave,
     // Colours are optional: none means the shop shows no colour choice.
     colors,
     featuredImage: acceptImageRef(p.featuredImage, 'Main photo', { required: true }),

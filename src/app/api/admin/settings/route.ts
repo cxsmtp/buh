@@ -19,6 +19,7 @@ export async function GET(req: Request) {
       delivery: adminView('delivery'),
       payments: adminView('payments'),
       phoneCheck: adminView('phoneCheck'),
+      ai: adminView('ai'),
       // Settings → Phone check's warning (no TRUST_PROXY: stricter limits) and the hub's one-time notice.
       phoneCheckInfo: { behindProxy: behindProxy(), whatsappNotice: phoneCheckNoticeDue() },
     });

@@ -20,6 +20,7 @@ const NAMES: Record<string, string> = {
   store: 'Store & contact',
   theme: 'Festival themes',
   look: 'Look',
+  ai: 'AI writing',
 };
 
 interface Version {

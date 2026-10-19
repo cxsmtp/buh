@@ -93,7 +93,7 @@ export function cleanDraft(input: unknown): Record<string, unknown> {
     description: s(d.description, 4000),
     material: s(d.material, 120),
     threadCount: s(d.threadCount, 6),
-    weave: s(d.weave, 20),
+    weave: s(d.weave, 30),
     colors,
     photos,
     sizes,

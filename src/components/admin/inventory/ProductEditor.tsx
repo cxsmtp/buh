@@ -9,6 +9,8 @@ import { shortSizeName } from '@/lib/client/stock';
 import { AI_STAGING_PRESETS, transformProductImage } from '@/lib/aiImageTransform';
 import { Sheet } from '@/components/common/Sheet';
 import { measurementRows, sizeFromPreset, standardMeasurements } from '@/lib/measurements';
+import { DEFAULT_WEAVES } from '@/data/catalogDefaults';
+import { WriteFromPhoto } from './WriteFromPhoto';
 
 /**
  * Add or edit a product in four steps, made for a phone:
@@ -27,7 +29,6 @@ import { measurementRows, sizeFromPreset, standardMeasurements } from '@/lib/mea
  * overwritten (the server answers 409 and the current figures are shown).
  */
 
-const WEAVES: Product['weave'][] = ['Sateen', 'Percale', 'Linen', 'Jacquard'];
 const MAX_PHOTOS = 8;
 const STEPS = ['Photos', 'Details', 'Sizes', 'Publish'] as const;
 
@@ -72,7 +73,7 @@ function draftFrom(product: Product | null, catalog: CatalogSettings): Draft {
       category: catalog.categories[0]?.id ?? '',
       material: '100% Cotton',
       threadCount: '300',
-      weave: 'Percale',
+      weave: (catalog.weaves ?? DEFAULT_WEAVES).includes('Percale') ? 'Percale' : (catalog.weaves?.[0] ?? 'Percale'),
       price: '',
       compareAtPrice: '',
       colors: [],
@@ -517,6 +518,7 @@ export function ProductEditor({
                 </li>
               ))}
             </ol>
+            <WriteFromPhoto photos={draft.photos} originals={originals} isNew={!product} current={draft} facts={draft} onApply={(patch) => setDraft((d) => ({ ...d, ...patch }))} />
             {cover && originals[cover] && (
               <details className="rounded-xl border border-line bg-surface px-3 py-2">
                 <summary className="min-h-11 flex items-center gap-2 font-semibold cursor-pointer">
@@ -602,9 +604,10 @@ export function ProductEditor({
                     Weave
                   </label>
                   <select id="pe-weave" className={field} value={draft.weave} onChange={(e) => set('weave', e.target.value as Product['weave'])}>
-                    {WEAVES.map((w) => (
+                    {(catalog.weaves ?? DEFAULT_WEAVES).map((w) => (
                       <option key={w}>{w}</option>
                     ))}
+                    {!(catalog.weaves ?? DEFAULT_WEAVES).includes(draft.weave) && <option value={draft.weave}>{draft.weave} (removed)</option>}
                   </select>
                 </div>
                 <div className="sm:col-span-2">

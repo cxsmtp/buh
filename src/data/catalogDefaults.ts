@@ -1,5 +1,8 @@
-import type { AssistantSettings, DeliverySettings, CatalogSettings, EmailSettings, StoreSettings, ThemeSettings } from '@/types';
+import type { AiSettings, AssistantSettings, DeliverySettings, CatalogSettings, EmailSettings, StoreSettings, ThemeSettings } from '@/types';
 import { ALL_BED_PROFILES_LIST } from './bedProfiles';
+
+/** The weaves every shop starts with (Settings → Catalogue → Weaves). */
+export const DEFAULT_WEAVES: readonly string[] = ['Sateen', 'Percale', 'Linen', 'Jacquard'];
 
 /** Settings → Catalogue before the owner changes anything. */
 export const DEFAULT_CATALOG: CatalogSettings = {
@@ -12,7 +15,11 @@ export const DEFAULT_CATALOG: CatalogSettings = {
     { id: 'duvet-covers', label: 'Duvet Covers', icon: '☁️' },
   ],
   lowStockThreshold: 2,
+  weaves: [...DEFAULT_WEAVES],
 };
+
+/** Settings → AI writing before the owner adds a key: off. */
+export const DEFAULT_AI: AiSettings = { enabled: false, model: 'claude-opus-5-5', anthropicApiKey: '' };
 
 /** Settings → Store & contact before the owner fills it in. */
 export const DEFAULT_STORE: StoreSettings = {

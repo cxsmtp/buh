@@ -5,7 +5,7 @@ import { paymentsModeWarning } from '@/lib/server/payments';
 import { adminView, getSettings, undoVersionId, type SettingsKey } from '@/lib/server/settings';
 import { saveGuarded } from '@/lib/server/settingsGuard';
 
-const KEYS: SettingsKey[] = ['brand', 'bank', 'courier', 'sms', 'catalog', 'store', 'theme', 'email', 'assistant', 'delivery', 'payments', 'phoneCheck'];
+const KEYS: SettingsKey[] = ['brand', 'bank', 'courier', 'sms', 'catalog', 'store', 'theme', 'email', 'assistant', 'delivery', 'payments', 'phoneCheck', 'ai'];
 
 export async function PUT(req: Request, { params }: { params: Promise<{ key: string }> }) {
   try {
