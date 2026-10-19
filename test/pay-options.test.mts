@@ -256,12 +256,15 @@ test('the reports: card fees are income ("Card fees" in the summary, card_fee_ae
   const zip = readZip(fs.readFileSync(result.file));
   const sales = zip.get('sales.csv')!.toString('utf8').replace(/^﻿/, '').split(/\r?\n/);
   const header = sales[0].split(',');
-  assert.equal(header.at(-1), 'card_fee_aed', 'a column of its own (the last, so earlier columns keep their place)');
+  // A column of its own, after the earlier ones (so they keep their place); the VAT columns come after it.
+  const at = header.indexOf('card_fee_aed');
+  assert.equal(at, 24);
+  assert.deepEqual(header.slice(at + 1), ['vat_aed', 'total_excl_vat_aed']);
   const row = sales.find((l) => l.includes(id))!;
-  assert.equal(row.split(',').at(-1), (fee / 100).toFixed(2));
+  assert.equal(row.split(',').at(at - header.length), (fee / 100).toFixed(2));
   const others = sales.slice(1).filter((l) => l && !l.includes('online_card') && !l.includes('Card'));
   assert.ok(others.length > 0);
-  for (const l of others) assert.equal(l.split(',').at(-1), '0.00', 'no fee on cash on delivery or bank transfer');
+  for (const l of others) assert.equal(l.split(',').at(at - header.length), '0.00', 'no fee on cash on delivery or bank transfer');
   const summary = zip.get('summary.csv')!.toString('utf8');
   assert.match(summary, /Card fees[^\n]*,(\d+\.\d\d)/);
   assert.ok(summary.includes((fee / 100).toFixed(2)));

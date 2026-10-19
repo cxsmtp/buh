@@ -42,6 +42,9 @@ let server: RunningServer;
 let owner = '';
 let accountant = '';
 let invoiceOrder: { id: string; documentPath: string } | null = null;
+/** The doors the accountant's browser got: the setup link's, and the one the setup gave. */
+let grantDoor = '';
+let setupDoor = '';
 
 const h = () => ({ 'content-type': 'application/json', origin: server.base });
 const as = (cookie: string, method: string, p: string, body?: unknown) =>
@@ -107,6 +110,8 @@ test('the owner invites; the setup link opens the hub (its own path) and signs t
   accountant = cookies.find((c) => c.startsWith('buh_admin='))!;
   assert.ok(accountant);
   assert.ok(cookies.some((c) => c.startsWith('buh_door=')), 'the hub’s ordinary door for this browser');
+  grantDoor = door!;
+  setupDoor = cookies.find((c) => c.startsWith('buh_door='))!;
   const again = await rawFetch(`${server.base}/api/admin/staff/setup`, { method: 'POST', headers: { ...h(), cookie: door! }, body: JSON.stringify({ token: decodeURIComponent(m[2]), password: CA_PASSWORD }) });
   assert.notEqual(again.status, 200, 'the link works once');
   // Signing in with the ordinary form: audited as the accountant's sign-in.
@@ -254,4 +259,24 @@ test('revoking ends the accountant’s session at once; the owner’s carries on
   assert.equal((await as(accountant, 'GET', '/api/admin/reports')).status, 401, 'signed out at once');
   assert.equal((await as(owner, 'GET', '/api/admin/reports')).status, 200);
   assert.ok(auditEntries().some((e) => e.action === 'accountant.revoked'));
+  // The doors the accountant's browser was given end too: an admin address is the unknown address again.
+  for (const d of [setupDoor, grantDoor]) {
+    assert.ok(d);
+    assert.equal((await rawFetch(`${server.base}/api/admin/session`, { headers: { cookie: d } })).status, 404, 'no door after a revoke');
+  }
+});
+
+test('the owner’s "sign out everywhere" signs every accountant out too', { skip }, async () => {
+  const res = await as(owner, 'POST', '/api/admin/staff', { email: 'second@firm.test' });
+  const m = /\/([A-Za-z0-9_-]{43})#setup=([^&]+)$/.exec(((await res.json()) as { link: string }).link)!;
+  const hub = await rawFetch(`${server.base}/${m[1]}`, { redirect: 'manual' });
+  const door = (hub.headers.getSetCookie?.() ?? []).map((c) => c.split(';')[0]).find((c) => c.startsWith('buh_door='))!;
+  const setup = await rawFetch(`${server.base}/api/admin/staff/setup`, { method: 'POST', headers: { ...h(), cookie: door }, body: JSON.stringify({ token: decodeURIComponent(m[2]), password: CA_PASSWORD }) });
+  assert.equal(setup.status, 200, await setup.clone().text());
+  const second = (setup.headers.getSetCookie?.() ?? []).map((c) => c.split(';')[0]).find((c) => c.startsWith('buh_admin='))!;
+  assert.equal((await as(second, 'GET', '/api/admin/reports')).status, 200);
+  assert.equal((await as(owner, 'POST', '/api/admin/logout')).status, 200);
+  assert.equal((await as(second, 'GET', '/api/admin/reports')).status, 401, 'the accountant is signed out too');
+  assert.equal((await as(owner, 'GET', '/api/admin/reports')).status, 401, 'and the owner');
+  assert.ok(auditEntries().some((e) => e.action === 'admin.sign_out' && Number(e.details.accountantsSignedOut) >= 1));
 });

@@ -9,11 +9,11 @@ import {
   currentLink,
   doorCookie,
   doorTokenFromCookieHeader,
+  grantDoorBinding,
   hasPendingReveal,
   hubHeaderValue,
   issueDoorToken,
   matchesLink,
-  resetGrantExpiry,
   setLinkNotice,
   takeReveal,
   verifyDoorToken,
@@ -131,15 +131,18 @@ export function decide(rawUrl: string | undefined, cookieHeader: string | undefi
     const door = verifyDoorToken(doorTokenFromCookieHeader(cookieHeader), now);
     if (!door.ok) return unknown(true);
     if (!door.renew) return { kind: 'pass' };
-    const token = issueDoorToken(now);
+    // Renewed with what it is bound to: a grant's door never outlives the grant, an accountant's stays theirs.
+    const token = issueDoorToken(now, currentLink(), DOOR_TTL_MS, door.bind);
     return token ? { kind: 'renew', cookie: serializeCookie(doorCookie(token)) } : { kind: 'pass' };
   }
   const segment = path.slice(1);
   if ((LINK_PATTERN.test(segment) || GRANT_PATTERN.test(segment)) && path === `/${segment}`) {
     const rec = currentLink();
-    // The link: a door for 30 days. A reset email's grant: a door only while that reset is open.
-    const ttl = LINK_PATTERN.test(segment) ? (matchesLink(segment, rec) ? DOOR_TTL_MS : 0) : Math.max(0, resetGrantExpiry(segment, now) - now);
-    const token = ttl > 0 ? issueDoorToken(now, rec, ttl) : null;
+    // The link: a door for 30 days. A reset or setup email's grant: a door only while that grant is
+    // open (capped, so a renewal can't stretch it), an accountant's bound to their account.
+    const grant = LINK_PATTERN.test(segment) ? null : grantDoorBinding(segment, now);
+    const ttl = LINK_PATTERN.test(segment) ? (matchesLink(segment, rec) ? DOOR_TTL_MS : 0) : Math.max(0, (grant?.cap ?? 0) - now);
+    const token = ttl > 0 ? issueDoorToken(now, rec, ttl, grant ?? {}) : null;
     if (token) return { kind: 'hub', url: `${HUB_ROUTE}${query}`, cookie: serializeCookie(doorCookie(token, ttl)), hubHeader: hubHeaderValue(rec) };
   }
   return { kind: 'pass' };

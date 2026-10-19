@@ -110,6 +110,11 @@ export function VatSettingsCard({ storeAddress }: { storeAddress: string }) {
           Prices include VAT <span className="text-xs text-ink-soft">(recommended: UAE prices for consumers are shown with VAT. Untick only if your accountant says so: 5% is then added at checkout.)</span>
         </span>
       </label>
+      {!draft.pricesIncludeVat && (
+        <p role="alert" className="text-xs text-ink bg-warning-soft border border-warning-line rounded-xl px-3 py-2" data-testid="vat-exclusive-warning">
+          Prices exclude VAT: shoppers see every price before VAT, and 5% more is added only at checkout. UAE prices for consumers are normally shown including VAT, so a shopper may feel misled by the higher total. Keep “Prices include VAT” ticked unless your accountant advises otherwise.
+        </p>
+      )}
       {!on && (
         <div>
           <label htmlFor="vat-confirm" className={label}>To turn VAT on, type {phrase}</label>

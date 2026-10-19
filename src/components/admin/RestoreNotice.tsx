@@ -9,6 +9,8 @@ interface Notice {
   backup: string;
   suspendedPasskeys: number;
   recoveryCodesLeft: number;
+  /** Accountant accounts the restore revoked (the backup may be older than a revoke), not invited again yet. */
+  accountantsRevoked?: number;
 }
 
 /**
@@ -45,6 +47,11 @@ export function RestoreNotice({ onReview }: { onReview: () => void }) {
             : ' restored passkeys were switched off,'}
           {' '}and the old recovery codes no longer work{notice.recoveryCodesLeft > 0 ? ` (you have ${notice.recoveryCodesLeft} new ones)` : ''}.
         </p>
+        {(notice.accountantsRevoked ?? 0) > 0 && (
+          <p className="font-bold" data-testid="restore-reinvite">
+            Re-invite your accountant: accountant access from the backup was switched off ({notice.accountantsRevoked} account{notice.accountantsRevoked === 1 ? '' : 's'}). Settings → Security → Accountant access.
+          </p>
+        )}
       </div>
       <div className="flex flex-wrap gap-2">
         <button type="button" onClick={onReview} className="px-3 py-1.5 rounded-lg bg-ink text-paper font-bold">Review now</button>

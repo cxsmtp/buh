@@ -143,6 +143,15 @@ for (const width of [375, 1280]) {
       await card.getByText(/VAT is on from/).waitFor();
     }
     assert.match(await card.innerText(), /VAT · on/);
+    // Unticking "Prices include VAT" warns that shoppers then see prices before VAT (not saved here).
+    const inclusive = card.getByRole('checkbox', { name: /Prices include VAT/ });
+    assert.equal(await inclusive.isChecked(), true, 'inclusive by default');
+    assert.equal(await card.getByTestId('vat-exclusive-warning').count(), 0);
+    await inclusive.uncheck();
+    assert.match(await card.getByTestId('vat-exclusive-warning').innerText(), /shoppers see every price before VAT/);
+    assert.ok((await sideways(page)) <= 0, `no sideways scroll with the warning at ${width}`);
+    await inclusive.check();
+    await card.getByTestId('vat-exclusive-warning').waitFor({ state: 'detached' });
     assert.ok((await sideways(page)) <= 0, `no sideways scroll at ${width}`);
     if (SHOTS) await card.screenshot({ path: path.join(SHOTS, `vat-settings-on-${width}.png`) });
     await ctx.close();

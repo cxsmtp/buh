@@ -22,6 +22,7 @@ interface VatReturn {
   output: { netFils: number; vatFils: number };
   input: { count: number; amountFils: number; vatFils: number; withoutTrn: number; withoutTrnVatFils: number };
   netVatFils: number;
+  missingVat?: { count: number; orderIds: string[] };
   notes: string[];
 }
 
@@ -114,6 +115,11 @@ export function VatPanel() {
       {error && <p role="alert" className="text-xs text-danger bg-danger-soft border border-danger-line rounded-xl px-3 py-2">{error}</p>}
       {data && (
         <>
+          {(data.missingVat?.count ?? 0) > 0 && (
+            <p role="alert" className="text-xs text-ink bg-warning-soft border border-warning-line rounded-xl px-3 py-2 break-words" data-testid="vat-missing">
+              {data.missingVat!.count} order{data.missingVat!.count === 1 ? ' has' : 's have'} no VAT worked out although placed after VAT started (an older version of the shop was running, or VAT was off then): {data.missingVat!.orderIds.slice(0, 10).join(', ')}{data.missingVat!.count > 10 ? ', …' : ''}. They have no tax invoice and are not in these totals: check them with your accountant.
+            </p>
+          )}
           <Card>
             <h3 className="text-sm font-bold text-ink mb-1">Output VAT (sales)</h3>
             <Line label={`Tax invoices (${data.sales.count}), excluding VAT`} value={aed(data.sales.netFils)} />

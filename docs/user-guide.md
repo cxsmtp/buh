@@ -309,7 +309,9 @@ Give your accountant their own sign-in that can only look at Money: reports and 
 2. They get an email with a one-time setup link (valid 72 hours) to choose their password. No email set up? The link is shown to you once: send it to them privately.
 3. Send them your **Admin Hub link** yourself (it is never in the email). They sign in there with their email and password and see only Money, marked "Read-only".
 
-- **Revoke access** signs them out at once, everywhere; their password stops working. **Send a new setup link** invites them again (an expired or revoked invite).
+- **Revoke access** signs them out at once, everywhere; their password stops working. **Send a new setup link** invites them again (an expired or revoked invite). Signing yourself out of the Admin Hub signs your accountant out too.
+- **After restoring a backup** your accountant's access is switched off (the backup may be older than a revoke). The Admin Hub says **Re-invite your accountant**: tap **Send a new setup link** next to their name.
+- **What they can see:** everything in Money, including customers' bank-transfer screenshots, customer names (and emails on tax invoices), and the full audit log with sign-in IP addresses and device names. Invite only someone you trust with your books.
 - Every accountant sign-in and every export they download is in the audit log, with their email.
 - They have no passkeys, recovery codes or "forgot password": if they lose the password, send a new setup link.
 
@@ -322,14 +324,18 @@ To turn it on (Settings → Payments → VAT):
 1. Type your **TRN** (the 15 digits on your FTA registration certificate).
 2. Choose the date VAT starts (today or later; orders already placed never change).
 3. Check the **name** and **address** for your tax invoices (the shop's name and address are used when empty).
-4. Leave **Prices include VAT** ticked (UAE prices for consumers are shown with VAT; untick only if your accountant says so: 5% is then added at checkout).
+4. Leave **Prices include VAT** ticked (UAE prices for consumers are shown with VAT; untick only if your accountant says so: shoppers then see every price before VAT, and 5% is added at checkout; the setting warns you).
 5. Type `TURN ON VAT` and tap **Turn VAT on**. It is recorded in the audit log.
 
 While VAT is on the TRN and the date are fixed; to change them, turn VAT off first.
 
 **Tax invoices.** From the start date every order carries 5% VAT, worked out on the server (inside the price: VAT = total × 5 ÷ 105, rounded to the fil; delivery and the card fee are taxed the same way). Each order gets a **Tax Invoice** with your name, address and TRN, its number (INV-000001, INV-000002…: one series with no gaps), the date, the items, the VAT and the total including VAT. The number is given when the order is confirmed (or, for a card, when the payment is taken). Open it from the order (**Receipt / invoice**); the customer has the same page from their order confirmation (**Tax invoice (printable)**). Print → Save as PDF keeps a copy.
 
-**Credit notes.** A refund after the invoice (or cancelling an invoiced order) gives a credit note (CN-000001…) against that invoice, shown on the invoice page. A refund that fails afterwards gives a negative one.
+**Credit notes.** A card refund after the invoice (made in the hub or in Stripe), or cancelling an invoiced order, gives a credit note (CN-000001…) against that invoice, shown on the invoice page. A refund that fails afterwards gives a negative one. Not covered: money you give back by hand for a cash-on-delivery or bank-transfer order (the shop doesn't record it: cancel the order for a full credit, or ask your accountant for a manual credit note) and card chargebacks; tell your accountant about those.
+
+**Reports with VAT.** Money → Reports then shows "Net sales incl. VAT", "Profit incl. VAT" and, below, the same without VAT (the VAT you owe the FTA is not your income). sales.csv in the export has `vat_aed` and `total_excl_vat_aed` beside the total.
+
+**Going back to an older version while VAT is on:** orders it takes get no VAT and no invoice. Money → VAT lists them in a warning; check them with your accountant.
 
 **VAT return helper (Money → VAT).** Pick a quarter (or your FTA tax period's dates): sales excluding VAT and the VAT on them, the credit notes, input VAT from expenses, and the net VAT payable or refundable. **Download for my accountant (CSV)** has the totals and every invoice, credit note and expense behind them; the accountant's ZIP has it too (`vat-return.csv`). It is a helper, not a filed return: your accountant files it on EmaraTax.
 

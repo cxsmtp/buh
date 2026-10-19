@@ -367,7 +367,7 @@ test('the VAT return helper: sales and output VAT, credit notes, input VAT from 
   assert.equal(empty.sales.count + empty.credits.count + empty.input.count, 0);
 });
 
-test('a backup keeps the VAT data and the accountant accounts, and the restore brings them back', async () => {
+test('a backup keeps the VAT data and the accountant accounts, and the restore brings them back (the accountants revoked)', async () => {
   const staff = await import('@/lib/server/staffAuth');
   const invite = staff.inviteAccountant('ca@firm.test', 'Our CA', OWNER, OWNER);
   kvSet('vat:test-marker', 1);
@@ -377,13 +377,15 @@ test('a backup keeps the VAT data and the accountant accounts, and the restore b
   const live = getDb();
   const restored = new Database(path.join(target, 'shop.db'), { readonly: true });
   try {
-    for (const t of ['order_vat', 'vat_invoices', 'vat_credit_notes', 'staff_accounts']) {
+    for (const t of ['order_vat', 'vat_invoices', 'vat_credit_notes']) {
       assert.deepEqual(restored.prepare(`SELECT * FROM ${t} ORDER BY 1`).all(), live.prepare(`SELECT * FROM ${t} ORDER BY 1`).all(), t);
     }
     assert.ok((restored.prepare('SELECT COUNT(*) FROM vat_invoices').pluck().get() as number) > 40);
     assert.equal(restored.prepare("SELECT data FROM kv WHERE key = 'vat:settings'").pluck().get(), live.prepare("SELECT data FROM kv WHERE key = 'vat:settings'").pluck().get());
     assert.deepEqual(restored.prepare('SELECT id, vat_fils, supplier_trn FROM expenses WHERE vat_fils IS NOT NULL ORDER BY id').all(), live.prepare('SELECT id, vat_fils, supplier_trn FROM expenses WHERE vat_fils IS NOT NULL ORDER BY id').all());
-    assert.equal(restored.prepare('SELECT status FROM staff_accounts WHERE id = ?').pluck().get(invite.account.id), 'invited');
+    // The account comes back, revoked by the restore (the backup may be older than a revoke): the owner re-invites.
+    assert.deepEqual(restored.prepare('SELECT id, email, name FROM staff_accounts ORDER BY id').all(), live.prepare('SELECT id, email, name FROM staff_accounts ORDER BY id').all());
+    assert.deepEqual(restored.prepare('SELECT status, revoked_by, setup_grant_hash FROM staff_accounts WHERE id = ?').get(invite.account.id), { status: 'revoked', revoked_by: 'restore', setup_grant_hash: null });
   } finally {
     restored.close();
   }

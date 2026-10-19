@@ -153,7 +153,7 @@ On the server (this replaces the live data; the current data is kept aside in `r
    docker compose start updater
    ```
 
-Then sign in with the new one-time password from `docker compose logs app-blue` at your admin link (the backup keeps it; a backup from before BUH-02.08 prints a new one in the log; if you changed the link after the backup, make a new one with `docker compose exec app-blue node scripts/admin-link.mjs --new`), and re-enter the courier and SMS keys. Restored passkeys are switched off and old recovery codes no longer work (the backup may be older than a passkey you removed): follow the banner in the Admin Hub to keep your passkeys and create new codes. Keys and the admin account are deliberately not in backups.
+Then sign in with the new one-time password from `docker compose logs app-blue` at your admin link (the backup keeps it; a backup from before BUH-02.08 prints a new one in the log; if you changed the link after the backup, make a new one with `docker compose exec app-blue node scripts/admin-link.mjs --new`), and re-enter the courier and SMS keys. Restored passkeys are switched off and old recovery codes no longer work (the backup may be older than a passkey you removed): follow the banner in the Admin Hub to keep your passkeys and create new codes. Accountant access comes back switched off: re-invite your accountant (Settings → Security → Accountant access). Keys and the admin account are deliberately not in backups.
 
 To check a backup on your own computer (Node 24, in a checkout of this repository after `npm ci`):
 

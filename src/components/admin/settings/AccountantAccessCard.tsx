@@ -23,11 +23,14 @@ interface Account {
   invitedAt: string;
   lastSignInAt: string | null;
   revokedAt: string | null;
+  /** 'restore': revoked by a backup restore (the backup may be older than a revoke). */
+  revokedBy?: string | null;
 }
 
 const when = (iso: string | null) => (iso ? new Date(iso).toLocaleString('en-GB', { day: 'numeric', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' }) : '');
 
 function statusText(a: Account): string {
+  if (a.status === 'revoked' && a.revokedBy === 'restore') return `Switched off by a backup restore ${when(a.revokedAt)}: re-invite to give access again`;
   if (a.status === 'revoked') return `Access revoked ${when(a.revokedAt)}`;
   if (a.status === 'invited') return a.setupExpired ? 'Setup link expired: send a new one' : `Invited: setup link valid until ${when(a.setupExpiresAt)}`;
   return a.lastSignInAt ? `Active · last signed in ${when(a.lastSignInAt)}` : 'Active';
@@ -79,7 +82,8 @@ export function AccountantAccessCard() {
     await load();
   };
 
-  const shown = accounts.filter((a) => a.status !== 'revoked' || accounts.length <= 5);
+  const shown = accounts.filter((a) => a.status !== 'revoked' || a.revokedBy === 'restore' || accounts.length <= 5);
+  const reinvite = accounts.filter((a) => a.status === 'revoked' && a.revokedBy === 'restore');
 
   return (
     <div className="space-y-4 text-sm border-t border-line pt-4" data-testid="accountant-access">
@@ -109,6 +113,11 @@ export function AccountantAccessCard() {
         </div>
         <button type="submit" disabled={busy || !email.trim()} className={darkButton}>{busy ? 'Sending…' : 'Invite'}</button>
       </form>
+      {reinvite.length > 0 && (
+        <p role="status" className="text-xs text-ink bg-warning-soft border border-warning-line rounded-xl px-3 py-2 break-words" data-testid="accountant-reinvite">
+          Re-invite your accountant: the shop was restored from a backup, so accountant access from it was switched off ({reinvite.map((a) => a.email).join(', ')}). Use “Send a new setup link” below.
+        </p>
+      )}
       {error && <p role="alert" className="text-xs text-danger bg-danger-soft border border-danger-line rounded-xl px-3 py-2">{error}</p>}
       {notice && <p role="status" className="text-xs text-ink bg-success-soft border border-success-line rounded-xl px-3 py-2 break-words">{notice}</p>}
       {link && (

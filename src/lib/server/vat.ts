@@ -3,7 +3,7 @@ import { UAE_VAT_PERCENT, vatInsideFils, vatOnTopFils } from '@/lib/money';
 import type { Order } from '@/types';
 import { audit, auditOrThrow } from './audit';
 import { aedText, toCsv } from './csv';
-import { getDb, inTransaction } from './db';
+import { afterCommit, getDb, inTransaction } from './db';
 import { HttpError } from './http';
 import { kvGet, kvSet } from './kv';
 import { logEvent } from './log';
@@ -47,6 +47,8 @@ export interface VatSettings {
   address: string;
   changedAt?: string;
   changedBy?: string;
+  /** When VAT was last switched on (ISO): orders placed before it are not flagged as missing VAT. */
+  enabledAt?: string;
 }
 
 export const DEFAULT_VAT: VatSettings = { enabled: false, trn: '', ratePercent: UAE_VAT_PERCENT, pricesIncludeVat: true, effectiveFrom: '', legalName: '', address: '' };
@@ -67,6 +69,7 @@ export function vatSettings(): VatSettings {
     address: typeof raw.address === 'string' ? raw.address : '',
     ...(raw.changedAt ? { changedAt: String(raw.changedAt) } : {}),
     ...(raw.changedBy ? { changedBy: String(raw.changedBy) } : {}),
+    ...(raw.enabledAt ? { enabledAt: String(raw.enabledAt) } : {}),
   };
 }
 
@@ -130,7 +133,7 @@ export function saveVatSettings(body: Record<string, unknown>, by: string, now =
   );
   if (!Object.keys(changes).length) return before;
   auditOrThrow(turningOn ? 'vat.enabled' : !enabled && before.enabled ? 'vat.disabled' : 'vat.settings_changed', { by, changes });
-  const saved = { ...next, ratePercent: UAE_VAT_PERCENT, changedAt: new Date(now).toISOString(), changedBy: by };
+  const saved = { ...next, ratePercent: UAE_VAT_PERCENT, changedAt: new Date(now).toISOString(), changedBy: by, ...(turningOn ? { enabledAt: new Date(now).toISOString() } : {}) };
   kvSet(KEY, saved);
   return saved;
 }
@@ -326,7 +329,9 @@ export function issueInvoice(orderId: string, now = Date.now()): TaxInvoice {
     const seq = (getDb().prepare('SELECT COALESCE(MAX(seq), 0) + 1 FROM vat_invoices').pluck().get() as number);
     const at = new Date(now).toISOString();
     getDb().prepare('INSERT INTO vat_invoices (seq, number, order_id, issued_at, issued_on, net_fils, vat_fils, total_fils) VALUES (?, ?, ?, ?, ?, ?, ?, ?)').run(seq, invoiceNumber(seq), orderId, at, dubaiDateOf(at), v.netFils, v.vatFils, v.totalFils);
-    audit('vat.invoice_issued', { orderId, number: invoiceNumber(seq), totalFils: v.totalFils, vatFils: v.vatFils });
+    // In the audit log once the number is committed (a rolled-back one is never logged as issued).
+    const details = { orderId, number: invoiceNumber(seq), totalFils: v.totalFils, vatFils: v.vatFils };
+    afterCommit(() => audit('vat.invoice_issued', details));
     return invoiceFor(orderId)!;
   });
 }
@@ -337,7 +342,8 @@ function issueCreditNote(inv: TaxInvoice, totalFils: number, vatFils: number, re
   getDb()
     .prepare('INSERT INTO vat_credit_notes (seq, number, invoice_seq, order_id, reason, issued_at, issued_on, net_fils, vat_fils, total_fils) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)')
     .run(seq, creditNumber(seq), inv.seq, inv.orderId, reason, at, dubaiDateOf(at), totalFils - vatFils, vatFils, totalFils);
-  audit('vat.credit_note_issued', { orderId: inv.orderId, number: creditNumber(seq), invoice: inv.number, reason, totalFils, vatFils });
+  const details = { orderId: inv.orderId, number: creditNumber(seq), invoice: inv.number, reason, totalFils, vatFils };
+  afterCommit(() => audit('vat.credit_note_issued', details));
 }
 
 interface StateRow {
@@ -351,9 +357,9 @@ interface StateRow {
 
 const SUPPLIED = new Set(['confirmed', 'dispatched', 'out_for_delivery', 'delivered']);
 
-/** Is the order a supply now (its tax invoice due)? A live card payment taken; otherwise confirmed, paid or sent. */
+/** Is the order a supply now (its tax invoice due)? A live card payment taken (live mode known: a test or unknown one never); otherwise confirmed, paid or sent. */
 function invoiceDue(s: StateRow): boolean {
-  if (s.payment_method === 'online_card') return ['paid', 'refund_pending', 'refunded'].includes(s.card_state) && s.card_livemode !== 0;
+  if (s.payment_method === 'online_card') return ['paid', 'refund_pending', 'refunded'].includes(s.card_state) && s.card_livemode === 1;
   if (s.status === 'cancelled') return false;
   return SUPPLIED.has(s.status) || s.payment_status === 'paid' || s.payment_status === 'verified' || s.bank_state === 'paid';
 }
@@ -376,22 +382,38 @@ function vatOfCredited(credited: number, inv: TaxInvoice): number {
   return sign * Number(n / (BigInt(inv.totalFils) * BigInt(2)));
 }
 
+const STATE_SQL = 'SELECT o.status, o.payment_method, o.payment_status, o.card_state, o.card_livemode, o.bank_state FROM orders o JOIN order_vat v ON v.order_id = o.id WHERE o.id = ?';
+
+/** Read only: would syncVatDocuments write anything for this order now (an invoice due, a credit note owed)? */
+function documentsBehind(orderId: string): boolean {
+  const s = getDb().prepare(STATE_SQL).get(orderId) as StateRow | undefined;
+  if (!s) return false;
+  const inv = invoiceFor(orderId);
+  if (!inv) return invoiceDue(s);
+  const credited = getDb().prepare('SELECT COALESCE(SUM(total_fils), 0) FROM vat_credit_notes WHERE order_id = ?').pluck().get(orderId) as number;
+  return creditWanted(orderId, s, inv) !== credited;
+}
+
+/** How many times the documents were brought in line (all orders, or one): for tests. */
+export const vatSyncStats = { all: 0, writes: 0 };
+
 /**
  * Bring an order's tax documents in line with its state (idempotent): its invoice once due, and
  * credit notes for whatever was refunded or cancelled since (or a negative one when a refund failed
- * afterwards or a cancelled order was reinstated). Only for orders with a VAT breakdown.
+ * afterwards or a cancelled order was reinstated). Only for orders with a VAT breakdown, and only
+ * when something is due: an order whose documents are in line is only read (no write lock).
  */
 export function syncVatDocuments(orderId: string, now = Date.now()): void {
-  // Most orders have no VAT (VAT off): no write lock for them.
+  // Most orders have no VAT (VAT off), and most VAT orders are in line: no write lock for them.
+  if (!getDb().inTransaction && !documentsBehind(orderId)) return;
   if (!getDb().prepare('SELECT 1 FROM order_vat WHERE order_id = ?').get(orderId)) return;
   inTransaction(() => {
-    const s = getDb()
-      .prepare('SELECT o.status, o.payment_method, o.payment_status, o.card_state, o.card_livemode, o.bank_state FROM orders o JOIN order_vat v ON v.order_id = o.id WHERE o.id = ?')
-      .get(orderId) as StateRow | undefined;
+    const s = getDb().prepare(STATE_SQL).get(orderId) as StateRow | undefined;
     if (!s) return;
     let inv = invoiceFor(orderId);
-    if (!inv && invoiceDue(s)) inv = issueInvoice(orderId, now);
-    if (!inv) return;
+    if (!inv && !invoiceDue(s)) return;
+    vatSyncStats.writes++;
+    if (!inv) inv = issueInvoice(orderId, now);
     const credited = getDb().prepare('SELECT COALESCE(SUM(total_fils), 0) FROM vat_credit_notes WHERE order_id = ?').pluck().get(orderId) as number;
     const wanted = creditWanted(orderId, s, inv);
     const delta = wanted - credited;
@@ -411,9 +433,23 @@ export function syncVatDocumentsQuietly(orderId: string): void {
   }
 }
 
-/** Every order with a VAT breakdown, in line (before any VAT figure is shown). */
+/**
+ * The VAT orders whose documents may be behind: no invoice yet (unless cancelled before one was due,
+ * which is final), or credit notes that don't add up to what was refunded or cancelled. Every other
+ * VAT order is final as it stands and is not looked at again.
+ */
+const OPEN_VAT_ORDERS = `
+  SELECT v.order_id FROM order_vat v JOIN orders o ON o.id = v.order_id LEFT JOIN vat_invoices i ON i.order_id = v.order_id
+  WHERE (i.seq IS NULL AND NOT (o.status = 'cancelled' AND o.payment_method <> 'online_card'))
+     OR (i.seq IS NOT NULL AND COALESCE((SELECT SUM(c.total_fils) FROM vat_credit_notes c WHERE c.order_id = v.order_id), 0) <>
+         CASE WHEN o.payment_method = 'online_card'
+              THEN MAX(0, MIN(i.total_fils, COALESCE((SELECT SUM(r.amount_fils) FROM card_refunds r WHERE r.order_id = v.order_id), 0)))
+              WHEN o.status = 'cancelled' THEN i.total_fils ELSE 0 END)`;
+
+/** Every VAT order not yet final, in line (once, before VAT figures are shown). */
 export function syncAllVatDocuments(): void {
-  const ids = getDb().prepare('SELECT order_id FROM order_vat').pluck().all() as string[];
+  vatSyncStats.all++;
+  const ids = getDb().prepare(OPEN_VAT_ORDERS).pluck().all() as string[];
   for (const id of ids) syncVatDocumentsQuietly(id);
 }
 
@@ -432,7 +468,30 @@ export interface VatReturn {
   input: { count: number; amountFils: number; vatFils: number; withoutTrn: number; withoutTrnVatFils: number };
   /** Output VAT less input VAT: payable when positive, refundable when negative. */
   netVatFils: number;
+  /**
+   * Orders placed in the period on or after the VAT effective date that have no VAT breakdown: placed
+   * by an older version of the shop (a rollback while VAT was on) or while VAT was switched off.
+   */
+  missingVat: { count: number; orderIds: string[] };
   notes: string[];
+}
+
+/** The UTC instant a UAE date starts (Asia/Dubai is UTC+4 all year). */
+const dubaiStartIso = (date: string) => new Date(`${date}T00:00:00+04:00`).toISOString();
+const nextDay = (date: string) => new Date(Date.parse(`${date}T00:00:00Z`) + 86_400_000).toISOString().slice(0, 10);
+
+/** Orders placed from..to (UAE dates), on or after the effective date, without a VAT breakdown. */
+function ordersWithoutVat(from: string, to: string, s: VatSettings): VatReturn['missingVat'] {
+  if (!s.enabled || !s.effectiveFrom) return { count: 0, orderIds: [] };
+  const start = from > s.effectiveFrom ? from : s.effectiveFrom;
+  if (start > to) return { count: 0, orderIds: [] };
+  const startIso = dubaiStartIso(start);
+  const since = s.enabledAt && s.enabledAt > startIso ? s.enabledAt : startIso;
+  const ids = getDb()
+    .prepare('SELECT o.id FROM orders o LEFT JOIN order_vat v ON v.order_id = o.id WHERE v.order_id IS NULL AND o.created_at >= ? AND o.created_at < ? ORDER BY o.created_at')
+    .pluck()
+    .all(since, dubaiStartIso(nextDay(to))) as string[];
+  return { count: ids.length, orderIds: ids.slice(0, 50) };
 }
 
 interface DocRow {
@@ -458,7 +517,6 @@ interface ExpenseVatRow {
 }
 
 function periodRows(from: string, to: string) {
-  syncAllVatDocuments();
   const db = getDb();
   const invoices = db.prepare("SELECT i.number, i.order_id, i.issued_on, i.net_fils, i.vat_fils, i.total_fils, json_extract(o.data, '$.customer.fullName') AS customer FROM vat_invoices i JOIN orders o ON o.id = i.order_id WHERE i.issued_on >= ? AND i.issued_on <= ? ORDER BY i.seq").all(from, to) as DocRow[];
   const credits = db.prepare("SELECT c.number, c.order_id, c.issued_on, c.net_fils, c.vat_fils, c.total_fils, c.reason, i.number AS invoice_number, json_extract(o.data, '$.customer.fullName') AS customer FROM vat_credit_notes c JOIN vat_invoices i ON i.seq = c.invoice_seq JOIN orders o ON o.id = c.order_id WHERE c.issued_on >= ? AND c.issued_on <= ? ORDER BY c.seq").all(from, to) as DocRow[];
@@ -468,8 +526,13 @@ function periodRows(from: string, to: string) {
 
 const sumOf = (rows: Array<{ net_fils: number; vat_fils: number; total_fils: number }>) => rows.reduce((t, r) => ({ count: t.count + 1, netFils: t.netFils + r.net_fils, vatFils: t.vatFils + r.vat_fils, totalFils: t.totalFils + r.total_fils }), { count: 0, netFils: 0, vatFils: 0, totalFils: 0 });
 
+/** The VAT return for a period (UAE dates): the documents brought in line once, then summed. */
 export function vatReturn(from: string, to: string): VatReturn {
-  const { invoices, credits, expenses } = periodRows(from, to);
+  syncAllVatDocuments();
+  return returnOf(from, to, periodRows(from, to));
+}
+
+function returnOf(from: string, to: string, { invoices, credits, expenses }: ReturnType<typeof periodRows>): VatReturn {
   const s = vatSettings();
   const sales = sumOf(invoices);
   const cr = sumOf(credits);
@@ -481,14 +544,17 @@ export function vatReturn(from: string, to: string): VatReturn {
   const notes: string[] = [];
   if (input.withoutTrn) notes.push(`${input.withoutTrn} expense${input.withoutTrn === 1 ? ' has' : 's have'} VAT but no supplier TRN (AED ${aedText(input.withoutTrnVatFils)} of VAT): input VAT can usually only be recovered with the supplier’s tax invoice. Ask your accountant.`);
   if (!s.enabled && !sales.count && !cr.count) notes.push('VAT is off: the shop has issued no tax invoices in this period.');
+  const missingVat = ordersWithoutVat(from, to, s);
   notes.push('A helper for your accountant, not a filed return: check it against the FTA’s return form (EmaraTax) before filing.');
-  return { from, to, registered: s.enabled, trn: s.trn, sales, credits: cr, output, input, netVatFils: output.vatFils - input.vatFils, notes };
+  return { from, to, registered: s.enabled, trn: s.trn, sales, credits: cr, output, input, netVatFils: output.vatFils - input.vatFils, missingVat, notes };
 }
 
 /** The VAT return helper as CSV: the totals, then every invoice, credit note and expense behind them. */
 export function vatReturnCsv(from: string, to: string): string {
-  const r = vatReturn(from, to);
-  const { invoices, credits, expenses } = periodRows(from, to);
+  syncAllVatDocuments();
+  const period = periodRows(from, to);
+  const r = returnOf(from, to, period);
+  const { invoices, credits, expenses } = period;
   const a = aedText;
   const rows: unknown[][] = [
     ['summary', 'Period', `${from} to ${to}`, '', '', r.trn, '', '', '', 'UAE dates'],
@@ -497,6 +563,7 @@ export function vatReturnCsv(from: string, to: string): string {
     ['summary', 'Standard-rated supplies after adjustments / output VAT', '', '', '', '', a(r.output.netFils), a(r.output.vatFils), '', ''],
     ['summary', 'Expenses with VAT (input VAT)', '', '', r.input.count, '', a(r.input.amountFils - r.input.vatFils), a(r.input.vatFils), a(r.input.amountFils), r.input.withoutTrn ? `${r.input.withoutTrn} without a supplier TRN` : ''],
     ['summary', 'Net VAT (output less input)', '', '', '', '', '', a(r.netVatFils), '', r.netVatFils >= 0 ? 'payable' : 'refundable'],
+    ...(r.missingVat.count ? [['summary', 'Orders placed after VAT started without VAT worked out (no tax invoice: check them)', '', '', r.missingVat.count, '', '', '', '', r.missingVat.orderIds.join(' ')]] : []),
     ...invoices.map((i) => ['tax_invoice', i.number, i.issued_on, i.order_id, i.customer ?? '', '', a(i.net_fils), a(i.vat_fils), a(i.total_fils), '']),
     ...credits.map((c) => ['credit_note', c.number, c.issued_on, c.order_id, c.customer ?? '', '', a(-c.net_fils), a(-c.vat_fils), a(-c.total_fils), `${c.reason} · invoice ${c.invoice_number}`]),
     ...expenses.map((e) => ['expense', e.id, e.spent_on, e.category, e.payee, e.supplier_trn ?? '', a(e.amount_fils - e.vat_fils), a(e.vat_fils), a(e.amount_fils), e.supplier_trn ? '' : 'no supplier TRN']),

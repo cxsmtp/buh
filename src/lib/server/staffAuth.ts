@@ -6,6 +6,7 @@ import { audit, auditedTransaction } from './audit';
 import { dataFile } from './dataDir';
 import { getDb } from './db';
 import { HttpError } from './http';
+import { kvGet, kvSet } from './kv';
 import { logEvent } from './log';
 import { emailConfigured, sender, transport } from './mail';
 import { hashPassword } from './password';
@@ -154,6 +155,11 @@ export function endStaffSessions(id: string): void {
   getDb().prepare('UPDATE staff_accounts SET session_gen = session_gen + 1 WHERE id = ?').run(id);
 }
 
+/** The owner's "sign out everywhere": every accountant's sessions (and the doors given with their setup links) end too. */
+export function endAllStaffSessions(): number {
+  return getDb().prepare('UPDATE staff_accounts SET session_gen = session_gen + 1').run().changes;
+}
+
 // ── Invite, setup, revoke ───────────────────────────────────────────────────
 
 export interface Invite {
@@ -181,14 +187,17 @@ export function inviteAccountant(emailInput: unknown, nameInput: unknown, ownerE
   const id = auditedTransaction((auditOrThrow) => {
     const db = getDb();
     const existing = db.prepare('SELECT * FROM staff_accounts WHERE email = ?').get(email) as Row | undefined;
+    // A revoked account invited again counts towards the limit like a new one.
+    if (!existing || existing.status === 'revoked') {
+      const count = db.prepare("SELECT COUNT(*) FROM staff_accounts WHERE status <> 'revoked'").pluck().get() as number;
+      if (count >= MAX_STAFF) throw new HttpError(409, `There are already ${MAX_STAFF} accountant accounts. Revoke one first.`);
+    }
     if (existing) {
       db.prepare("UPDATE staff_accounts SET status = 'invited', name = CASE WHEN ? <> '' THEN ? ELSE name END, password_hash = NULL, setup_hash = ?, setup_grant_hash = ?, setup_expires_at = ?, session_gen = session_gen + 1, invited_at = ?, invited_by = ?, activated_at = NULL, revoked_at = NULL, revoked_by = NULL WHERE id = ?")
         .run(name, name, sha(token), hashSegment(grant, 'buh-staff-grant'), expires, at, by, existing.id);
       auditOrThrow('accountant.invited', { by, staffId: existing.id, email, again: true, was: existing.status });
       return existing.id;
     }
-    const count = db.prepare("SELECT COUNT(*) FROM staff_accounts WHERE status <> 'revoked'").pluck().get() as number;
-    if (count >= MAX_STAFF) throw new HttpError(409, `There are already ${MAX_STAFF} accountant accounts. Revoke one first.`);
     const newId = `acc_${crypto.randomBytes(9).toString('base64url')}`;
     db.prepare("INSERT INTO staff_accounts (id, email, role, name, status, setup_hash, setup_grant_hash, setup_expires_at, invited_at, invited_by) VALUES (?, ?, 'accountant', ?, 'invited', ?, ?, ?, ?, ?)")
       .run(newId, email, name, sha(token), hashSegment(grant, 'buh-staff-grant'), expires, at, by);
@@ -234,6 +243,29 @@ export function revokeStaff(id: unknown, by: string, now = Date.now()): StaffAcc
     }
     return view(getDb().prepare('SELECT * FROM staff_accounts WHERE id = ?').get(id) as Row, now);
   });
+}
+
+// ── After a restore ─────────────────────────────────────────────────────────
+
+const RESTORE_KEY = 'staff:revoked-by-restore';
+
+/**
+ * A restore (scripts/restore-backup.mjs) revokes every accountant account it brings back (the backup
+ * may be older than a revoke) and leaves a note; the first start after it writes that to the audit
+ * log, once. True when it wrote it.
+ */
+export function auditStaffRestoreOnce(): boolean {
+  const note = kvGet<{ at?: string; accounts?: Array<{ id?: unknown; was?: unknown }>; audited?: boolean }>(RESTORE_KEY)?.data;
+  if (!note?.at || note.audited) return false;
+  const accounts = Array.isArray(note.accounts) ? note.accounts.slice(0, MAX_STAFF * 10) : [];
+  if (!audit('accountant.revoked_by_restore', { restoredAt: note.at, staffIds: accounts.map((a) => String(a?.id ?? '').slice(0, 40)), count: accounts.length })) return false;
+  kvSet(RESTORE_KEY, { ...note, audited: true });
+  return true;
+}
+
+/** The accounts a restore revoked that the owner has not invited again (shown: "Re-invite your accountant"). */
+export function revokedByRestore(): StaffAccount[] {
+  return listStaff().filter((a) => a.status === 'revoked' && a.revokedBy === 'restore');
 }
 
 /** Email the setup link (when the shop's email is set up). Never throws; true when sent. */

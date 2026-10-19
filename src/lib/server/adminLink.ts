@@ -126,21 +126,47 @@ interface DoorPayload {
   v: string;
   iat: number;
   exp: number;
+  /** A hard end (ms): a door given by a grant (a reset or setup email) never lasts past the grant, renewed or not. */
+  cap?: number;
+  /** An accountant's door (given through their setup link): their account id and session generation. */
+  s?: string;
+  g?: number;
+}
+
+/** What a door is bound to besides the link: a hard end, and an accountant's account (src/lib/server/staffAuth.ts). */
+export interface DoorBinding {
+  cap?: number;
+  staff?: { id: string; gen: number };
 }
 
 function doorMac(body: string, rec: LinkRecord): string {
   return mac('admin-door', `${rec.version}\n${rec.hash}\n${body}`);
 }
 
-/** A door token for the current link (null when there is no link yet). */
-export function issueDoorToken(now = Date.now(), rec: LinkRecord | null = currentLink(), ttlMs = DOOR_TTL_MS): string | null {
+/**
+ * A door token for the current link (null when there is no link yet, or its cap has passed). With a
+ * binding: never valid past `cap` (a renewal keeps it), and an accountant's door ends with their
+ * sessions (a revoke, a new setup link, a sign-out everywhere). The owner's door has neither.
+ */
+export function issueDoorToken(now = Date.now(), rec: LinkRecord | null = currentLink(), ttlMs = DOOR_TTL_MS, bind: DoorBinding = {}): string | null {
   if (!rec) return null;
-  const body = Buffer.from(JSON.stringify({ v: rec.version, iat: now, exp: now + Math.min(ttlMs, DOOR_TTL_MS) } satisfies DoorPayload)).toString('base64url');
+  const cap = typeof bind.cap === 'number' && Number.isFinite(bind.cap) ? bind.cap : undefined;
+  const exp = Math.min(now + Math.min(ttlMs, DOOR_TTL_MS), cap ?? Infinity);
+  if (!(exp > now)) return null;
+  const payload: DoorPayload = { v: rec.version, iat: now, exp, ...(cap !== undefined ? { cap } : {}), ...(bind.staff ? { s: bind.staff.id, g: bind.staff.gen } : {}) };
+  const body = Buffer.from(JSON.stringify(payload)).toString('base64url');
   return `${body}.${doorMac(body, rec)}`;
 }
 
-/** Is this door token valid for the current link? `renew` when it should be re-issued. */
-export function verifyDoorToken(token: string | undefined | null, now = Date.now(), rec: LinkRecord | null = currentLink()): { ok: boolean; renew: boolean } {
+/** An accountant's door stands while their account does, with the same session generation (as their session does). */
+function staffDoorStands(id: unknown, gen: unknown): boolean {
+  if (typeof id !== 'string' || id.length > 40 || typeof gen !== 'number') return false;
+  const row = getDb().prepare("SELECT session_gen FROM staff_accounts WHERE id = ? AND status IN ('invited', 'active')").get(id) as { session_gen: number } | undefined;
+  return row?.session_gen === gen;
+}
+
+/** Is this door token valid for the current link? `renew` when it should be re-issued (with the same `bind`). */
+export function verifyDoorToken(token: string | undefined | null, now = Date.now(), rec: LinkRecord | null = currentLink()): { ok: boolean; renew: boolean; bind?: DoorBinding } {
   const no = { ok: false, renew: false };
   if (!rec || !token || token.length > 512) return no;
   const dot = token.indexOf('.');
@@ -154,7 +180,13 @@ export function verifyDoorToken(token: string | undefined | null, now = Date.now
     return no;
   }
   if (payload.v !== rec.version || !Number.isFinite(payload.exp) || payload.exp <= now) return no;
-  return { ok: true, renew: now - Number(payload.iat || 0) > DOOR_RENEW_AFTER_MS };
+  if (payload.cap !== undefined && !(Number(payload.cap) > now)) return no;
+  if (payload.s !== undefined && !staffDoorStands(payload.s, payload.g)) return no;
+  const bind: DoorBinding = {
+    ...(payload.cap !== undefined ? { cap: Number(payload.cap) } : {}),
+    ...(payload.s !== undefined ? { staff: { id: String(payload.s), gen: Number(payload.g) } } : {}),
+  };
+  return { ok: true, renew: now - Number(payload.iat || 0) > DOOR_RENEW_AFTER_MS, ...(bind.cap !== undefined || bind.staff ? { bind } : {}) };
 }
 
 /** The door token in a Cookie header. */
@@ -216,11 +248,28 @@ export function resetGrantExpiry(segment: string, now = Date.now()): number {
  * An accountant's setup email opens the hub the same way (src/lib/server/staffAuth.ts): its own
  * grant, valid while that invite is open (72 hours, ended by choosing a password or by a revoke).
  */
-function staffGrantExpiry(segment: string, now: number): number {
+function staffGrant(segment: string, now: number): { expires: number; id: string; gen: number } | null {
   const row = getDb()
-    .prepare("SELECT setup_grant_hash AS hash, setup_expires_at AS expires FROM staff_accounts WHERE setup_grant_hash = ? AND status = 'invited'")
-    .get(hashSegment(segment, 'buh-staff-grant')) as { hash: string; expires: number | null } | undefined;
-  return row && Number(row.expires) > now && sameDigest(hashSegment(segment, 'buh-staff-grant'), row.hash) ? Number(row.expires) : 0;
+    .prepare("SELECT id, session_gen AS gen, setup_grant_hash AS hash, setup_expires_at AS expires FROM staff_accounts WHERE setup_grant_hash = ? AND status = 'invited'")
+    .get(hashSegment(segment, 'buh-staff-grant')) as { id: string; gen: number; hash: string; expires: number | null } | undefined;
+  return row && Number(row.expires) > now && sameDigest(hashSegment(segment, 'buh-staff-grant'), row.hash) ? { expires: Number(row.expires), id: row.id, gen: row.gen } : null;
+}
+
+function staffGrantExpiry(segment: string, now: number): number {
+  return staffGrant(segment, now)?.expires ?? 0;
+}
+
+/**
+ * The door a grant path gives (a password-reset email's, or an accountant's setup email's): capped
+ * at the grant's end, however often it is renewed; an accountant's is also bound to their account,
+ * so a revoke or a new setup link ends it at once. Null when the path opens nothing.
+ */
+export function grantDoorBinding(segment: string, now = Date.now()): (DoorBinding & { cap: number }) | null {
+  if (!GRANT_PATTERN.test(segment)) return null;
+  const expires = resetGrantExpiry(segment, now);
+  if (!expires) return null;
+  const staff = staffGrant(segment, now);
+  return staff && staff.expires === expires ? { cap: expires, staff: { id: staff.id, gen: staff.gen } } : { cap: expires };
 }
 
 export function matchesResetGrant(segment: string, now = Date.now()): boolean {

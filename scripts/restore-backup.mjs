@@ -22,7 +22,8 @@
 // backups, and courier / SMS keys are blanked in them, on purpose: re-enter the keys in the Admin
 // Hub after a restore. The owner's passkeys and recovery codes are in the database, but the backup
 // may predate a revocation: restored recovery codes are voided and restored passkeys are switched
-// off until the owner confirms them in the Admin Hub (see below). Expenses come back with every
+// off until the owner confirms them in the Admin Hub (see below). Accountant accounts come back
+// revoked, for the same reason: the owner re-invites their accountant. Expenses come back with every
 // earlier version and every bill (expenses/). The server's audit key stays (with --replace), or is
 // copied from the running shop's DATA_DIR into the new folder, so the restored audit log still
 // checks out on this server; on a new server the hub says the log was signed by another server's
@@ -307,10 +308,20 @@ const refunds = tableExists('card_refunds') ? db.prepare('SELECT COUNT(*) AS n F
 const passkeyIds = tableExists('admin_passkeys') ? db.prepare('SELECT id FROM admin_passkeys').all().map((r) => r.id) : [];
 const voidedCodes = tableExists('admin_recovery_codes') ? db.prepare('DELETE FROM admin_recovery_codes WHERE used_at IS NULL').run().changes : 0;
 if (tableExists('admin_recovery_codes')) db.prepare('DELETE FROM admin_recovery_codes').run();
+// Accountant access (backups from before BUH-02.17 have none): the backup may predate a revoke,
+// and nothing in it can tell. So every restored accountant (active, or invited with a setup link)
+// is revoked; the first start writes it to the audit log and the hub says "Re-invite your accountant".
+const staffRevoked = tableExists('staff_accounts')
+  ? db.prepare("SELECT id, email, status FROM staff_accounts WHERE status IN ('active', 'invited') ORDER BY id").all()
+  : [];
+if (staffRevoked.length) {
+  db.prepare("UPDATE staff_accounts SET status = 'revoked', password_hash = NULL, setup_hash = NULL, setup_grant_hash = NULL, setup_expires_at = NULL, session_gen = session_gen + 1, revoked_at = ?, revoked_by = 'restore' WHERE status IN ('active', 'invited')").run(new Date().toISOString());
+}
 if (tableExists('kv')) {
   const put = db.prepare('INSERT INTO kv (key, data, updated_at) VALUES (?, ?, ?) ON CONFLICT(key) DO UPDATE SET data = excluded.data, updated_at = excluded.updated_at');
   const now = new Date().toISOString();
   if (passkeyIds.length) put.run('admin:passkeys-suspended', JSON.stringify(passkeyIds), now);
+  if (staffRevoked.length) put.run('staff:revoked-by-restore', JSON.stringify({ at: now, accounts: staffRevoked.map((s) => ({ id: s.id, was: s.status })) }), now);
   put.run('admin:restored', JSON.stringify({ at: now, backup: backupName }), now);
   db.prepare("DELETE FROM kv WHERE key = 'admin:link-reveal'").run();
 }
@@ -360,6 +371,10 @@ console.log(
     ? 'Admin Hub: the private admin link from this backup works again. If you changed it after this backup was taken, make a new one: node scripts/admin-link.mjs --new'
     : 'Admin Hub: this backup has no private admin link; the first start prints a new one in the log.'
 );
+if (staffRevoked.length) {
+  console.log('');
+  console.log(`Accountant access: ${staffRevoked.length} accountant account${staffRevoked.length === 1 ? ' was' : 's were'} revoked (the backup may be older than a revoke). Re-invite your accountant in Settings → Security → Accountant access.`);
+}
 if (passkeys || voidedCodes) {
   console.log('');
   console.log('!!! IMPORTANT: Admin Hub passkeys and recovery codes from this backup are switched off !!!');

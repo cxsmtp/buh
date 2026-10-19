@@ -7,6 +7,7 @@ import { audit, auditFiles, auditOrThrow, verifyAllAuditLogs } from './audit';
 import { takeExportLock } from './exportLock';
 import { aedText, csvHead, csvRow, toCsv } from './csv';
 import { dataDir, dataFile } from './dataDir';
+import { getDb } from './db';
 import { diskRoomProblem } from './diskRoom';
 import { activeBillBytes, activeBillCount, billFile, EXPENSE_CSV_HEADERS, expenseCsvRow, expenseTotals, iterExpenses, type Expense } from './expenses';
 import { HttpError } from './http';
@@ -123,9 +124,36 @@ export interface Report {
   card: { paidCount: number; paidFils: number; refundedFils: number };
   expenses: { count: number; fils: number; byCategory: Array<{ id: string; name: string; count: number; fils: number }>; byMethod: Record<string, { count: number; fils: number }> };
   profitFils: number;
+  /**
+   * With VAT (orders in the period that carry a VAT breakdown): the same figures without the output
+   * VAT (owed to the FTA, not the shop's income) and without the input VAT on expenses (recoverable).
+   * Null when no order of the period carries VAT: then every figure above is already net.
+   */
+  exVat: ExVat | null;
   excluded: { cancelled: number; awaitingCard: number; testMode: number };
   notes: string[];
   vat: VatStatus;
+}
+
+export interface ExVat {
+  /** Output VAT in the gross sales (orders with a VAT breakdown). */
+  salesVatFils: number;
+  /** The VAT share of the refunds (in proportion to each order's VAT). */
+  refundVatFils: number;
+  grossSalesFils: number;
+  netSalesFils: number;
+  /** VAT on the period's expenses (as entered with each bill). */
+  expensesVatFils: number;
+  expensesFils: number;
+  profitFils: number;
+}
+
+/** The VAT of a part of an order's total, in proportion, rounded half up (whole fils). */
+function vatShare(amountFils: number, vatFils: number, totalFils: number): number {
+  if (!amountFils || !vatFils || !totalFils) return 0;
+  if (amountFils === totalFils) return vatFils;
+  const sign = amountFils < 0 ? -1 : 1;
+  return sign * Math.floor((Math.abs(amountFils) * vatFils * 2 + totalFils) / (totalFils * 2));
 }
 
 const DATE = /^\d{4}-\d{2}-\d{2}$/;
@@ -182,6 +210,11 @@ export function buildReport(from: string, to: string, now = Date.now()): Report 
   const excluded = { cancelled: 0, awaitingCard: 0, testMode: 0 };
   const notes: string[] = [];
   let outside = 0;
+  // Orders that carry VAT (UAE VAT on): their output VAT is not the shop's income.
+  const vatOf = new Map((getDb().prepare('SELECT order_id, vat_fils, total_fils FROM order_vat').all() as Array<{ order_id: string; vat_fils: number; total_fils: number }>).map((v) => [v.order_id, v]));
+  let salesVatFils = 0;
+  let refundVatFils = 0;
+  let vatOrders = 0;
   for (const o of orders) {
     const c = classifyOrder(o);
     const placedIn = inPeriod(dubaiDateOf(o.createdAt), from, to);
@@ -200,6 +233,11 @@ export function buildReport(from: string, to: string, now = Date.now()): Report 
       sales.cardFeeFils += fils(o.cardFee ?? 0);
       sales.discountFils += fils(o.discount);
       sales.grossFils += total;
+      const v = vatOf.get(o.id);
+      if (v) {
+        vatOrders++;
+        salesVatFils += v.vat_fils;
+      }
       if (c.paid) sales.paidFils += total;
       else sales.unpaidFils += total;
       const m = byMethod[o.paymentMethod] ?? (byMethod[o.paymentMethod] = { orders: 0, fils: 0, paidOrders: 0, paidFils: 0 });
@@ -230,6 +268,11 @@ export function buildReport(from: string, to: string, now = Date.now()): Report 
     if (r.dateApprox) approx++;
     refunds.fils += r.amountFils;
     card.refundedFils += r.amountFils;
+    const v = vatOf.get(r.orderId);
+    if (v) {
+      vatOrders++;
+      refundVatFils += vatShare(r.amountFils, v.vat_fils, v.total_fils);
+    }
   }
   if (reversed) notes.push(`${reversed} card refund${reversed === 1 ? '' : 's'} failed after being made: AED ${aedText(reversedFils)} came back to the shop and is taken off the refunds.`);
   if (approx) notes.push(`${approx} refund${approx === 1 ? ' was' : 's were'} made before refunds were recorded one by one: ${approx === 1 ? 'its date is' : 'their dates are'} the best known (refunds.csv says "approximate").`);
@@ -240,6 +283,20 @@ export function buildReport(from: string, to: string, now = Date.now()): Report 
   // Summed by the database: every expense of the period, however many.
   const expenses = expenseTotals({ from, to });
   const netSalesFils = sales.grossFils - refunds.fils;
+  let exVat: ExVat | null = null;
+  if (vatOrders) {
+    const expensesVatFils = getDb().prepare('SELECT COALESCE(SUM(vat_fils), 0) FROM expenses WHERE removed_at IS NULL AND vat_fils > 0 AND spent_on >= ? AND spent_on <= ?').pluck().get(from, to) as number;
+    const net = netSalesFils - (salesVatFils - refundVatFils);
+    exVat = {
+      salesVatFils,
+      refundVatFils,
+      grossSalesFils: sales.grossFils - salesVatFils,
+      netSalesFils: net,
+      expensesVatFils,
+      expensesFils: expenses.fils - expensesVatFils,
+      profitFils: net - (expenses.fils - expensesVatFils),
+    };
+  }
   return {
     from,
     to,
@@ -251,6 +308,7 @@ export function buildReport(from: string, to: string, now = Date.now()): Report 
     card,
     expenses,
     profitFils: netSalesFils - expenses.fils,
+    exVat,
     excluded,
     notes,
     vat: vatStatus(now, orders, booked),
@@ -304,11 +362,14 @@ function salesCsv(orders: Order[], refunds: BookedRefund[]): string {
     t.approx ||= r.dateApprox;
     refundOf.set(r.orderId, t);
   }
+  // With UAE VAT: each order's output VAT, so the accountant has sales without it (total_aed stays the gross, VAT included).
+  const vatOf = new Map((getDb().prepare('SELECT order_id, vat_fils, total_fils FROM order_vat').all() as Array<{ order_id: string; vat_fils: number; total_fils: number }>).map((v) => [v.order_id, v]));
   return toCsv(
-    ['date', 'order_number', 'customer_name', 'emirate', 'items', 'quantity', 'items_aed', 'delivery_fee_aed', 'cod_fee_aed', 'discount_aed', 'total_aed', 'payment_method', 'payment_status', 'payment_ref', 'paid', 'refund_aed', 'refund_date', 'order_status', 'courier', 'awb', 'counted_in_sales', 'not_counted_because', 'placed_at_utc', 'refund_date_approximate', 'card_fee_aed'],
+    ['date', 'order_number', 'customer_name', 'emirate', 'items', 'quantity', 'items_aed', 'delivery_fee_aed', 'cod_fee_aed', 'discount_aed', 'total_aed', 'payment_method', 'payment_status', 'payment_ref', 'paid', 'refund_aed', 'refund_date', 'order_status', 'courier', 'awb', 'counted_in_sales', 'not_counted_because', 'placed_at_utc', 'refund_date_approximate', 'card_fee_aed', 'vat_aed', 'total_excl_vat_aed'],
     orders.map((o) => {
       const c = classifyOrder(o);
       const refund = refundOf.get(o.id);
+      const v = vatOf.get(o.id);
       return [
         dubaiDateOf(o.createdAt), o.id, o.customer.fullName, o.customer.emirate,
         o.items.map((i) => `${i.title} (${i.profileName}${i.color ? `, ${i.color}` : ''}) x${i.quantity}`).join('; '),
@@ -318,6 +379,7 @@ function salesCsv(orders: Order[], refunds: BookedRefund[]): string {
         refund?.fils ? aedText(refund.fils) : '', refund?.fils ? refund.date : '', o.status,
         o.courier?.provider ?? '', o.courier?.simulated ? '' : (o.courier?.awbNumber ?? ''),
         c.counted ? 'yes' : 'no', c.reason, o.createdAt, refund?.fils && refund.approx ? 'yes' : '', aedText(fils(o.cardFee ?? 0)),
+        v ? aedText(v.vat_fils) : '', v ? aedText(fils(o.total) - v.vat_fils) : '',
       ];
     })
   );
@@ -363,7 +425,17 @@ function summaryRows(r: Report): Array<[string, string, string | number, string]
   for (const [m, t] of Object.entries(r.expenses.byMethod)) rows.push(['Expenses paid by', EXPENSE_METHOD[m] ?? m, t.count, aedText(t.fils)]);
   rows.push(
     ['Expenses', 'Total expenses', r.expenses.count, aedText(r.expenses.fils)],
-    ['Result', 'Profit (net sales less expenses)', '', aedText(r.profitFils)],
+    ['Result', r.exVat ? 'Profit including VAT (net sales incl. VAT less expenses incl. VAT)' : 'Profit (net sales less expenses)', '', aedText(r.profitFils)],
+    ...(r.exVat
+      ? ([
+          ['Excluding VAT', 'Output VAT in gross sales (owed to the FTA)', '', aedText(r.exVat.salesVatFils)],
+          ['Excluding VAT', 'VAT on refunds', '', aedText(-r.exVat.refundVatFils)],
+          ['Excluding VAT', 'Net sales excluding VAT', '', aedText(r.exVat.netSalesFils)],
+          ['Excluding VAT', 'VAT on expenses (input VAT)', '', aedText(r.exVat.expensesVatFils)],
+          ['Excluding VAT', 'Expenses excluding VAT', '', aedText(r.exVat.expensesFils)],
+          ['Excluding VAT', 'Profit excluding VAT', '', aedText(r.exVat.profitFils)],
+        ] as Array<[string, string, string | number, string]>)
+      : []),
     ['Not counted', 'Cancelled orders', r.excluded.cancelled, ''],
     ['Not counted', 'Waiting for card payment', r.excluded.awaitingCard, ''],
     ['Not counted', 'Stripe test mode', r.excluded.testMode, ''],
@@ -411,6 +483,8 @@ function readme(r: Report, shop: string, bills: number, auditCount: number, veri
     '  summary.csv      The same totals, for Excel.',
     '  sales.csv        One row per order placed in the period, cancelled ones too ("counted_in_sales" says',
     '                   whether it is in the totals, and why not). Customer name and emirate only.',
+    '                   total_aed is what the customer paid (VAT included when the order carries VAT);',
+    '                   vat_aed and total_excl_vat_aed are filled in for orders with VAT.',
     '  order-items.csv  One row per item of those orders.',
     '  refunds.csv      One row per refund to a card made in the period (by the day it was made), and per',
     '                   refund that failed afterwards (a negative amount). "approximate": refunded before',
@@ -435,7 +509,11 @@ function readme(r: Report, shop: string, bills: number, auditCount: number, veri
     'VAT',
     `  ${r.vat.text}`,
     ...(r.vat.registered
-      ? ['  Order totals include VAT. vat-return.csv: tax invoices, credit notes and expenses with VAT for the period, with the totals.']
+      ? [
+          '  Order totals include VAT: total_aed in sales.csv and the "Gross sales", "Net sales" and "Profit including VAT" lines are',
+          '  with VAT. vat_aed and total_excl_vat_aed in sales.csv, and the "Excluding VAT" lines of the summary, are without it.',
+          '  vat-return.csv: tax invoices, credit notes and expenses with VAT for the period, with the totals.',
+        ]
       : ['  No VAT is charged or included in these figures.']),
     '',
     'Audit log check',

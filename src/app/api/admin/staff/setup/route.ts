@@ -1,5 +1,5 @@
 import { sessionCookie } from '@/lib/server/adminAuth';
-import { doorCookie, issueDoorToken } from '@/lib/server/adminLink';
+import { currentLink, DOOR_TTL_MS, doorCookie, issueDoorToken } from '@/lib/server/adminLink';
 import { auditOrThrow } from '@/lib/server/audit';
 import { clientIp, enforceIpLimit, requireDoor } from '@/lib/server/guard';
 import { allowFields, assertSameOrigin, handleRouteError, HttpError, json, readJsonBody, str } from '@/lib/server/http';
@@ -26,8 +26,9 @@ export async function POST(req: Request) {
     auditOrThrow('accountant.sign_in', { by: staff.email, ip: clientIp(req), via: 'setup' });
     const res = json({ success: true, email: staff.email, role: 'accountant' });
     res.cookies.set(sessionCookie(staffSessionToken(staff)));
-    // The setup link's door ends with it: this browser keeps the hub's ordinary door (30 days, renewed while used).
-    const door = issueDoorToken();
+    // The setup link's door ends with it: this browser gets the hub's door (30 days, renewed while used),
+    // bound to this account, so a revoke, a new setup link or signing out everywhere ends it too.
+    const door = issueDoorToken(Date.now(), currentLink(), DOOR_TTL_MS, { staff: { id: staff.id, gen: staff.sessionGen } });
     if (door) res.cookies.set(doorCookie(door));
     return res;
   } catch (err) {

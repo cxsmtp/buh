@@ -3,13 +3,19 @@ import { enforceLimit, requireAdmin } from '@/lib/server/guard';
 import { allowFields, handleRouteError, json, readJsonBody } from '@/lib/server/http';
 import { getSettings } from '@/lib/server/settings';
 import { siteUrl } from '@/lib/server/siteUrl';
-import { emailStaffInvite, inviteAccountant, listStaff } from '@/lib/server/staffAuth';
+import { auditStaffRestoreOnce, emailStaffInvite, inviteAccountant, listStaff } from '@/lib/server/staffAuth';
 
-/** Settings → Security → Accountant access: who has read-only access (owner only). */
+/**
+ * Settings → Security → Accountant access: who has read-only access (owner only). `reinvite`: the
+ * accountants a backup restore revoked, for the owner to invite again.
+ */
 export async function GET(req: Request) {
   try {
     await requireAdmin(req);
-    return json({ accounts: listStaff() });
+    // In case the start-up step could not write it (it is written once either way).
+    auditStaffRestoreOnce();
+    const accounts = listStaff();
+    return json({ accounts, reinvite: accounts.filter((a) => a.status === 'revoked' && a.revokedBy === 'restore').map((a) => a.email) });
   } catch (err) {
     return handleRouteError(err, 'admin/staff');
   }

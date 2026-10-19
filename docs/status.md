@@ -28,6 +28,9 @@ One row per release. Benchmarks run `npm run test:load` on the same 4 vCPU host,
 | BUH-01.01.00 | 2026-10-14 | branch 753 / 662 / 729; main 769 / 729 / 605 (p50 82–88 vs 79–86 ms; p95 139–148 vs 128–210 ms) | branch 568 / 598 / 525; main 591 / 495 / 490 | 0 on the branch (main has no `/api/products`, so its catalogue runs fail by design) | 118 passed | 0 vulnerabilities | Two reviews (security, correctness); no automated scanner here |
 | BUH-01.00.00 | 2026-10-14 | branch 707 / 748 / 757 / 751; main 777 / 746 / 759 / 643 (p50 81–87 ms both; p95 136–170 vs 119–152 ms) | branch 598 / 467 / 501 / 497; main 548 / 547 / 622 / 513 (p50 78–100 vs 74–86 ms) | 0 | 76 passed | 0 vulnerabilities | No new scan (not available here) |
 
+**Known limits**
+- **Going back to a version before BUH-02.17 while UAE VAT is on:** that version places orders without VAT (no `order_vat`, no tax invoice) and leaves the VAT documents alone. Money → VAT flags every order placed after VAT was switched on that has no VAT breakdown, and the VAT return CSV lists them; check those with your accountant. Turn VAT off before going back, if you can.
+
 **Notes for BUH-02.03.00**
 - Three alternating rounds against main at BUH-02.02.00: level (the branch slightly ahead, within run-to-run spread).
 - The new readability test reproduced the reported problem on main (labels at 1.12:1 in dark mode) and passes on the branch in light and dark mode at both widths.

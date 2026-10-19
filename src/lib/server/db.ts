@@ -569,9 +569,35 @@ export function getDb(): DB {
   return db;
 }
 
+/** Things to do once the outermost transaction has committed (dropped if it, or the part that queued them, rolls back). */
+const commitHooks: Array<() => void> = [];
+
 /** Run fn in one transaction (IMMEDIATE, so concurrent writers queue instead of failing mid-way). */
 export function inTransaction<T>(fn: () => T): T {
-  return getDb().transaction(fn).immediate();
+  const mark = commitHooks.length;
+  let out: T;
+  try {
+    out = getDb().transaction(fn).immediate();
+  } catch (err) {
+    commitHooks.length = mark;
+    throw err;
+  }
+  if (!getDb().inTransaction) {
+    for (const hook of commitHooks.splice(0)) {
+      try {
+        hook();
+      } catch {
+        // a hook never undoes a commit
+      }
+    }
+  }
+  return out;
+}
+
+/** Run fn once what is being written now is committed: at once outside a transaction, never if it rolls back. */
+export function afterCommit(fn: () => void): void {
+  if (getDb().inTransaction) commitHooks.push(fn);
+  else fn();
 }
 
 /** Consistent online backup to a file, safe while the shop is serving. */
