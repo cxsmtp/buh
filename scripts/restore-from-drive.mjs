@@ -9,7 +9,7 @@
 //   settings in DATA_DIR/shop.db and its secrets in DATA_DIR/drive-secrets.json (when run inside the
 //   running shop: podman exec beautifuluaehome …).
 // Only the shop's own copies count: files it marked (appProperties buhBackup=1) with a backup's
-// name, not stamped more than a day ahead. Copies in Drive are always encrypted: BACKUP_PASSPHRASE
+// name, not stamped more than a day ahead. Copies in Drive are always encrypted: the backup password
 // opens them, and restore-backup.mjs refuses one from Drive that is not.
 // Only Google's fixed addresses are called (oauth2.googleapis.com, www.googleapis.com). The download
 // is streamed to disk and checked against Drive's size and MD5 before the restore reads it.

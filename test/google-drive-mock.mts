@@ -72,6 +72,8 @@ export interface GoogleMock {
   userCode: string;
   refreshToken: string;
   userToken: string;
+  /** The Google account the device flow connects (Drive's about.get answers with it; '' answers 403). */
+  userEmail: string;
   revoked: Set<string>;
   /**
    * Called before each request is answered (after its body is read): may wait (to hold a request
@@ -103,6 +105,7 @@ export async function startGoogleMock(sa: { publicKey: crypto.KeyObject; email: 
     userCode: 'GQVQ-JKEC',
     refreshToken: `1//0gMockRefresh${crypto.randomBytes(16).toString('base64url')}`,
     userToken: `ya29.mock-user-${crypto.randomBytes(12).toString('hex')}`,
+    userEmail: 'shop.owner@gmail.com',
     revoked: new Set<string>(),
     before: null,
     pageLoop: false,
@@ -207,6 +210,11 @@ export async function startGoogleMock(sa: { publicKey: crypto.KeyObject; email: 
         const data = Buffer.concat(s.got);
         files.set(id, { id, name: s.name, parents: s.parents, data, createdTime: new Date().toISOString(), appProperties: s.appProperties, by: s.by });
         return send(200, { id, name: s.name, size: String(mock.tamper.size ? data.length + 1 : data.length), md5Checksum: mock.tamper.md5 ? '0'.repeat(32) : md5(data) });
+      }
+      // about.get (drive.file allows it): who is connected.
+      if (u.pathname === '/drive/v3/about' && req.method === 'GET') {
+        if (who !== 'user' || !mock.userEmail) return err(403, 'insufficientPermissions', 'Insufficient Permission');
+        return send(200, { user: { emailAddress: mock.userEmail, displayName: 'Shop Owner' } });
       }
       // Create a folder (metadata only).
       if (u.pathname === '/drive/v3/files' && req.method === 'POST') {

@@ -466,35 +466,40 @@ Under **Settings → Branding & bank → Bank transfer details**. These are **ne
 The line at the top of the Admin Hub shows when the last backup ran:
 
 - **green:** recent and emailed;
-- **amber:** taken but not emailed (check the `SMTP_*` settings), or emailed without a `BACKUP_PASSPHRASE`;
+- **amber:** taken but not emailed (check the `SMTP_*` settings), or emailed without a backup password;
 - **red:** failed or overdue.
 
 **Back up now** runs one immediately. Backups run every 12 hours on their own, with your expenses and every bill photo. Courier, SMS and Stripe keys are not in backups: after a restore, enter them again. Restoring: see HOSTINGER_DEPLOYMENT_GUIDE.md.
 
+#### Protect backups with a password
+
+Settings → System & backups → **Protect backups with a password**. Backups hold customers' names, phones and addresses; with a password every backup (emailed, on the server and in Google Drive) is encrypted.
+
+- **Make one for me:** the shop makes a strong password (six words and two digits). It is shown **once**: press **Copy** (or **Download as a text file**), save it in your password manager, tick **I saved it…**, then **Use this password**.
+- **Or type your own:** at least 12 characters, typed twice. A few words with dashes are easy to type and hard to guess.
+- **Change the password:** asks for your hub password again. Backups made before the change still need the old password: keep it until they are no longer needed. The card lists the earlier passwords' dates (never the passwords).
+- The card says **Backups are encrypted ✓** with the date, or **Not protected** in red. Without the password a backup can't be opened, by anyone, us included.
+- If `BACKUP_PASSPHRASE` is set on the server it wins, and the card says **Set on the server**.
+
 #### Copy each backup to Google Drive
 
-An off-server copy: if the server is lost, the shop can be rebuilt from Drive on a new one. Copies are always encrypted, so `BACKUP_PASSPHRASE` must be set first (keep it in your password manager: without it a copy can't be opened).
+An off-server copy: if the server is lost, the shop can be rebuilt from Drive on a new one. Copies are always encrypted: without a backup password the card offers **Make a password first** right there.
 
-**Connect my Google Drive (recommended, works with a personal Gmail):**
+**Connect my Google Drive (recommended, works with a personal Gmail):** Google lets an app use your Drive only once you have registered it in Google Cloud, so there is a one-time setup (about 10 minutes). The card guides you through it in **Set up Google Drive**: four steps, each with an **Open this page** button to the exact Google Cloud page and **Copy** buttons for what to type. Tick each step when done; the ticks are remembered.
 
-1. Go to console.cloud.google.com and make a project (any name).
-2. APIs & Services → Library → **Google Drive API** → **Enable**.
-3. Google Auth Platform → **Branding**: app name "Beautiful UAE Home backups", your Gmail as the support and contact email.
-4. Google Auth Platform → **Audience**: user type **External**; while it says **Testing**, add your own Gmail under **Test users**.
-5. Audience → **Publish app** (status **In production**): in Testing, Google cuts the connection off after 7 days. The shop asks only for `drive.file` (the files it makes itself), which is not a sensitive permission, so no Google review is needed; Google may still show "Google hasn't verified this app": press **Advanced** → **Go to … (unsafe)**, it is your own app.
-6. Google Auth Platform → **Data access** → **Add or remove scopes** → tick `…/auth/drive.file` → **Update** → **Save**.
-7. Google Auth Platform → **Clients** → **Create client** → type **TVs and Limited Input devices** → **Create**: copy the **Client ID** and **Client secret**.
-8. In the Admin Hub: Settings → System & backups → **Copy each backup to Google Drive** → **Connect my Google Drive**: paste the client ID and secret, press **Connect Google Drive**.
-9. On your phone or computer open **google.com/device**, sign in with your Gmail, type the code the hub shows, and press **Allow**. The hub says **Connected** within seconds.
-10. The shop makes a folder **Beautiful UAE Home backups** in your Drive and switches copies on. Press **Back up now** for the first copy.
-11. Press **Copy restore details** (your password is asked), and save the four lines in your password manager: a new server needs them to rebuild the shop.
+1. **Make a Google Cloud project**, and paste its project ID in the box (the next buttons then open in your project).
+2. **Switch on the Google Drive API** (**Enable**).
+3. **Name the app and publish it**: Branding (app name "Beautiful UAE Home backups", your Gmail, Audience **External**), Audience → **Publish app** (in Testing, Google cuts the connection off after 7 days), Data access (optional) → the `drive.file` scope.
+4. **Make the client**: type **TVs and Limited Input devices**, then **Download JSON**.
+
+Then **Upload the client file** (or paste the client ID and secret) and press **Connect Google Drive**. The code shows large: press **Copy the code** and **Open google.com/device**, sign in with your Gmail, enter the code and press **Allow** (if Google says the app isn't verified: **Advanced** → **Go to Beautiful UAE Home backups**: it is your own app). The hub notices by itself, says **Connected to** your Gmail, and makes the first copy at once. Then press **Copy restore details** (your password is asked) and save the four lines in your password manager: a new server needs them.
 
 **Or a service account (Google Workspace shared drives only):**
 
 1. Go to console.cloud.google.com, make a project, and switch on the **Google Drive API**.
 2. IAM & Admin → **Service accounts** → **Create service account** (no roles) → **Keys** → **Add key** → **JSON**: keep the downloaded file safe.
 3. In a **shared drive**, add the service account's email (in the JSON file) as **Content manager**, and make a folder. (A personal Drive folder refuses its uploads: Google gives a service account no storage of its own.)
-4. In the Admin Hub, choose **A service account and a shared drive**, paste the whole JSON file and the folder's link, press **Test connection**, tick **Copy each backup to Google Drive**, and press **Save**.
+4. In the Admin Hub, open **Advanced (Google Workspace)**, choose **A service account and a shared drive**, paste the whole JSON file and the folder's link, press **Test connection**, tick **Copy each backup to Google Drive**, and press **Save**.
 
 - The status line at the top of the Admin Hub says when the last copy reached Drive; the card shows its time and size. **Back up now** finishes as soon as the backup is made: the copy then goes up on its own, and the status line shows how far it is ("Copying to Google Drive: … of …").
 - A failed copy never stops the local backup: you get an alert (email, and Settings → System & backups → Health) until a copy works again. If Google stops accepting the connection (you removed the app's access, or it ran out), the alert says **Reconnect Google Drive**: press it and enter the new code.

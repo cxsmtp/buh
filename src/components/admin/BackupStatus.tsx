@@ -4,6 +4,7 @@ import React, { useEffect, useState } from 'react';
 import { AlertTriangle, CheckCircle2, DatabaseBackup, Loader2, XCircle } from 'lucide-react';
 import { getJson, postJson } from '@/lib/apiClient';
 import { copyingText, mb, type DriveCopying } from './settings/DriveBackupCard';
+import { BACKUP_PASSWORD_EVENT } from './settings/BackupPasswordCard';
 
 interface Health {
   level: 'ok' | 'warning' | 'failing';
@@ -42,7 +43,12 @@ export const BackupStatus: React.FC = () => {
       });
     load();
     const t = setInterval(load, 5 * 60_000);
-    return () => clearInterval(t);
+    // A backup password just set (or changed): the "unencrypted" notice goes at once.
+    window.addEventListener(BACKUP_PASSWORD_EVENT, load);
+    return () => {
+      clearInterval(t);
+      window.removeEventListener(BACKUP_PASSWORD_EVENT, load);
+    };
   }, []);
 
   // A copy to Google Drive going up after the backup: follow it every few seconds until it is done.

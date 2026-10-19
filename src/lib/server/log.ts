@@ -40,6 +40,20 @@ const GOOGLE_TOKEN = /\bya29\.[A-Za-z0-9._-]+/g;
 const GOOGLE_REFRESH = /(?<![\w/])1\/\/[A-Za-z0-9._-]{10,}/g;
 const GOOGLE_CLIENT_SECRET = /\bGOCSPX-[A-Za-z0-9_-]{6,}/g;
 
+// Secrets known at run time (the backup password): removed wherever they appear, whatever the key.
+const KNOWN_SECRETS = new Set<string>();
+
+/** Never log this value (8 characters or more), wherever it appears: the backup password. */
+export function addRedactedValue(value: string): void {
+  if (typeof value === 'string' && value.length >= 8 && KNOWN_SECRETS.size < 100) KNOWN_SECRETS.add(value);
+}
+
+function withoutKnownSecrets(s: string): string {
+  let out = s;
+  for (const v of KNOWN_SECRETS) if (out.includes(v)) out = out.split(v).join('[redacted]');
+  return out;
+}
+
 export function maskPhone(phone: string): string {
   const digits = phone.replace(/\D/g, '');
   if (digits.length < 6) return '***';
@@ -55,7 +69,8 @@ function scrubString(s: string, max = 500): string {
   // Masked before it is cut, so a cut can never leave half a phone number unmasked.
   // A private key is removed whole, or what is left of it after the cut (from its BEGIN line on);
   // a bare key body (base64 DER starts MII…) too.
-  return maskSecretPaths(s.slice(0, max * 2).replace(PEM_KEY, '[private key redacted]').replace(BARE_KEY, '[private key redacted]').replace(GOOGLE_REFRESH, '1//[redacted]'))
+  // Known secrets first, before the cut (a password is at most 256 characters), so no half of one is left.
+  return maskSecretPaths(withoutKnownSecrets(s.slice(0, max * 2 + 300)).slice(0, max * 2).replace(PEM_KEY, '[private key redacted]').replace(BARE_KEY, '[private key redacted]').replace(GOOGLE_REFRESH, '1//[redacted]'))
     .replace(STRIPE_SECRET, (_m, key: string | undefined, intent: string | undefined) => (key ? `${key}[redacted]` : `${intent}_[redacted]`))
     .replace(ANTHROPIC_KEY, 'sk-ant-[redacted]')
     .replace(GOOGLE_KEY, (_m, classic: string | undefined, auth: string | undefined) => `${classic ?? auth}[redacted]`)

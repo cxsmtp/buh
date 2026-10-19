@@ -9,6 +9,7 @@ import { kvGet, kvSet } from './kv';
 import { testStandIn } from './testStandIn';
 import { logEvent } from './log';
 import { safeRequest, type SafeResponse } from './outbound';
+import { backupPassphrase } from './backupSecret';
 
 /**
  * Off-server copies of every backup, in a Google Drive folder (Settings → System & backups →
@@ -31,8 +32,13 @@ import { safeRequest, type SafeResponse } from './outbound';
  * upload, 8 MB at a time read from disk (never the whole file in memory), and checks Google's size
  * and MD5 of the result against the file's own.
  *
- * - Only encrypted backups (BACKUP_PASSPHRASE) ever go to Drive: without the passphrase, copies
- *   can't be switched on and stop (an alert) if it is later removed.
+ * - Only encrypted backups (a backup password: backupSecret.ts) ever go to Drive: without one, copies
+ *   can't be switched on and stop (an alert) if it is later removed. Connecting before there is a
+ *   password marks the setting "switch on once protected": setting the password switches copies on.
+ * - Setting it up (the hub's "Set up Google Drive" wizard): the steps the owner has ticked and the
+ *   Google Cloud project id (for the console links) are kept in kv `backup:drive-wizard` (nothing
+ *   secret). The connected Google account's email comes from Drive's about.get (drive.file allows
+ *   it: no extra permission), shown as "Connected to …".
  * - The newest `keep` copies (default 30) are kept; older ones that this feature uploaded (their
  *   Drive file ids are recorded) are deleted. Nothing else in the folder is ever touched.
  * - The key, the OAuth client secret, the refresh token and a device sign-in in progress are
@@ -76,6 +82,8 @@ const FILES_KEY = 'backup:drive-files';
 const DEVICE_KEY = 'backup:drive-device';
 /** The secrets, outside the database: never in a backup (createBackup takes only shop.db and the shop's folders). */
 export const DRIVE_SECRETS_FILE = 'drive-secrets.json';
+/** The setup wizard's ticks and the Google Cloud project id (not secret). */
+const WIZARD_KEY = 'backup:drive-wizard';
 
 /** service_account: a key and a folder shared with it (shared drives). oauth: the owner's own Drive, connected with a code. */
 export type DriveMode = 'oauth' | 'service_account';
@@ -95,6 +103,10 @@ interface DriveConfig {
   refreshToken: string;
   oauthFolderId: string;
   connectedAt?: string;
+  /** The Google account connected (Drive's about.get), when Google said; shown as "Connected to …". */
+  accountEmail?: string;
+  /** Connected before there was a backup password: copies switch on when one is set. */
+  enableWhenProtected?: boolean;
   /** Google refused the refresh token (revoked, or expired): "Reconnect Google Drive". */
   needsReconnect?: boolean;
   savedAt?: string;
@@ -541,7 +553,8 @@ export type ConnectOutcome = 'none' | 'pending' | 'connected' | 'denied' | 'expi
  * Step 2, asked by the hub every few seconds: the server asks Google whether the owner has
  * approved, but never sooner than Google's interval (raised by 5 seconds on every slow_down), and
  * stops when the device code expires. Approved: the refresh token is saved, the shop's folder is
- * made (or the saved one kept), and copies are switched on when BACKUP_PASSPHRASE is set.
+ * made (or the saved one kept), and copies are switched on when there is a backup password (or as
+ * soon as one is set).
  */
 export async function pollDriveConnect(by = '', now = Date.now()): Promise<{ outcome: ConnectOutcome; status: DriveStatus }> {
   const p = pendingDevice();
@@ -613,8 +626,10 @@ export async function pollDriveConnect(by = '', now = Date.now()): Promise<{ out
     oauthFolderId: keepFolder,
     connectedAt: at,
     needsReconnect: false,
-    // Connecting is the owner asking for copies: on, when they can be encrypted.
+    // Connecting is the owner asking for copies: on, when they can be encrypted (else once they can).
     enabled: passphraseSet(),
+    enableWhenProtected: !passphraseSet(),
+    accountEmail: p.clientId === cur.oauthClientId ? cur.accountEmail : undefined,
     savedAt: at,
     savedBy: by,
   };
@@ -630,16 +645,31 @@ export async function pollDriveConnect(by = '', now = Date.now()): Promise<{ out
   } catch (err) {
     logEvent('warn', 'backup_drive_folder_later', { error: err instanceof Error ? err.message : String(err) });
   }
-  if (folder !== keepFolder) {
-    const latest = config();
-    // Unless the setting changed meanwhile (disconnected, another client).
-    if (sameTarget(latest, next)) {
-      saveConfig({ ...latest, oauthFolderId: folder });
-      kvSet(FILES_KEY, []);
-    }
+  // Who is connected (Drive's about.get: allowed with drive.file), best effort.
+  const email = await driveAccountEmail(access);
+  const latest = config();
+  // Unless the setting changed meanwhile (disconnected, another client).
+  if (sameTarget(latest, next) && (folder !== keepFolder || (email && email !== latest.accountEmail))) {
+    saveConfig({ ...latest, oauthFolderId: folder, ...(email ? { accountEmail: email } : {}) });
+    if (folder !== keepFolder) kvSet(FILES_KEY, []);
   }
   audit('backup.drive_connected', { by, clientId: p.clientId, folderId: folder, enabled: next.enabled });
   return { outcome: 'connected', status: driveStatus() };
+}
+
+export const DRIVE_ABOUT_URL = 'https://www.googleapis.com/drive/v3/about';
+const ACCOUNT_EMAIL = /^[A-Za-z0-9._%+-]{1,64}@[A-Za-z0-9.-]{1,180}\.[A-Za-z]{2,24}$/;
+
+/** The connected Google account's email (Drive's about.get; drive.file allows it), or '' when Google does not say. */
+export async function driveAccountEmail(token: string): Promise<string> {
+  try {
+    const res = await google(`${DRIVE_ABOUT_URL}?fields=user(emailAddress)`, { method: 'GET', headers: { Authorization: `Bearer ${token}` }, timeoutMs: 10_000, maxBytes: 16 * 1024 });
+    const user = (jsonOf(res).user ?? {}) as { emailAddress?: unknown };
+    const email = typeof user.emailAddress === 'string' ? user.emailAddress.trim().toLowerCase() : '';
+    return res.ok && ACCOUNT_EMAIL.test(email) ? email : '';
+  } catch {
+    return '';
+  }
 }
 
 /** Tests: forget the OAuth access token in hand. */
@@ -829,10 +859,26 @@ export async function uploadToDrive(token: string, folderId: string, file: strin
 // ── Copying each backup ─────────────────────────────────────────────────────
 
 function passphraseSet(): boolean {
-  return Boolean(process.env.BACKUP_PASSPHRASE);
+  return Boolean(backupPassphrase());
 }
 
-const NO_PASSPHRASE = 'BACKUP_PASSPHRASE is not set: copies to Google Drive are always encrypted, so none can be made. Set BACKUP_PASSPHRASE (see the deployment guide), then try again.';
+const NO_PASSPHRASE = 'No backup password is set: copies to Google Drive are always encrypted, so none can be made. Make one in Settings → System & backups → Protect backups with a password.';
+
+/**
+ * A backup password was just set: a Google Drive connected while there was none (copies waiting to
+ * be protected) is switched on now. Returns whether copies were switched on.
+ */
+export function enableDriveIfWaiting(by = ''): boolean {
+  const cfg = config();
+  if (!cfg.enableWhenProtected || !passphraseSet()) return false;
+  const ready = cfg.mode === 'oauth' && Boolean(cfg.refreshToken) && !cfg.needsReconnect;
+  saveConfig({ ...cfg, enabled: cfg.enabled || ready, enableWhenProtected: false });
+  if (ready && !cfg.enabled) {
+    audit('backup.drive_saved', { by, enabled: true, mode: cfg.mode, folderId: activeFolder(cfg), keep: cfg.keep, reason: 'backup password set' });
+    return true;
+  }
+  return false;
+}
 
 function isSealed(file: string): boolean {
   const fd = fs.openSync(file, 'r');
@@ -975,6 +1021,43 @@ async function copyOnce(file: string, reason: string): Promise<DriveState | null
   return state();
 }
 
+// ── The setup wizard ────────────────────────────────────────────────────────
+
+/** The wizard's steps, in order (the owner ticks each one done in Google Cloud). */
+export const WIZARD_STEPS = ['project', 'api', 'consent', 'client'] as const;
+export type WizardStep = (typeof WIZARD_STEPS)[number];
+export interface DriveWizard {
+  done: WizardStep[];
+  projectId: string;
+}
+/** A Google Cloud project id: 6 to 30 lowercase letters, digits and hyphens, starting with a letter. */
+const PROJECT_ID = /^[a-z][a-z0-9-]{4,28}[a-z0-9]$/;
+
+export function driveWizard(): DriveWizard {
+  const v = kvGet<Partial<DriveWizard>>(WIZARD_KEY)?.data ?? {};
+  const done = Array.isArray(v.done) ? WIZARD_STEPS.filter((x) => (v.done as unknown[]).includes(x)) : [];
+  const projectId = typeof v.projectId === 'string' && PROJECT_ID.test(v.projectId) ? v.projectId : '';
+  return { done, projectId };
+}
+
+/** Save the wizard's ticks ({ done?: steps[], projectId?: string }); nothing secret. */
+export function saveDriveWizard(input: Record<string, unknown>): DriveWizard {
+  for (const k of Object.keys(input)) if (!['done', 'projectId'].includes(k)) throw new HttpError(400, `Unexpected field: ${k.slice(0, 40)}.`);
+  const cur = driveWizard();
+  const next: DriveWizard = { ...cur };
+  if (input.done !== undefined) {
+    if (!Array.isArray(input.done) || input.done.length > WIZARD_STEPS.length || input.done.some((x) => !WIZARD_STEPS.includes(x as WizardStep))) throw new HttpError(400, `done: a list of ${WIZARD_STEPS.join(', ')}.`);
+    next.done = WIZARD_STEPS.filter((x) => (input.done as unknown[]).includes(x));
+  }
+  if (input.projectId !== undefined) {
+    const id = typeof input.projectId === 'string' ? input.projectId.trim().toLowerCase() : null;
+    if (id === null || (id && !PROJECT_ID.test(id))) throw new HttpError(400, 'Project ID: 6 to 30 lowercase letters, digits and dashes, as Google shows it (for example beautiful-uae-home-123456).');
+    next.projectId = id;
+  }
+  kvSet(WIZARD_KEY, next);
+  return next;
+}
+
 // ── Settings → System & backups ─────────────────────────────────────────────
 
 export interface DriveStatus {
@@ -996,6 +1079,12 @@ export interface DriveStatus {
   needsReconnect: boolean;
   oauthFolderId: string;
   folderName: string;
+  /** The Google account connected, when Google said (else ''). */
+  accountEmail: string;
+  /** Connected before there was a backup password: copies switch on when one is set. */
+  waitingForPassword: boolean;
+  /** The setup wizard: steps ticked, the Google Cloud project id. */
+  wizard: DriveWizard;
   /** A connection in progress: the code to enter and where (never the device code). */
   connecting: { userCode: string; verificationUrl: string; expiresAt: string; interval: number } | null;
   /** A copy going up now (the backup is already done): its file, bytes sent of its size. */
@@ -1031,6 +1120,9 @@ export function driveStatus(): DriveStatus {
     needsReconnect: Boolean(cfg.needsReconnect),
     oauthFolderId: cfg.oauthFolderId,
     folderName: APP_FOLDER_NAME,
+    accountEmail: cfg.mode === 'oauth' && cfg.refreshToken ? cfg.accountEmail ?? '' : '',
+    waitingForPassword: Boolean(cfg.enableWhenProtected && !cfg.enabled && cfg.refreshToken),
+    wizard: driveWizard(),
     connecting: p && p.expiresAt > Date.now() ? { userCode: p.userCode, verificationUrl: p.verificationUrl, expiresAt: new Date(p.expiresAt).toISOString(), interval: p.interval } : null,
     copying: running && progress ? { ...progress } : null,
     lastAttemptAt: s.lastAttemptAt,
@@ -1096,7 +1188,7 @@ export async function updateDriveSettings(input: Record<string, unknown>, by = '
 /**
  * Save Settings → Google Drive: { enabled?, mode?, folderId?, keep?, serviceAccountKey?, disconnect? }.
  * A JSON key replaces the saved one; null removes it; missing or empty keeps it. `disconnect: true`
- * forgets the Google Drive connection (the refresh token). Switching on needs BACKUP_PASSPHRASE and,
+ * forgets the Google Drive connection (the refresh token). Switching on needs a backup password and,
  * for the mode chosen, a connection (oauth) or a key and a folder (service account).
  */
 export function saveDriveSettings(input: Record<string, unknown>, by = ''): DriveStatus {
@@ -1106,6 +1198,8 @@ export function saveDriveSettings(input: Record<string, unknown>, by = ''): Driv
   if (input.enabled !== undefined) {
     if (typeof input.enabled !== 'boolean') throw new HttpError(400, 'enabled must be true or false.');
     next.enabled = input.enabled;
+    // The owner said: no longer "switch on once protected".
+    next.enableWhenProtected = false;
   }
   if (input.mode !== undefined) {
     if (input.mode !== 'oauth' && input.mode !== 'service_account') throw new HttpError(400, 'mode: oauth or service_account.');
@@ -1140,12 +1234,13 @@ export function saveDriveSettings(input: Record<string, unknown>, by = ''): Driv
     if (input.disconnect !== true) throw new HttpError(400, 'disconnect must be true.');
     next.refreshToken = '';
     next.needsReconnect = false;
+    next.accountEmail = undefined;
     if (next.mode === 'oauth') next.enabled = false;
     setPending(null);
     _resetDriveUserToken();
   }
   if (next.enabled) {
-    if (!passphraseSet()) throw new HttpError(400, `Not switched on. ${NO_PASSPHRASE.replace(', then try again', ', restart the shop, then switch this on')}`, {}, { code: 'passphrase_required' });
+    if (!passphraseSet()) throw new HttpError(400, `Not switched on. ${NO_PASSPHRASE}`, {}, { code: 'passphrase_required' });
     if (next.mode === 'oauth' && !next.refreshToken) throw new HttpError(400, 'Press Connect Google Drive before switching this on.');
     if (next.mode === 'service_account' && !next.privateKey) throw new HttpError(400, 'Paste the service account’s JSON key before switching this on.');
     if (next.mode === 'service_account' && !next.folderId) throw new HttpError(400, 'Paste the Google Drive folder’s link before switching this on.');

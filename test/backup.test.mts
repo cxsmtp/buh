@@ -67,7 +67,7 @@ test('encrypted backups: unreadable without the passphrase, restorable with it',
     const raw = fs.readFileSync(result.file);
     assert.ok(!raw.includes(Buffer.from('Fatima')), 'no plain customer data');
     assert.throws(() => backup.openBackup(raw), /encrypted/);
-    assert.throws(() => backup.openBackup(raw, 'wrong'), /Wrong passphrase/);
+    assert.throws(() => backup.openBackup(raw, 'wrong'), /Wrong password: this backup was made with another backup password \(fingerprint [a-f0-9]{12}\)/);
     assert.ok(backup.openBackup(raw, 'correct horse battery staple').some((e) => e.name === 'shop.db'));
 
     const target = path.join(os.tmpdir(), `buh-restore-enc-${Date.now()}`);
@@ -114,7 +114,9 @@ test('scheduled run: emails the backup with flat files to BACKUP_EMAIL and recor
     for (const f of ['orders.csv', 'customers.csv', 'products.csv', 'order_items.csv', '.tar.gz']) assert.ok(mails[0].raw.includes(f), f);
     // Emailed in the clear: flagged until a passphrase is set.
     assert.equal(backup.backupHealth().level, 'warning');
-    assert.match(backup.backupHealth().notice ?? '', /BACKUP_PASSPHRASE/);
+    // The alert points to the card in the hub, never to a server setting.
+    assert.equal(backup.backupHealth().notice, 'Backups are emailed unencrypted: anyone with a backup email can read customers’ details. Protect them with a password in Settings → System & backups.');
+    assert.doesNotMatch(backup.backupHealth().notice ?? '', /BACKUP_PASSPHRASE|env/i);
     process.env.BACKUP_PASSPHRASE = 'short';
     assert.match(backup.backupHealth().notice ?? '', /at least 12/);
     process.env.BACKUP_PASSPHRASE = 'a long enough passphrase';

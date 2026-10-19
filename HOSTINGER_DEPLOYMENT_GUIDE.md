@@ -45,7 +45,7 @@ Everything the shop stores lives in one Docker volume and is backed up every 12 
    ```
    - Fill in `DOMAIN`, `ACME_EMAIL`, `NEXT_PUBLIC_APP_URL` and `NEXT_PUBLIC_SUPPORT_EMAIL`. `NEXT_PUBLIC_APP_URL` must be the `https://` address you open the shop at: Admin Hub passkeys only work there.
    - **Fill in the backup email (`SMTP_*`, `BACKUP_EMAIL`).**
-   - Set a `BACKUP_PASSPHRASE` of at least 12 characters, and store it in your password manager. Without it, customer data is emailed unencrypted.
+   - The backup password is set in the Admin Hub (Settings → System & backups → **Protect backups with a password**: **Make one for me**, then save it in your password manager). `BACKUP_PASSPHRASE` here is optional: if set (at least 12 characters), it wins over the hub's. Without either, customer data is emailed unencrypted.
 6. **Start** (pulls the ready-made image `ghcr.io/cxsmtp/buh:latest`):
    ```bash
    docker compose pull app-blue && docker compose up -d
@@ -90,7 +90,7 @@ The Admin Hub has no button or address on the shop: addresses like `/admin` are 
 - [ ] **Instagram / Facebook Shopping (optional):** add `https://yourdomain.ae/feeds/meta.csv` as a scheduled feed in Meta Commerce Manager.
 - [ ] **Outbound access:** the server fetches exchange rates (open.er-api.com) daily and festival dates (calendar.google.com) weekly; if they are blocked, built-in festival dates are used and no local currency is shown.
 - [ ] **Backups:** press **Back up now** at the top of the Admin Hub.
-  - Check that the email arrives (with `BACKUP_PASSPHRASE`, one encrypted `.tar.gz.enc` file; without it, the CSV files and the `.tar.gz`).
+  - Check that the email arrives (with a backup password, one encrypted `.tar.gz.enc` file; without it, the CSV files and the `.tar.gz`).
   - The status line should be green.
 - [ ] **Restore drill:** restore that backup on your computer (section 4), so you know it works before you need it.
 - [ ] **A real test order:** place it from your phone, then confirm, book and cancel it in the Admin Hub.
@@ -110,7 +110,7 @@ The shop backs itself up every 12 hours, and straight after a restart if one is 
 - **The audit log.**
 - **A checksum manifest:** a damaged file is detected.
 
-**Encryption:** with `BACKUP_PASSPHRASE` set, the email carries one AES-256 encrypted file instead of plain customer data. That is recommended, because email is not a safe place for customers' addresses and phone numbers.
+**Encryption:** with a backup password (set in the Admin Hub: Settings → System & backups → **Protect backups with a password**; or `BACKUP_PASSPHRASE` on the server, which wins), the email carries one AES-256 encrypted file instead of plain customer data. That is recommended, because email is not a safe place for customers' addresses and phone numbers. The hub's password is kept in `DATA_DIR/backup-secret.json` (owner-only), never in a backup. Changing it leaves older backups needing the old one; the restore names the date of the password a backup needs. Inside the running shop the restore script knows the current password by itself (`podman exec beautifuluaehome node scripts/restore-backup.mjs …`).
 
 **Size:** one backup holds at most 6 GB of data (database, photos, receipts, bills, audit log); it is made and restored a piece at a time, so it needs disk, not memory. From 80% the Admin Hub and an email warn you; beyond it the backup is refused (and you are told) instead of making one too big to restore.
 
@@ -486,7 +486,7 @@ Day to day: Settings → Versions in the Admin Hub; the commands in the section 
    ```bat
    scp buh-backup-20261016-1200.tar.gz.enc root@your-server-ip:/root/
    ```
-2. On the server: stop the updater, then the shop, and restore over the new shop's data (the data before is kept aside in `replaced-<time>/`). The passphrase is the laptop shop's `BACKUP_PASSPHRASE`; it is typed without showing and passed by name only, so it is not on a command line or in the shell history (a backup ending in `.tar.gz`, not `.enc`, needs none: press Enter):
+2. On the server: stop the updater, then the shop, and restore over the new shop's data (the data before is kept aside in `replaced-<time>/`). The passphrase is the laptop shop's backup password (from your password manager, or its `BACKUP_PASSPHRASE`); it is typed without showing and passed by name only, so it is not on a command line or in the shell history (a backup ending in `.tar.gz`, not `.enc`, needs none: press Enter):
    ```bash
    podman stop beautifuluaehome-updater && podman stop beautifuluaehome
    ```
@@ -507,14 +507,14 @@ Day to day: Settings → Versions in the Admin Hub; the commands in the section 
    ```
 3. Sign in with the new one-time password from `podman logs beautifuluaehome` (the admin account is not in backups) at your admin link (the backup keeps it; `podman exec beautifuluaehome node scripts/admin-link.mjs --new` makes a new one), re-enter the courier and SMS keys, and follow the Admin Hub's banner about passkeys (section 4).
 
-**Rebuilding on a new server from Google Drive** (the old server is lost; needs the copies in Google Drive, your `BACKUP_PASSPHRASE`, and either the four restore-details lines from "Connect my Google Drive" or the service account's `.json` key file):
+**Rebuilding on a new server from Google Drive** (the old server is lost; needs the copies in Google Drive, your backup password (from your password manager), and either the four restore-details lines from "Connect my Google Drive" or the service account's `.json` key file):
 
 1. Set up the new server with the steps above, up to the shop running (a new, empty shop).
 2. On the server: stop the updater, then the shop:
    ```bash
    podman stop beautifuluaehome-updater && podman stop beautifuluaehome
    ```
-3. Type the passphrase without showing it, passed by name only (not on a command line):
+3. Type the backup password without showing it, passed by name only (not on a command line):
    ```bash
    read -rs -p 'Backup passphrase: ' BACKUP_PASSPHRASE && export BACKUP_PASSPHRASE
    ```
