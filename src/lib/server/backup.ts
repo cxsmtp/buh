@@ -20,6 +20,7 @@ import { kvGet, kvSet } from './kv';
 import { expenseCsvFiles } from './expenses';
 import { toCsv } from './csv';
 import { blankDriveKeyIn, copyBackupToDrive } from './driveBackup';
+import { backupPassphrase, currentBackupKey, describeFingerprint, MIN_PASSPHRASE_LENGTH, passphraseFingerprintSync, passphraseSource, UNREADABLE_MESSAGE } from './backupSecret';
 
 /**
  * Backups, every 12 hours (BACKUP_INTERVAL_HOURS), taken by the running shop:
@@ -41,16 +42,18 @@ import { blankDriveKeyIn, copyBackupToDrive } from './driveBackup';
  *    since the backup may predate a revocation.
  *
  * All packed in one .tar.gz, streamed (each file read a piece at a time, compressed and encrypted
- * as it goes, so a big bills folder never sits in memory); with BACKUP_PASSPHRASE set it is
- * encrypted (AES-256-GCM, key from scrypt) to .tar.gz.enc. The data to back up may be at most
+ * as it goes, so a big bills folder never sits in memory); with a backup password set (Settings →
+ * System & backups → "Protect backups with a password", or BACKUP_PASSPHRASE on the server: see
+ * backupSecret.ts) it is encrypted (AES-256-GCM, key from scrypt) to .tar.gz.enc, its header naming
+ * the password's fingerprint and the day it was set (never the password). The data to back up may be at most
  * BACKUP_LIMITS.totalBytes (6 GB): the monitor warns from 80%, and beyond it the backup is refused
  * (and the owner told) rather than made too big to restore. It is emailed to
  * BACKUP_EMAIL through the SMTP server in SMTP_*, and the newest 14 are kept
  * in DATA_DIR/backups. Every run is recorded (backup-state.json and the audit
  * log) and shown in the admin hub; a failure is emailed when email works.
  *
- * With Settings → System & backups → "Copy each backup to Google Drive" switched on (and
- * BACKUP_PASSPHRASE set), each backup is also copied to a Drive folder (driveBackup.ts).
+ * With Settings → System & backups → "Copy each backup to Google Drive" switched on (and a
+ * backup password set), each backup is also copied to a Drive folder (driveBackup.ts).
  *
  * Restore: node scripts/restore-backup.mjs <file> <empty folder>, or --from-drive latest.
  */
@@ -294,12 +297,27 @@ async function* tarStream(items: PackItem[]): AsyncGenerator<Buffer> {
 // scrypt cost 2^17 (128 MB, about half a second): slow to guess offline.
 const SCRYPT_N = 131072;
 const SCRYPT_MAXMEM = 256 * 1024 * 1024;
-/** Shorter passphrases are accepted but flagged in the admin hub and the log. */
-export const MIN_PASSPHRASE_LENGTH = 12;
+/** Shorter passphrases are refused in the hub, and flagged in the admin hub and the log when set on the server. */
+export { MIN_PASSPHRASE_LENGTH };
 
-function sealHead(salt: Buffer, iv: Buffer, tag: Buffer): Buffer {
-  // Every field has a fixed length, so the head can be written before the tag is known and again after.
-  return Buffer.from(JSON.stringify({ kdf: 'scrypt', N: SCRYPT_N, r: 8, p: 1, salt: salt.toString('base64'), iv: iv.toString('base64'), tag: tag.toString('base64') }) + '\n');
+/**
+ * The encrypted backup's head. The salt, iv and tag have fixed lengths and the password's
+ * fingerprint and day are the same both times, so the head can be written before the tag is known
+ * and again after. `fp` and `fpSet` are hints only (older restore tools ignore them): which password
+ * a backup needs, never the password.
+ */
+function sealHead(salt: Buffer, iv: Buffer, tag: Buffer, fp = '', fpSet = ''): Buffer {
+  return Buffer.from(JSON.stringify({ kdf: 'scrypt', N: SCRYPT_N, r: 8, p: 1, salt: salt.toString('base64'), iv: iv.toString('base64'), tag: tag.toString('base64'), ...(fp ? { fp, fpSet } : {}) }) + '\n');
+}
+
+/** "This backup needs the password set on 1 Oct 2026": from the backup's head, or what this server remembers. */
+export function wrongPasswordMessage(head: { fp?: unknown; fpSet?: unknown }): string {
+  const fp = typeof head.fp === 'string' && /^[a-f0-9]{12}$/.test(head.fp) ? head.fp : '';
+  if (!fp) return 'Wrong passphrase, or the backup is damaged.';
+  const known = describeFingerprint(fp);
+  const day = (typeof head.fpSet === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(head.fpSet) ? head.fpSet : '') || known?.setAt?.slice(0, 10) || '';
+  const which = day ? `the backup password set on ${day}` : `another backup password (fingerprint ${fp})`;
+  return `Wrong password: this backup was made with ${which}. Backups made before a password change still need the old password.`;
 }
 
 export function seal(plain: Buffer, passphrase: string): Buffer {
@@ -325,7 +343,9 @@ export function unseal(sealed: Buffer, passphrase: string): Buffer {
   try {
     return Buffer.concat([decipher.update(rest.subarray(nl + 1)), decipher.final()]);
   } catch {
-    throw new Error('Wrong passphrase, or the backup is damaged.');
+    // The right password (its fingerprint matches) but unreadable: damaged, not a wrong password.
+    if (typeof head.fp === 'string' && head.fp && passphraseFingerprintSync(passphrase) === head.fp) throw new Error('The backup is damaged (the password is right, but the data does not check out).');
+    throw new Error(wrongPasswordMessage(head));
   }
 }
 
@@ -391,8 +411,8 @@ export async function createBackup(now = new Date()): Promise<BackupResult> {
 
     // Streamed: read, compressed (level 6: photos and receipts are already compressed; level 9
     // only costs time) and encrypted a piece at a time, off the main thread where it counts.
-    const passphrase = process.env.BACKUP_PASSPHRASE || '';
-    const encrypted = passphrase.length > 0;
+    const secret = await currentBackupKey();
+    const encrypted = Boolean(secret);
     const out = fs.createWriteStream(partial, { mode: 0o600, flags: 'wx' });
     let cipher: crypto.CipherGCM | null = null;
     let salt = Buffer.alloc(16);
@@ -401,16 +421,16 @@ export async function createBackup(now = new Date()): Promise<BackupResult> {
     if (encrypted) {
       salt = crypto.randomBytes(16);
       iv = crypto.randomBytes(12);
-      key = await scrypt(passphrase, salt, 32, { N: SCRYPT_N, r: 8, p: 1, maxmem: SCRYPT_MAXMEM });
+      key = await scrypt(secret!.passphrase, salt, 32, { N: SCRYPT_N, r: 8, p: 1, maxmem: SCRYPT_MAXMEM });
       cipher = crypto.createCipheriv('aes-256-gcm', key, iv);
       // The head with a blank tag; the real tag is written over it once everything is encrypted.
-      out.write(Buffer.concat([Buffer.from(BACKUP_MAGIC), sealHead(salt, iv, Buffer.alloc(16))]));
+      out.write(Buffer.concat([Buffer.from(BACKUP_MAGIC), sealHead(salt, iv, Buffer.alloc(16), secret!.fingerprint, secret!.setOn)]));
     }
     await pipeline(Readable.from(tarStream(items)), zlib.createGzip({ level: 6 }), cipher ?? new PassThrough(), out);
     if (cipher) {
       const fd = fs.openSync(partial, 'r+');
       try {
-        fs.writeSync(fd, sealHead(salt, iv, cipher.getAuthTag()), 0, undefined, Buffer.byteLength(BACKUP_MAGIC));
+        fs.writeSync(fd, sealHead(salt, iv, cipher.getAuthTag(), secret!.fingerprint, secret!.setOn), 0, undefined, Buffer.byteLength(BACKUP_MAGIC));
         fs.fsyncSync(fd);
       } finally {
         fs.closeSync(fd);
@@ -456,7 +476,7 @@ export function auditRestoreOnce(): boolean {
  */
 export function openBackup(payload: Buffer, passphrase = ''): TarEntry[] {
   const isSealed = payload.subarray(0, BACKUP_MAGIC.length).toString() === BACKUP_MAGIC;
-  if (isSealed && !passphrase) throw new Error('This backup is encrypted: give its BACKUP_PASSPHRASE.');
+  if (isSealed && !passphrase) throw new Error('This backup is encrypted: give its backup password.');
   const archive = isSealed ? unseal(payload, passphrase) : payload;
   const entries = readTar(zlib.gunzipSync(archive, { maxOutputLength: BACKUP_LIMITS.totalBytes + 64 * 1024 ** 2 }));
   const manifest = entries.find((e) => e.name === 'MANIFEST.sha256');
@@ -488,9 +508,9 @@ async function emailBackup(result: BackupResult) {
     `Backup of Beautiful UAE Home taken ${new Date().toUTCString()}.`,
     `Contents: ${result.summary}.`,
     fits
-      ? `Full backup attached: ${name} (${(result.size / 1024 / 1024).toFixed(1)} MB${result.encrypted ? ', encrypted with your BACKUP_PASSPHRASE' : ''}).`
+      ? `Full backup attached: ${name} (${(result.size / 1024 / 1024).toFixed(1)} MB${result.encrypted ? ', encrypted with your backup password' : ''}).`
       : `The full backup (${(result.size / 1024 / 1024).toFixed(1)} MB) is too large to email; it is on the server in the backups folder. ${result.encrypted ? '' : 'The CSV files are attached.'}`,
-    result.encrypted ? '' : 'Note: these files contain customer names, phone numbers and addresses. Set BACKUP_PASSPHRASE to receive them encrypted instead.',
+    result.encrypted ? '' : 'Note: these files contain customer names, phone numbers and addresses. Protect them with a password in the Admin Hub (Settings → System & backups) to receive them encrypted instead.',
     '',
     'To restore: node scripts/restore-backup.mjs <backup file> <empty folder> (see HOSTINGER_DEPLOYMENT_GUIDE.md).',
   ].filter((l) => l !== undefined);
@@ -581,16 +601,26 @@ export function backupHealth(now = Date.now()) {
   const hours = intervalHours();
   const last = state.lastSuccessAt ? Date.parse(state.lastSuccessAt) : 0;
   const overdue = !last || now - last > (hours + 1) * 3600_000;
-  const passphrase = process.env.BACKUP_PASSPHRASE || '';
-  const notice = !passphrase
+  // The password file there but unreadable: no backup is made (never unencrypted) until it is fixed.
+  let passphrase = '';
+  let unreadable = false;
+  try {
+    passphrase = backupPassphrase();
+  } catch {
+    unreadable = true;
+  }
+  // Points to the card in the hub (Settings → System & backups → Protect backups with a password).
+  const notice = unreadable
+    ? UNREADABLE_MESSAGE
+    : !passphrase
     ? emailConfigured()
-      ? 'Backups are emailed unencrypted: set BACKUP_PASSPHRASE.'
+      ? 'Backups are emailed unencrypted: anyone with a backup email can read customers’ details. Protect them with a password in Settings → System & backups.'
       : undefined
-    : passphrase.length < MIN_PASSPHRASE_LENGTH
-    ? `BACKUP_PASSPHRASE is short: use at least ${MIN_PASSPHRASE_LENGTH} characters.`
+    : passphraseSource() === 'env' && passphrase.length < MIN_PASSPHRASE_LENGTH
+    ? `The backup password set on the server is short: use at least ${MIN_PASSPHRASE_LENGTH} characters.`
     : undefined;
   const level: 'ok' | 'warning' | 'failing' =
-    state.lastError && (!last || Date.parse(state.lastAttemptAt || '') > last)
+    unreadable || (state.lastError && (!last || Date.parse(state.lastAttemptAt || '') > last))
       ? 'failing'
       : overdue
       ? 'failing'
@@ -602,7 +632,7 @@ export function backupHealth(now = Date.now()) {
     notice,
     intervalHours: hours,
     emailConfigured: emailConfigured(),
-    encrypted: Boolean(process.env.BACKUP_PASSPHRASE),
+    encrypted: Boolean(passphrase),
     nextDueAt: last ? new Date(last + hours * 3600_000).toISOString() : null,
     ...state,
   };

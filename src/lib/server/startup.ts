@@ -6,6 +6,7 @@ import { MIN_PASSPHRASE_LENGTH, auditRestoreOnce, emailConfigured, startBackupSc
 import { refreshPayHashes } from './bankPay';
 import { getDb } from './db';
 import { migrateDriveSecrets } from './driveBackup';
+import { backupPassphrase } from './backupSecret';
 import { backfillRefundLedger, normalizeBankStates, startUnconfirmedSweep } from './orders';
 import { startMonitor } from './monitor';
 import { startCardSweep } from './payments';
@@ -53,12 +54,19 @@ export async function onStartup() {
   if (process.env.NODE_ENV === 'production' && !emailConfigured()) {
     console.error('!! Backups are not emailed: set up email in Admin Hub → Settings → Email (or SMTP_HOST, SMTP_USER, SMTP_PASS and BACKUP_EMAIL in .env.production).');
   }
-  const passphrase = process.env.BACKUP_PASSPHRASE || '';
+  // The backup password: chosen in the hub (DATA_DIR/backup-secret.json) or BACKUP_PASSPHRASE.
+  let passphrase = '';
+  try {
+    passphrase = backupPassphrase();
+  } catch (err) {
+    console.error(`!! ${err instanceof Error ? err.message : String(err)}`);
+    passphrase = 'unreadable (reported above)';
+  }
   if (process.env.NODE_ENV === 'production' && passphrase.length < MIN_PASSPHRASE_LENGTH) {
     console.error(
       passphrase
         ? `!! BACKUP_PASSPHRASE is shorter than ${MIN_PASSPHRASE_LENGTH} characters: emailed backups are easier to crack.`
-        : '!! BACKUP_PASSPHRASE is not set: backups (customer names, phones, addresses) are emailed unencrypted.'
+        : '!! No backup password is set: backups (customer names, phones, addresses) are emailed unencrypted. Set one in Admin Hub → Settings → System & backups.'
     );
   }
 

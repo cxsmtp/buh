@@ -79,7 +79,7 @@ Copy `.env.production.example` to `.env.production`. The settings that matter mo
 - **`DOMAIN`, `ACME_EMAIL`:** for the automatic HTTPS certificate.
 - The SMS gateway, couriers, bank details and branding are set in the Admin Hub.
 - **`NEXT_PUBLIC_SUPPORT_EMAIL`:** shown to customers with non-UAE numbers.
-- **Backup email (`SMTP_*`, `BACKUP_EMAIL`, `BACKUP_PASSPHRASE`):** where the 12-hourly backups go.
+- **Backup email (`SMTP_*`, `BACKUP_EMAIL`):** where the 12-hourly backups go. Their password is set in the Admin Hub (Settings → System & backups); `BACKUP_PASSPHRASE` is optional and wins when set.
 - **Off-server copies (optional):** Admin Hub → Settings → System & backups → Copy each backup to Google Drive (connect your own Drive with a code, or a service account for shared drives; encrypted copies only). Rebuild a lost server from Drive: HOSTINGER_DEPLOYMENT_GUIDE.md.
 - **`DATA_DIR`:** the database, photos, receipts, backups and audit log (a Docker volume in production).
 - **`TRUST_PROXY=1`:** only behind the HTTPS proxy (Caddy or nginx); it also turns on the scanner slow-down.

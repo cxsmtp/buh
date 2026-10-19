@@ -104,7 +104,9 @@ for (const width of [375, 1280]) {
   test(`Connect my Google Drive at ${width}px: the code to enter, then connected; restore details after the password`, { skip }, async () => {
     const { ctx, page, errors } = await hub(width);
     const card = page.getByTestId('drive-backup-card');
-    assert.ok(await card.getByRole('radio', { name: /Connect my Google Drive/ }).isChecked());
+    // The recommended way, chosen by default; the service account tucked away under Advanced.
+    assert.ok(await card.getByRole('radio', { name: /Connect my Google Drive/, includeHidden: true }).isChecked());
+    assert.equal(await card.getByTestId('drive-advanced').getAttribute('open'), null);
     // Google: pending a few times, then the owner approves.
     google.deviceScript = ['pending', 'pending', 'pending', 'ok'];
     const first = width === 375;
@@ -116,12 +118,15 @@ for (const width of [375, 1280]) {
     const code = card.getByTestId('drive-connect-code');
     await code.waitFor();
     assert.equal(await card.getByTestId('drive-user-code').innerText(), 'GQVQ-JKEC');
-    assert.equal(await code.getByRole('link', { name: 'www.google.com/device' }).getAttribute('href'), 'https://www.google.com/device');
+    assert.equal(await code.getByRole('link', { name: 'Open google.com/device' }).getAttribute('href'), 'https://www.google.com/device');
     assert.deepEqual(await overflow(page), []);
     await card.scrollIntoViewIfNeeded();
     if (SHOTS) await card.screenshot({ path: path.join(SHOTS, `drive-connect-code-${width}.png`) });
     await card.getByTestId('drive-connected').waitFor({ timeout: 20_000 });
-    await card.getByTestId('drive-message').filter({ hasText: /^Connected\. Each backup is now copied/ }).waitFor();
+    await card.getByTestId('drive-message').filter({ hasText: /^Connected to shop\.owner@gmail\.com\. Making the first copy now/ }).waitFor();
+    assert.match(await card.getByTestId('drive-connected').innerText(), /Connected to shop\.owner@gmail\.com/);
+    // The first copy is made at once (Back up now, then the copy to Drive).
+    await card.getByTestId('drive-last-copy').filter({ hasText: /Last copy .*\(\d+ in Drive\)/ }).waitFor({ timeout: 20_000 });
     assert.ok(await card.getByRole('checkbox', { name: 'Copy each backup to Google Drive' }).isChecked());
     assert.equal(await card.getByLabel('Client secret').getAttribute('placeholder'), 'Saved (hidden)');
     assert.equal(await card.getByLabel('Client secret').inputValue(), '');
@@ -149,7 +154,9 @@ test('after connecting: Back up now copies to the shop’s folder; nothing secre
   assert.equal(run.drive.level, 'ok', JSON.stringify(run.drive));
   const folder = google.files.get(run.drive.oauthFolderId)!;
   assert.equal(folder.name, 'Beautiful UAE Home backups');
-  assert.equal([...google.files.values()].filter((f) => f.parents.includes(folder.id) && f.name.endsWith('.tar.gz.enc')).length, 1);
+  // The first copy made on connecting, and this one (one per minute: a copy with the same name replaces the earlier).
+  const inFolder = [...google.files.values()].filter((f) => f.parents.includes(folder.id) && f.name.endsWith('.tar.gz.enc'));
+  assert.ok(inFolder.length >= 1 && inFolder.length === run.drive.copies, `${inFolder.length} copies, ${run.drive.copies} recorded`);
   const status = await (await api('GET', '/api/admin/backup/drive')).text();
   for (const s of [OAUTH_CLIENT.secret, google.refreshToken, google.userToken]) assert.ok(!status.includes(s));
   const log = server.log();

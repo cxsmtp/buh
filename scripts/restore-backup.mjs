@@ -6,8 +6,11 @@
 //   In place, over the current data (STOP THE SHOP FIRST); the current data is moved
 //   aside to replaced-<time>/ (never deleted) and the backups/ folder is kept:
 //     node scripts/restore-backup.mjs buh-backup-….tar.gz /data --replace
-//   Encrypted backups need the passphrase:
+//   Encrypted backups need their backup password: BACKUP_PASSPHRASE when set, else (inside the
+//   running shop: podman exec beautifuluaehome …) the one chosen in the Admin Hub, read from
+//   DATA_DIR/backup-secret.json. Another one (an older backup, a new server) is typed:
 //     BACKUP_PASSPHRASE='…' node scripts/restore-backup.mjs buh-backup-….tar.gz.enc …
+//   A backup made with an earlier password is refused with the day that password was set.
 //   From the shop's copies in Google Drive (always encrypted; the service account from
 //   BUH_DRIVE_KEY / BUH_DRIVE_KEY_FILE and BUH_DRIVE_FOLDER, or the shop's saved settings):
 //     node scripts/restore-backup.mjs --from-drive latest [empty folder, default DATA_DIR]
@@ -38,6 +41,41 @@ const MIN_FREE = 256 * 1024 * 1024;
 const BILL_EXTS = ['jpg', 'png', 'webp', 'heic', 'pdf'];
 const BILL_FILE = new RegExp(`^expenses/[a-f0-9]{24}\\.(${BILL_EXTS.join('|')})$`);
 const args = process.argv.slice(2);
+const SECRET_FILE = 'backup-secret.json';
+
+/** The shop's backup password file (DATA_DIR/backup-secret.json), or {} when there is none. */
+function readSecretFile() {
+  const dir = process.env.DATA_DIR;
+  if (!dir) return {};
+  try {
+    const v = JSON.parse(fs.readFileSync(path.join(path.resolve(dir), SECRET_FILE), 'utf8'));
+    return v && typeof v === 'object' && !Array.isArray(v) ? v : {};
+  } catch {
+    return {};
+  }
+}
+const secretFile = readSecretFile();
+/** BACKUP_PASSPHRASE wins; else the password chosen in the Admin Hub (when run inside the shop). */
+const passphrase = process.env.BACKUP_PASSPHRASE || (typeof secretFile.passphrase === 'string' ? secretFile.passphrase : '');
+const passphraseFrom = process.env.BACKUP_PASSPHRASE ? 'BACKUP_PASSPHRASE' : passphrase ? `the shop’s backup password${typeof secretFile.setAt === 'string' && secretFile.setAt ? ` (set on ${secretFile.setAt.slice(0, 10)})` : ''}` : '';
+
+/** As src/lib/server/backupSecret.ts: SHA-256 of a slow scrypt of the password, 12 hex characters. */
+function fingerprintOf(pass) {
+  const key = crypto.scryptSync(pass, Buffer.from('buh-backup-password-fingerprint-v1'), 32, { N: 131072, r: 8, p: 1, maxmem: 256 * 1024 * 1024 });
+  return crypto.createHash('sha256').update(key).digest('hex').slice(0, 12);
+}
+
+/** Which password a backup needs, from its head (and what this server remembers of earlier ones). */
+function neededPassword(meta) {
+  const fp = typeof meta.fp === 'string' && /^[a-f0-9]{12}$/.test(meta.fp) ? meta.fp : '';
+  if (!fp) return '';
+  let day = typeof meta.fpSet === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(meta.fpSet) ? meta.fpSet : '';
+  if (!day) {
+    const known = [{ fingerprint: secretFile.fingerprint, setAt: secretFile.setAt }, ...(Array.isArray(secretFile.earlier) ? secretFile.earlier : [])].find((e) => e && e.fingerprint === fp);
+    if (known && typeof known.setAt === 'string') day = known.setAt.slice(0, 10);
+  }
+  return day ? `the backup password set on ${day}` : `another backup password (fingerprint ${fp})`;
+}
 const replace = args.includes('--replace');
 // --from-drive latest | <copy's file name> | <Drive file id> | list: a copy from Google Drive
 // (scripts/restore-from-drive.mjs), downloaded next to the restore, checked, then restored as any
@@ -64,8 +102,8 @@ if (fromDrive === '' || (fromDrive === null && !file) || !finalTarget || (fromDr
   console.error('   or: node scripts/restore-backup.mjs --from-drive <latest | copy name | list> [empty folder, default DATA_DIR] [--replace]');
   process.exit(2);
 }
-if (fromDrive !== null && !process.env.BACKUP_PASSPHRASE) {
-  console.error('Copies in Google Drive are encrypted: set BACKUP_PASSPHRASE (the shop’s own) to restore one.');
+if (fromDrive !== null && !passphrase) {
+  console.error('Copies in Google Drive are encrypted: give the backup password to restore one (BACKUP_PASSPHRASE=\'…\', or run it inside the shop, which knows its own).');
   process.exit(2);
 }
 if (!replace && fs.existsSync(finalTarget) && fs.readdirSync(finalTarget).length) {
@@ -97,6 +135,20 @@ function fail(message, code = 1) {
   process.exit(code);
 }
 
+/** Copy the backup password file (owner-only, without a password still waiting to be confirmed); never over one already there. */
+function keepSecret(from, to) {
+  try {
+    if (!fs.existsSync(from) || fs.existsSync(to)) return false;
+    const v = JSON.parse(fs.readFileSync(from, 'utf8'));
+    if (!v || typeof v !== 'object' || typeof v.passphrase !== 'string' || !v.passphrase) return false;
+    delete v.pending;
+    fs.writeFileSync(to, JSON.stringify(v), { mode: 0o600, flag: 'wx' });
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 // ── From Google Drive: fetched (and checked) into the folder being restored to ──
 let driveCopy = '';
 if (fromDrive !== null) {
@@ -119,6 +171,8 @@ const backupName = driveCopy ? `${driveCopy} (Google Drive)` : path.basename(fil
 // ── The stream: the file, decrypted if sealed, uncompressed ──────────────────
 let source;
 let sealed = false;
+// The backup named its password's fingerprint and the password given matches it: a failure is damage.
+let passwordMatches = false;
 {
   const fd = fs.openSync(file, 'r');
   const head = Buffer.alloc(4096);
@@ -126,8 +180,7 @@ let sealed = false;
   fs.closeSync(fd);
   if (head.subarray(0, MAGIC.length).toString() === MAGIC) {
     sealed = true;
-    const passphrase = process.env.BACKUP_PASSPHRASE;
-    if (!passphrase) fail('This backup is encrypted: set BACKUP_PASSPHRASE.', 2);
+    if (!passphrase) fail('This backup is encrypted: give its backup password (BACKUP_PASSPHRASE=\'…\'), or run this inside the shop, which knows its own.', 2);
     const nl = head.subarray(MAGIC.length, n).indexOf(0x0a);
     if (nl < 0) fail('Unknown backup encryption settings.');
     let meta;
@@ -137,6 +190,13 @@ let sealed = false;
       fail('Unknown backup encryption settings.');
     }
     if (![16384, 131072].includes(meta.N) || meta.r !== 8 || meta.p !== 1) fail('Unknown backup encryption settings.');
+    // The backup names its password's fingerprint (backups from BUH-02.18 on): a different one is
+    // refused now, saying which password it needs, rather than after reading the whole file.
+    const needed = neededPassword(meta);
+    if (needed) {
+      if (fingerprintOf(passphrase) !== meta.fp) fail(`Wrong password: this backup was made with ${needed}, not with ${passphraseFrom}. Backups made before a password change still need the old password: run again with BACKUP_PASSPHRASE='the old password'.`, 2);
+      passwordMatches = true;
+    }
     const key = crypto.scryptSync(passphrase, Buffer.from(meta.salt, 'base64'), 32, { N: meta.N, r: 8, p: 1, maxmem: 256 * 1024 * 1024 });
     const decipher = crypto.createDecipheriv('aes-256-gcm', key, Buffer.from(meta.iv, 'base64'));
     decipher.setAuthTag(Buffer.from(meta.tag, 'base64'));
@@ -256,11 +316,11 @@ try {
 } catch (err) {
   const text = String(err?.message ?? err);
   // Encrypted: anything unreadable is a wrong passphrase or damage (garbage in, before the tag says so).
-  fail(sealed || /auth|decrypt/i.test(text) ? 'Wrong passphrase, or the backup is damaged.' : `The backup could not be read: ${text}`);
+  fail(passwordMatches ? 'The backup is damaged (the password is right, but the data does not check out).' : sealed || /auth|decrypt/i.test(text) ? 'Wrong passphrase, or the backup is damaged.' : `The backup could not be read: ${text}`);
 }
 // The stream is fully read: the encryption tag (if any) is now checked.
 await new Promise((resolve) => (source.readableEnded || source.destroyed ? resolve() : source.once('close', resolve)));
-if (source.errored) fail('Wrong passphrase, or the backup is damaged.');
+if (source.errored) fail(passwordMatches ? 'The backup is damaged (the password is right, but the data does not check out).' : 'Wrong passphrase, or the backup is damaged.');
 
 // Check everything against the manifest; refuse anything else.
 if (!manifestText) fail('The backup has no manifest.');
@@ -352,6 +412,8 @@ if (replace) {
   fs.rmdirSync(target);
   // The same server: its audit key stays, so the restored audit log is still checked against it.
   if (fs.existsSync(path.join(aside, 'audit.key'))) fs.copyFileSync(path.join(aside, 'audit.key'), path.join(finalTarget, 'audit.key'));
+  // And its backup password (never in a backup): the restored shop keeps encrypting its backups.
+  if (keepSecret(path.join(aside, SECRET_FILE), path.join(finalTarget, SECRET_FILE))) console.log('The backup password chosen in the Admin Hub stays: the next backups are encrypted with it.');
   console.log(`Restored into ${finalTarget}: ${counts}. Integrity check: ok.`);
   console.log(`The previous data was moved to ${aside} (delete it once you are happy).`);
   console.log('Start the shop again. Admin sign-in: a new one-time password is printed in the log.');
@@ -364,6 +426,10 @@ if (replace) {
     fs.copyFileSync(liveKey, path.join(target, 'audit.key'));
     fs.chmodSync(path.join(target, 'audit.key'), 0o600);
     console.log(`This server's audit key was copied from ${live}, so the restored audit log checks out here.`);
+  }
+  // The running shop's backup password (never in a backup), so the restored shop keeps encrypting.
+  if (live && live !== path.resolve(target) && keepSecret(path.join(live, SECRET_FILE), path.join(target, SECRET_FILE))) {
+    console.log(`The backup password chosen in the Admin Hub was copied from ${live}: the restored shop encrypts its backups with it.`);
   }
   console.log(`Restored to ${target}: ${counts}. Integrity check: ok.`);
   console.log('Next: stop the shop, set DATA_DIR to this folder (or swap folders), start it, and sign in with the new one-time password from the log.');

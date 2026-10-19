@@ -75,7 +75,7 @@ test('encrypted: streamed both ways; a wrong passphrase or a damaged file restor
     const wrong = path.join(scratch, 'enc-wrong');
     const w = spawnSync(process.execPath, ['scripts/restore-backup.mjs', result.file, wrong], { encoding: 'utf8', env: { ...process.env, BACKUP_PASSPHRASE: 'wrong passphrase!' } });
     assert.notEqual(w.status, 0);
-    assert.match(w.stderr, /Wrong passphrase, or the backup is damaged/);
+    assert.match(w.stderr, /Wrong password: this backup was made with another backup password \(fingerprint [a-f0-9]{12}\), not with BACKUP_PASSPHRASE/);
     assert.ok(!fs.existsSync(wrong) || fs.readdirSync(wrong).length === 0, 'nothing left behind');
     // One byte changed in the middle: refused, nothing left behind.
     const bad = path.join(scratch, 'damaged.tar.gz.enc');
@@ -84,6 +84,7 @@ test('encrypted: streamed both ways; a wrong passphrase or a damaged file restor
     fs.writeFileSync(bad, bytes);
     const d = spawnSync(process.execPath, ['scripts/restore-backup.mjs', bad, path.join(scratch, 'enc-bad')], { encoding: 'utf8', env: { ...process.env } });
     assert.notEqual(d.status, 0);
+    assert.match(d.stderr, /damaged/);
     assert.ok(!fs.existsSync(path.join(scratch, 'enc-bad')) || fs.readdirSync(path.join(scratch, 'enc-bad')).length === 0);
     fs.rmSync(result.file);
   } finally {

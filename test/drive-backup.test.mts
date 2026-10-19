@@ -120,9 +120,9 @@ test('the token exchange: the JWT bearer grant at Google’s token address; kept
   drive._resetDriveToken();
 });
 
-test('switching copies on is refused without BACKUP_PASSPHRASE; a copy is never made while it is missing', async () => {
+test('switching copies on is refused without a backup password; a copy is never made while it is missing', async () => {
   delete process.env.BACKUP_PASSPHRASE;
-  assert.throws(() => drive.saveDriveSettings({ enabled: true, folderId: FOLDER, serviceAccountKey: sa.json }), (err: Error & { status?: number; details?: { code?: string } }) => err.status === 400 && err.details?.code === 'passphrase_required' && /BACKUP_PASSPHRASE/.test(err.message));
+  assert.throws(() => drive.saveDriveSettings({ enabled: true, folderId: FOLDER, serviceAccountKey: sa.json }), (err: Error & { status?: number; details?: { code?: string } }) => err.status === 400 && err.details?.code === 'passphrase_required' && /No backup password is set/.test(err.message) && !/BACKUP_PASSPHRASE/.test(err.message));
   assert.equal(drive.driveStatus().enabled, false);
   // Saving without switching on is fine (the key and folder are kept).
   drive.saveDriveSettings({ enabled: false, folderId: FOLDER, serviceAccountKey: sa.json });
@@ -135,7 +135,7 @@ test('switching copies on is refused without BACKUP_PASSPHRASE; a copy is never 
   assert.match(plain.file, /\.tar\.gz$/);
   const uploads = google.requests.filter((r) => r.path.startsWith('/upload/')).length;
   const st = await drive.copyBackupToDrive(plain.file);
-  assert.match(String(st?.lastError), /BACKUP_PASSPHRASE is not set/);
+  assert.match(String(st?.lastError), /No backup password is set/);
   assert.equal(google.requests.filter((r) => r.path.startsWith('/upload/')).length, uploads, 'nothing sent to Google');
   // An unencrypted file is refused even with a passphrase set.
   process.env.BACKUP_PASSPHRASE = PASS;
@@ -284,7 +284,7 @@ test('a failed copy raises the owner alert without failing the local backup; a g
 
   // Paused without the passphrase: also an alert.
   delete process.env.BACKUP_PASSPHRASE;
-  assert.match(String(monitor.currentProblems().find((x) => x.id === 'drive_backup')?.text), /paused: BACKUP_PASSPHRASE/);
+  assert.match(String(monitor.currentProblems().find((x) => x.id === 'drive_backup')?.text), /paused: No backup password is set/);
   process.env.BACKUP_PASSPHRASE = PASS;
 
   await backup.runBackup('manual');
@@ -380,14 +380,14 @@ test('one-command rebuild: --from-drive latest into an empty folder brings back 
 
   // Refusals: no passphrase, a folder that is not empty, a copy that is not there, a wrong passphrase (nothing left behind).
   const c = path.join(scratch, 'refusals');
-  assert.match((await restore(['--from-drive', 'latest', c], { ...env, BACKUP_PASSPHRASE: '' })).out, /set BACKUP_PASSPHRASE/);
+  assert.match((await restore(['--from-drive', 'latest', c], { ...env, BACKUP_PASSPHRASE: '' })).out, /give the backup password/);
   assert.match((await restore(['--from-drive', 'latest', a], env)).out, /not empty/);
   const missing = await restore(['--from-drive', 'buh-backup-19990101-0000.tar.gz.enc', c], env);
   assert.notEqual(missing.status, 0);
   assert.match(missing.out, /No copy called/);
   const wrong = await restore(['--from-drive', 'latest', c], { ...env, BACKUP_PASSPHRASE: 'not the passphrase' });
   assert.notEqual(wrong.status, 0);
-  assert.match(wrong.out, /Wrong passphrase/);
+  assert.match(wrong.out, /Wrong password: this backup was made with another backup password/);
   assert.ok(!fs.existsSync(c) || fs.readdirSync(c).length === 0, 'nothing left behind');
   fs.rmSync(scratch, { recursive: true, force: true });
 });
