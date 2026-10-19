@@ -55,7 +55,13 @@ export async function onStartup() {
     console.error('!! Backups are not emailed: set up email in Admin Hub → Settings → Email (or SMTP_HOST, SMTP_USER, SMTP_PASS and BACKUP_EMAIL in .env.production).');
   }
   // The backup password: chosen in the hub (DATA_DIR/backup-secret.json) or BACKUP_PASSPHRASE.
-  const passphrase = backupPassphrase();
+  let passphrase = '';
+  try {
+    passphrase = backupPassphrase();
+  } catch (err) {
+    console.error(`!! ${err instanceof Error ? err.message : String(err)}`);
+    passphrase = 'unreadable (reported above)';
+  }
   if (process.env.NODE_ENV === 'production' && passphrase.length < MIN_PASSPHRASE_LENGTH) {
     console.error(
       passphrase

@@ -20,7 +20,7 @@ import { kvGet, kvSet } from './kv';
 import { expenseCsvFiles } from './expenses';
 import { toCsv } from './csv';
 import { blankDriveKeyIn, copyBackupToDrive } from './driveBackup';
-import { backupPassphrase, currentBackupKey, describeFingerprint, MIN_PASSPHRASE_LENGTH, passphraseFingerprintSync, passphraseSource } from './backupSecret';
+import { backupPassphrase, currentBackupKey, describeFingerprint, MIN_PASSPHRASE_LENGTH, passphraseFingerprintSync, passphraseSource, UNREADABLE_MESSAGE } from './backupSecret';
 
 /**
  * Backups, every 12 hours (BACKUP_INTERVAL_HOURS), taken by the running shop:
@@ -601,9 +601,18 @@ export function backupHealth(now = Date.now()) {
   const hours = intervalHours();
   const last = state.lastSuccessAt ? Date.parse(state.lastSuccessAt) : 0;
   const overdue = !last || now - last > (hours + 1) * 3600_000;
-  const passphrase = backupPassphrase();
+  // The password file there but unreadable: no backup is made (never unencrypted) until it is fixed.
+  let passphrase = '';
+  let unreadable = false;
+  try {
+    passphrase = backupPassphrase();
+  } catch {
+    unreadable = true;
+  }
   // Points to the card in the hub (Settings → System & backups → Protect backups with a password).
-  const notice = !passphrase
+  const notice = unreadable
+    ? UNREADABLE_MESSAGE
+    : !passphrase
     ? emailConfigured()
       ? 'Backups are emailed unencrypted: anyone with a backup email can read customers’ details. Protect them with a password in Settings → System & backups.'
       : undefined
@@ -611,7 +620,7 @@ export function backupHealth(now = Date.now()) {
     ? `The backup password set on the server is short: use at least ${MIN_PASSPHRASE_LENGTH} characters.`
     : undefined;
   const level: 'ok' | 'warning' | 'failing' =
-    state.lastError && (!last || Date.parse(state.lastAttemptAt || '') > last)
+    unreadable || (state.lastError && (!last || Date.parse(state.lastAttemptAt || '') > last))
       ? 'failing'
       : overdue
       ? 'failing'

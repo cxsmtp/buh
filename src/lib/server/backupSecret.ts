@@ -56,13 +56,27 @@ interface SecretFile {
 
 const FP = /^[a-f0-9]{12}$/;
 
+/** The password file exists but can't be read: backups stop (never made unencrypted) until it is fixed. */
+export const UNREADABLE_MESSAGE = 'The backup password file (backup-secret.json) can’t be read, so no backup is made until it is fixed: restore it from a copy, or remove it and set a new password.';
+
 function readFile(): SecretFile {
   let v: Record<string, unknown> = {};
+  let text: string | null = null;
   try {
-    const parsed = JSON.parse(fs.readFileSync(dataFile(BACKUP_SECRET_FILE), 'utf8'));
-    if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) v = parsed;
-  } catch {
-    // none yet (or unreadable): no password
+    text = fs.readFileSync(dataFile(BACKUP_SECRET_FILE), 'utf8');
+  } catch (err) {
+    // None yet: no password. Anything else (no permission, a disk error) must not quietly turn encryption off.
+    if ((err as NodeJS.ErrnoException)?.code !== 'ENOENT') throw new HttpError(500, UNREADABLE_MESSAGE, {}, { code: 'passphrase_unreadable' });
+  }
+  if (text !== null) {
+    let parsed: unknown;
+    try {
+      parsed = JSON.parse(text);
+    } catch {
+      throw new HttpError(500, UNREADABLE_MESSAGE, {}, { code: 'passphrase_unreadable' });
+    }
+    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) throw new HttpError(500, UNREADABLE_MESSAGE, {}, { code: 'passphrase_unreadable' });
+    v = parsed as Record<string, unknown>;
   }
   const s = (x: unknown) => (typeof x === 'string' ? x : '');
   const earlier = Array.isArray(v.earlier)
@@ -83,7 +97,7 @@ function writeFile(next: SecretFile) {
 
 function env(): string {
   const v = process.env.BACKUP_PASSPHRASE || '';
-  if (v) addRedactedValue(v);
+  if (v) addRedactedValue(v, 4);
   return v;
 }
 
@@ -131,7 +145,12 @@ export async function currentBackupKey(): Promise<{ passphrase: string; fingerpr
 /** The day the password with this fingerprint was set, and whether it is the one in use now (as far as this server knows). */
 export function describeFingerprint(fingerprint: string): { setAt: string; current: boolean } | null {
   if (!FP.test(fingerprint)) return null;
-  const f = readFile();
+  let f: SecretFile;
+  try {
+    f = readFile();
+  } catch {
+    return null; // the password file can't be read: say nothing about the day
+  }
   if (f.fingerprint === fingerprint) return { setAt: f.setAt, current: !env() };
   const e = f.earlier.find((x) => x.fingerprint === fingerprint);
   return e ? { setAt: e.setAt, current: false } : null;
@@ -174,13 +193,13 @@ function notOnServer() {
 }
 
 /** "Make one for me": a new password, kept (unconfirmed) for 30 minutes, returned this once. */
-export async function startGeneratedPassphrase(by: string, now = Date.now()): Promise<{ passphrase: string; expiresAt: string }> {
+export async function startGeneratedPassphrase(by: string, now = Date.now()): Promise<{ passphrase: string; fingerprint: string; expiresAt: string }> {
   notOnServer();
   const passphrase = generatePassphrase();
   addRedactedValue(passphrase);
   const fingerprint = await passphraseFingerprint(passphrase);
   writeFile({ ...readFile(), pending: { passphrase, fingerprint, expiresAt: now + PENDING_MS, by } });
-  return { passphrase, expiresAt: new Date(now + PENDING_MS).toISOString() };
+  return { passphrase, fingerprint, expiresAt: new Date(now + PENDING_MS).toISOString() };
 }
 
 export interface SavedPassphrase {
@@ -189,7 +208,10 @@ export interface SavedPassphrase {
   how: 'generated' | 'typed';
 }
 
-function save(cur: SecretFile, passphrase: string, fingerprint: string, how: 'generated' | 'typed', by: string, now: number): SavedPassphrase {
+function save(cur: SecretFile, passphrase: string, fingerprint: string, how: 'generated' | 'typed', by: string, now: number, replacing: boolean): SavedPassphrase {
+  // Checked again here, after any wait: two first-time saves at once must not let the second
+  // replace the first without the hub password.
+  if (cur.passphrase && !replacing) throw new HttpError(409, 'A backup password was set meanwhile: reload the page, then use Change the password.', {}, { code: 'passphrase_set' });
   const at = new Date(now).toISOString();
   const changed = Boolean(cur.passphrase);
   const earlier = changed && cur.fingerprint && cur.fingerprint !== fingerprint
@@ -200,23 +222,30 @@ function save(cur: SecretFile, passphrase: string, fingerprint: string, how: 'ge
   return { changed, fingerprint, how };
 }
 
-/** "I saved it": the password made by "Make one for me" becomes the backup password. */
-export function confirmGeneratedPassphrase(by: string, now = Date.now()): SavedPassphrase {
+/**
+ * "I saved it": the password made by "Make one for me" becomes the backup password, only if it is
+ * the one this screen showed (its fingerprint): another "Make one for me" since (a second tab, a
+ * double press) must never make backups use a password the owner did not see.
+ */
+export function confirmGeneratedPassphrase(by: string, shownFingerprint: string, replacing: boolean, now = Date.now()): SavedPassphrase {
   notOnServer();
   const cur = readFile();
   if (!cur.pending || cur.pending.expiresAt <= now) {
     if (cur.pending) writeFile({ ...cur, pending: null });
     throw new HttpError(409, 'That password ran out before it was saved (30 minutes). Press Make one for me again.', {}, { code: 'pending_expired' });
   }
-  return save(cur, cur.pending.passphrase, cur.pending.fingerprint, 'generated', by, now);
+  if (cur.pending.fingerprint !== shownFingerprint) {
+    throw new HttpError(409, 'A newer password was made since this one (in another tab?). Press Make one for me again and save the new one.', {}, { code: 'pending_replaced' });
+  }
+  return save(cur, cur.pending.passphrase, cur.pending.fingerprint, 'generated', by, now, replacing);
 }
 
 /** The owner's own password (checked with checkTypedPassphrase first). */
-export async function setTypedPassphrase(passphrase: string, by: string, now = Date.now()): Promise<SavedPassphrase> {
+export async function setTypedPassphrase(passphrase: string, by: string, replacing: boolean, now = Date.now()): Promise<SavedPassphrase> {
   notOnServer();
   addRedactedValue(passphrase);
   const fingerprint = await passphraseFingerprint(passphrase);
-  return save(readFile(), passphrase, fingerprint, 'typed', by, now);
+  return save(readFile(), passphrase, fingerprint, 'typed', by, now, replacing);
 }
 
 /** Whether a password is set in the hub (a change then needs the hub password again). */

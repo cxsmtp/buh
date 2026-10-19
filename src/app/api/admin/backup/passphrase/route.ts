@@ -12,8 +12,8 @@ import { allowFields, assertSameOrigin, handleRouteError, HttpError, json, readJ
  * - GET: whether backups are encrypted, where the password comes from (the hub, or the server's
  *   BACKUP_PASSPHRASE, which wins), the day it was set and the earlier ones (fingerprints only).
  * - POST { action: 'generate' }: a new password, shown once; nothing changes yet.
- * - POST { action: 'confirm', currentPassword? }: "I saved it": the generated one becomes the
- *   backup password.
+ * - POST { action: 'confirm', fingerprint, currentPassword? }: "I saved it": the generated one
+ *   (the one with that fingerprint, as shown) becomes the backup password.
  * - POST { action: 'set', passphrase, repeat }: the owner's own, when there is none yet.
  * - POST { action: 'change', passphrase, repeat, currentPassword }.
  * Replacing a password (confirm or change while one is set) needs the hub password again; each
@@ -31,7 +31,7 @@ export async function GET(req: Request) {
 
 const FIELDS: Record<string, readonly string[]> = {
   generate: ['action'],
-  confirm: ['action', 'currentPassword'],
+  confirm: ['action', 'fingerprint', 'currentPassword'],
   set: ['action', 'passphrase', 'repeat'],
   change: ['action', 'passphrase', 'repeat', 'currentPassword'],
 };
@@ -48,7 +48,7 @@ export async function POST(req: Request) {
 
     if (action === 'generate') {
       const made = await startGeneratedPassphrase(session.email);
-      return json({ success: true, passphrase: made.passphrase, expiresAt: made.expiresAt });
+      return json({ success: true, passphrase: made.passphrase, fingerprint: made.fingerprint, expiresAt: made.expiresAt });
     }
 
     // Replacing the password in use: the hub password again (a passkey sign-in is not enough).
@@ -61,8 +61,8 @@ export async function POST(req: Request) {
     }
 
     let saved: SavedPassphrase;
-    if (action === 'confirm') saved = confirmGeneratedPassphrase(session.email);
-    else saved = await setTypedPassphrase(checkTypedPassphrase(body.passphrase, body.repeat), session.email);
+    if (action === 'confirm') saved = confirmGeneratedPassphrase(session.email, str(body.fingerprint, 'fingerprint', 12), replacing);
+    else saved = await setTypedPassphrase(checkTypedPassphrase(body.passphrase, body.repeat), session.email, replacing);
 
     if (!audit(saved.changed ? 'backup.passphrase_changed' : 'backup.passphrase_set', { by: session.email, how: saved.how, fingerprint: saved.fingerprint })) throw new Error('audit write failed');
     // Google Drive connected while there was no password: copies switch on now.

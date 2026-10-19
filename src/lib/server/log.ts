@@ -43,9 +43,17 @@ const GOOGLE_CLIENT_SECRET = /\bGOCSPX-[A-Za-z0-9_-]{6,}/g;
 // Secrets known at run time (the backup password): removed wherever they appear, whatever the key.
 const KNOWN_SECRETS = new Set<string>();
 
-/** Never log this value (8 characters or more), wherever it appears: the backup password. */
-export function addRedactedValue(value: string): void {
-  if (typeof value === 'string' && value.length >= 8 && KNOWN_SECRETS.size < 100) KNOWN_SECRETS.add(value);
+const KNOWN_SECRETS_MAX = 100;
+
+/**
+ * Never log this value (minLength characters or more), wherever it appears: the backup password.
+ * The newest ones are kept: adding one again moves it to the front, and the oldest drops out past 100.
+ */
+export function addRedactedValue(value: string, minLength = 8): void {
+  if (typeof value !== 'string' || value.length < minLength) return;
+  KNOWN_SECRETS.delete(value);
+  KNOWN_SECRETS.add(value);
+  if (KNOWN_SECRETS.size > KNOWN_SECRETS_MAX) KNOWN_SECRETS.delete(KNOWN_SECRETS.values().next().value as string);
 }
 
 function withoutKnownSecrets(s: string): string {

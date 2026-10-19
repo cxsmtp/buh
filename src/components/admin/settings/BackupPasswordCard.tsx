@@ -70,6 +70,8 @@ export function PasswordMaker({ replacing, minLength = 12, onSaved, compact = fa
   const id = useId();
   const [way, setWay] = useState<'make' | 'type'>('make');
   const [made, setMade] = useState('');
+  // The fingerprint of the password shown: "I saved it" saves that one, never a newer one.
+  const [madeFp, setMadeFp] = useState('');
   const [savedTick, setSavedTick] = useState(false);
   const [copied, setCopied] = useState(false);
   const [typed, setTyped] = useState('');
@@ -81,13 +83,14 @@ export function PasswordMaker({ replacing, minLength = 12, onSaved, compact = fa
   const make = async () => {
     setError('');
     setBusy('make');
-    const { ok, data } = await postJson<{ passphrase?: string; message?: string }>('/api/admin/backup/passphrase', { action: 'generate' });
+    const { ok, data } = await postJson<{ passphrase?: string; fingerprint?: string; message?: string }>('/api/admin/backup/passphrase', { action: 'generate' });
     setBusy('');
-    if (!ok || !data.passphrase) {
+    if (!ok || !data.passphrase || !data.fingerprint) {
       setError(data.message || 'Could not make a password. Please try again.');
       return;
     }
     setMade(data.passphrase);
+    setMadeFp(data.fingerprint);
     setSavedTick(false);
     setCopied(false);
   };
@@ -127,7 +130,7 @@ export function PasswordMaker({ replacing, minLength = 12, onSaved, compact = fa
     if (!savedTick) return;
     setError('');
     setBusy('save');
-    const { ok, data } = await postJson<SaveReply>('/api/admin/backup/passphrase', { action: 'confirm', ...(replacing ? { currentPassword: current } : {}) });
+    const { ok, data } = await postJson<SaveReply>('/api/admin/backup/passphrase', { action: 'confirm', fingerprint: madeFp, ...(replacing ? { currentPassword: current } : {}) });
     setBusy('');
     if (!ok) {
       setError(data.message || 'Could not save the password. Please try again.');

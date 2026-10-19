@@ -102,7 +102,7 @@ test('the password route: hidden, sign-in and same origin required, allow-listed
   assert.equal((await api('POST', '/api/admin/backup/passphrase', { action: 'nope' })).status, 400);
   assert.equal((await api('POST', '/api/admin/backup/passphrase', { action: 'generate', passphrase: 'x' })).status, 400, 'allow-listed per action');
   assert.equal((await api('POST', '/api/admin/backup/passphrase', { action: 'set', passphrase: 'short', repeat: 'short' })).status, 400);
-  assert.equal((await api('POST', '/api/admin/backup/passphrase', { action: 'confirm' })).status, 409, 'nothing made yet');
+  assert.equal((await api('POST', '/api/admin/backup/passphrase', { action: 'confirm', fingerprint: 'abcdef012345' })).status, 409, 'nothing made yet');
   const big = await api('POST', '/api/admin/backup/passphrase', { action: 'set', passphrase: 'x'.repeat(4000), repeat: 'x' });
   assert.equal(big.status, 413, 'size-capped');
   // The backup health alert points to the card, no server setting named.

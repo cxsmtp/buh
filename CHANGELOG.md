@@ -1,5 +1,18 @@
 # Changelog
 
+## BUH-02.18.00 — 2026-10-19 21:40 UTC · [#36](https://github.com/cxsmtp/buh/pull/36)
+
+- **Backup password, set in the hub.** Settings → System & backups → "Protect backups with a password". Press "Make one for me" (six words and two digits), copy or download it, tick "I saved it", or type your own. No server settings needed.
+- **Change it any time.** Changing it asks for your hub password, and the card lists earlier passwords by date, because backups made before a change still open with the old one. The restore tool names the day of the password a backup needs.
+- **Google Drive in four guided steps.** "Set up Google Drive" opens each Google page for you, with Copy buttons for every value. You then upload the file Google gives you and enter one large code at google.com/device. The hub shows "Connected to <your Gmail>" and makes the first copy at once.
+- **Drive waits for the password.** If Drive is linked before a password exists, copies start by themselves as soon as you set one.
+- **Never unencrypted by accident.** If the password file is ever damaged, backups stop and the hub shows a red alert, instead of sending customers' details unencrypted.
+- **Status.**
+  - **Benchmark:** 3 alternating rounds (branch first), 0 failed requests. Storefront branch 757 / 743 / 738 req/s vs main 675 / 730 / 754; catalogue API branch 692 / 661 / 702 vs main 733 / 643 / 704; serviceability API branch 568 / 570 / 633 vs main 602 / 580 / 611. The branch's first storefront round (p95 171 ms) was the cold start; rounds 2–3 match main (p95 110 / 102 vs 104 / 112 ms). No page or hot path changed.
+  - **Tests:** TESTS_PLACEHOLDER (unit and end-to-end, including 375 and 1280 px browser checks).
+  - **Dependency audit:** production 0 vulnerabilities; no new packages.
+  - **Security scan:** independent review found 0 high, 2 medium and 3 low issues. Fixed with tests: "I saved it" now saves only the password on screen, a damaged password file stops backups, a race between two first-time saves, and log masking that stopped after 100 passwords. Not changed: the password fingerprint uses a fixed salt (no faster to guess than the backup itself; one shop). Google Drive has not been tried with a real Google account yet.
+
 ## BUH-02.17.00 — 2026-10-19 21:00 UTC · [#35](https://github.com/cxsmtp/buh/pull/35)
 
 - **Read-only access for your accountant.** Invite them from Settings → Security. They see only Money (reports, expenses with bills, VAT and the audit log) and can change nothing. Removing access, or "sign out everywhere", ends their access at once, and restoring a backup never brings it back.

@@ -31,7 +31,7 @@ for (const k of ['log', 'warn', 'error'] as const) {
 const secret = await import('@/lib/server/backupSecret');
 const backup = await import('@/lib/server/backup');
 const drive = await import('@/lib/server/driveBackup');
-const { logEvent } = await import('@/lib/server/log');
+const { addRedactedValue, logEvent } = await import('@/lib/server/log');
 const { audit } = await import('@/lib/server/audit');
 const { WORDS } = await import('@/lib/server/wordlist');
 const { parseClientJson, clientIdLooksRight } = await import('@/lib/driveClientJson');
@@ -114,26 +114,36 @@ test('generate, then confirm: the password is saved (owner-only file), audited w
   // Made, not yet used.
   assert.equal(secret.passphraseSource(), 'none');
   assert.equal(fs.statSync(secretFile()).mode & 0o777, 0o600);
-  const saved = secret.confirmGeneratedPassphrase('owner@shop.ae');
+  // A second "Make one for me" (another tab): "I saved it" on the first screen is refused, never
+  // saving the password that screen did not show.
+  const g2 = await secret.startGeneratedPassphrase('owner@shop.ae');
+  made.push(g2.passphrase);
+  assert.throws(() => secret.confirmGeneratedPassphrase('owner@shop.ae', g.fingerprint, false), (e: Error & { status?: number; details?: { code?: string } }) => e.status === 409 && e.details?.code === 'pending_replaced');
+  assert.equal(secret.passphraseSource(), 'none');
+  const saved = secret.confirmGeneratedPassphrase('owner@shop.ae', g2.fingerprint, false);
+  assert.equal(saved.fingerprint, g2.fingerprint);
   assert.equal(saved.changed, false);
   assert.equal(saved.how, 'generated');
   assert.ok(audit('backup.passphrase_set', { by: 'owner@shop.ae', how: saved.how, fingerprint: saved.fingerprint, passphrase: g.passphrase, note: `typed ${g.passphrase} by mistake` }));
   assert.equal(secret.passphraseSource(), 'hub');
-  assert.equal(secret.backupPassphrase(), g.passphrase);
+  assert.equal(secret.backupPassphrase(), g2.passphrase);
+  // Saved meanwhile: a first-time save that did not ask for the hub password can't replace it.
+  await assert.rejects(secret.setTypedPassphrase('raced-second-password-12', 'owner@shop.ae', false), (e: Error & { status?: number; details?: { code?: string } }) => e.status === 409 && e.details?.code === 'passphrase_set');
+  assert.equal(secret.backupPassphrase(), g2.passphrase);
   const st = secret.passphraseStatus();
   assert.equal(st.encrypted, true);
   assert.equal(st.how, 'generated');
   assert.match(st.fingerprint ?? '', /^[a-f0-9]{12}$/);
-  assert.ok(!JSON.stringify(st).includes(g.passphrase), 'the status never holds the password');
+  assert.ok(!JSON.stringify(st).includes(g2.passphrase), 'the status never holds the password');
   assert.equal(fs.statSync(secretFile()).mode & 0o777, 0o600);
   // A second confirm has nothing to confirm.
-  assert.throws(() => secret.confirmGeneratedPassphrase('owner@shop.ae'), (e: Error & { status?: number }) => e.status === 409);
+  assert.throws(() => secret.confirmGeneratedPassphrase('owner@shop.ae', g2.fingerprint, true), (e: Error & { status?: number }) => e.status === 409);
   assert.equal(backup.backupHealth().notice, undefined);
   assert.equal(backup.backupHealth().encrypted, true);
 });
 
 test('the password file is never in a backup (raw bytes and every file inside), and backups are encrypted with it', async () => {
-  const pass = made[0];
+  const pass = made[1];
   const r = await backup.createBackup();
   assert.equal(r.encrypted, true);
   const raw = fs.readFileSync(r.file);
@@ -157,7 +167,7 @@ test('the restore script inside the shop reads the password file: no BACKUP_PASS
   assert.match(r.stdout, /Integrity check: ok/);
   // The restored shop keeps the password (copied from the running shop, owner-only, nothing waiting).
   const copied = JSON.parse(fs.readFileSync(path.join(target, 'backup-secret.json'), 'utf8'));
-  assert.equal(copied.passphrase, made[0]);
+  assert.equal(copied.passphrase, made[1]);
   assert.equal(copied.pending, undefined);
   assert.equal(fs.statSync(path.join(target, 'backup-secret.json')).mode & 0o777, 0o600);
   // Outside the shop (no DATA_DIR, no BACKUP_PASSPHRASE): asked for.
@@ -175,25 +185,25 @@ test('change: a new typed password; earlier backups need the old one, refused wi
   const later = Date.now() + 26 * 3600_000;
   const typed = 'quiet-lantern-orchard-ribbon-31';
   made.push(typed);
-  const saved = await secret.setTypedPassphrase(secret.checkTypedPassphrase(typed, typed), 'owner@shop.ae', later);
+  const saved = await secret.setTypedPassphrase(secret.checkTypedPassphrase(typed, typed), 'owner@shop.ae', true, later);
   assert.equal(saved.changed, true);
   assert.equal(saved.how, 'typed');
   const st = secret.passphraseStatus();
   assert.deepEqual(st.earlier.map((e) => e.fingerprint), [oldFp]);
   assert.equal(st.earlier[0].setAt, oldSetAt);
-  assert.ok(!fs.readFileSync(secretFile(), 'utf8').includes(made[0]), 'the old password is not kept');
+  assert.ok(!fs.readFileSync(secretFile(), 'utf8').includes(made[1]), 'the old password is not kept');
 
   const oldBackup = fs.readFileSync(path.join(dir, 'backups', before));
   const day = oldSetAt.slice(0, 10);
   assert.throws(() => backup.openBackup(oldBackup, typed), new RegExp(`Wrong password: this backup was made with the backup password set on ${day}\\. Backups made before a password change still need the old password\\.`));
-  assert.ok(backup.openBackup(oldBackup, made[0]).length > 0, 'the old password still opens it');
+  assert.ok(backup.openBackup(oldBackup, made[1]).length > 0, 'the old password still opens it');
   // The restore script inside the shop (the new password from the file): refused at once, naming the day.
   const r = restore([path.join(dir, 'backups', before), tmp('old')], { BACKUP_PASSPHRASE: undefined, DATA_DIR: dir });
   assert.equal(r.status, 2, r.stdout + r.stderr);
   assert.match(r.stderr, new RegExp(`Wrong password: this backup was made with the backup password set on ${day}, not with the shop’s backup password \\(set on ${new Date(later).toISOString().slice(0, 10)}\\)`));
   assert.match(r.stderr, /BACKUP_PASSPHRASE='the old password'/);
   // With the old one typed: restored.
-  const ok = restore([path.join(dir, 'backups', before), tmp('oldok')], { BACKUP_PASSPHRASE: made[0], DATA_DIR: dir });
+  const ok = restore([path.join(dir, 'backups', before), tmp('oldok')], { BACKUP_PASSPHRASE: made[1], DATA_DIR: dir });
   assert.equal(ok.status, 0, ok.stdout + ok.stderr);
   // A new backup uses the new password.
   const n = await backup.createBackup(new Date(later));
@@ -206,10 +216,10 @@ test('BACKUP_PASSPHRASE wins: used for backups, the hub shows "on the server" an
     assert.equal(secret.passphraseSource(), 'env');
     assert.equal(secret.backupPassphrase(), 'the server one, long enough');
     await assert.rejects(secret.startGeneratedPassphrase('owner@shop.ae'), (e: Error & { status?: number }) => e.status === 409);
-    await assert.rejects(secret.setTypedPassphrase('another long password', 'owner@shop.ae'), (e: Error & { status?: number }) => e.status === 409);
+    await assert.rejects(secret.setTypedPassphrase('another long password', 'owner@shop.ae', true), (e: Error & { status?: number }) => e.status === 409);
     const r = await backup.createBackup(new Date(Date.now() + 27 * 3600_000));
     assert.ok(backup.openBackup(fs.readFileSync(r.file), 'the server one, long enough').length > 0);
-    assert.throws(() => backup.openBackup(fs.readFileSync(r.file), made[1]), /another backup password \(fingerprint/);
+    assert.throws(() => backup.openBackup(fs.readFileSync(r.file), made[2]), /another backup password \(fingerprint/);
     const st = secret.passphraseStatus();
     assert.equal(st.source, 'env');
     assert.equal(st.short, false);
@@ -225,8 +235,37 @@ test('BACKUP_PASSPHRASE wins: used for backups, the hub shows "on the server" an
 test('a password made but not confirmed in 30 minutes is not used', async () => {
   const g = await secret.startGeneratedPassphrase('owner@shop.ae', Date.now() - 31 * 60_000);
   made.push(g.passphrase);
-  assert.throws(() => secret.confirmGeneratedPassphrase('owner@shop.ae'), (e: Error & { status?: number; details?: { code?: string } }) => e.status === 409 && e.details?.code === 'pending_expired');
-  assert.equal(secret.backupPassphrase(), made[1]);
+  assert.throws(() => secret.confirmGeneratedPassphrase('owner@shop.ae', g.fingerprint, true), (e: Error & { status?: number; details?: { code?: string } }) => e.status === 409 && e.details?.code === 'pending_expired');
+  assert.equal(secret.backupPassphrase(), made[2]);
+});
+
+test('a damaged password file stops backups instead of making them unencrypted', async () => {
+  const file = secretFile();
+  const good = fs.readFileSync(file);
+  fs.writeFileSync(file, '{"passphrase": "cut sh');
+  try {
+    assert.throws(() => secret.backupPassphrase(), (e: Error & { status?: number; details?: { code?: string } }) => e.details?.code === 'passphrase_unreadable');
+    const before = fs.readdirSync(path.join(dir, 'backups')).length;
+    await assert.rejects(backup.createBackup(new Date(Date.now() + 28 * 3600_000)), /backup-secret\.json/);
+    assert.equal(fs.readdirSync(path.join(dir, 'backups')).filter((f) => !f.endsWith('.partial')).length, before, 'no backup made in plain form');
+    // Nor can "set" quietly replace it (and lose the earlier passwords' history).
+    await assert.rejects(secret.setTypedPassphrase('replacement-password-99', 'owner@shop.ae', false), (e: Error & { details?: { code?: string } }) => e.details?.code === 'passphrase_unreadable');
+    assert.equal(backup.backupHealth().level, 'failing');
+    assert.match(backup.backupHealth().notice ?? '', /can’t be read/);
+  } finally {
+    fs.writeFileSync(file, good, { mode: 0o600 });
+  }
+  assert.equal(secret.passphraseSource(), 'hub');
+});
+
+test('masking keeps the newest passwords, however many were made', () => {
+  for (let i = 0; i < 150; i++) addRedactedValue(`filler-password-${i}`);
+  const p = made.at(-1)!;
+  addRedactedValue(p);
+  logEvent('error', 'late', { error: `still masked ${p}` });
+  assert.ok(!logged.join('\n').includes(p));
+  // The others made in this file back in the list (the shop re-adds the one in use each time it reads it).
+  for (const m of made) addRedactedValue(m);
 });
 
 test('never in the log or the audit log, wherever it appears', () => {
@@ -254,7 +293,7 @@ test('Google Drive connected before there was a password: copies switch on as so
     assert.equal(r.status.waitingForPassword, true);
     assert.equal(r.status.accountEmail, 'shop.owner@gmail.com', 'who is connected, from about.get');
     assert.equal(drive.enableDriveIfWaiting('owner@shop.ae'), false, 'still no password');
-    await secret.setTypedPassphrase('mango-harbour-velvet-quiet-74', 'owner@shop.ae');
+    await secret.setTypedPassphrase('mango-harbour-velvet-quiet-74', 'owner@shop.ae', false);
     assert.equal(drive.enableDriveIfWaiting('owner@shop.ae'), true);
     const st = drive.driveStatus();
     assert.equal(st.enabled, true);

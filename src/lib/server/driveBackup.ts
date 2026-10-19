@@ -859,7 +859,11 @@ export async function uploadToDrive(token: string, folderId: string, file: strin
 // ── Copying each backup ─────────────────────────────────────────────────────
 
 function passphraseSet(): boolean {
-  return Boolean(backupPassphrase());
+  try {
+    return Boolean(backupPassphrase());
+  } catch {
+    return false; // the password file can't be read: no copy (backup health says why)
+  }
 }
 
 const NO_PASSPHRASE = 'No backup password is set: copies to Google Drive are always encrypted, so none can be made. Make one in Settings → System & backups → Protect backups with a password.';
