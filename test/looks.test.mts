@@ -199,24 +199,24 @@ test('looks: the default for an existing shop, history with timestamps, switch b
   assert.deepEqual(Object.keys(stored).sort(), ['changedAt', 'changedBy', 'label', 'mode', 'preset']);
 });
 
-test('migration 11 only adds rows: an existing shop (database version 10) keeps everything and gains its starting look', async () => {
+test('migration 13 only adds rows: an existing shop (database version 12) keeps everything and gains its starting look', async () => {
   const { spawnSync } = await import('node:child_process');
   const os = await import('node:os');
   const path = await import('node:path');
   const Database = (await import('better-sqlite3')).default;
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'buh-v10-'));
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'buh-v12-'));
   const run = (code: string) => spawnSync(process.execPath, ['--import', 'tsx', '-e', `process.env.DATA_DIR=${JSON.stringify(dir)}; ${code}`], { encoding: 'utf8' });
   assert.equal(run(`const m = await import('@/lib/server/db'); (m.getDb ?? m.default.getDb)();`).status, 0);
-  // Back to version 10, as a shop running BUH-02.09 has it, with a branding setting saved.
+  // Back to version 12, as a shop running BUH-02.11 has it, with a branding setting saved.
   const db = new Database(path.join(dir, 'shop.db'));
   db.exec("DELETE FROM settings_history WHERE key = 'look'; DELETE FROM settings WHERE key = 'look'");
   db.prepare("INSERT INTO settings (key, data, updated_at) VALUES ('brand', '{\"storeName\":\"Kept\"}', '2026-01-01T00:00:00.000Z')").run();
-  db.pragma('user_version = 10');
+  db.pragma('user_version = 12');
   db.close();
   const up = run(`const m = await import('@/lib/server/db'); const db = (m.getDb ?? m.default.getDb)(); console.log(JSON.stringify({ v: db.pragma('user_version', { simple: true }), settings: db.prepare("SELECT key, data FROM settings ORDER BY key").all(), history: db.prepare("SELECT key, data, saved_at FROM settings_history").all() }));`);
   assert.equal(up.status, 0, up.stderr);
   const out = JSON.parse(up.stdout.trim().split('\n').pop()!);
-  assert.equal(out.v, 11);
+  assert.equal(out.v, 13);
   assert.deepEqual(out.settings.find((s: { key: string }) => s.key === 'brand'), { key: 'brand', data: '{"storeName":"Kept"}' });
   const look = JSON.parse(out.settings.find((s: { key: string }) => s.key === 'look').data);
   assert.deepEqual([look.preset, look.mode], ['ivory-gold', 'system']);

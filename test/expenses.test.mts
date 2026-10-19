@@ -394,5 +394,5 @@ test('migration 12 only adds (tables and an index) and seeds the categories', ()
   assert.ok(statements.length >= 6);
   for (const s of statements) assert.match(s, /^CREATE (TABLE|INDEX|UNIQUE INDEX) /, s);
   assert.doesNotMatch(m12, /DROP|ALTER|DELETE|UPDATE /);
-  assert.equal(getDb().pragma('user_version', { simple: true }), 12);
+  assert.equal(getDb().pragma('user_version', { simple: true }), 13);
 });
