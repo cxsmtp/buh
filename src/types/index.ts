@@ -25,6 +25,8 @@ export interface BedProfileMeasurement {
   otherPieces?: string;
   piecesIncluded: number;
   priceDelta: number;   // e.g. +0 for Single, +40 for King, +60 for Super King
+  /** Packed weight of one set, in grams (admin only: never shown in the shop). */
+  weightGrams?: number;
 }
 
 export interface Product {
@@ -111,8 +113,16 @@ export interface CourierDetails {
   labelGenerated: boolean;
   /** Live bookings only: booked with the carrier, or sent without an answer (may exist). */
   bookingState?: 'booked' | 'uncertain';
-  /** The AWB came from sandbox mode, not a real booking. */
+  /** A test booking, not a real shipment: never shown to customers. */
   simulated?: boolean;
+  /** Which test: Jeebly's sandbox (its own AWB), or an offline practice booking (no keys saved). */
+  testKind?: 'sandbox' | 'practice';
+  /** Where an API booking lives at the carrier: Jeebly's demo (sandbox) or its live system. */
+  carrierEnv?: 'sandbox' | 'live';
+  /** The owner typed the tracking number in (booked in the carrier's own portal). */
+  enteredByHand?: boolean;
+  /** The carrier's name when provider is 'manual' (another courier), as the owner typed it. */
+  carrierName?: string;
   courierNotes?: string;
   codAmountCollected?: number;
 }
@@ -150,6 +160,8 @@ export interface Order {
     unitPrice: number;
     quantity: number;
     totalPrice: number;
+    /** The size's packed weight when the order was placed (a snapshot: later edits don't change it). */
+    weightGrams?: number;
   }[];
   subtotal: number;
   deliveryFee: number;
@@ -312,18 +324,31 @@ export interface BankTransferDetails {
 }
 
 export interface CourierSettings {
+  /** Packaging allowance added to every parcel's weight, in grams (default 200). */
+  packagingGrams?: number;
   autoAssignRules: {
     codCourier: CourierProvider; // Defaults to 'jeebly'
     prepaidCourier: CourierProvider; // Defaults to 'echo'
   };
   jeebly: {
+    /** Live (production) keys: used only when isLive is on. */
     apiKey: string;
     clientKey: string;
+    /** Jeebly sandbox keys: test bookings go to Jeebly's sandbox with these. */
+    sandboxApiKey: string;
+    sandboxClientKey: string;
     serviceType: 'Scheduled' | 'Express';
     isLive: boolean;
     pickupLocationName: string;
     pickupPhone: string;
     pickupAddress: string;
+    /** Jeebly's production address, given by Jeebly with the live keys (https, *.jeebly.com). */
+    liveBaseUrl?: string;
+    /** Building or warehouse name, unit / shop number, area and a landmark: empty until the owner adds them. */
+    pickupBuilding?: string;
+    pickupArea?: string;
+    pickupUnit?: string;
+    pickupLandmark?: string;
     pickupEmirate: Emirate;
   };
   echo: {

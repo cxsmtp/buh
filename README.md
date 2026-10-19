@@ -21,7 +21,7 @@
 | **Looks that match the device** | Four looks (Ivory & Gold, Noir & Champagne, Pearl & Emerald, Sand & Rose), each light and dark, following each visitor's device or fixed by you; every change kept with its time and author, with Switch back ([Settings → Look](docs/user-guide.md#look)). |
 | **Festival themes for everyone** | 32 UAE festivals (the Eids, National Day, Diwali, Christmas, Lunar New Year and more) shift the accent and add a fine motif automatically, from 3 weeks before to a week after. |
 | **Runs itself** | Live updates on open pages, updates without downtime and automatic rollback, settings history, problem alerts and a daily summary email. |
-| **Real courier bookings** | Jeebly and Eco Express AWBs come from the carrier. A failed booking says so; it never invents a tracking number. |
+| **Real courier bookings** | Jeebly AWBs come from Jeebly (test first in its sandbox; Live mode after a passed Sandbox check), or type in a number from any courier's portal. A failed booking says so; it never invents a tracking number, label or link. The 4 × 6 in label has real barcodes. |
 | **Safe by default** | Security headers on every page, size-capped and validated API input, limits against SMS-pumping fraud, and no secrets in the browser or the logs ([security](docs/security.md)). |
 | **Fast** | The storefront serves ~800 requests/s on 4 vCPU ([status](docs/status.md)). |
 

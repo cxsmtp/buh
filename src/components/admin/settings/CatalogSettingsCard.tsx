@@ -103,6 +103,23 @@ export function CatalogSettingsCard({ value, onSave, auto }: { value: CatalogSet
                   <span className="text-ink-soft">Pieces in the set</span>
                   <input className={field} type="number" min={1} max={20} value={s.piecesIncluded} onChange={(e) => setSize(i, { piecesIncluded: Math.max(1, Number(e.target.value) || 1) })} />
                 </label>
+                <label>
+                  <span className="text-ink-soft">Weight (g), packed set</span>
+                  <input
+                    className={field}
+                    type="number"
+                    inputMode="numeric"
+                    min={1}
+                    max={50000}
+                    step={1}
+                    value={s.weightGrams ?? ''}
+                    placeholder="e.g. 1200"
+                    onChange={(e) => {
+                      const g = Math.round(Number(e.target.value));
+                      setSize(i, { weightGrams: e.target.value === '' || !(g > 0) ? undefined : Math.min(50000, g) });
+                    }}
+                  />
+                </label>
               </div>
             )}
           </div>

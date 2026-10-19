@@ -274,9 +274,16 @@ test('the shop and the admin hub share one store: a customer order reaches the o
   await admin.getByText(/Orders & Dispatches/).first().waitFor();
   const card = admin.locator('div.rounded-2xl', { hasText: orderId }).last();
   await card.waitFor();
+  // No courier keys: Test mode, a practice booking, only after the owner says yes (and is told after).
+  const asked: string[] = [];
+  admin.on('dialog', (d) => {
+    asked.push(d.message());
+    void d.accept();
+  });
   await card.getByRole('button', { name: /Confirm & Assign Courier/ }).click();
-  await admin.getByRole('button', { name: /Confirm Order & Dispatch/ }).click();
+  await admin.getByRole('button', { name: /Make a TEST booking \(not sent to Jeebly\)/ }).click();
   await admin.getByRole('button', { name: 'Close label' }).click();
+  assert.ok(asked.some((m) => /TEST booking made \(PRACTICE-/.test(m)), 'told it was a test');
   await card.getByRole('button', { name: 'Mark dispatched' }).click();
   await card.getByText(/^dispatched$/i).waitFor();
   assert.equal((await lookup(orderId, '0564005006')).order!.status, 'dispatched', 'saved on the server');

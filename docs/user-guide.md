@@ -147,7 +147,7 @@ Set these up once, in **Settings → Passkeys & recovery codes**, so you can alw
 
 New orders appear under **Orders & Dispatches** within seconds, with a notice at the top. An order shows **via Instagram** (or WhatsApp, TikTok…) when that is where the customer came from. For each order:
 
-- **Confirm & Assign Courier** books Jeebly or Eco Express and prints the label. For a cash-on-delivery order the customer hasn't confirmed on WhatsApp yet, it first asks **"This customer hasn't confirmed on WhatsApp yet — ship anyway?"** (you may have confirmed by phone call): **OK** books it and the "ship anyway" is kept in the order's **History** and the audit log; **Cancel** books nothing. With **Hold orders until confirmed on WhatsApp** on, it can't be booked at all until confirmed.
+- **Confirm & Assign Courier** (or **Book courier** on a confirmed or dispatched order) books Jeebly or Eco Express and opens the label. The dialog says plainly whether it is a **Live** booking (a real shipment) or a **Test** one (see Couriers below); a test booking asks you first, and its order shows **Test booking – not sent to the courier**. Booked in the courier's own portal instead? Use **Enter tracking number**. For a cash-on-delivery order the customer hasn't confirmed on WhatsApp yet, it first asks **"This customer hasn't confirmed on WhatsApp yet — ship anyway?"** (you may have confirmed by phone call): **OK** books it and the "ship anyway" is kept in the order's **History** and the audit log; **Cancel** books nothing. With **Hold orders until confirmed on WhatsApp** on, it can't be booked at all until confirmed.
 - **Mark dispatched**, then **Out for delivery** or **Mark delivered**, as the parcel moves.
 - **Bank transfers** (filter **Transfer to check**, with a count of screenshots waiting): each order shows where it stands: **Waiting for bank transfer** → **Transfer screenshot received** → **Payment received**.
   - **View transfer screenshot** opens what the customer uploaded (hub only); earlier ones stay under **Earlier: #1, #2…**.
@@ -409,12 +409,39 @@ There is no **Send test** for Firebase: try a checkout on your own phone (a bill
 
 ### Couriers
 
-Enter the Jeebly and Eco Express keys and use **Test connection**. Keys are kept on the server and never shown again: leave a key field blank to keep the saved one.
+Keys are kept on the server and never shown again: leave a key field blank to keep the saved one.
 
-- **Sandbox mode** gives simulated AWBs, labelled as such.
-- **Live mode** books with the carrier. If the carrier refuses, you see why, and the order stays unbooked.
-- **Booking the same order again** shows the AWB already issued; it never books twice.
+**Your pickup address** comes first: the phone, unit / shop / villa no., building, area, landmark and emirate where the courier collects parcels (street is optional). Jeebly requires them all; the tab lists what is missing. They are sent with every booking and printed on the label as the sender (nothing is filled in for you).
+
+**Packaging weight per parcel** (200 g unless you change it) is added to the sizes' weights to make each parcel's weight (see Weights below).
+
+**Jeebly: Test mode and Live mode.** The tab and the booking dialog always say which one is on.
+
+- **Test mode** (the default): nothing is a real shipment, and the customer sees no tracking.
+  - With your Jeebly **sandbox keys** saved, a booking is a test shipment in Jeebly's sandbox, with Jeebly's own test AWB. If the sandbox refuses or can't be reached, you see Jeebly's answer and nothing is booked.
+  - With no keys at all, a booking is an offline **practice** booking (AWB `PRACTICE-…`): nothing is sent anywhere.
+  - With only live keys saved and Live mode off, the hub says so ("Live mode is off: bookings are tests only…") and books nothing until you add sandbox keys or go live.
+- **Run the Sandbox check** before going live (Jeebly asks for every scenario to be tried in its demo system first). It books one PREPAID dummy order marked TEST in Jeebly's demo system, fetches its label PDF, tracks it and cancels it. Each step shows pass or fail with Jeebly's own reply. The last result is kept (and backed up) and in the audit log.
+- **Live address (from Jeebly):** Jeebly gives it with your production keys. Only an https address on jeebly.com is accepted, and the live keys go only to that address.
+- **Turn on Live mode** works once the live address is saved and a Sandbox check passed in the last 30 days. Then bookings are real shipments with your live keys, and the customer sees the tracking number and Jeebly's updates. **Turn on without a sandbox check** is there if you must: type the phrase shown; it is recorded in the audit log.
+- **Test connection** asks Jeebly to track a made-up number (it creates nothing) and shows what Jeebly said, e.g. "Jeebly said: Invalid API Token — the keys were refused". It only calls the keys good when Jeebly says so.
+- **When Jeebly refuses a booking** you see its own words, e.g. "For settlement of COD amount, we will require your bank details": add your bank details in your Jeebly account, then book again. Nothing is booked meanwhile.
+- **Refresh tracking** on a Jeebly order shows Jeebly's latest status and events. It never moves the order: when Jeebly says Delivered, check it and tap **Mark delivered**.
+- **Cancelling an order** with a Jeebly booking cancels the shipment with Jeebly too, and tells you what Jeebly said. If Jeebly refuses (already picked up, for example), the order is flagged: cancel it in the Jeebly portal.
+- **Booking the same order again** shows the AWB already issued; it never books twice, and a test booking never replaces a real one. After a test booking, **Book for real** appears on the order once Live mode is on.
 - **"No answer from the carrier"** means the shipment may or may not have been created. Check the carrier portal for the order number first. The next attempt asks you to confirm before booking again.
+
+**Eco Express** live booking isn't connected yet (its published API points at a test server): book in the Eco portal, then **Enter tracking number** on the order. Its test bookings are practice ones.
+
+**Enter tracking number** (on a confirmed, dispatched or out-for-delivery order): booked in the Jeebly or Eco portal, or with any other courier? Choose the courier (or **Another courier** and its name), type the AWB (4 to 40 letters, digits or dashes) and, if you have it, the https tracking link. The customer's Track Order then shows the number with a **Copy** button, and with a link, the courier's name and **Track on the courier's page**. Replacing a real tracking number asks you first. Both are in the audit log.
+
+**What customers see.** Track Order shows the tracking number only for a real booking (never a test one). For a Jeebly booking it also shows Jeebly's own updates (status, hub and time, refreshed at most every 5 minutes), never phone numbers, the driver or delivery photos.
+
+**The label.** For a Jeebly booking, **Print Jeebly label (PDF)** opens the label Jeebly makes (its logo and barcode; fetched by the shop with your keys and recorded in the audit log): stick that one on the parcel. The shop's own 4 × 6 in label is then the **packing slip**, and the label for any other courier. It has a real Code 128 barcode of the AWB and of the order number, your shop name and pickup address as the sender, the customer's name, phone, address, area, emirate and landmark, **COD: AED 1,234.00** or **PREPAID**, weight, pieces and what is in the parcel, the order number and dispatch date, and the courier's name. **Print packing slip** (or **Print label**) prints only that, at 4 × 6 in. A test booking's label says **TEST BOOKING – NOT A REAL SHIPMENT – DO NOT SEND** across it; don't stick it on a parcel.
+
+**Weights.** Give each size its packed weight in **Inventory → the product → Sizes → Measurements & price → Weight (g)** (one set, as packed); size presets in **Settings → Catalogue** can carry a weight that new products take. An order keeps the weights it was placed with. Booking pre-fills the parcel weight (you can change it) and shows how it was worked out, e.g. "2 × King 1.2 kg + packaging 0.2 kg = 2.6 kg → 3 kg for Jeebly" (Jeebly takes whole kilograms, rounded up). If a size has no weight, it says "Add weights to these sizes: …" and you type the weight: it is never guessed. Shoppers never see weights.
+
+**WhatsApp Customer** sends the AWB and link only for a real booking; otherwise it says the tracking number will follow.
 
 ### Audit log files
 

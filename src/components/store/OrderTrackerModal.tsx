@@ -2,7 +2,7 @@
 
 import React, { useState } from 'react';
 import type { BankTransferCheck, Order, WhatsAppCheck } from '@/types';
-import { X, Search, Truck, ExternalLink, MapPin, Upload, CheckCircle2 } from 'lucide-react';
+import { X, Search, Truck, ExternalLink, MapPin, Upload, CheckCircle2, Copy, Check } from 'lucide-react';
 import { postJson, safeHref } from '@/lib/apiClient';
 import { WhatsAppConfirm } from './WhatsAppConfirm';
 import { cancelHoursOf } from '@/lib/whatsappConfirm';
@@ -24,10 +24,42 @@ interface TrackedOrder {
   emirate: string;
   area: string;
   items: Array<{ title: string; profileName: string; quantity: number; totalPrice: number }>;
-  courier: { awbNumber: string; trackingUrl: string; status: string };
+  /** A real booking's AWB and link only (never a test one); `carrier` only with a link the owner typed in. */
+  courier: {
+    awbNumber: string;
+    trackingUrl: string;
+    status: string;
+    carrier?: string;
+    /** The courier's own status and events (newest first): no phones, rider or proof of delivery. */
+    live?: { lastStatus: string; events: Array<{ status: string; desc: string; hub: string; at: string }> };
+  };
   whatsappCheck?: Pick<WhatsAppCheck, 'status' | 'code' | 'hold' | 'cancelAt' | 'openBy'>;
   /** A bank transfer: where it stands, and the customer's own private page while it is open. */
   bankTransfer?: Pick<BankTransferCheck, 'state' | 'uploads' | 'payPath'>;
+}
+
+/** Copies the tracking number (to paste on the courier's site). */
+function CopyButton({ text }: { text: string }) {
+  const [copied, setCopied] = useState(false);
+  return (
+    <button
+      type="button"
+      onClick={() => {
+        void navigator.clipboard?.writeText(text).then(
+          () => {
+            setCopied(true);
+            setTimeout(() => setCopied(false), 2000);
+          },
+          () => undefined
+        );
+      }}
+      aria-label={copied ? 'Tracking number copied' : 'Copy tracking number'}
+      className="shrink-0 inline-flex items-center gap-1 px-2 min-h-8 rounded-lg border border-line-strong text-ink text-[11px] font-semibold hover:bg-sand focus:outline-none focus-visible:ring-2 focus-visible:ring-gold"
+    >
+      {copied ? <Check className="w-3.5 h-3.5" aria-hidden="true" /> : <Copy className="w-3.5 h-3.5" aria-hidden="true" />}
+      <span>{copied ? 'Copied' : 'Copy'}</span>
+    </button>
+  );
 }
 
 export const OrderTrackerModal: React.FC<OrderTrackerModalProps> = ({
@@ -170,41 +202,64 @@ export const OrderTrackerModal: React.FC<OrderTrackerModalProps> = ({
                   </div>
                 ) : null}
 
-                {/* Courier Details */}
-                <div className="bg-surface p-3 rounded-xl border border-line space-y-2">
-                  <div className="flex justify-between items-center">
-                    <span className="text-ink-muted font-medium">Delivery Service:</span>
-                    <strong className="text-ink">
-                      UAE Priority Express Delivery
-                    </strong>
-                  </div>
+                {/* Delivery: a tracking number only once a real courier booking has one */}
+                {searchResult.status !== 'cancelled' && (
+                  <div data-testid="tracking-box" className="bg-surface p-3 rounded-xl border border-line space-y-2">
+                    <div className="flex justify-between items-center gap-3">
+                      <span className="text-ink-muted font-medium">Delivery:</span>
+                      <span className="font-medium text-ink text-right" data-testid="tracking-status">{searchResult.courier.live?.lastStatus || searchResult.courier.status}</span>
+                    </div>
 
-                  <div className="flex justify-between items-center">
-                    <span className="text-ink-muted font-medium">Airway Bill (AWB):</span>
-                    <span className="font-mono font-semibold text-warning">
-                      {searchResult.courier.awbNumber || 'Assigned when your order is dispatched'}
-                    </span>
-                  </div>
+                    {searchResult.courier.awbNumber ? (
+                      <div className="flex flex-wrap justify-between items-center gap-2">
+                        <span className="text-ink-muted font-medium">
+                          Tracking number{searchResult.courier.carrier ? ` (${searchResult.courier.carrier})` : ''}:
+                        </span>
+                        <span className="flex items-center gap-1.5 min-w-0">
+                          <span className="font-mono font-semibold text-ink break-anywhere" data-testid="tracking-awb">{searchResult.courier.awbNumber}</span>
+                          <CopyButton text={searchResult.courier.awbNumber} />
+                        </span>
+                      </div>
+                    ) : searchResult.status === 'dispatched' || searchResult.status === 'out_for_delivery' ? (
+                      <p className="text-ink-soft leading-relaxed">Your parcel is with our delivery team; the tracking number will appear here once the courier scans it.</p>
+                    ) : searchResult.status !== 'delivered' ? (
+                      <p className="text-ink-soft leading-relaxed">The tracking number will appear here once your order is with the courier.</p>
+                    ) : null}
 
-                  <div className="flex justify-between items-center">
-                    <span className="text-ink-muted font-medium">Status Note:</span>
-                    <span className="font-medium text-ink">
-                      {searchResult.courier.status}
-                    </span>
-                  </div>
+                    {searchResult.courier.live && searchResult.courier.live.events.length > 0 && (
+                      <ol data-testid="tracking-events" aria-label="Courier updates" className="border-t border-line pt-2 space-y-1.5">
+                        {searchResult.courier.live.events.slice(0, 8).map((e, i) => (
+                          <li key={i} className="flex gap-2">
+                            <span className={`mt-1 w-2 h-2 rounded-full shrink-0 ${i === 0 ? 'bg-gold' : 'bg-line-strong'}`} aria-hidden="true" />
+                            <span className="min-w-0">
+                              <span className={`block ${i === 0 ? 'font-semibold text-ink' : 'text-ink-soft'}`}>
+                                {e.status}
+                                {e.hub ? ` · ${e.hub}` : ''}
+                              </span>
+                              {e.at && (
+                                <span className="block text-[10px] text-ink-muted">
+                                  {new Date(e.at).toLocaleString('en-GB', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit', timeZone: 'Asia/Dubai' })}
+                                </span>
+                              )}
+                            </span>
+                          </li>
+                        ))}
+                      </ol>
+                    )}
 
-                  {safeHref(searchResult.courier.trackingUrl) && (
-                    <a
-                      href={safeHref(searchResult.courier.trackingUrl)}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      className="mt-1 flex items-center justify-center gap-1.5 w-full bg-gold/15 hover:bg-gold/25 text-warning font-semibold py-2 rounded-lg transition-colors text-xs"
-                    >
-                      <span>Open Live Carrier Tracking Page</span>
-                      <ExternalLink className="w-3.5 h-3.5" />
-                    </a>
-                  )}
-                </div>
+                    {searchResult.courier.awbNumber && safeHref(searchResult.courier.trackingUrl) && (
+                      <a
+                        href={safeHref(searchResult.courier.trackingUrl)}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="mt-1 flex items-center justify-center gap-1.5 w-full min-h-11 bg-gold/15 hover:bg-gold/25 text-ink font-semibold py-2 rounded-lg transition-colors text-xs focus:outline-none focus-visible:ring-2 focus-visible:ring-gold"
+                      >
+                        <span>Track on the courier&apos;s page</span>
+                        <ExternalLink className="w-3.5 h-3.5" aria-hidden="true" />
+                      </a>
+                    )}
+                  </div>
+                )}
 
                 {/* Items */}
                 <div>

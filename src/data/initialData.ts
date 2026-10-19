@@ -24,28 +24,35 @@ export const INITIAL_BANK_DETAILS: BankTransferDetails = {
 };
 
 export const INITIAL_COURIER_SETTINGS: CourierSettings = {
+  packagingGrams: 200,
   autoAssignRules: {
     codCourier: 'jeebly', // Default for Cash On Delivery (Jeebly UAE)
     prepaidCourier: 'echo', // Default for Pre-payment / Account transfer (Eco Express)
   },
-  // No keys in the code: the owner enters the carrier's own (Admin Hub → Courier); the server
-  // keeps them and never sends them back to the browser.
+  // Empty until the owner enters their own: no sample keys, pickup address or account numbers.
   jeebly: {
     apiKey: '',
     clientKey: '',
+    sandboxApiKey: '',
+    sandboxClientKey: '',
     serviceType: 'Scheduled',
     isLive: false,
-    pickupLocationName: 'Beautiful UAE Home Artisan Studio',
+    pickupLocationName: '',
     pickupPhone: '',
-    pickupAddress: 'Studio 08, Alserkal Avenue Creative Zone, Al Quoz 1',
+    pickupAddress: '',
+    liveBaseUrl: '',
+    pickupBuilding: '',
+    pickupArea: '',
+    pickupUnit: '',
+    pickupLandmark: '',
     pickupEmirate: 'Dubai',
   },
   echo: {
     apiKey: '',
-    accountId: 'ECH-DXB-91402',
+    accountId: '',
     isLive: false,
-    hubCode: 'DXB-HUB-01',
-    serviceTier: 'Next-Day Express Priority',
+    hubCode: '',
+    serviceTier: '',
   },
 };
 

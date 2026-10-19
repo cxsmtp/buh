@@ -8,7 +8,7 @@ import { shrinkPhoto } from '@/lib/shrinkPhoto';
 import { shortSizeName } from '@/lib/client/stock';
 import { AI_STAGING_PRESETS, transformProductImage } from '@/lib/aiImageTransform';
 import { Sheet } from '@/components/common/Sheet';
-import { measurementRows, standardMeasurements } from '@/lib/measurements';
+import { measurementRows, sizeFromPreset, standardMeasurements } from '@/lib/measurements';
 
 /**
  * Add or edit a product in four steps, made for a phone:
@@ -58,21 +58,6 @@ interface Draft {
   seenStock: Record<string, number>;
   /** What the BUH-02.10 update took off the shop (a standard duvet cover), per size: offered back in one tap. */
   legacy: NonNullable<Product['legacyMeasurements']>;
-}
-
-/** A size added from a preset: its name, mattress and price, but none of the pieces (those are this product's own). */
-function sizeFromPreset(preset: BedProfileMeasurement): BedProfileMeasurement {
-  return {
-    id: preset.id,
-    name: preset.name,
-    badge: preset.badge,
-    mattressSize: preset.mattressSize,
-    fittedSheet: '',
-    flatSheet: '',
-    pillowcases: '',
-    piecesIncluded: preset.piecesIncluded,
-    priceDelta: preset.priceDelta,
-  };
 }
 
 function draftFrom(product: Product | null, catalog: CatalogSettings): Draft {
@@ -761,6 +746,25 @@ export function ProductEditor({
                         <label className="block">
                           <span className="text-ink-soft">Pieces in the set</span>
                           <input className={field} type="number" min={1} max={20} value={s.piecesIncluded} onChange={(e) => updateSize(s.id, { piecesIncluded: Math.max(1, Number(e.target.value) || 1) })} />
+                        </label>
+                        <label className="block">
+                          <span className="text-ink-soft">Weight (g)</span>
+                          <input
+                            className={field}
+                            type="number"
+                            inputMode="numeric"
+                            min={1}
+                            max={50000}
+                            step={1}
+                            value={s.weightGrams ?? ''}
+                            placeholder="e.g. 1200"
+                            aria-describedby={`pe-weight-hint-${s.id}`}
+                            onChange={(e) => {
+                              const g = Math.round(Number(e.target.value));
+                              updateSize(s.id, { weightGrams: e.target.value === '' || !(g > 0) ? undefined : Math.min(50000, g) });
+                            }}
+                          />
+                          <span id={`pe-weight-hint-${s.id}`} className="block text-[11px] text-ink-muted mt-0.5">Packed weight of one set, for the courier. Not shown in the shop.</span>
                         </label>
                       </div>
                     )}

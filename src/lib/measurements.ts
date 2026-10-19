@@ -56,3 +56,22 @@ export function standardMeasurements(
     ...(isDuvetProduct(product) && clean(preset.duvetCover) ? { duvetCover: clean(preset.duvetCover) } : {}),
   };
 }
+
+/**
+ * A size added to a product from a Settings → Catalogue preset: its name, mattress, price and
+ * packed weight, but none of the pieces (those are this product's own).
+ */
+export function sizeFromPreset(preset: BedProfileMeasurement): BedProfileMeasurement {
+  return {
+    id: preset.id,
+    name: preset.name,
+    badge: preset.badge,
+    mattressSize: preset.mattressSize,
+    fittedSheet: '',
+    flatSheet: '',
+    pillowcases: '',
+    piecesIncluded: preset.piecesIncluded,
+    priceDelta: preset.priceDelta,
+    ...(preset.weightGrams ? { weightGrams: preset.weightGrams } : {}),
+  };
+}

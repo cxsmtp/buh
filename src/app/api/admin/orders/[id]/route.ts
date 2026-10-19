@@ -3,6 +3,7 @@ import { requireAdmin } from '@/lib/server/guard';
 import { allowFields, handleRouteError, HttpError, json, readJsonBody } from '@/lib/server/http';
 import { getOrder, orderEvents, updateOrderByAdmin } from '@/lib/server/orders';
 import { cancelUnpaidCardOrder } from '@/lib/server/payments';
+import { cancelJeeblyBooking } from '@/lib/server/jeeblyOps';
 
 export async function GET(req: Request, { params }: { params: Promise<{ id: string }> }) {
   try {
@@ -39,6 +40,12 @@ export async function PATCH(req: Request, { params }: { params: Promise<{ id: st
     }
     // Audited (before → after) inside updateOrderByAdmin, before anything is saved.
     const order = updateOrderByAdmin(id, body, session.email);
+    // Cancelled: its Jeebly booking is cancelled with Jeebly too, the answer audited before it is
+    // reported; a refusal is said (cancel it in the portal), never claimed as done.
+    if (body.status === 'cancelled' && current?.status !== 'cancelled') {
+      const carrierCancel = await cancelJeeblyBooking(order, session.email);
+      if (carrierCancel.message) return json({ order: getOrder(id), carrierCancel });
+    }
     return json({ order });
   } catch (err) {
     return handleRouteError(err, 'admin/orders/patch');

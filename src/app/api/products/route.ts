@@ -9,7 +9,8 @@ export function GET() {
       void _active;
       void _review;
       void _legacy;
-      return p;
+      // A size's packed weight is for the parcel only: not sent to shoppers.
+      return { ...p, profiles: p.profiles.map(({ weightGrams: _w, ...s }) => (void _w, s)) };
     });
     return json({ products });
   } catch (err) {

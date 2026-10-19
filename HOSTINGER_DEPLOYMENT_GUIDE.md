@@ -80,9 +80,12 @@ The Admin Hub has no button or address on the shop: addresses like `/admin` are 
   - Only if you want SMS codes instead: choose **SMS code**, enter your Twilio or Infobip keys (or Firebase Phone Auth, billed per SMS; see docs/user-guide.md), **Send test** to your own mobile, then **Save**.
 - [ ] **Settings → Branding & bank → Bank transfer details:** enter the bank name, account name and real IBAN, and check every digit. Bank transfer is hidden at checkout until they are saved, and the account is never shown on the website: each customer who chooses it gets it privately (email, WhatsApp, their order's private page).
 - [ ] **Settings → Couriers:**
-  - enter the keys;
-  - press **Test connection**;
-  - switch to **live mode** only when you are ready to book real pickups.
+  - enter your pickup phone, unit, building, area, landmark and emirate;
+  - enter the Jeebly sandbox (demo) keys, the live keys and the live address Jeebly gave you, then **Save Carrier Settings**;
+  - press **Run the Sandbox check** and look at each step (it creates and cancels one TEST shipment in Jeebly's demo system);
+  - press **Turn on Live mode** only when you are ready to book real pickups (it needs the live address and a passed Sandbox check);
+  - add each size's packed weight in **Inventory** (Weight (g)), so parcels are weighed for you;
+  - Eco Express: book in the Eco portal and use **Enter tracking number** on the order.
 - [ ] **Inventory Stock:** add your products with their real pieces per size, and **Remove** the sample products.
 - [ ] **Instagram / Facebook Shopping (optional):** add `https://yourdomain.ae/feeds/meta.csv` as a scheduled feed in Meta Commerce Manager.
 - [ ] **Outbound access:** the server fetches exchange rates (open.er-api.com) daily and festival dates (calendar.google.com) weekly; if they are blocked, built-in festival dates are used and no local currency is shown.

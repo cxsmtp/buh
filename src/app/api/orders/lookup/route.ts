@@ -1,7 +1,8 @@
 import { enforceIpLimit } from '@/lib/server/guard';
 import { assertSameOrigin, handleRouteError, json, readJsonBody, str } from '@/lib/server/http';
 import { normalizePhoneNumber } from '@/lib/otpService';
-import { lookupOrder } from '@/lib/server/orders';
+import { getOrder, lookupOrder } from '@/lib/server/orders';
+import { customerTracking } from '@/lib/server/jeeblyOps';
 import { rateLimit } from '@/lib/server/rateLimit';
 
 /** Track Order: order number + the phone number on the order. Limited to slow guessing. */
@@ -18,7 +19,10 @@ export async function POST(req: Request) {
     }
     const order = lookupOrder(orderId, phone);
     if (!order) return json({ found: false, message: 'No order matches that order number and phone number.' }, 404);
-    return json({ found: true, order });
+    // A real Jeebly booking: its live status and events (kept 5 minutes; never phones, rider, proof or signature).
+    const full = getOrder(order.id);
+    const live = full ? await customerTracking(full).catch(() => undefined) : undefined;
+    return json({ found: true, order: live ? { ...order, courier: { ...order.courier, live } } : order });
   } catch (err) {
     return handleRouteError(err, 'orders/lookup', { found: false });
   }
