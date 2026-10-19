@@ -450,6 +450,98 @@ const MIGRATIONS: Array<(db: DB) => void> = [
       db.prepare("INSERT INTO settings (key, data, updated_at) VALUES ('look', ?, ?)").run(JSON.stringify(now), at);
     }
   },
+  // 14: the accountant's read-only sign-in, and UAE VAT (opt-in, off by default). Add-only: an older
+  //     version ignores these tables and columns (src/lib/server/staffAuth.ts, src/lib/server/vat.ts).
+  //     staff_accounts: people the owner invited (role 'accountant' only); the setup link is kept as
+  //     hashes, single use, 72 h. order_vat: an order's VAT breakdown in fils, written once when it is
+  //     placed while VAT is on (from the effective date); never for an older order, never rewritten.
+  //     vat_invoices / vat_credit_notes: the gap-free numbered series (seq 1, 2, 3…, taken inside an
+  //     IMMEDIATE transaction). Expenses gain the VAT on the bill and the supplier's TRN (input VAT).
+  (db) => {
+    db.exec(`
+      CREATE TABLE staff_accounts (
+        id                TEXT PRIMARY KEY,
+        email             TEXT NOT NULL UNIQUE COLLATE NOCASE,
+        role              TEXT NOT NULL CHECK (role IN ('accountant')),
+        name              TEXT NOT NULL DEFAULT '',
+        password_hash     TEXT,
+        status            TEXT NOT NULL CHECK (status IN ('invited', 'active', 'revoked')),
+        setup_hash        TEXT,
+        setup_grant_hash  TEXT,
+        setup_expires_at  INTEGER,
+        session_gen       INTEGER NOT NULL DEFAULT 1,
+        invited_at        TEXT NOT NULL,
+        invited_by        TEXT NOT NULL,
+        activated_at      TEXT,
+        last_sign_in_at   TEXT,
+        revoked_at        TEXT,
+        revoked_by        TEXT
+      );
+      CREATE UNIQUE INDEX staff_by_setup ON staff_accounts(setup_hash) WHERE setup_hash IS NOT NULL;
+      CREATE UNIQUE INDEX staff_by_grant ON staff_accounts(setup_grant_hash) WHERE setup_grant_hash IS NOT NULL;
+      CREATE TABLE order_vat (
+        order_id    TEXT PRIMARY KEY REFERENCES orders(id),
+        rate_bp     INTEGER NOT NULL,          -- 500 = 5%
+        inclusive   INTEGER NOT NULL,          -- 1: the prices included VAT
+        net_fils    INTEGER NOT NULL,
+        vat_fils    INTEGER NOT NULL,
+        total_fils  INTEGER NOT NULL,
+        lines       TEXT NOT NULL,             -- JSON [{ kind, label, quantity, totalFils, netFils, vatFils }]
+        supplier    TEXT NOT NULL,             -- JSON { name, address, trn } when it was placed
+        created_at  TEXT NOT NULL
+      );
+      CREATE TABLE vat_invoices (
+        seq         INTEGER PRIMARY KEY,       -- 1, 2, 3… with no gaps
+        number      TEXT NOT NULL UNIQUE,      -- INV-000001
+        order_id    TEXT NOT NULL UNIQUE REFERENCES orders(id),
+        issued_at   TEXT NOT NULL,
+        issued_on   TEXT NOT NULL,             -- the UAE date
+        net_fils    INTEGER NOT NULL,
+        vat_fils    INTEGER NOT NULL,
+        total_fils  INTEGER NOT NULL
+      );
+      CREATE INDEX vat_invoices_by_date ON vat_invoices(issued_on);
+      CREATE TABLE vat_credit_notes (
+        seq          INTEGER PRIMARY KEY,      -- 1, 2, 3… with no gaps
+        number       TEXT NOT NULL UNIQUE,     -- CN-000001
+        invoice_seq  INTEGER NOT NULL REFERENCES vat_invoices(seq),
+        order_id     TEXT NOT NULL REFERENCES orders(id),
+        reason       TEXT NOT NULL,            -- refund | cancelled | refund_reversed
+        issued_at    TEXT NOT NULL,
+        issued_on    TEXT NOT NULL,
+        net_fils     INTEGER NOT NULL,         -- negative: a refund that failed afterwards (the credit comes back)
+        vat_fils     INTEGER NOT NULL,
+        total_fils   INTEGER NOT NULL CHECK (total_fils <> 0)
+      );
+      CREATE INDEX vat_credit_notes_by_order ON vat_credit_notes(order_id);
+      CREATE INDEX vat_credit_notes_by_date ON vat_credit_notes(issued_on);
+      ALTER TABLE expenses ADD COLUMN vat_fils INTEGER;
+      ALTER TABLE expenses ADD COLUMN supplier_trn TEXT;
+    `);
+  },
+  // 15: shareable selections ("collections", /c/<slug>): a few products under a short title, with
+  //     an optional last day. The slug never changes once made (it is in links already shared); the
+  //     idempotency key makes a double-tapped "Create link" one collection. views and bag_adds are
+  //     plain counters (no visitor data). A new table only: an older version simply ignores it.
+  (db) => {
+    db.exec(`
+      CREATE TABLE collections (
+        id               TEXT PRIMARY KEY,           -- col-<hex>
+        slug             TEXT NOT NULL UNIQUE,       -- eid-picks-7k2mq: the title's words + 5 random characters
+        title            TEXT NOT NULL,
+        product_ids      TEXT NOT NULL,              -- JSON array of product ids, in the order shown
+        expires_on       TEXT,                       -- YYYY-MM-DD (UAE date): the last day it opens, NULL for no end
+        views            INTEGER NOT NULL DEFAULT 0,
+        bag_adds         INTEGER NOT NULL DEFAULT 0,
+        idempotency_key  TEXT UNIQUE,
+        created_at       TEXT NOT NULL,
+        created_by       TEXT NOT NULL DEFAULT '',
+        updated_at       TEXT NOT NULL,
+        updated_by       TEXT NOT NULL DEFAULT ''
+      );
+      CREATE INDEX collections_by_created ON collections(created_at);
+    `);
+  },
 ];
 
 let db: DB | null = null;
@@ -477,9 +569,35 @@ export function getDb(): DB {
   return db;
 }
 
+/** Things to do once the outermost transaction has committed (dropped if it, or the part that queued them, rolls back). */
+const commitHooks: Array<() => void> = [];
+
 /** Run fn in one transaction (IMMEDIATE, so concurrent writers queue instead of failing mid-way). */
 export function inTransaction<T>(fn: () => T): T {
-  return getDb().transaction(fn).immediate();
+  const mark = commitHooks.length;
+  let out: T;
+  try {
+    out = getDb().transaction(fn).immediate();
+  } catch (err) {
+    commitHooks.length = mark;
+    throw err;
+  }
+  if (!getDb().inTransaction) {
+    for (const hook of commitHooks.splice(0)) {
+      try {
+        hook();
+      } catch {
+        // a hook never undoes a commit
+      }
+    }
+  }
+  return out;
+}
+
+/** Run fn once what is being written now is committed: at once outside a transaction, never if it rolls back. */
+export function afterCommit(fn: () => void): void {
+  if (getDb().inTransaction) commitHooks.push(fn);
+  else fn();
 }
 
 /** Consistent online backup to a file, safe while the shop is serving. */

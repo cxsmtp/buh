@@ -7,23 +7,32 @@ import type { BedProfileMeasurement, Product } from '@/types';
  */
 
 export interface MeasurementRow {
-  key: 'sheet' | 'pillowcases' | 'duvetCover' | 'otherPieces';
+  key: 'sheet' | 'pillowcases' | 'duvetCover' | 'otherPieces' | 'dimensions';
   label: string;
   value: string;
 }
 
-type Size = Pick<BedProfileMeasurement, 'fittedSheet' | 'flatSheet' | 'pillowcases' | 'duvetCover' | 'otherPieces'>;
+type Size = Pick<BedProfileMeasurement, 'fittedSheet' | 'flatSheet' | 'pillowcases' | 'duvetCover' | 'otherPieces' | 'dimensions'>;
+type Kind = Pick<Product, 'fitted' | 'productType'>;
+
+/** A simple product's variant (towels, cushions…): its dimensions, when the owner gave them. */
+function dimensionsRow(size: Size): MeasurementRow | null {
+  const value = clean(size.dimensions);
+  return value ? { key: 'dimensions', label: 'Dimensions', value } : null;
+}
 
 const clean = (v: unknown) => (typeof v === 'string' ? v.trim() : '');
 
-/** The sheet line of a size: its label and value, or null when the owner gave none. */
-export function sheetRow(product: Pick<Product, 'fitted'>, size: Size): MeasurementRow | null {
+/** The sheet line of a size: its label and value, or null when the owner gave none (a simple product: its dimensions). */
+export function sheetRow(product: Kind, size: Size): MeasurementRow | null {
+  if (product.productType === 'simple') return dimensionsRow(size);
   const value = clean(product.fitted ? size.fittedSheet : size.flatSheet);
   return value ? { key: 'sheet', label: product.fitted ? 'Fitted sheet' : 'Flat sheet', value } : null;
 }
 
 /** The rows to show for a size, in order, with nothing empty. */
-export function measurementRows(product: Pick<Product, 'fitted'>, size: Size): MeasurementRow[] {
+export function measurementRows(product: Kind, size: Size): MeasurementRow[] {
+  if (product.productType === 'simple') return [dimensionsRow(size)].filter((r): r is MeasurementRow => r !== null);
   const rows: Array<MeasurementRow | null> = [
     sheetRow(product, size),
     clean(size.pillowcases) ? { key: 'pillowcases', label: 'Pillowcases', value: clean(size.pillowcases) } : null,

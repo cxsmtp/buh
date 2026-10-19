@@ -1,5 +1,22 @@
 # Changelog
 
+## BUH-02.17.00 — 2026-10-19 21:00 UTC · [#35](https://github.com/cxsmtp/buh/pull/35)
+
+- **Read-only access for your accountant.** Invite them from Settings → Security. They see only Money (reports, expenses with bills, VAT and the audit log) and can change nothing. Removing access, or "sign out everywhere", ends their access at once, and restoring a backup never brings it back.
+- **UAE VAT when you register (off until then).** Enter your TRN and a start date, and from that date orders carry 5% VAT. Tax invoices are numbered with no gaps, credit notes follow refunds, and Money → VAT gives the quarterly return for your accountant. Reports show figures with and without VAT.
+- **Backups copied to your Google Drive.** Use "Connect my Google Drive" with a code at google.com/device. Copies are always encrypted, only the shop's own copies are kept (newest 30), and a new server can be rebuilt from Drive with one line.
+- **Share a selection.** Tick products in Inventory, name it (e.g. "Eid picks") and share one link with a proper WhatsApp/Instagram preview, with an optional end date.
+- **More than bedding.** Towels, cushions, throws and curtains get simple sizes, prices, stock and weights, without bed measurements.
+- **Amazon.ae / Noon starter export** and a **hub that opens where you need it** (today's orders on your phone, the overview on a laptop).
+- **Safer edges.**
+  - Gemini's new "AQ." keys are accepted and hidden everywhere.
+  - The Stripe webhook address now looks like any unknown page to anything that isn't a signed Stripe delivery, and future-dated deliveries are refused.
+- **Status.**
+  - **Benchmark:** 3 alternating rounds (main first), 0 failed requests. Storefront branch 786 / 758 / 632 req/s vs main 759 / 696 / 711; catalogue API branch 691 / 647 / 583 vs main 735 / 612 / 687; serviceability API branch 582 / 556 / 560 vs main 595 / 553 / 587. The branch's slower third round coincided with another build on the same machine (load average up to 3.5). Focused re-runs, alternating, 4 each, show the same speed: serviceability branch 667 / 641 / 627 / 659 vs main 610 / 650 / 651 / 636; catalogue branch 631 / 658 / 654 / 649 vs main 629 / 627 / 644 / 674.
+  - **Tests:** 1,042 passed, 0 failed (unit and end-to-end).
+  - **Dependency audit:** production 0 vulnerabilities; no new packages.
+  - **Security scan:** independent reviews of the accountant and VAT work, the catalogue features and the Drive backups found 0 high, 4 medium and about 30 low issues, all fixed, mostly with tests that fail before and pass after. Google Drive has not been tried with a real Google account yet.
+
 ## BUH-02.16.00 — 2026-10-19 09:30 UTC · [#34](https://github.com/cxsmtp/buh/pull/34)
 
 - **Style in a bedroom (Gemini).** In the product editor, Gemini places your bedding in a styled bedroom (Dubai luxury master, Palm villa, Hotel suite, Clean catalogue, Kids' room) from a plain camera photo. You see the original and the result side by side and choose Add, Try again or Discard, and your real photo is never replaced.

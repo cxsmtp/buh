@@ -14,7 +14,9 @@ import { verifyPhoneToken } from './phoneToken';
 import { getProduct, invalidateProducts, listProducts } from './products';
 import { bump } from './live';
 import { bankTransferMode, cardFeePercent, cardPaymentsReady, getSettings, phoneCheckMode, phoneCodesOn } from './settings';
-import { cardFeeFils } from '@/lib/money';
+import { cardFeeFils, vatOnTopFils } from '@/lib/money';
+import { checkoutVat, orderVat, recordOrderVat, syncVatDocumentsQuietly } from './vat';
+import { mac } from './secrets';
 import { audit, auditedTransaction, auditOrThrow } from './audit';
 import { kvGet, kvSet } from './kv';
 import { logEvent as logEvent_ } from './log';
@@ -306,6 +308,8 @@ function writeOrder(order: Order, idempotencyKey?: string) {
       key: idempotencyKey ?? null,
       data: JSON.stringify(stored),
     });
+  // UAE VAT (only orders with a VAT breakdown): the tax invoice once due, credit notes after a cancel.
+  syncVatDocumentsQuietly(order.id);
   bump('orders'); // the admin hub shows it straight away
 }
 
@@ -325,6 +329,19 @@ export function orderEvents(orderId: string) {
 }
 
 // ── Placing an order (public) ───────────────────────────────────────────────
+
+/** VAT added on top at checkout (prices excluding VAT); 0 when prices include it. */
+function recordableVat(baseFils: number, plan: { rateBp: number; inclusive: boolean }): number {
+  return plan.inclusive ? 0 : vatOnTopFils(baseFils, plan.rateBp / 100);
+}
+
+/**
+ * The customer's private address for their order's receipt (or tax invoice, with VAT on):
+ * /invoice/<order>.<mac>, made from the server's key (never stored), so only someone given it opens it.
+ */
+export function documentPath(orderId: string): string {
+  return `/invoice/${orderId}.${mac('order-document', orderId)}`;
+}
 
 export interface PlaceOrderResult {
   order: Order;
@@ -549,7 +566,7 @@ export function placeOrder(input: unknown, context: PlaceOrderContext = {}): Pla
         const product = getProduct(line.productId);
         if (!product || !product.active) throw new HttpError(409, 'An item in your bag is no longer available. Please remove it and try again.');
         const profile = product.profiles.find((p) => p.id === line.profileId);
-        if (!profile) throw new HttpError(409, `${product.title}: that bed size is no longer offered.`);
+        if (!profile) throw new HttpError(409, `${product.title}: that ${product.productType === 'simple' ? 'option' : 'bed size'} is no longer offered.`);
         // No colours on the product: none is chosen (a colour sent from an older bag is ignored).
         const color = !product.colors.length ? undefined : line.color && product.colors.some((c2) => c2.name === line.color) ? line.color : product.colors[0]?.name;
         if (product.colors.length && line.color && color !== line.color) throw new HttpError(409, `${product.title}: that colour is no longer offered.`);
@@ -578,6 +595,8 @@ export function placeOrder(input: unknown, context: PlaceOrderContext = {}): Pla
           totalPrice: aed(unitFils * line.quantity),
           // The size's packed weight now (a snapshot: editing the product later does not change this order).
           ...(Number(profile.weightGrams) > 0 ? { weightGrams: Math.round(Number(profile.weightGrams)) } : {}),
+          // A simple product's variant (towels, cushions…): its dimensions, as shown when it was bought.
+          ...(product.productType === 'simple' ? { productType: 'simple' as const, ...(profile.dimensions ? { dimensions: profile.dimensions } : {}) } : {}),
         });
       }
 
@@ -585,7 +604,11 @@ export function placeOrder(input: unknown, context: PlaceOrderContext = {}): Pla
       const codFils = paymentMethod === 'cod' ? fils(COD_FEE) : 0;
       // The card fee: a percent of items + delivery, in whole fils (half up), part of the total Stripe is asked for.
       const cardFeeF = card ? cardFeeFils(subtotalFils + deliveryFils, feePercent) : 0;
-      const totalFils = subtotalFils + deliveryFils + codFils + cardFeeF;
+      // UAE VAT (Settings → Payments → VAT, off by default): from its effective date. Prices include
+      // VAT unless the owner chose otherwise; then 5% of the whole is added on top here.
+      const vatPlan = checkoutVat();
+      const vatPlanned = vatPlan ? recordableVat(subtotalFils + deliveryFils + codFils + cardFeeF, vatPlan) : 0;
+      const totalFils = subtotalFils + deliveryFils + codFils + cardFeeF + vatPlanned;
       // Never charge a total the customer was not shown (a price changed while they were at checkout).
       if (expectedTotalFils !== null && expectedTotalFils !== totalFils) {
         throw new HttpError(409, `Prices have changed since you opened checkout: your total is now AED ${aed(totalFils)}. Please check your bag and confirm again.`, {}, { code: 'price_changed', total: aed(totalFils), ...(card ? { cardFeePercent: feePercent } : {}) });
@@ -605,6 +628,7 @@ export function placeOrder(input: unknown, context: PlaceOrderContext = {}): Pla
         deliveryOption,
         codFee: aed(codFils),
         ...(cardFeeF ? { cardFee: aed(cardFeeF), cardFeePercent: feePercent } : {}),
+        ...(vatPlanned ? { vatAdded: aed(vatPlanned) } : {}),
         discount: 0,
         total: aed(totalFils),
         paymentMethod: paymentMethod as Order['paymentMethod'],
@@ -639,6 +663,8 @@ export function placeOrder(input: unknown, context: PlaceOrderContext = {}): Pla
         ...(source ? { source } : {}),
       };
       writeOrder(created, idempotencyKey);
+      // Its VAT breakdown, worked out here and stored once (never for an order placed without VAT).
+      if (vatPlan) recordOrderVat(created, vatPlan);
       logEvent(id, 'customer', 'created', { total: created.total, paymentMethod, ...(created.cardFee ? { cardFee: created.cardFee } : {}), ...(created.bankDetailsBy ? { bankDetailsBy: created.bankDetailsBy } : {}) });
       if (ipHash) getDb().prepare('UPDATE orders SET card_ip = ? WHERE id = ?').run(ipHash, id);
       if (card) {
@@ -1696,6 +1722,8 @@ function ledgerRefund(orderId: string, totalFils: number, source: RefundRow['sou
   let id = refundId ?? null;
   if (id && db.prepare(`SELECT 1 FROM card_refunds WHERE stripe_refund_id = ? AND amount_fils ${delta > 0 ? '>' : '<'} 0`).get(id)) id = null;
   db.prepare('INSERT INTO card_refunds (order_id, amount_fils, at, source, stripe_refund_id) VALUES (?, ?, ?, ?, ?)').run(orderId, delta, new Date().toISOString(), source, id);
+  // A credit note for it (or a negative one for a refund that failed), when the order has a tax invoice.
+  syncVatDocumentsQuietly(orderId);
   return delta;
 }
 
@@ -1949,6 +1977,9 @@ export function customerView(order: Order) {
   void _bank;
   return {
     ...rest,
+    // The printable receipt (a tax invoice once VAT is on and it is issued): the customer's own private link.
+    documentPath: documentPath(order.id),
+    documentLabel: orderVat(order.id) ? 'Tax invoice' : 'Receipt',
     courier: trackingView(order),
     ...(order.whatsappCheck ? { whatsappCheck: whatsAppView(order.whatsappCheck) } : {}),
     ...(order.card ? { card: cardView(order.card) } : {}),
@@ -2017,7 +2048,7 @@ export function lookupOrder(id: string, phone: string) {
     firstName: order.customer.fullName.split(/\s+/)[0],
     emirate: order.customer.emirate,
     area: order.customer.area,
-    items: order.items.map((i) => ({ title: i.title, image: i.image, profileName: i.profileName, color: i.color, quantity: i.quantity, totalPrice: i.totalPrice })),
+    items: order.items.map((i) => ({ title: i.title, image: i.image, profileName: i.profileName, ...(i.dimensions ? { dimensions: i.dimensions } : {}), color: i.color, quantity: i.quantity, totalPrice: i.totalPrice })),
     courier: trackingView(order),
     ...(order.whatsappCheck ? { whatsappCheck: whatsAppView(order.whatsappCheck) } : {}),
     ...(order.card ? { card: cardView(order.card) } : {}),

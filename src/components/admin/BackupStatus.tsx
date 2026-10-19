@@ -3,6 +3,7 @@
 import React, { useEffect, useState } from 'react';
 import { AlertTriangle, CheckCircle2, DatabaseBackup, Loader2, XCircle } from 'lucide-react';
 import { getJson, postJson } from '@/lib/apiClient';
+import { copyingText, mb, type DriveCopying } from './settings/DriveBackupCard';
 
 interface Health {
   level: 'ok' | 'warning' | 'failing';
@@ -16,6 +17,8 @@ interface Health {
   lastEmailedAt?: string;
   lastEmailError?: string;
   notice?: string;
+  /** The off-server copy (Settings → System & backups → Google Drive). */
+  drive?: { enabled: boolean; level: 'off' | 'ok' | 'failing'; lastSuccessAt?: string; lastSize?: number; lastError?: string; copying?: DriveCopying | null };
 }
 
 function ago(iso?: string) {
@@ -42,6 +45,20 @@ export const BackupStatus: React.FC = () => {
     return () => clearInterval(t);
   }, []);
 
+  // A copy to Google Drive going up after the backup: follow it every few seconds until it is done.
+  const copying = Boolean(health?.drive?.copying);
+  useEffect(() => {
+    if (!copying) return;
+    const t = setInterval(
+      () =>
+        void getJson<Health>('/api/admin/backup').then(({ ok, data }) => {
+          if (ok) setHealth(data);
+        }),
+      3000
+    );
+    return () => clearInterval(t);
+  }, [copying]);
+
   const runNow = async () => {
     setRunning(true);
     const { ok, data } = await postJson<Health>('/api/admin/backup', {});
@@ -50,13 +67,16 @@ export const BackupStatus: React.FC = () => {
   };
 
   if (!health) return null;
+  const drive = health.drive?.enabled ? health.drive : null;
+  // A failed Drive copy never makes the local backup look failed: it turns an all-green line amber.
+  const level = health.level === 'ok' && drive?.level === 'failing' ? 'warning' : health.level;
   const tone =
-    health.level === 'ok'
+    level === 'ok'
       ? 'bg-success-soft border-success-line text-success'
-      : health.level === 'warning'
+      : level === 'warning'
       ? 'bg-warning-soft border-warning-line text-warning'
       : 'bg-danger-soft border-danger-line text-danger';
-  const Icon = health.level === 'ok' ? CheckCircle2 : health.level === 'warning' ? AlertTriangle : XCircle;
+  const Icon = level === 'ok' ? CheckCircle2 : level === 'warning' ? AlertTriangle : XCircle;
   const detail =
     health.level === 'failing'
       ? health.lastError
@@ -91,6 +111,17 @@ export const BackupStatus: React.FC = () => {
       <p data-testid="backup-detail" className="opacity-80 break-words">
         {detail} Every {health.intervalHours} h{health.lastSummary ? ` • ${health.lastSummary}` : ''}.
       </p>
+      {drive && (
+        <p data-testid="backup-drive" className="opacity-80 break-words">
+          {drive.copying
+            ? copyingText(drive.copying)
+            : drive.level === 'failing'
+            ? `Google Drive copy failed: ${drive.lastError || 'see Settings → System & backups'}.`
+            : drive.lastSuccessAt
+            ? `Copied to Google Drive ${ago(drive.lastSuccessAt)}${drive.lastSize ? ` (${mb(drive.lastSize)})` : ''}.`
+            : 'Google Drive: no copy yet.'}
+        </p>
+      )}
     </div>
   );
 };

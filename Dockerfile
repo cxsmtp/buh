@@ -54,6 +54,8 @@ COPY --from=builder /app/.next/standalone ./
 COPY --from=builder /app/.next/static ./.next/static
 # Restore tool (node scripts/restore-backup.mjs) inside the container.
 COPY --from=builder /app/scripts/restore-backup.mjs ./scripts/restore-backup.mjs
+# Its --from-drive mode (a copy from Google Drive, for rebuilding on a new server from the image alone).
+COPY --from=builder /app/scripts/restore-from-drive.mjs ./scripts/restore-from-drive.mjs
 # Database snapshot the updater takes before switching versions (node scripts/backup-now.mjs).
 COPY --from=builder /app/scripts/backup-now.mjs ./scripts/backup-now.mjs
 # The Admin Hub's private link: make a new one when it is lost (node scripts/admin-link.mjs --new).

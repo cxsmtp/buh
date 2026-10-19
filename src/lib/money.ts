@@ -33,3 +33,25 @@ export function cardFeeFils(baseFils: number, percent: number): number {
 
 /** "3.5" or "2.25": the percent as the owner typed it, for labels. */
 export const percentText = (percent: number) => String(Math.round(Number(percent) * 100) / 100);
+
+/** UAE VAT: 5% (Settings → Payments → VAT; off unless the shop is VAT-registered). */
+export const UAE_VAT_PERCENT = 5;
+
+/**
+ * The VAT inside a VAT-inclusive total, in whole fils: `round(total × rate / (100 + rate))`, half up,
+ * integer maths only (5%: round(total × 5 / 105)). Negative totals (a reversal) round the same way.
+ */
+export function vatInsideFils(totalFils: number, ratePercent: number = UAE_VAT_PERCENT): number {
+  const bp = Math.round(ratePercent * 100);
+  if (!Number.isFinite(totalFils) || bp <= 0) return 0;
+  const sign = totalFils < 0 ? -1 : 1;
+  const t = Math.abs(Math.round(totalFils));
+  return sign * Math.floor((2 * t * bp + 10000 + bp) / (2 * (10000 + bp)));
+}
+
+/** The VAT added on top of a VAT-exclusive price, in whole fils: `round(net × rate / 100)`, half up. */
+export function vatOnTopFils(netFils: number, ratePercent: number = UAE_VAT_PERCENT): number {
+  const bp = Math.round(ratePercent * 100);
+  if (!Number.isFinite(netFils) || bp <= 0 || netFils <= 0) return 0;
+  return Math.floor((Math.round(netFils) * bp + 5000) / 10000);
+}

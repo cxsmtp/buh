@@ -114,6 +114,8 @@ The shop backs itself up every 12 hours, and straight after a restart if one is 
 
 **Size:** one backup holds at most 6 GB of data (database, photos, receipts, bills, audit log); it is made and restored a piece at a time, so it needs disk, not memory. From 80% the Admin Hub and an email warn you; beyond it the backup is refused (and you are told) instead of making one too big to restore.
 
+**Off-server copy (recommended):** the shop can also copy each backup, encrypted, to a Google Drive folder (Admin Hub → Settings → System & backups → **Copy each backup to Google Drive**; steps in docs/user-guide.md). Then a lost server can be rebuilt from Drive ("Hostinger VPS with Podman, images only" → "Rebuilding on a new server from Google Drive").
+
 **If something is wrong**, the status line at the top of the Admin Hub turns amber (taken but not emailed) or red (failed or overdue), and a failure is also emailed. **Back up now** runs one immediately.
 
 Before every update, the updater also saves a copy of the database on the server, as `backups/pre-update-<time>.db` (the newest 5 are kept).
@@ -151,7 +153,7 @@ On the server (this replaces the live data; the current data is kept aside in `r
    docker compose start updater
    ```
 
-Then sign in with the new one-time password from `docker compose logs app-blue` at your admin link (the backup keeps it; a backup from before BUH-02.08 prints a new one in the log; if you changed the link after the backup, make a new one with `docker compose exec app-blue node scripts/admin-link.mjs --new`), and re-enter the courier and SMS keys. Restored passkeys are switched off and old recovery codes no longer work (the backup may be older than a passkey you removed): follow the banner in the Admin Hub to keep your passkeys and create new codes. Keys and the admin account are deliberately not in backups.
+Then sign in with the new one-time password from `docker compose logs app-blue` at your admin link (the backup keeps it; a backup from before BUH-02.08 prints a new one in the log; if you changed the link after the backup, make a new one with `docker compose exec app-blue node scripts/admin-link.mjs --new`), and re-enter the courier and SMS keys. Restored passkeys are switched off and old recovery codes no longer work (the backup may be older than a passkey you removed): follow the banner in the Admin Hub to keep your passkeys and create new codes. Accountant access comes back switched off: re-invite your accountant (Settings → Security → Accountant access). Keys and the admin account are deliberately not in backups.
 
 To check a backup on your own computer (Node 24, in a checkout of this repository after `npm ci`):
 
@@ -504,6 +506,56 @@ Day to day: Settings → Versions in the Admin Hub; the commands in the section 
    podman start beautifuluaehome && podman start beautifuluaehome-updater
    ```
 3. Sign in with the new one-time password from `podman logs beautifuluaehome` (the admin account is not in backups) at your admin link (the backup keeps it; `podman exec beautifuluaehome node scripts/admin-link.mjs --new` makes a new one), re-enter the courier and SMS keys, and follow the Admin Hub's banner about passkeys (section 4).
+
+**Rebuilding on a new server from Google Drive** (the old server is lost; needs the copies in Google Drive, your `BACKUP_PASSPHRASE`, and either the four restore-details lines from "Connect my Google Drive" or the service account's `.json` key file):
+
+1. Set up the new server with the steps above, up to the shop running (a new, empty shop).
+2. On the server: stop the updater, then the shop:
+   ```bash
+   podman stop beautifuluaehome-updater && podman stop beautifuluaehome
+   ```
+3. Type the passphrase without showing it, passed by name only (not on a command line):
+   ```bash
+   read -rs -p 'Backup passphrase: ' BACKUP_PASSPHRASE && export BACKUP_PASSPHRASE
+   ```
+
+**With "Connect my Google Drive"** (the four lines you saved with **Copy restore details**):
+
+4. Paste the four lines into a file only root can read, then save it (Ctrl+O, Enter, Ctrl+X):
+   ```bash
+   install -m 600 /dev/null /root/drive.env && nano /root/drive.env
+   ```
+5. Restore the newest copy over the new shop's data (`--from-drive list` instead of `--from-drive latest` lists the copies; a copy's name restores that one):
+   ```bash
+   podman run --rm -v beautifuluaehome-data:/data --env-file /root/drive.env -e BACKUP_PASSPHRASE --entrypoint node ghcr.io/cxsmtp/buh:latest scripts/restore-backup.mjs --from-drive latest /data --replace
+   ```
+
+**Or with a service account** (its `.json` key file):
+
+4. Copy the key file to the server (from your computer), and load it by name only:
+   ```bat
+   scp drive-key.json root@your-server-ip:/root/
+   ```
+   ```bash
+   export BUH_DRIVE_KEY="$(cat /root/drive-key.json)"
+   ```
+5. Restore the newest copy (put your folder's link in):
+   ```bash
+   podman run --rm -v beautifuluaehome-data:/data -e BACKUP_PASSPHRASE -e BUH_DRIVE_KEY -e BUH_DRIVE_FOLDER='https://drive.google.com/drive/folders/your-folder-id' --entrypoint node ghcr.io/cxsmtp/buh:latest scripts/restore-backup.mjs --from-drive latest /data --replace
+   ```
+
+Then, either way:
+
+6. Forget the secrets in this shell, and start the shop and the updater:
+   ```bash
+   unset BACKUP_PASSPHRASE BUH_DRIVE_KEY
+   ```
+   ```bash
+   podman start beautifuluaehome && podman start beautifuluaehome-updater
+   ```
+7. Sign in as in step 3 of "Moving the laptop shop" above, then in Settings → System & backups press **Connect Google Drive** again (or paste the key again: backups never carry the connection or the key), and press **Back up now**. Keep `/root/drive.env` in your password manager, then delete it: `rm /root/drive.env`.
+
+To check the copies from the running shop (it uses its saved connection and folder): `podman exec beautifuluaehome node scripts/restore-backup.mjs --from-drive list`.
 
 ## 6. Logs and health
 

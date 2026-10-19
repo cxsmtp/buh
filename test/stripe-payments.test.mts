@@ -14,7 +14,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { after, before, test } from 'node:test';
 import Database from 'better-sqlite3';
-import { jsonRequest, tempDataDir } from './helpers.mjs';
+import { jsonRequest, tempDataDir, LATEST_DB_VERSION, UNDO_MIGRATION_14, UNDO_MIGRATION_15 } from './helpers.mjs';
 import { startStripeMock, TEST_KEYS, type StripeMock } from './stripe-mock.mjs';
 
 const dir = tempDataDir();
@@ -259,6 +259,41 @@ test('the webhook refuses a wrong signature, no saved secret, no signature, an o
   await settings.updateSettings('payments', { cardEnabled: s.cardEnabled, stripeWebhookSecret: TEST_KEYS.webhook });
   assert.equal((await webhook(good.body, good.signature)).status, 200);
   assert.equal(orders.getOrder(data.order!.id)!.card!.state, 'paid');
+});
+
+test('webhook signatures: every v1 signature is tried, timing-safe, over the raw body; more than 5 minutes old or ahead is refused', async () => {
+  assert.equal(payments.WEBHOOK_TOLERANCE_SEC, 300);
+  const now = Math.floor(Date.now() / 1000);
+  const ignored = (opts: { timestamp?: number; secret?: string } = {}) => mock.event('customer.created', { id: 'cus_1' }, opts);
+  const refusedAnswer = { status: 400, text: JSON.stringify({ received: false, message: 'Invalid request.' }) };
+  // Inside the window either way: accepted.
+  for (const t of [now, now - 240, now + 60]) {
+    const e = ignored({ timestamp: t });
+    assert.equal((await webhook(e.body, e.signature)).status, 200, `t = now ${t - now}`);
+  }
+  // Too old (a replayed delivery) or too far ahead: refused, even signed with the right secret.
+  for (const t of [now - 301, now - 3600, now + 301, now + 86_400]) {
+    const e = ignored({ timestamp: t });
+    assert.deepEqual(await webhook(e.body, e.signature), refusedAnswer, `t = now ${t - now}`);
+  }
+  // Several v1 signatures (Stripe sends one per secret while a secret is being rolled): any one that matches will do.
+  const e = ignored();
+  const t = /t=(\d+)/.exec(e.signature)![1];
+  const v1 = /v1=([0-9a-f]+)/.exec(e.signature)![1];
+  assert.equal((await webhook(e.body, `t=${t},v1=${'0'.repeat(64)},v1=${v1}`)).status, 200, 'the second v1 matches');
+  const e2 = ignored();
+  const t2 = /t=(\d+)/.exec(e2.signature)![1];
+  const v12 = /v1=([0-9a-f]+)/.exec(e2.signature)![1];
+  for (const sig of [`t=${t2},v0=${v12}`, `t=${t2}`, `v1=${v12}`, `t=abc,v1=${v12}`, `t=${t2},v1=${v12.slice(0, -2)}`, `t=${t2},v1=${v12.toUpperCase()}`]) {
+    assert.deepEqual(await webhook(e2.body, sig), refusedAnswer, sig);
+  }
+  // The raw body is what is signed: the same JSON re-spaced is refused.
+  assert.deepEqual(await webhook(JSON.stringify(JSON.parse(e2.body), null, 1), e2.signature), refusedAnswer);
+  assert.equal((await webhook(e2.body, e2.signature)).status, 200);
+  // Stripe's library does the comparison with crypto.timingSafeEqual (checked in its source here).
+  const node = fs.readFileSync('node_modules/stripe/cjs/platform/NodePlatformFunctions.js', 'utf8');
+  assert.match(node, /secureCompare\(a, b\) \{[\s\S]*?crypto\.timingSafeEqual/);
+  assert.match(fs.readFileSync('src/lib/server/payments.ts', 'utf8'), /Stripe\.webhooks\.constructEvent\(raw, signature, secret, WEBHOOK_TOLERANCE_SEC\)/);
 });
 
 test('the confirmation screen’s check asks Stripe (never the browser): paid with how; a wrong secret is unknown', async () => {
@@ -773,6 +808,8 @@ test('migration 9 only adds (columns, indexes, a table); backups carry card paym
   const db = new Database(path.join(old, 'shop.db'));
   // Migration 10's columns go too (it runs again after 9).
   // Migrations 11 and 12 go too (they run again after 10): newest first.
+  db.exec(UNDO_MIGRATION_15); // migration 15
+  db.exec(UNDO_MIGRATION_14); // migration 14
   db.exec("DELETE FROM settings_history WHERE key = 'look'; DELETE FROM settings WHERE key = 'look'"); // migration 13
   db.exec('DROP TABLE card_refunds; DROP TABLE expense_bills; DROP TABLE expense_versions; DROP TABLE expenses; DROP TABLE expense_categories;'); // migration 12
   db.exec('DROP INDEX orders_unconfirmed_due; DROP INDEX orders_unopened_due; ALTER TABLE orders DROP COLUMN phone_check_method; ALTER TABLE orders DROP COLUMN wa_cancel_at; ALTER TABLE orders DROP COLUMN wa_unopened_cancel_at;'); // migration 11
@@ -783,7 +820,7 @@ test('migration 9 only adds (columns, indexes, a table); backups carry card paym
   db.close();
   const up = run(`const m = await import('@/lib/server/db'); const db = (m.getDb ?? m.default.getDb)(); console.log(JSON.stringify({ v: db.pragma('user_version', { simple: true }), row: db.prepare("SELECT status, data, card_state, payment_ref FROM orders WHERE id = 'BUH-OLD-9'").get() }));`);
   assert.equal(up.status, 0, up.stderr);
-  assert.deepEqual(JSON.parse(up.stdout.trim().split('\n').pop()!), { v: 13, row: { status: 'pending_confirmation', data: '{"id":"BUH-OLD-9"}', card_state: 'none', payment_ref: null } });
+  assert.deepEqual(JSON.parse(up.stdout.trim().split('\n').pop()!), { v: LATEST_DB_VERSION, row: { status: 'pending_confirmation', data: '{"id":"BUH-OLD-9"}', card_state: 'none', payment_ref: null } });
 });
 
 test('wallet addresses: emirates by any name, areas from the shop’s list, nothing guessed', () => {

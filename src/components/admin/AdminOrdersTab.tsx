@@ -491,7 +491,7 @@ export const AdminOrdersTab: React.FC<AdminOrdersTabProps> = ({
                         {/* eslint-disable-next-line @next/next/no-img-element */}
                         <img src={i.image} alt={i.title} className="w-6 h-6 rounded object-cover" />
                         <span className="truncate">
-                          <strong>{i.quantity}x</strong> {i.title} ({i.profileName.split(' ')[0]})
+                          <strong>{i.quantity}x</strong> {i.title} ({i.mattressSize ? i.profileName.split(' ')[0] : i.profileName})
                         </span>
                       </div>
                     ))}
@@ -727,7 +727,18 @@ export const AdminOrdersTab: React.FC<AdminOrdersTabProps> = ({
 
                 {/* Action Buttons */}
                 <div className="flex items-center justify-between gap-2 pt-1">
-                  <div className="flex items-center gap-2">
+                  <div className="flex items-center gap-2 flex-wrap">
+                    {/* The order's printable receipt (a tax invoice with VAT on): the server decides which. */}
+                    <a
+                      href={`/api/admin/orders/${order.id}/invoice`}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      data-testid="order-invoice-link"
+                      className="flex items-center gap-1.5 text-xs text-ink bg-surface hover:bg-sand border border-line-strong font-semibold px-3 py-1.5 rounded-xl"
+                    >
+                      <Printer className="w-3.5 h-3.5 text-gold" aria-hidden="true" />
+                      <span>Receipt / invoice</span>
+                    </a>
                     {/* Print Label only once the carrier has issued the AWB */}
                     {order.courier.awbNumber && order.courier.labelGenerated && (
                       <button

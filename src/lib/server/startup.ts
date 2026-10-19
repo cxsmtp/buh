@@ -5,9 +5,11 @@ import { ensureAdminLink } from './adminLinkSetup';
 import { MIN_PASSPHRASE_LENGTH, auditRestoreOnce, emailConfigured, startBackupSchedule } from './backup';
 import { refreshPayHashes } from './bankPay';
 import { getDb } from './db';
+import { migrateDriveSecrets } from './driveBackup';
 import { backfillRefundLedger, normalizeBankStates, startUnconfirmedSweep } from './orders';
 import { startMonitor } from './monitor';
 import { startCardSweep } from './payments';
+import { auditStaffRestoreOnce } from './staffAuth';
 import { startFestivalRefresh } from './theme';
 import { logEvent } from './log';
 import { liveGateways } from '@/lib/otpService';
@@ -25,6 +27,10 @@ export async function onStartup() {
   step('database_open', () => getDb()); // open (and migrate) the database now, not on the first customer's request
   // Restored from a backup since the last start: in the audit log, once.
   step('restore_audit', auditRestoreOnce);
+  // Accountants a restore revoked (the backup may predate a revoke): in the audit log, once.
+  step('restore_staff_audit', auditStaffRestoreOnce);
+  // Google Drive secrets the first version kept in the database: moved to their own file.
+  step('drive_secrets', migrateDriveSecrets);
   step('backup_schedule', startBackupSchedule);
   step('festival_refresh', startFestivalRefresh);
   step('monitor', startMonitor);

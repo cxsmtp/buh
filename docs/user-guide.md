@@ -110,6 +110,7 @@ The Admin Hub is not on the shop's pages: there is no button, tab or link to it,
 - **Updating from an earlier version:** the update makes your link. It is printed once in the log and emailed (when email is set up), and if you are signed in at that moment, the next time you open the shop you are taken to it once. The Admin Hub then says **The Admin Hub has moved to this private link**.
 - **Bookmark it on your phone:** open the link, then on an iPhone Share → **Add to Home Screen** (or Add Bookmark); on Android the ⋮ menu → **Add to Home screen** (or the bookmark star). **On your laptop:** open it and press Ctrl+D (⌘+D on a Mac). The hub says "This is your private Admin Hub link" until you press **I've bookmarked it**.
 - **One link for every device:** a phone gets the phone view (one column, the tab bar at the bottom), a laptop the full view (tabs at the top). The **Phone view / Laptop view** switch at the top changes it; each device remembers its choice.
+- **Where it opens:** on a phone, **Orders**, with **Today's to-dos** on top (orders to confirm, orders to dispatch, products running low or sold out: tap one to go there). On a laptop, the **Overview**: the same to-dos and **Money highlights** (sales today, in the last 7 days and this month, with the number of orders; cancelled orders and unpaid card orders are left out, and the full figures are in Money → Reports). After that, each device opens on the section you last chose there (per view). On a phone the Overview is under **More**.
 - **Keep it private:** don't share or post it. Opening it lets a browser reach the sign-in for 30 days (renewed while you use it); your password, a passkey or a recovery code is still needed.
 - **Change it** (if someone may have seen it): Settings → **Security** → **Change the admin link**, with your current password (or no password within 10 minutes of a passkey sign-in). The old link, and every phone or laptop that used it, stop working at once; the new link is shown once (copy it, then **Open the new link** and bookmark it again) and emailed. The audit log notes the change, never the link.
 - **Lost it?** Only a fingerprint of the link is kept, so it can't be shown again, by anyone, and "Forgot password" needs the link too. The only way back in is a new link, made on the server (on the VPS: SSH, or hPanel's browser terminal); the old one stops working:
@@ -207,7 +208,18 @@ Customers confirm their number with one WhatsApp message they send you; nothing 
 - Tap a product to open it: the sizes with **− / +**, then the quick actions below.
 - **Edit** opens the step-by-step editor; **+ Add product** starts a new one (see below).
 - **Check measurements** (a small ochre badge): the update that brought measurements per product kept every measurement the shop showed before (nothing is filled in), fitted sheets ticked as fitted, and took off only a duvet cover that was just the standard size's on a set that isn't a duvet product (a duvet cover you typed yourself stays). Open **Edit → Sizes** once, keep only what each set includes, and save: the badge goes. A duvet cover taken off is kept: the editor shows **Taken off the shop by the update** with **Put it back** (one tap, then save).
+- **Select to share** (on a laptop the tick boxes are always there): tick several products, then **Share these** at the bottom, give it a short title ("Eid picks") and, if you like, a **last day**. **Create link** makes one page with just those products, like `https://yourdomain.ae/c/eid-picks-7k2mq`, with **Copy link**, **WhatsApp** and your phone's **Share…**. See **Shared links** below.
 - **Hide / Show in shop**, **Sold out** (every size to 0, with Undo), **Duplicate** (a hidden copy with no stock, for another colour: change its photos and colour, then show it), **Share** (the product's link, through your phone's share sheet or copied), **History**, the arrows (its place in the shop) and **Remove** (out of the shop for good but kept for past orders; restore it, hidden, under **Removed**).
+
+### Shared links (several products on one page)
+
+A shared link shows only the products you picked, in the shop's own look, with add to bag and checkout as usual. Pasted in WhatsApp or Instagram it previews with its title and the first product's photo.
+
+- **Inventory → Shared links** lists them, newest first, with how often each was opened (**views**, once per visit) and how many times a piece was **added to bag** from it. Nothing is kept about who opened it.
+- **Share** sends it again; **Edit** renames it, changes the last day, or adds and takes off products (the link stays the same, so links already sent keep working); **Delete** takes it down.
+- Only products on sale show: a hidden or removed product is left out until you show it again, and a sold-out one shows as **Sold out**.
+- After its last day (UAE time, until midnight) the link says **This selection has ended**, with a button into the shop. A link with no last day stays open until you delete it.
+- Shared links are in every backup (the database and `collections.csv`) and come back with a restore.
 
 ### Managing stock from your phone
 
@@ -226,10 +238,11 @@ On a phone the bottom bar is **Orders**, **Inventory**, **Chats** and **More** (
 1. **Photos:** **Take photo** opens the camera; **From gallery** picks several at once. Each is made smaller on the phone (at most 1600 px) and uploaded straight away. The first photo is the **cover**: tap the star to make another one the cover, or the arrows (or drag, on a computer) to change the order.
    - **Write name & descriptions from photo** looks at the cover (or the photo you pick under **Photo to use**) and writes a name, a short description for the card and a full description of 2–3 short paragraphs, from the design it sees: the motif, colours, texture and style. Empty fields are filled in; if you already typed something, the suggestion is shown next to it with **Use these** or **Keep mine**. It also offers the colours it sees (**Add these colours**) and the weave (**Set weave to …**): nothing is added without your tap, and nothing is saved until you publish. It never makes up a thread count, material, origin or care instructions: those come only from what you typed under **More details**. Switch it on in Settings → **AI writing** (with Claude or Gemini); until then the button says how.
    - **Style in a bedroom (AI)** makes a new photo of the product in a bedroom with Google Gemini: pick the photo, a style (**Dubai luxury master**, **Palm villa**, **Hotel suite**, **Clean catalogue (white backdrop)** or **Kids' room**) and, if you like, a few extra words about the setting (up to 200 characters, e.g. "morning light"). It takes 10–30 seconds. Your photo and the styled one are shown side by side: **check the pattern and colours match the real product**, then **Add to photos** (it goes right after the original, which stays first), **Try again** or **Discard** (deleted). Your original photo is never changed. It needs a Gemini key in Settings → AI writing; up to 10 an hour.
-2. **Details:** name, category and price; **More details** has the SKU, the "was" price, descriptions, fabric and colours. **Colours are optional:** with none, the shop shows no colour; with one, it shows it as a label; with several, shoppers choose one.
+2. **Details:** name, category and price, and **What is it?**: **Bed linen** (bed sizes with sheet and pillowcase measurements) or **Other** (towels, cushions, throws, curtains, decor). A category can start new products as Other (Settings → Catalogue); you can always change it here. **More details** has the SKU, the "was" price, descriptions, fabric (thread count and weave for bed linen only) and colours. **Colours are optional:** with none, the shop shows no colour; with one, it shows it as a label; with several, shoppers choose one.
 3. **Sizes:** tap a size (from your presets in Settings → Catalogue) to add it, then set its pieces with **− / +** or type them.
    - **Fitted sheet (elastic corners):** tick it when the set's sheet is fitted; left unticked (the default), the set has a flat sheet. The shop shows "Fitted sheet" or "Flat sheet" with its size.
    - **Measurements & price** under each size: the sheet, **Pillowcases**, **Duvet cover** and **Other pieces** (e.g. cushion covers) of this product. They start empty: fill in only what the set includes. **Use standard sizes** fills the empty ones from the size preset (sheet and pillowcases; the duvet cover only for a duvet product), shown greyed as a hint until then. The shop shows only the lines you filled in, and no Measurements at all when there are none.
+   - **Other** products have **variants** instead: each with a name ("Bath towel", "50 × 50 cm"), optional **Dimensions** ("70 × 140 cm"), a **price difference**, a **weight** for the courier and its pieces in stock. **Add a variant** for more; one is enough for a single item. The shop shows the variants to choose from and their dimensions (no bed measurements), and orders, labels, Track Order, the feeds and the backups name the variant.
 4. **Publish:** shown in the shop (or **Save hidden**), new arrival, featured.
 
 The draft saves itself as you go ("Draft saved" at the top), so a phone call or a closed tab loses nothing; open **Add product** again (on any device) to continue, or **Start over**. Editing a product works the same way; if a customer buys while you edit its stock, **Save** shows the new figures to check.
@@ -277,7 +290,7 @@ On a phone: **More → Money**; on a laptop: the **Money** tab. Three parts: **E
 - **Card fees:** the card payment fee customers pay is part of each card order's total and counts as your income: **Card fees** in the report and summary, `card_fee_aed` in `sales.csv` (Stripe's own fees are in your Stripe dashboard).
 - **What counts as a sale:** every order placed in the period, except orders cancelled before any money was taken, card orders still waiting for payment, and Stripe test payments. A card payment refunded later shows as a sale (when placed) and a refund on the day each refund was made: a part refunded in one month and the rest in the next appear in each month, and a refund that failed comes off on the day it failed. Refunds made before BUH-02.10 are dated as well as the shop knows (marked "approximate" in `refunds.csv`).
 - **The ZIP** holds `summary.html` (open and print, or Print → Save as PDF), `summary.csv`, `sales.csv` (one row per order: date, number, customer name, emirate, items, amounts, payment method and reference, refund, status, courier and AWB), `order-items.csv`, `refunds.csv` (one row per refund, by its date), `expenses.csv` (every expense of the period, however many), every bill in `bills/` (named date_category_amount_expense), the period's audit log with its check, and a `README.txt` explaining each file. The CSVs open in Excel (Arabic names included). One export is made at a time (a second one says to wait), and none is made when the server's disk is nearly full.
-- **VAT:** the shop is not VAT-registered and no VAT is added. Reports show your sales of the last 12 months against the AED 375,000 mandatory registration threshold; from 80% it turns amber (Settings → System & backups shows it too, and you get an email). Talk to your accountant then.
+- **VAT:** the shop is not VAT-registered and no VAT is added. Reports show your sales of the last 12 months against the AED 375,000 mandatory registration threshold; from 80% it turns amber (Settings → System & backups shows it too, and you get an email). Talk to your accountant then. Once you are registered, see **UAE VAT** below.
 
 **Audit log**
 
@@ -287,6 +300,46 @@ A read-only list of everything that changes money or the shop, newest first: ord
 - The green line **"The log is intact"** means every entry's signature and its link to the one before were checked, and no month is missing. If anything was changed, removed or reordered, or a month is missing or cut short, it turns red (**BROKEN**) and says where (file and line).
 - After restoring a backup onto a new server, a grey line says those entries were **signed by another server's key (fingerprint …): restored from a backup**: they are in order, but only that server could check their signatures. New entries start a fresh chain. That is normal after a restore, not a problem.
 - An amber **unverified** line means entries that can't be checked (made before key ids and not signed by this server's key): ask for help if you did not restore a backup.
+
+### Accountant access (read-only)
+
+Give your accountant their own sign-in that can only look at Money: reports and their ZIP, expenses with the bills, the VAT return and the audit log. They can't change orders, stock, prices or settings, see any keys, invite anyone, or read chats.
+
+1. **Settings → Security → Accountant access**: type their email (and a name if you like), tap **Invite**.
+2. They get an email with a one-time setup link (valid 72 hours) to choose their password. No email set up? The link is shown to you once: send it to them privately.
+3. Send them your **Admin Hub link** yourself (it is never in the email). They sign in there with their email and password and see only Money, marked "Read-only".
+
+- **Revoke access** signs them out at once, everywhere; their password stops working. **Send a new setup link** invites them again (an expired or revoked invite). Signing yourself out of the Admin Hub signs your accountant out too.
+- **After restoring a backup** your accountant's access is switched off (the backup may be older than a revoke). The Admin Hub says **Re-invite your accountant**: tap **Send a new setup link** next to their name.
+- **What they can see:** everything in Money, including customers' bank-transfer screenshots, customer names (and emails on tax invoices), and the full audit log with sign-in IP addresses and device names. Invite only someone you trust with your books.
+- Every accountant sign-in and every export they download is in the audit log, with their email.
+- They have no passkeys, recovery codes or "forgot password": if they lose the password, send a new setup link.
+
+### UAE VAT (only once you are VAT-registered)
+
+VAT is **off** unless you turn it on. Off, nothing about VAT shows anywhere: receipts say "Receipt", with no TRN. **Talk to your accountant before turning this on.**
+
+To turn it on (Settings → Payments → VAT):
+
+1. Type your **TRN** (the 15 digits on your FTA registration certificate).
+2. Choose the date VAT starts (today or later; orders already placed never change).
+3. Check the **name** and **address** for your tax invoices (the shop's name and address are used when empty).
+4. Leave **Prices include VAT** ticked (UAE prices for consumers are shown with VAT; untick only if your accountant says so: shoppers then see every price before VAT, and 5% is added at checkout; the setting warns you).
+5. Type `TURN ON VAT` and tap **Turn VAT on**. It is recorded in the audit log.
+
+While VAT is on the TRN and the date are fixed; to change them, turn VAT off first.
+
+**Tax invoices.** From the start date every order carries 5% VAT, worked out on the server (inside the price: VAT = total × 5 ÷ 105, rounded to the fil; delivery and the card fee are taxed the same way). Each order gets a **Tax Invoice** with your name, address and TRN, its number (INV-000001, INV-000002…: one series with no gaps), the date, the items, the VAT and the total including VAT. The number is given when the order is confirmed (or, for a card, when the payment is taken). Open it from the order (**Receipt / invoice**); the customer has the same page from their order confirmation (**Tax invoice (printable)**). Print → Save as PDF keeps a copy.
+
+**Credit notes.** A card refund after the invoice (made in the hub or in Stripe), or cancelling an invoiced order, gives a credit note (CN-000001…) against that invoice, shown on the invoice page. A refund that fails afterwards gives a negative one. Not covered: money you give back by hand for a cash-on-delivery or bank-transfer order (the shop doesn't record it: cancel the order for a full credit, or ask your accountant for a manual credit note) and card chargebacks; tell your accountant about those.
+
+**Reports with VAT.** Money → Reports then shows "Net sales incl. VAT", "Profit incl. VAT" and, below, the same without VAT (the VAT you owe the FTA is not your income). sales.csv in the export has `vat_aed` and `total_excl_vat_aed` beside the total.
+
+**Going back to an older version while VAT is on:** orders it takes get no VAT and no invoice. Money → VAT lists them in a warning; check them with your accountant.
+
+**VAT return helper (Money → VAT).** Pick a quarter (or your FTA tax period's dates): sales excluding VAT and the VAT on them, the credit notes, input VAT from expenses, and the net VAT payable or refundable. **Download for my accountant (CSV)** has the totals and every invoice, credit note and expense behind them; the accountant's ZIP has it too (`vat-return.csv`). It is a helper, not a filed return: your accountant files it on EmaraTax.
+
+**Input VAT on expenses.** With VAT on, an expense has **VAT on the bill (AED)** and **Supplier TRN**. Fill them from the supplier's tax invoice; expenses with VAT but no supplier TRN are flagged in the VAT return.
 
 ### Settings
 
@@ -301,11 +354,11 @@ A read-only list of everything that changes money or the shop, newest first: ord
 - **Email & admin account:** the mail server, where backups and alerts go, the mailbox for chat replies, and your sign-in email.
 - **Security:** your private admin link: **Change the admin link** (see "Your private admin link" above).
 - **Passkeys & recovery codes:** your ways back in if you forget the password (see above).
-- **Catalogue:** the size presets offered when adding a product (name, measurements, price difference, pieces in the set), the categories shown in the shop (each category with pieces in it is a round story chip at the top of the shop, in this order, with its first piece's photo; **New in** and **On sale** chips come from each product's **New arrival** tick and its **Was (AED)** price), the **Weaves**, and the **Only N left** level.
+- **Catalogue:** the size presets offered when adding a product (name, measurements, price difference, pieces in the set), the categories shown in the shop (each category with pieces in it is a round story chip at the top of the shop, in this order, with its first piece's photo; **New in** and **On sale** chips come from each product's **New arrival** tick and its **Was (AED)** price), the **Weaves**, and the **Only N left** level. Next to each category, **Bed linen** or **Other**: what a new product in it starts as (e.g. a "Towels" category set to Other). **Export for Amazon / Noon** is here too (see below).
   - **Weaves** (Sateen, Percale, Linen and Jacquard to start with) are the choices in the product editor, in this order. **Add a weave** (up to 30, each up to 30 characters), the arrows to reorder, the pencil to **Rename** and the bin to remove. Each shows how many products use it. A weave products still use can't be removed (the shop says which ones): **Rename** it instead, which changes it on every product at once (and is in the audit log), or change those products first. Renaming to a weave already in the list merges the two.
 - **AI writing:** choose who writes **Write from photo**: **Anthropic (Claude)** or **Google Gemini**.
   - **Anthropic:** your API key (console.anthropic.com → API keys), the model (Claude Opus 5.5 recommended for the best writing; Sonnet 5.5 is faster and cheaper, Haiku 5.5 the cheapest), and **Test** (a tiny call that says whether the key works, or Anthropic's reason).
-  - **Google Gemini:** get a key at aistudio.google.com → **Get API key** → **Create API key** (it starts with AIza), paste it, then press **Test and list models**: the shop asks Google which models your key can use and fills **Writing model** (the newest Pro is chosen for you) and **Image model (styled photos)** (Gemini 3.1 Flash Image). Press **Save AI settings**. Gemini is also what makes **Style in a bedroom** photos, so add a Gemini key for those even if Claude writes your text.
+  - **Google Gemini:** get a key at aistudio.google.com → **Get API key** → **Create API key** (it starts with AQ. for keys made since May 2026, or AIza for older ones; both work), paste it, then press **Test and list models**: the shop asks Google which models your key can use and fills **Writing model** (the newest Pro is chosen for you) and **Image model (styled photos)** (Gemini 3.1 Flash Image). Press **Save AI settings**. Gemini is also what makes **Style in a bedroom** photos, so add a Gemini key for those even if Claude writes your text.
   - **Use AI writing** switches writing on (it needs the chosen AI's key).
   - **Label styled photos for customers** (on by default): the shop shows a small **Styled image** tag on photos made by Style in a bedroom, on the product card and in the product's photos, so customers know the room is not real. Keep it on.
   - Keys are kept on the shop's server only: the hub shows just their last 4 characters, and they are never in a backup (type them again after restoring one). Each description or styled photo is a small charge on your own Anthropic or Google account; the shop allows 20 descriptions and 10 styled photos an hour.
@@ -315,7 +368,7 @@ A read-only list of everything that changes money or the shop, newest first: ord
 - **Payments:** card, Apple Pay and Google Pay through your Stripe account (see "Card payments" above).
 - **Phone check:** WhatsApp (free, the default) or SMS code, the hours before unconfirmed orders cancel, and the SMS gateway (see below).
 - **Couriers:** see below.
-- **System & backups:** health (disk, database, backups, SMS), backups, and **Settings history**: every save keeps the version it replaced (keys excepted); **Restore** puts an earlier one back and can itself be undone.
+- **System & backups:** health (disk, database, backups, SMS), backups, the copy to Google Drive, and **Settings history**: every save keeps the version it replaced (keys excepted); **Restore** puts an earlier one back and can itself be undone.
 
 ### Look
 
@@ -360,6 +413,11 @@ The greeting is a short, gracious line (for example *Eid Mubarak* with *Fresh li
 - Every product has its own link, `https://yourdomain.ae/p/<product>`, which previews with the photo, name and price when pasted in WhatsApp or Instagram. **Share** on a product copies or sends it.
 - **Instagram / Facebook Shopping and Google:** add `https://yourdomain.ae/feeds/meta.csv` as a scheduled data feed in Meta Commerce Manager (or Google Merchant Center). It lists every product and size with live stock.
 - Links you post can carry `?utm_source=instagram&utm_campaign=eid`; orders then show where customers came from.
+- **Several products in one link:** Inventory → Select to share (see **Shared links** above).
+
+### Export for Amazon / Noon (groundwork)
+
+Settings → Catalogue → **Export for Amazon / Noon** → **Download CSV**: the products on sale, one row per size or variant, with SKU, parent SKU, title, description, brand, price in AED, stock, photo links, category, size and weight. A product without an SKU gets a fixed one made from its id (the same in every export). It is groundwork: **check the template your seller account gives you; column names differ by category**, and copy these columns into it. Nothing is sent to Amazon or Noon (that needs your seller account's own keys).
 
 ### Daily summary and alerts
 
@@ -375,6 +433,7 @@ Customers pay by card, Apple Pay or Google Pay into **your own Stripe account**;
    - **Endpoint URL:** the address shown in Settings → Payments (**Copy**), e.g. `https://beautifuluaehome.com/api/stripe/webhook`;
    - **Events:** `payment_intent.succeeded`, `payment_intent.payment_failed`, `payment_intent.canceled`, `charge.refunded`, `charge.refund.updated`;
    - then open the endpoint, **Signing secret → Reveal**, and paste it (`whsec_…`) into **Webhook signing secret**.
+   - Opening this address in a browser shows **Page not found**: that is on purpose. It answers only Stripe's signed deliveries, so scanners can't tell it exists. To check it, use **Send test webhook** in Stripe (it should show a 200).
 4. Tick **Take card payments at checkout** and **Save payment settings**. Saving needs all three keys, from the same mode. **Check the connection** shows your Stripe account's name and whether it can take payments. The badge says **Test mode: no real money** or **Live mode: real payments**.
 5. **Apple Pay:** tap **Register this domain for Apple Pay** (once in test mode and once in live mode; Stripe hosts the verification file for you). It shows "Apple Pay ready". Google Pay needs nothing more.
 6. **Try it in test mode:** at checkout choose **Card** and use `4242 4242 4242 4242`, any future date, any CVC; `4000 0000 0000 9995` is declined; `4000 0027 6000 3184` asks for 3-D Secure. The order shows **Paid by card · Visa •••• 4242** in Orders.
@@ -411,6 +470,37 @@ The line at the top of the Admin Hub shows when the last backup ran:
 - **red:** failed or overdue.
 
 **Back up now** runs one immediately. Backups run every 12 hours on their own, with your expenses and every bill photo. Courier, SMS and Stripe keys are not in backups: after a restore, enter them again. Restoring: see HOSTINGER_DEPLOYMENT_GUIDE.md.
+
+#### Copy each backup to Google Drive
+
+An off-server copy: if the server is lost, the shop can be rebuilt from Drive on a new one. Copies are always encrypted, so `BACKUP_PASSPHRASE` must be set first (keep it in your password manager: without it a copy can't be opened).
+
+**Connect my Google Drive (recommended, works with a personal Gmail):**
+
+1. Go to console.cloud.google.com and make a project (any name).
+2. APIs & Services → Library → **Google Drive API** → **Enable**.
+3. Google Auth Platform → **Branding**: app name "Beautiful UAE Home backups", your Gmail as the support and contact email.
+4. Google Auth Platform → **Audience**: user type **External**; while it says **Testing**, add your own Gmail under **Test users**.
+5. Audience → **Publish app** (status **In production**): in Testing, Google cuts the connection off after 7 days. The shop asks only for `drive.file` (the files it makes itself), which is not a sensitive permission, so no Google review is needed; Google may still show "Google hasn't verified this app": press **Advanced** → **Go to … (unsafe)**, it is your own app.
+6. Google Auth Platform → **Data access** → **Add or remove scopes** → tick `…/auth/drive.file` → **Update** → **Save**.
+7. Google Auth Platform → **Clients** → **Create client** → type **TVs and Limited Input devices** → **Create**: copy the **Client ID** and **Client secret**.
+8. In the Admin Hub: Settings → System & backups → **Copy each backup to Google Drive** → **Connect my Google Drive**: paste the client ID and secret, press **Connect Google Drive**.
+9. On your phone or computer open **google.com/device**, sign in with your Gmail, type the code the hub shows, and press **Allow**. The hub says **Connected** within seconds.
+10. The shop makes a folder **Beautiful UAE Home backups** in your Drive and switches copies on. Press **Back up now** for the first copy.
+11. Press **Copy restore details** (your password is asked), and save the four lines in your password manager: a new server needs them to rebuild the shop.
+
+**Or a service account (Google Workspace shared drives only):**
+
+1. Go to console.cloud.google.com, make a project, and switch on the **Google Drive API**.
+2. IAM & Admin → **Service accounts** → **Create service account** (no roles) → **Keys** → **Add key** → **JSON**: keep the downloaded file safe.
+3. In a **shared drive**, add the service account's email (in the JSON file) as **Content manager**, and make a folder. (A personal Drive folder refuses its uploads: Google gives a service account no storage of its own.)
+4. In the Admin Hub, choose **A service account and a shared drive**, paste the whole JSON file and the folder's link, press **Test connection**, tick **Copy each backup to Google Drive**, and press **Save**.
+
+- The status line at the top of the Admin Hub says when the last copy reached Drive; the card shows its time and size. **Back up now** finishes as soon as the backup is made: the copy then goes up on its own, and the status line shows how far it is ("Copying to Google Drive: … of …").
+- A failed copy never stops the local backup: you get an alert (email, and Settings → System & backups → Health) until a copy works again. If Google stops accepting the connection (you removed the app's access, or it ran out), the alert says **Reconnect Google Drive**: press it and enter the new code.
+- Older copies the shop made are deleted once there are more than you keep (30 by default); nothing else in your Drive is touched.
+- The client secret, the connection and the key are never shown again, never in a backup and never in the logs (they are kept in their own file on the server, not in the database). **Disconnect** also asks Google to remove the shop's access. A restored shop keeps the settings but not the connection: connect again (or paste the key again).
+- Rebuilding a lost server from Drive: HOSTINGER_DEPLOYMENT_GUIDE.md, "Rebuilding on a new server from Google Drive".
 
 ### Phone check and the SMS gateway
 

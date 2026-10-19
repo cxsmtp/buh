@@ -1,11 +1,11 @@
-import { requireAdmin } from '@/lib/server/guard';
+import { requireAdmin, requireReader } from '@/lib/server/guard';
 import { allowFields, handleRouteError, HttpError, json, readJsonBody } from '@/lib/server/http';
 import { expenseVersions, getExpense, removeExpense, updateExpense } from '@/lib/server/expenses';
 
 /** One expense, with every earlier version and every bill (removed ones too). */
 export async function GET(req: Request, { params }: { params: Promise<{ id: string }> }) {
   try {
-    await requireAdmin(req);
+    await requireReader(req);
     const { id } = await params;
     const expense = getExpense(id);
     if (!expense) throw new HttpError(404, 'Expense not found.');
@@ -24,7 +24,7 @@ export async function PATCH(req: Request, { params }: { params: Promise<{ id: st
     const session = await requireAdmin(req);
     const { id } = await params;
     const body = await readJsonBody(req, 8 * 1024);
-    allowFields(body, ['version', 'date', 'amount', 'categoryId', 'method', 'payee', 'note']);
+    allowFields(body, ['version', 'date', 'amount', 'categoryId', 'method', 'payee', 'note', 'vat', 'supplierTrn']);
     if (!getExpense(id)) throw new HttpError(404, 'Expense not found.');
     return json({ expense: updateExpense(id, body, session.email) });
   } catch (err) {

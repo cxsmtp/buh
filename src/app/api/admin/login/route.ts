@@ -1,5 +1,5 @@
 import { signIn, sessionCookie } from '@/lib/server/adminAuth';
-import { audit } from '@/lib/server/audit';
+import { audit, auditOrThrow } from '@/lib/server/audit';
 import { clientIp, enforceIpLimit, requireDoor } from '@/lib/server/guard';
 import { assertSameOrigin, handleRouteError, HttpError, json, readJsonBody, str } from '@/lib/server/http';
 
@@ -17,8 +17,10 @@ export async function POST(req: Request) {
 
     try {
       const result = await signIn(email, password, { ip });
-      audit('admin.sign_in', { email: result.email, ip });
-      const res = json({ success: true, email: result.email, mustChangePassword: result.mustChangePassword });
+      // An accountant's sign-in is in the audit log before it counts (no entry, no session).
+      if (result.role === 'accountant') auditOrThrow('accountant.sign_in', { by: result.email, ip });
+      else audit('admin.sign_in', { email: result.email, ip });
+      const res = json({ success: true, email: result.email, mustChangePassword: result.mustChangePassword, role: result.role });
       res.cookies.set(sessionCookie(result.token));
       return res;
     } catch (err) {

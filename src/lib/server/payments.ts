@@ -1,6 +1,7 @@
 import Stripe from 'stripe';
 import { HttpError } from './http';
 import { logEvent } from './log';
+import { testStandIn } from './testStandIn';
 import { audit } from './audit';
 import {
   CARD_PAYMENT_TTL_MINUTES,
@@ -62,14 +63,8 @@ const fils = (aed: number) => Math.round(aed * 100);
 function testApi(): { host: string; port: number; protocol: 'http' } | null {
   const v = process.env.BUH_TEST_STRIPE_API;
   if (!v) return null;
-  try {
-    const u = new URL(v);
-    if (u.protocol === 'http:' && (u.hostname === '127.0.0.1' || u.hostname === 'localhost') && u.port && u.pathname === '/' && !u.search) {
-      return { host: u.hostname, port: Number(u.port), protocol: 'http' };
-    }
-  } catch {
-    // ignored below
-  }
+  const u = testStandIn('BUH_TEST_STRIPE_API');
+  if (u) return { host: u.hostname, port: Number(u.port), protocol: 'http' };
   logEvent('warn', 'stripe_test_api_ignored', {});
   return null;
 }
@@ -429,6 +424,8 @@ export async function cancelPaidCardWithoutStripe(orderId: string, actor: string
 
 /** Every refused webhook gets this same answer: nothing tells a prober which check failed. */
 export const WEBHOOK_REFUSED = 'Invalid request.';
+/** How far a webhook's signed timestamp may be from now, either way (Stripe's own default). */
+export const WEBHOOK_TOLERANCE_SEC = 300;
 
 /**
  * A webhook from Stripe: the signature over the raw body (with the saved signing secret) must
@@ -438,9 +435,13 @@ export const WEBHOOK_REFUSED = 'Invalid request.';
 export function handleStripeWebhook(raw: Buffer, signature: string | null): { type: string; outcome: CardOutcome; carrierCancel?: string } {
   const secret = getSettings('payments').stripeWebhookSecret;
   if (!secret || !signature || signature.length > 2000) throw new HttpError(400, WEBHOOK_REFUSED);
+  // Stripe's library checks every v1 signature (timing-safe) over the raw body and refuses a
+  // timestamp more than 5 minutes old; one more than 5 minutes ahead (or not a number) is refused here.
+  const t = /(?:^|,)\s*t=(\d{1,12})\s*(?:,|$)/.exec(signature)?.[1];
+  if (!t || Math.abs(Date.now() / 1000 - Number(t)) > WEBHOOK_TOLERANCE_SEC) throw new HttpError(400, WEBHOOK_REFUSED);
   let event: Stripe.Event;
   try {
-    event = Stripe.webhooks.constructEvent(raw, signature, secret);
+    event = Stripe.webhooks.constructEvent(raw, signature, secret, WEBHOOK_TOLERANCE_SEC);
   } catch {
     throw new HttpError(400, WEBHOOK_REFUSED);
   }

@@ -13,6 +13,7 @@ interface Totals {
   paidFils: number;
 }
 interface Vat {
+  registered?: boolean;
   from: string;
   to: string;
   salesFils: number;
@@ -30,6 +31,8 @@ interface Report {
   card: { paidCount: number; paidFils: number; refundedFils: number };
   expenses: { count: number; fils: number; byCategory: Array<{ id: string; name: string; count: number; fils: number }> };
   profitFils: number;
+  /** With UAE VAT: the figures without the VAT (null when no order of the period carries VAT). */
+  exVat?: { salesVatFils: number; refundVatFils: number; grossSalesFils: number; netSalesFils: number; expensesVatFils: number; expensesFils: number; profitFils: number } | null;
   excluded: { cancelled: number; awaitingCard: number; testMode: number };
   notes: string[];
   vat: Vat;
@@ -45,19 +48,23 @@ export function VatNotice({ vat }: { vat: Vat }) {
       {warn && <AlertTriangle className="w-4 h-4 shrink-0 text-warning" aria-hidden="true" />}
       <div className="min-w-0 space-y-1">
         <p className="break-words">{vat.text}</p>
-        <div className="h-2 rounded-full bg-sand overflow-hidden" aria-hidden="true">
-          <div className={`h-full ${warn ? 'bg-warning' : 'bg-gold'}`} style={{ width: `${Math.min(100, Math.round(vat.ratio * 100))}%` }} />
-        </div>
-        <p className="text-[11px]">
-          {niceDate(vat.from)} to {niceDate(vat.to)} · AED {aed(vat.salesFils)} of AED 375,000
-        </p>
+        {!vat.registered && (
+          <>
+            <div className="h-2 rounded-full bg-sand overflow-hidden" aria-hidden="true">
+              <div className={`h-full ${warn ? 'bg-warning' : 'bg-gold'}`} style={{ width: `${Math.min(100, Math.round(vat.ratio * 100))}%` }} />
+            </div>
+            <p className="text-[11px]">
+              {niceDate(vat.from)} to {niceDate(vat.to)} · AED {aed(vat.salesFils)} of AED 375,000
+            </p>
+          </>
+        )}
       </div>
     </div>
   );
 }
 
-/** Money → Reports: a month, quarter, financial year or any dates; the totals; the ZIP for the accountant. */
-export function ReportsPanel() {
+/** Money → Reports: a month, quarter, financial year or any dates; the totals; the ZIP for the accountant (readOnly: the accountant can't change the year's start). */
+export function ReportsPanel({ readOnly = false }: { readOnly?: boolean }) {
   const id = useId();
   const today = dubaiToday();
   const [startMonth, setStartMonth] = useState(1);
@@ -108,6 +115,7 @@ export function ReportsPanel() {
   }, [from, to, load]);
 
   const saveStart = async (m: number) => {
+    if (readOnly) return;
     setStartMonth(m);
     setFy(financialYearOf(today, m));
     await sendJson('PUT', '/api/admin/reports/settings', { yearStartMonth: m });
@@ -176,7 +184,7 @@ export function ReportsPanel() {
         )}
         <div>
           <label htmlFor={`${id}-start`} className={labelClass}>Your financial year starts in</label>
-          <select id={`${id}-start`} value={startMonth} onChange={(e) => void saveStart(Number(e.target.value))} className={inputClass}>
+          <select id={`${id}-start`} value={startMonth} disabled={readOnly} onChange={(e) => void saveStart(Number(e.target.value))} className={inputClass}>
             {MONTH_NAMES.map((name, i) => (
               <option key={name} value={i + 1}>{name}{i === 0 ? ' (calendar year)' : ''}</option>
             ))}
@@ -192,9 +200,9 @@ export function ReportsPanel() {
           <div className="grid grid-cols-3 gap-2">
             {(
               [
-                ['Net sales', report.netSalesFils, 'report-net-sales'],
-                ['Expenses', report.expenses.fils, 'report-expenses'],
-                ['Profit', report.profitFils, 'report-profit'],
+                [report.exVat ? 'Net sales incl. VAT' : 'Net sales', report.netSalesFils, 'report-net-sales'],
+                [report.exVat ? 'Expenses incl. VAT' : 'Expenses', report.expenses.fils, 'report-expenses'],
+                [report.exVat ? 'Profit incl. VAT' : 'Profit', report.profitFils, 'report-profit'],
               ] as const
             ).map(([label, fils, testId]) => (
               <Card key={label} className="p-2.5 text-center min-w-0">
@@ -220,6 +228,16 @@ export function ReportsPanel() {
             <Line label="Net sales" value={aed(report.netSalesFils)} strong />
             {report.sales.unpaidFils > 0 && <Line label="of which not marked paid yet" value={aed(report.sales.unpaidFils)} />}
           </Card>
+          {report.exVat && (
+            <Card>
+              <h3 className="text-sm font-bold text-ink mb-1">Excluding VAT (AED)</h3>
+              <Line label="Output VAT in gross sales (owed to the FTA)" value={aed(report.exVat.salesVatFils)} />
+              {report.exVat.refundVatFils !== 0 && <Line label="VAT on refunds" value={aed(-report.exVat.refundVatFils)} />}
+              <Line label="Net sales excluding VAT" value={aed(report.exVat.netSalesFils)} strong testId="report-net-sales-ex-vat" />
+              <Line label="Expenses excluding VAT" value={aed(report.exVat.expensesFils)} />
+              <Line label="Profit excluding VAT" value={aed(report.exVat.profitFils)} strong testId="report-profit-ex-vat" />
+            </Card>
+          )}
           <Card>
             <h3 className="text-sm font-bold text-ink mb-1">By payment method</h3>
             {Object.entries(report.byMethod).map(([m, t]) => (

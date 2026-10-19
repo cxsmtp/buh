@@ -1,4 +1,4 @@
-import { enforceLimit, requireAdmin } from '@/lib/server/guard';
+import { enforceLimit, requireReader } from '@/lib/server/guard';
 import { assertSameOrigin, handleRouteError, HttpError } from '@/lib/server/http';
 import { auditExportStream } from '@/lib/server/auditView';
 
@@ -10,7 +10,7 @@ import { auditExportStream } from '@/lib/server/auditView';
  */
 export async function GET(req: Request) {
   try {
-    const session = await requireAdmin(req);
+    const session = await requireReader(req);
     assertSameOrigin(req);
     enforceLimit(`export:${session.email}`, 20, 10 * 60_000, 'Too many exports at once. Wait a few minutes.');
     const q = new URL(req.url).searchParams;

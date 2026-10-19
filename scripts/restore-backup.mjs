@@ -8,6 +8,10 @@
 //     node scripts/restore-backup.mjs buh-backup-….tar.gz /data --replace
 //   Encrypted backups need the passphrase:
 //     BACKUP_PASSPHRASE='…' node scripts/restore-backup.mjs buh-backup-….tar.gz.enc …
+//   From the shop's copies in Google Drive (always encrypted; the service account from
+//   BUH_DRIVE_KEY / BUH_DRIVE_KEY_FILE and BUH_DRIVE_FOLDER, or the shop's saved settings):
+//     node scripts/restore-backup.mjs --from-drive latest [empty folder, default DATA_DIR]
+//     node scripts/restore-backup.mjs --from-drive list
 //
 // The backup is read as a stream (decrypted, uncompressed and unpacked a piece at a time, one file
 // after another), so a big one needs disk, not memory; it stops if the disk would be left with
@@ -18,7 +22,8 @@
 // backups, and courier / SMS keys are blanked in them, on purpose: re-enter the keys in the Admin
 // Hub after a restore. The owner's passkeys and recovery codes are in the database, but the backup
 // may predate a revocation: restored recovery codes are voided and restored passkeys are switched
-// off until the owner confirms them in the Admin Hub (see below). Expenses come back with every
+// off until the owner confirms them in the Admin Hub (see below). Accountant accounts come back
+// revoked, for the same reason: the owner re-invites their accountant. Expenses come back with every
 // earlier version and every bill (expenses/). The server's audit key stays (with --replace), or is
 // copied from the running shop's DATA_DIR into the new folder, so the restored audit log still
 // checks out on this server; on a new server the hub says the log was signed by another server's
@@ -34,9 +39,33 @@ const BILL_EXTS = ['jpg', 'png', 'webp', 'heic', 'pdf'];
 const BILL_FILE = new RegExp(`^expenses/[a-f0-9]{24}\\.(${BILL_EXTS.join('|')})$`);
 const args = process.argv.slice(2);
 const replace = args.includes('--replace');
-const [file, finalTarget] = args.filter((a) => a !== '--replace');
-if (!file || !finalTarget) {
+// --from-drive latest | <copy's file name> | <Drive file id> | list: a copy from Google Drive
+// (scripts/restore-from-drive.mjs), downloaded next to the restore, checked, then restored as any
+// other backup. Without a folder, into DATA_DIR (it must be empty unless --replace).
+const driveAt = args.indexOf('--from-drive');
+const fromDrive = driveAt >= 0 ? args[driveAt + 1] || '' : null;
+const positional = args.filter((a, i) => a !== '--replace' && (driveAt < 0 || (i !== driveAt && i !== driveAt + 1)));
+let file = fromDrive === null ? positional[0] : '';
+const finalTarget = fromDrive === null ? positional[1] : positional[0] || process.env.DATA_DIR || '';
+if (fromDrive === 'list') {
+  const { listDriveCopies } = await import('./restore-from-drive.mjs');
+  try {
+    const { copies } = await listDriveCopies(process.env.DATA_DIR || '');
+    if (!copies.length) console.log('There are no backup copies in the Google Drive folder.');
+    for (const c of copies) console.log(`${c.name}  ${(c.size / 1024 / 1024).toFixed(1)} MB  ${c.id}`);
+    process.exit(0);
+  } catch (err) {
+    console.error(String(err?.message ?? err));
+    process.exit(1);
+  }
+}
+if (fromDrive === '' || (fromDrive === null && !file) || !finalTarget || (fromDrive !== null && positional.length > 1)) {
   console.error('Usage: node scripts/restore-backup.mjs <backup file> <empty folder | data folder with --replace>');
+  console.error('   or: node scripts/restore-backup.mjs --from-drive <latest | copy name | list> [empty folder, default DATA_DIR] [--replace]');
+  process.exit(2);
+}
+if (fromDrive !== null && !process.env.BACKUP_PASSPHRASE) {
+  console.error('Copies in Google Drive are encrypted: set BACKUP_PASSPHRASE (the shop’s own) to restore one.');
   process.exit(2);
 }
 if (!replace && fs.existsSync(finalTarget) && fs.readdirSync(finalTarget).length) {
@@ -46,9 +75,16 @@ if (!replace && fs.existsSync(finalTarget) && fs.readdirSync(finalTarget).length
 // With --replace, restore next to the data first, and swap only once everything checked out.
 const target = replace ? path.join(finalTarget, `.restore-${Date.now()}`) : finalTarget;
 const targetExisted = fs.existsSync(target);
+// A copy fetched from Drive (removed at the end, and on any failure).
+let downloaded = '';
 
 /** Stop: remove everything this restore wrote (the target was empty, or is our own staging folder). */
 function fail(message, code = 1) {
+  try {
+    if (downloaded) fs.rmSync(downloaded, { force: true });
+  } catch {
+    // best effort
+  }
   try {
     if (fs.existsSync(target)) {
       if (targetExisted) for (const name of fs.readdirSync(target)) fs.rmSync(path.join(target, name), { recursive: true, force: true });
@@ -60,6 +96,25 @@ function fail(message, code = 1) {
   console.error(message);
   process.exit(code);
 }
+
+// ── From Google Drive: fetched (and checked) into the folder being restored to ──
+let driveCopy = '';
+if (fromDrive !== null) {
+  const { downloadFromDrive } = await import('./restore-from-drive.mjs');
+  fs.mkdirSync(replace ? finalTarget : target, { recursive: true, mode: 0o700 });
+  // A name nobody can guess or have made already; Ctrl-C (or a stop) removes it and what was restored.
+  downloaded = path.join(replace ? finalTarget : target, `.drive-download-${crypto.randomBytes(12).toString('hex')}.tar.gz.enc`);
+  for (const signal of ['SIGINT', 'SIGTERM']) process.on(signal, () => fail('Stopped.'));
+  try {
+    const copy = await downloadFromDrive(fromDrive, downloaded, { dataDir: process.env.DATA_DIR || '', minFree: MIN_FREE });
+    console.log(`Downloaded ${copy.name} (${(copy.size / 1024 / 1024).toFixed(1)} MB) from Google Drive; size and checksum match.`);
+    file = downloaded;
+    driveCopy = copy.name;
+  } catch (err) {
+    fail(String(err?.message ?? err));
+  }
+}
+const backupName = driveCopy ? `${driveCopy} (Google Drive)` : path.basename(file);
 
 // ── The stream: the file, decrypted if sealed, uncompressed ──────────────────
 let source;
@@ -88,6 +143,8 @@ let sealed = false;
     // Until the end the data is not proven (the tag is checked last): nothing is used before then.
     source = fs.createReadStream(file, { start: MAGIC.length + nl + 1 }).pipe(decipher);
   } else {
+    // The shop only ever puts encrypted copies in Drive: a plain one there was not made by it.
+    if (driveCopy && !sealed) fail('Copies from Google Drive are always encrypted: this one is not, so it was not restored.');
     source = fs.createReadStream(file);
   }
 }
@@ -231,6 +288,8 @@ const products = db.prepare('SELECT COUNT(*) AS n FROM products').get().n;
 const tableExists = (name) => Boolean(db.prepare("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ?").get(name));
 const stockMoves = tableExists('stock_moves') ? db.prepare('SELECT COUNT(*) AS n FROM stock_moves').get().n : 0;
 const drafts = tableExists('product_drafts') ? db.prepare('SELECT COUNT(*) AS n FROM product_drafts').get().n : 0;
+// Shared selections, /c/<slug> (backups from before BUH-02.17 have none).
+const collections = tableExists('collections') ? db.prepare('SELECT COUNT(*) AS n FROM collections').get().n : 0;
 // Expenses and their bills (backups from before BUH-02.10 have none). A bill is one of five kinds
 // of file named by its id: a row naming anything else is refused (it would be served from disk).
 const expenses = tableExists('expenses') ? db.prepare('SELECT COUNT(*) AS n FROM expenses').get().n : 0;
@@ -253,11 +312,21 @@ const refunds = tableExists('card_refunds') ? db.prepare('SELECT COUNT(*) AS n F
 const passkeyIds = tableExists('admin_passkeys') ? db.prepare('SELECT id FROM admin_passkeys').all().map((r) => r.id) : [];
 const voidedCodes = tableExists('admin_recovery_codes') ? db.prepare('DELETE FROM admin_recovery_codes WHERE used_at IS NULL').run().changes : 0;
 if (tableExists('admin_recovery_codes')) db.prepare('DELETE FROM admin_recovery_codes').run();
+// Accountant access (backups from before BUH-02.17 have none): the backup may predate a revoke,
+// and nothing in it can tell. So every restored accountant (active, or invited with a setup link)
+// is revoked; the first start writes it to the audit log and the hub says "Re-invite your accountant".
+const staffRevoked = tableExists('staff_accounts')
+  ? db.prepare("SELECT id, email, status FROM staff_accounts WHERE status IN ('active', 'invited') ORDER BY id").all()
+  : [];
+if (staffRevoked.length) {
+  db.prepare("UPDATE staff_accounts SET status = 'revoked', password_hash = NULL, setup_hash = NULL, setup_grant_hash = NULL, setup_expires_at = NULL, session_gen = session_gen + 1, revoked_at = ?, revoked_by = 'restore' WHERE status IN ('active', 'invited')").run(new Date().toISOString());
+}
 if (tableExists('kv')) {
   const put = db.prepare('INSERT INTO kv (key, data, updated_at) VALUES (?, ?, ?) ON CONFLICT(key) DO UPDATE SET data = excluded.data, updated_at = excluded.updated_at');
   const now = new Date().toISOString();
   if (passkeyIds.length) put.run('admin:passkeys-suspended', JSON.stringify(passkeyIds), now);
-  put.run('admin:restored', JSON.stringify({ at: now, backup: path.basename(file) }), now);
+  if (staffRevoked.length) put.run('staff:revoked-by-restore', JSON.stringify({ at: now, accounts: staffRevoked.map((s) => ({ id: s.id, was: s.status })) }), now);
+  put.run('admin:restored', JSON.stringify({ at: now, backup: backupName }), now);
   db.prepare("DELETE FROM kv WHERE key = 'admin:link-reveal'").run();
 }
 // The Admin Hub's private link comes back with the backup (only its fingerprint is stored), so the
@@ -266,7 +335,11 @@ if (tableExists('kv')) {
 const hasAdminLink = tableExists('kv') && Boolean(db.prepare("SELECT 1 FROM kv WHERE key = 'admin:link' AND data != 'null'").get());
 db.close();
 const passkeys = passkeyIds.length;
-const counts = `${orders} orders, ${refunds} card refunds, ${products} products, ${stockMoves} stock moves, ${drafts} product drafts, ${expenses} expenses, ${bills} bills`;
+if (downloaded) {
+  fs.rmSync(downloaded, { force: true });
+  downloaded = '';
+}
+const counts = `${orders} orders, ${refunds} card refunds, ${products} products, ${stockMoves} stock moves, ${drafts} product drafts, ${collections} shared selections, ${expenses} expenses, ${bills} bills`;
 if (replace) {
   // Move the current data aside (kept), then the restored files into place.
   const aside = path.join(finalTarget, `replaced-${new Date().toISOString().replace(/[:.]/g, '-')}`);
@@ -302,6 +375,10 @@ console.log(
     ? 'Admin Hub: the private admin link from this backup works again. If you changed it after this backup was taken, make a new one: node scripts/admin-link.mjs --new'
     : 'Admin Hub: this backup has no private admin link; the first start prints a new one in the log.'
 );
+if (staffRevoked.length) {
+  console.log('');
+  console.log(`Accountant access: ${staffRevoked.length} accountant account${staffRevoked.length === 1 ? ' was' : 's were'} revoked (the backup may be older than a revoke). Re-invite your accountant in Settings → Security → Accountant access.`);
+}
 if (passkeys || voidedCodes) {
   console.log('');
   console.log('!!! IMPORTANT: Admin Hub passkeys and recovery codes from this backup are switched off !!!');

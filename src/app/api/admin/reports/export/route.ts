@@ -1,6 +1,6 @@
 import fs from 'node:fs';
 import { Readable } from 'node:stream';
-import { enforceLimit, requireAdmin } from '@/lib/server/guard';
+import { enforceLimit, requireReader } from '@/lib/server/guard';
 import { assertSameOrigin, handleRouteError } from '@/lib/server/http';
 import { logEvent } from '@/lib/server/log';
 import { parsePeriod, prepareAccountantExport } from '@/lib/server/reports';
@@ -16,7 +16,7 @@ import { getSettings } from '@/lib/server/settings';
  */
 export async function GET(req: Request) {
   try {
-    const session = await requireAdmin(req);
+    const session = await requireReader(req);
     // A download link in the hub (same site); refused from anywhere else.
     assertSameOrigin(req);
     enforceLimit(`export:${session.email}`, 20, 10 * 60_000, 'Too many exports at once. Wait a few minutes.');

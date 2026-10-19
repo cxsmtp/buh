@@ -1,7 +1,8 @@
 import http from 'node:http';
 import { GEMINI_MODEL_ID } from '@/types';
 import { HttpError } from './http';
-import { logEvent } from './log';
+import { testStandIn } from './testStandIn';
+import { logEvent, maskGoogleKeys } from './log';
 import { safeFetch } from './outbound';
 
 /**
@@ -45,12 +46,8 @@ export function _setGeminiTransport(fn: Transport | null) {
 function testApi(): URL | null {
   const v = process.env.BUH_TEST_GEMINI_API;
   if (!v) return null;
-  try {
-    const u = new URL(v);
-    if (u.protocol === 'http:' && (u.hostname === '127.0.0.1' || u.hostname === 'localhost') && u.port && u.pathname === '/' && !u.search) return u;
-  } catch {
-    // ignored below
-  }
+  const u = testStandIn('BUH_TEST_GEMINI_API');
+  if (u) return u;
   logEvent('warn', 'gemini_test_api_ignored', {});
   return null;
 }
@@ -94,8 +91,9 @@ function send(req: GeminiRequest): Promise<GeminiReply> {
 
 /** Google keys (and the key in hand), wherever they appear in a message from Google. */
 export function scrubGemini(text: string, key: string): string {
-  let out = text.replace(/AIza[A-Za-z0-9_-]{10,}/g, 'AIza[redacted]');
-  if (key) out = out.split(key).join('[redacted]');
+  // The key in hand first (whatever its shape), then any other Google key.
+  let out = key ? text.split(key).join('[redacted]') : text;
+  out = maskGoogleKeys(out);
   return out.replace(/[\u0000-\u001f\u007f]+/g, ' ').trim().slice(0, 200);
 }
 

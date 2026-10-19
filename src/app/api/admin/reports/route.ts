@@ -1,4 +1,4 @@
-import { requireAdmin } from '@/lib/server/guard';
+import { requireReader } from '@/lib/server/guard';
 import { handleRouteError, json } from '@/lib/server/http';
 import { buildReport, parsePeriod, vatStatus, yearStartMonth } from '@/lib/server/reports';
 
@@ -9,7 +9,7 @@ import { buildReport, parsePeriod, vatStatus, yearStartMonth } from '@/lib/serve
  */
 export async function GET(req: Request) {
   try {
-    await requireAdmin(req);
+    await requireReader(req);
     const q = new URL(req.url).searchParams;
     const settings = { yearStartMonth: yearStartMonth() };
     if (!q.has('from') && !q.has('to')) return json({ settings, vat: vatStatus() });

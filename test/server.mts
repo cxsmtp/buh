@@ -72,7 +72,7 @@ export async function startServer(env: Record<string, string> = {}, opts: { port
   let log = '';
   const child: ChildProcess = spawn(process.execPath, [...(opts.preload ?? []).flatMap((m) => ['--import', pathToFileURL(path.resolve(m)).href]), SERVER], {
     cwd: path.dirname(SERVER),
-    env: { ...process.env, PORT: String(port), HOSTNAME: '127.0.0.1', DATA_DIR: dataDir, INSECURE_COOKIES: '1', OTP_DEV_MODE: 'true', TRUST_PROXY: '', BACKUP_DISABLED: 'true', SEED_STOCK: '50', FX_DISABLED: 'true', FESTIVAL_REFRESH_DISABLED: 'true', MONITOR_DISABLED: 'true', ...env },
+    env: { ...process.env, PORT: String(port), HOSTNAME: '127.0.0.1', DATA_DIR: dataDir, INSECURE_COOKIES: '1', OTP_DEV_MODE: 'true', TRUST_PROXY: '', BACKUP_DISABLED: 'true', SEED_STOCK: '50', FX_DISABLED: 'true', FESTIVAL_REFRESH_DISABLED: 'true', MONITOR_DISABLED: 'true', BUH_TEST_SERVER: '1', ...env },
     stdio: ['ignore', 'pipe', 'pipe'],
   });
   child.stdout!.on('data', (d) => (log += d));

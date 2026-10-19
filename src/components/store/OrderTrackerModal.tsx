@@ -23,7 +23,7 @@ interface TrackedOrder {
   firstName: string;
   emirate: string;
   area: string;
-  items: Array<{ title: string; profileName: string; quantity: number; totalPrice: number }>;
+  items: Array<{ title: string; profileName: string; dimensions?: string; quantity: number; totalPrice: number }>;
   /** A real booking's AWB and link only (never a test one); `carrier` only with a link the owner typed in. */
   courier: {
     awbNumber: string;
@@ -268,7 +268,7 @@ export const OrderTrackerModal: React.FC<OrderTrackerModalProps> = ({
                     {searchResult.items.map((i, idx) => (
                       <div key={idx} className="flex justify-between text-ink-soft text-[11px]">
                         <span>
-                          {i.quantity}x {i.title} ({i.profileName})
+                          {i.quantity}x {i.title} ({i.profileName}{i.dimensions ? `, ${i.dimensions}` : ''})
                         </span>
                         <span className="font-semibold text-ink">AED {i.totalPrice}</span>
                       </div>

@@ -4,7 +4,7 @@
  * troubleshooting without leaking credentials or customer data.
  */
 
-const SECRET_KEY = /(pass(word)?|secret|token|api.?key|auth|authorization|cookie|otp|code|sid|clientkey)/i;
+const SECRET_KEY = /(pass(word)?|secret|token|api.?key|private.?key|auth|authorization|cookie|otp|code|sid|clientkey)/i;
 // Field names that look like secrets but hold none: Stripe's error code (e.g. resource_missing) and
 // a card's decline code (e.g. insufficient_funds) are needed to understand a failed payment.
 const SAFE_KEYS = new Set(['stripeCode', 'declineCode']);
@@ -22,8 +22,23 @@ const SECRET_PATH = /\/([A-Za-z0-9_-]{4})[A-Za-z0-9_-]{28,}/g;
 const STRIPE_SECRET = /\b((?:sk|rk)_(?:test|live)_|whsec_)[A-Za-z0-9+/=_-]{6,}|\b(pi|seti)_[A-Za-z0-9]+_secret_[A-Za-z0-9]+/g;
 // Anthropic API keys (Settings → AI writing).
 const ANTHROPIC_KEY = /\bsk-ant-[A-Za-z0-9_-]{6,}/g;
-// Google (Gemini) API keys: AIza and 35 more characters (Settings → AI writing).
-const GOOGLE_KEY = /\bAIza[A-Za-z0-9_-]{20,}/g;
+// Google (Gemini) API keys (Settings → AI writing): the classic AIza… keys and the newer
+// authorization keys that start with AQ. (letters, digits, '.', '_' and '-'). Whole words only,
+// so ordinary text is never touched.
+const GOOGLE_KEY = /\b(AIza)[A-Za-z0-9_-]{20,}|\b(AQ\.)[A-Za-z0-9._-]{16,}/g;
+
+/** Google API keys (AIza… and AQ.…) anywhere in a text, replaced by their prefix + [redacted]. */
+export function maskGoogleKeys(s: string): string {
+  return s.replace(GOOGLE_KEY, (_m, classic: string | undefined, auth: string | undefined) => `${classic ?? auth}[redacted]`);
+}
+// A PEM private key (a Google service account's, Settings → System & backups → Google Drive), even
+// cut short; and Google OAuth access tokens (ya29.…).
+const PEM_KEY = /-----BEGIN [A-Z ]*PRIVATE KEY-----[\s\S]*?(?:-----END [A-Z ]*PRIVATE KEY-----|$)/g;
+const BARE_KEY = /\bMII[A-Za-z0-9+/=]{60,}/g;
+const GOOGLE_TOKEN = /\bya29\.[A-Za-z0-9._-]+/g;
+// Google refresh tokens (1//…: Connect my Google Drive) and OAuth client secrets (GOCSPX-…).
+const GOOGLE_REFRESH = /(?<![\w/])1\/\/[A-Za-z0-9._-]{10,}/g;
+const GOOGLE_CLIENT_SECRET = /\bGOCSPX-[A-Za-z0-9_-]{6,}/g;
 
 export function maskPhone(phone: string): string {
   const digits = phone.replace(/\D/g, '');
@@ -38,10 +53,14 @@ export function maskSecretPaths(s: string): string {
 
 function scrubString(s: string, max = 500): string {
   // Masked before it is cut, so a cut can never leave half a phone number unmasked.
-  return maskSecretPaths(s.slice(0, max * 2))
+  // A private key is removed whole, or what is left of it after the cut (from its BEGIN line on);
+  // a bare key body (base64 DER starts MII…) too.
+  return maskSecretPaths(s.slice(0, max * 2).replace(PEM_KEY, '[private key redacted]').replace(BARE_KEY, '[private key redacted]').replace(GOOGLE_REFRESH, '1//[redacted]'))
     .replace(STRIPE_SECRET, (_m, key: string | undefined, intent: string | undefined) => (key ? `${key}[redacted]` : `${intent}_[redacted]`))
     .replace(ANTHROPIC_KEY, 'sk-ant-[redacted]')
-    .replace(GOOGLE_KEY, 'AIza[redacted]')
+    .replace(GOOGLE_KEY, (_m, classic: string | undefined, auth: string | undefined) => `${classic ?? auth}[redacted]`)
+    .replace(GOOGLE_TOKEN, 'ya29.[redacted]')
+    .replace(GOOGLE_CLIENT_SECRET, 'GOCSPX-[redacted]')
     .replace(EMAIL, '$1***@$2')
     .replace(PHONE, (m) => (ISO_DATE.test(m) ? m : maskPhone(m)))
     .slice(0, max);

@@ -23,7 +23,7 @@ import {
   type LookVariant,
 } from '@/lib/design/themes';
 import { FESTIVE_ACCENTS } from '@/lib/festivals/catalog';
-import { tempDataDir } from './helpers.mjs';
+import { LATEST_DB_VERSION, tempDataDir, UNDO_MIGRATION_14, UNDO_MIGRATION_15 } from './helpers.mjs';
 
 /** Every pairing the pages use, at the ratio it needs (4.5 text, 3 large text and focus rings). */
 function problems(v: LookVariant, where: string): string[] {
@@ -246,6 +246,8 @@ test('migration 13 only adds rows: an existing shop (database version 12) keeps 
   assert.equal(run(`const m = await import('@/lib/server/db'); (m.getDb ?? m.default.getDb)();`).status, 0);
   // Back to version 12, as a shop running BUH-02.11 has it, with a branding setting saved.
   const db = new Database(path.join(dir, 'shop.db'));
+  db.exec(UNDO_MIGRATION_15); // migration 15
+  db.exec(UNDO_MIGRATION_14);
   db.exec("DELETE FROM settings_history WHERE key = 'look'; DELETE FROM settings WHERE key = 'look'");
   db.prepare("INSERT INTO settings (key, data, updated_at) VALUES ('brand', '{\"storeName\":\"Kept\"}', '2026-01-01T00:00:00.000Z')").run();
   db.pragma('user_version = 12');
@@ -253,7 +255,7 @@ test('migration 13 only adds rows: an existing shop (database version 12) keeps 
   const up = run(`const m = await import('@/lib/server/db'); const db = (m.getDb ?? m.default.getDb)(); console.log(JSON.stringify({ v: db.pragma('user_version', { simple: true }), settings: db.prepare("SELECT key, data FROM settings ORDER BY key").all(), history: db.prepare("SELECT key, data, saved_at FROM settings_history").all() }));`);
   assert.equal(up.status, 0, up.stderr);
   const out = JSON.parse(up.stdout.trim().split('\n').pop()!);
-  assert.equal(out.v, 13);
+  assert.equal(out.v, LATEST_DB_VERSION);
   assert.deepEqual(out.settings.find((s: { key: string }) => s.key === 'brand'), { key: 'brand', data: '{"storeName":"Kept"}' });
   const look = JSON.parse(out.settings.find((s: { key: string }) => s.key === 'look').data);
   assert.deepEqual([look.preset, look.mode], ['ivory-gold', 'system']);

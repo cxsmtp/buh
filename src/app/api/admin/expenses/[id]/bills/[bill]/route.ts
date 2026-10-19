@@ -1,5 +1,5 @@
 import { BILL_CSP } from '@/lib/csp';
-import { requireAdmin } from '@/lib/server/guard';
+import { requireAdmin, requireReader } from '@/lib/server/guard';
 import { allowFields, handleRouteError, HttpError, json, readJsonBody } from '@/lib/server/http';
 import { getExpense, readBill, removeBill } from '@/lib/server/expenses';
 
@@ -11,7 +11,7 @@ import { getExpense, readBill, removeBill } from '@/lib/server/expenses';
  */
 export async function GET(req: Request, { params }: { params: Promise<{ id: string; bill: string }> }) {
   try {
-    await requireAdmin(req);
+    await requireReader(req);
     const { id, bill } = await params;
     const file = readBill(id, bill);
     if (!file) throw new HttpError(404, 'Bill not found.');

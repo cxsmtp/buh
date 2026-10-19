@@ -449,10 +449,30 @@ function num(v: unknown, field: string, min: number, max: number, { integer = fa
   return integer ? n : Math.round(n * 100) / 100;
 }
 
-function validateProfile(v: unknown, i: number): BedProfileMeasurement {
+function validateProfile(v: unknown, i: number, simple = false): BedProfileMeasurement {
   const p = (v && typeof v === 'object' ? v : {}) as Obj;
   const id = text(p.id, `Size ${i + 1}`, 30, { required: true });
   if (!SIZE_ID.test(id)) throw new HttpError(400, `Size ${i + 1}: the id may use only lowercase letters, digits and dashes.`);
+  if (simple) {
+    // A simple product's variant: a name, its dimensions (optional), price difference, pieces and
+    // weight. No bed measurements: whatever the browser sends for those is dropped.
+    const dimensions = text(p.dimensions, `Variant ${i + 1} dimensions`, 80);
+    return {
+      id: id as BedProfileMeasurement['id'],
+      name: text(p.name, `Variant ${i + 1} name`, 60, { required: true }),
+      badge: text(p.badge, `Variant ${i + 1} badge`, 40),
+      mattressSize: '',
+      fittedSheet: '',
+      flatSheet: '',
+      pillowcases: '',
+      piecesIncluded: num(p.piecesIncluded ?? 1, `Variant ${i + 1} pieces`, 1, 20, { integer: true }),
+      priceDelta: num(p.priceDelta ?? 0, `Variant ${i + 1} price difference`, -10_000, 10_000),
+      ...(dimensions ? { dimensions } : {}),
+      ...(p.weightGrams === undefined || p.weightGrams === null || p.weightGrams === ''
+        ? {}
+        : { weightGrams: num(p.weightGrams, `Variant ${i + 1} weight (g)`, WEIGHT_GRAMS_MIN, WEIGHT_GRAMS_MAX, { integer: true }) }),
+    };
+  }
   return {
     id: id as BedProfileMeasurement['id'],
     name: text(p.name, `Size ${i + 1} name`, 60, { required: true }),
@@ -509,9 +529,12 @@ export function validateProduct(input: unknown): StoredProduct {
   const price = num(p.price, 'Price', 1, 100_000);
   const compareAt = p.compareAtPrice === undefined || p.compareAtPrice === null || p.compareAtPrice === '' ? undefined : num(p.compareAtPrice, 'Compare-at price', 0, 100_000);
 
-  if (!Array.isArray(p.profiles) || p.profiles.length === 0 || p.profiles.length > 12) throw new HttpError(400, 'Add 1 to 12 sizes.');
-  const profiles = p.profiles.map(validateProfile);
-  if (new Set(profiles.map((x) => x.id)).size !== profiles.length) throw new HttpError(400, 'Each bed size may appear once.');
+  // Bedding (bed sizes, the default and everything before BUH-02.17) or simple (plain variants).
+  if (p.productType !== undefined && p.productType !== null && p.productType !== 'bedding' && p.productType !== 'simple') throw new HttpError(400, 'Product type must be bedding or simple.');
+  const simple = p.productType === 'simple';
+  if (!Array.isArray(p.profiles) || p.profiles.length === 0 || p.profiles.length > 12) throw new HttpError(400, simple ? 'Add 1 to 12 variants.' : 'Add 1 to 12 sizes.');
+  const profiles = p.profiles.map((x, i) => validateProfile(x, i, simple));
+  if (new Set(profiles.map((x) => x.id)).size !== profiles.length) throw new HttpError(400, simple ? 'Each variant may appear once.' : 'Each bed size may appear once.');
   for (const pr of profiles) if (price + pr.priceDelta <= 0) throw new HttpError(400, `${pr.name} would cost nothing or less.`);
   const defaultProfileId = text(p.defaultProfileId, 'Default size', 30) || profiles[0].id;
   if (!profiles.some((x) => x.id === defaultProfileId)) throw new HttpError(400, 'The default size must be one of the sizes.');
@@ -536,6 +559,8 @@ export function validateProduct(input: unknown): StoredProduct {
 
   return {
     id: typeof p.id === 'string' ? p.id : '',
+    // Stored only for simple products: a bedding product's JSON stays as it always was.
+    ...(simple ? { productType: 'simple' as const } : {}),
     title,
     sku: sku || undefined,
     slug: title.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '').slice(0, 80),
@@ -562,9 +587,9 @@ export function validateProduct(input: unknown): StoredProduct {
     isNewArrival: p.isNewArrival === true,
     rating: num(p.rating ?? 5, 'Rating', 0, 5),
     reviewsCount: num(p.reviewsCount ?? 0, 'Reviews', 0, 1_000_000, { integer: true }),
-    fitted: p.fitted === true,
-    measurementsReview: p.measurementsReview === true ? true : undefined,
-    legacyMeasurements: legacyMeasurementsOf(p.legacyMeasurements),
+    fitted: !simple && p.fitted === true,
+    measurementsReview: !simple && p.measurementsReview === true ? true : undefined,
+    legacyMeasurements: simple ? undefined : legacyMeasurementsOf(p.legacyMeasurements),
     profiles,
     defaultProfileId,
     createdAt: typeof p.createdAt === 'string' ? p.createdAt.slice(0, 40) : new Date().toISOString(),

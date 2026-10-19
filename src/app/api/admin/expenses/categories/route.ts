@@ -1,11 +1,11 @@
-import { requireAdmin } from '@/lib/server/guard';
+import { requireAdmin, requireReader } from '@/lib/server/guard';
 import { allowFields, handleRouteError, json, readJsonBody } from '@/lib/server/http';
 import { addCategory, listCategories } from '@/lib/server/expenses';
 
 /** The expense categories (the owner's list). */
 export async function GET(req: Request) {
   try {
-    await requireAdmin(req);
+    await requireReader(req);
     return json({ categories: listCategories() });
   } catch (err) {
     return handleRouteError(err, 'admin/expenses/categories');

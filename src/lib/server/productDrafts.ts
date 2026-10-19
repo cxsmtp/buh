@@ -65,6 +65,7 @@ export function cleanDraft(input: unknown): Record<string, unknown> {
           piecesIncluded: n(o.piecesIncluded, 1, 20) ?? 1,
           priceDelta: n(o.priceDelta, -10_000, 10_000) ?? 0,
           weightGrams: n(o.weightGrams, 1, 50_000) === undefined ? undefined : Math.round(o.weightGrams as number),
+          dimensions: s(o.dimensions, 80),
         };
       })
     : [];
@@ -94,6 +95,7 @@ export function cleanDraft(input: unknown): Record<string, unknown> {
     material: s(d.material, 120),
     threadCount: s(d.threadCount, 6),
     weave: s(d.weave, 30),
+    productType: d.productType === 'simple' || d.productType === 'bedding' ? d.productType : undefined,
     colors,
     photos,
     sizes,

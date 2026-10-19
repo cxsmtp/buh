@@ -6,6 +6,7 @@ import { CourierSettings, Order } from '@/types';
 import { X, Printer, AlertTriangle, FileText } from 'lucide-react';
 import { aed2, carrierLabel } from '@/lib/courierMode';
 import { Barcode128 } from './Barcode128';
+import { labelContents as contentsOf } from '@/lib/labelContents';
 
 interface ShippingLabelModalProps {
   order: Order | null;
@@ -22,10 +23,6 @@ const H = 576;
 
 export const TEST_WATERMARK = 'TEST BOOKING – NOT A REAL SHIPMENT – DO NOT SEND';
 
-function contentsOf(order: Order): string {
-  const text = order.items.map((i) => `${i.title} × ${i.quantity}`).join('; ');
-  return text.length > 110 ? `${text.slice(0, 107).trimEnd()}…` : text;
-}
 
 function dateOf(iso?: string): string {
   const d = iso ? new Date(iso) : new Date();

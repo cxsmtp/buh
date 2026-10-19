@@ -113,7 +113,8 @@ test('every admin route checks the door (requireAdmin or requireDoor), found by 
     const src = fs.readFileSync(f, 'utf8');
     // A file's own helper that calls requireAdmin (e.g. owner(req)) counts too.
     const helpers = [...src.matchAll(/(?:async )?function (\w+)\([^)]*\)[^{]*\{([\s\S]*?)\n\}/g)].filter(([, , b]) => /requireAdmin\(req|requireDoor\(req/.test(b)).map(([, name]) => name);
-    const checks = new RegExp(`(?:requireAdmin|requireDoor${helpers.map((h) => `|${h}`).join('')})\\(req`);
+    // requireReader is requireAdmin for the accountant's read-only routes (guard.ts).
+    const checks = new RegExp(`(?:requireAdmin|requireReader|requireDoor${helpers.map((h) => `|${h}`).join('')})\\(req`);
     const handlers = [...src.matchAll(/export async function (GET|POST|PUT|PATCH|DELETE)\(([^)]*)\)\s*\{([\s\S]*?)\n\}/g)];
     assert.ok(handlers.length, `${f} has handlers`);
     for (const [, method, params, body] of handlers) {
@@ -122,6 +123,7 @@ test('every admin route checks the door (requireAdmin or requireDoor), found by 
     }
   }
   const guard = fs.readFileSync('src/lib/server/guard.ts', 'utf8');
+  assert.match(guard, /export function requireReader\(req: Request\)[^{]*\{\s*return requireAdmin\(req,/, 'requireReader is requireAdmin');
   const requireAdmin = guard.slice(guard.indexOf('export async function requireAdmin'));
   assert.match(requireAdmin.split('\n').slice(0, 3).join('\n'), /requireDoor\(req\)/, 'requireAdmin checks the door first');
 });
@@ -152,6 +154,23 @@ test('the front gate: admin addresses without a door become an unknown address; 
   assert.equal(gate.decide(`/${nearMiss}`, '').kind, 'pass', 'a near miss is just an unknown address');
   // A trailing slash: Next.js redirects to the address without it, which comes back through the gate.
   assert.equal(gate.decide('/api/admin/login/', '').kind, 'pass');
+});
+
+test('the front gate: Stripe’s webhook is only there for a POST carrying a Stripe-Signature header; anything else is an unknown address', () => {
+  const unknownApi = { kind: 'unknown', url: gate.NOWHERE_API };
+  const now = Date.now();
+  assert.equal(gate.STRIPE_WEBHOOK, '/api/stripe/webhook');
+  // What a scanner sends: no method given, GET, HEAD, OPTIONS, a POST without the header.
+  for (const req of [{}, { method: 'GET' }, { method: 'HEAD' }, { method: 'OPTIONS' }, { method: 'PUT' }, { method: 'GET', stripeSignature: true }, { method: 'post', stripeSignature: true }, { method: 'POST' }, { method: 'POST', stripeSignature: false }]) {
+    for (const p of ['/api/stripe/webhook', '/api//stripe/webhook', '/api/%73tripe/webhook', '/x/../api/stripe/webhook']) assert.deepEqual(gate.decide(p, '', now, req), unknownApi, `${p} ${JSON.stringify(req)}`);
+  }
+  assert.deepEqual(gate.decide('/api/stripe/webhook?probe=1', '', now, { method: 'GET' }), { kind: 'unknown', url: `${gate.NOWHERE_API}?probe=1` });
+  // Stripe's delivery: on to the route (which checks the signature itself and answers 400 when it is wrong).
+  assert.deepEqual(gate.decide('/api/stripe/webhook', '', now, { method: 'POST', stripeSignature: true }), { kind: 'pass' });
+  // Nothing else changes: other addresses never look at the method or the header.
+  for (const p of ['/api/products', '/api/orders', '/api/stripe/other']) assert.deepEqual(gate.decide(p, '', now, { method: 'GET' }), { kind: 'pass' }, p);
+  // A trailing slash: Next.js redirects to the address without it, which comes back through the gate.
+  assert.equal(gate.decide('/api/stripe/webhook/', '', now, { method: 'GET' }).kind, 'pass');
 });
 
 test('the password-reset email opens the hub through its own grant: the door lasts only while the reset is open, and setting the password ends it', async () => {
@@ -271,7 +290,7 @@ test('scanner slow-down: 10 misses in a minute slow an address, 30 shut it out f
   for (let i = 0; i < 100; i++) scan.recordMiss(calm, t0 + i * 61_000);
   assert.equal(scan.verdictFor(calm, t0 + 100 * 61_000).action, 'pass');
   for (const p of ['/_next/static/chunks/old.js', '/api/images/gone.jpg', '/icons/x.png', '/api/orders/lookup', '/api/products', '/p/gone']) assert.equal(scan.countsAsProbe(p), false, p);
-  for (const p of ['/wp-admin', '/.env', '/admin', '/api/admin/login']) assert.equal(scan.countsAsProbe(p), true, p);
+  for (const p of ['/wp-admin', '/.env', '/admin', '/api/admin/login', '/api/stripe/webhook']) assert.equal(scan.countsAsProbe(p), true, p);
   // Only behind the shop's proxy: without TRUST_PROXY=1 there is no address to count.
   const saved = process.env.TRUST_PROXY;
   delete process.env.TRUST_PROXY;
