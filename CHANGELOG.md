@@ -11,8 +11,8 @@
 - **No invented details.** Made-up warehouse addresses, phone numbers, hubs and sample accounts are gone from bookings, labels and messages, and Eco Express no longer books against a demo server.
 - **Already in Live mode?** Add Jeebly's live address in Couriers; bookings wait for it.
 - **Status.**
-  - **Benchmark:** BENCH
-  - **Tests:** TESTS
+  - **Benchmark:** 3 alternating rounds (main first), 0 failed requests. Storefront branch 839 / 909 / 805 req/s vs main 814 / 778 / 889; catalogue API branch 817 / 806 / 848 vs main 795 / 803 / 806. The serviceability API was mixed in the short 1,000-request run (branch 556 / 734 / 614 vs main 804 / 655 / 637), so it was re-run on its own: 4 × 5,000 requests each, alternating, gave branch 799 / 835 / 781 / 820 vs main 773 / 827 / 854 / 817 req/s (p95 88–98 vs 90–96 ms), the same within noise.
+  - **Tests:** 805 of 806 passed in the full run. The card-payment browser check at 375 px timed out waiting for the homepage under load, then passed 10/10 twice on its own. The security review's 13 findings were fixed, each with a test that fails before and passes after.
   - **Dependency audit:** production 0 vulnerabilities; no new packages.
   - **Security scan:** new admin routes (carrier label, carrier tracking, enter tracking number, Sandbox check, Live switch) check the session, size-cap and allow-list their input, and are audited. Carrier keys stay on the server and are blanked in backups. Real run against Jeebly's demo: create, label PDF, tracking and cancel passed (test AWBs JB115105, JB115106, both cancelled).
 
