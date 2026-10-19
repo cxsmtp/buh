@@ -1,6 +1,6 @@
 # Changelog
 
-## BUH-02.13.00 — 2026-10-19 03:50 UTC · [#NN](https://github.com/cxsmtp/buh/pull/NN)
+## BUH-02.13.00 — 2026-10-19 03:50 UTC · [#30](https://github.com/cxsmtp/buh/pull/30)
 
 - **Newer, slimmer server software.** The shop now runs on Node 24 (Node 20 is out of support), and npm, yarn and corepack are removed from the running shop, which only needs `node`. This clears the known holes Checkmarx found in the old base image.
 - **Updater and HTTPS proxy refreshed.** The updater carries only the container command it uses (docker CLI 29.9.1 on Alpine 3.24), and the proxy is Caddy 2.11.7 without curl. Both now report their own health.
