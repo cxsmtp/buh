@@ -73,7 +73,7 @@ services:
     profiles: ["green"]
 
   caddy:
-    image: caddy:2.8.4-alpine@sha256:af32e97399febea808609119bb21544d0265c58a02836576e32a2d082c262c17
+    image: caddy:2.11.7-alpine@sha256:d8542f48d34a9cf4e4c11a478865229840e87e4c96ea3f439101f31a5d35f75f
     restart: unless-stopped
     # No depends_on: Caddy health-checks both copies itself and serves whichever is up.
     env_file:
@@ -93,12 +93,19 @@ services:
       - NET_BIND_SERVICE
     security_opt:
       - no-new-privileges:true
+    # Healthy while Caddy listens for HTTPS.
+    healthcheck:
+      test: ["CMD", "nc", "-z", "127.0.0.1", "443"]
+      interval: 1m
+      timeout: 5s
+      retries: 3
+      start_period: 30s
     logging: *logging
 
   updater:
     # Opt-in: the Docker socket gives it control of the host (docs/security.md).
     profiles: ["autoupdate"]
-    image: docker:28.5.2-cli@sha256:625d9431a9f54c5a2bc90f24f0e1c3d55b1349fd857dd85035f98c2c9acbdd4d
+    image: docker:29.9.1-cli@sha256:6fae2214c3121a28d5aa639d09032f61310b7c9c75ffbad1025f261a1b621800
     restart: unless-stopped
     entrypoint: ["/bin/sh", "/updater/updater.sh"]
     command: ["daemon"]
@@ -130,6 +137,13 @@ services:
     security_opt:
       - no-new-privileges:true
     pids_limit: 128
+    # Healthy while the engine answers through the socket and the script parses.
+    healthcheck:
+      test: ["CMD", "/bin/sh", "/updater/updater.sh", "selfcheck"]
+      interval: 5m
+      timeout: 30s
+      retries: 3
+      start_period: 1m
     logging: *logging
 
 volumes:

@@ -33,7 +33,7 @@ STATUS=$NAME-updater-status
 STATE=$NAME-updater-state
 CODE=$NAME-updater-code
 UPDATER=$NAME-updater
-UPDATER_IMAGE=docker:28.5.2-cli@sha256:625d9431a9f54c5a2bc90f24f0e1c3d55b1349fd857dd85035f98c2c9acbdd4d
+UPDATER_IMAGE=docker:29.9.1-cli@sha256:6fae2214c3121a28d5aa639d09032f61310b7c9c75ffbad1025f261a1b621800
 # The engine's API socket on this machine, mounted into the updater as /var/run/docker.sock.
 ENGINE_SOCKET=${ENGINE_SOCKET:-/var/run/docker.sock}
 LATEST=buh:ci-latest

@@ -5,3 +5,5 @@ services:
     command: ["caddy", "run", "--config", "/etc/caddy/ci/Caddyfile", "--adapter", "caddyfile"]
     ports: !override
       - "8080:8080"
+    healthcheck:
+      test: ["CMD", "nc", "-z", "127.0.0.1", "8080"]

@@ -27,7 +27,7 @@
 
 ## Run it
 
-Node 20+:
+Node 24 (the version in the image; 20.9+ also works):
 
 ```
 npm ci && npm run dev
