@@ -165,12 +165,14 @@ export function colorFamily(hex: string): ColorFamily | null {
 
 const familiesOf = (p: Product) => new Set(p.colors.map((c) => colorFamily(c.hex)?.id).filter((x): x is string => Boolean(x)));
 
-/** Every word typed is somewhere in the name, category, colours or material. */
+/** Every word typed is somewhere in the name, category, colours or material (or a simple product's options). */
 export function matchesSearch(p: Product, q: string, categories: Category[] = []): boolean {
   const words = fold(q).split(/\s+/).filter(Boolean);
   if (!words.length) return true;
   const label = categories.find((c) => c.id === p.category)?.label ?? '';
-  const hay = fold([p.title, label, p.material, p.weave, ...p.colors.map((c) => c.name)].join(' '));
+  // A simple product's options are words shoppers search for ("bath towel", "50 x 50").
+  const options = p.productType === 'simple' ? p.profiles.flatMap((s) => [s.name, s.dimensions ?? '']) : [];
+  const hay = fold([p.title, label, p.material, p.productType === 'simple' ? '' : p.weave, ...p.colors.map((c) => c.name), ...options].join(' '));
   return words.every((w) => hay.includes(w));
 }
 

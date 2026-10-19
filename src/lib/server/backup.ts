@@ -28,7 +28,8 @@ import { toCsv } from './csv';
  *  - flat files anyone can open in Excel: orders.csv, order_items.csv,
  *    customers.csv, products.csv, chats.csv, stock_moves.csv (every stock
  *    change made in the Admin Hub: who, why, old → new);
- *  - product drafts and the stock ledger are tables in the database copy;
+ *  - product drafts, the stock ledger and the shared selections (/c/<slug>) are tables in the
+ *    database copy; collections.csv lists the selections too;
  *  - the bank-transfer receipts (every screenshot a customer uploaded, the earlier ones
  *    too), the product photos and the audit log;
  *  - the expenses (tables in the database copy, every earlier version and removed ones too),
@@ -171,14 +172,25 @@ function csvFiles(): TarEntry[] {
     },
     ...expenseCsvFiles(),
     {
+      // Shared selections (/c/<slug>): their products and counters (the table is in the database copy too).
+      name: 'collections.csv',
+      data: Buffer.from(toCsv(
+        ['collection_id', 'link', 'title', 'product_ids', 'last_day', 'views', 'added_to_bag', 'created_at', 'created_by', 'updated_at'],
+        (getDb().prepare('SELECT id, slug, title, product_ids, expires_on, views, bag_adds, created_at, created_by, updated_at FROM collections ORDER BY created_at').all() as Array<Record<string, string | number | null>>).map((r) => [
+          r.id, `/c/${r.slug}`, r.title, (JSON.parse(String(r.product_ids)) as string[]).join('; '), r.expires_on ?? '', r.views, r.bag_adds, r.created_at, r.created_by, r.updated_at,
+        ])
+      )),
+    },
+    {
       name: 'products.csv',
       data: Buffer.from(toCsv(
-        ['product_id', 'title', 'category', 'price_aed', 'stock_total', 'stock_by_size', 'visible', 'removed', 'sizes'],
+        ['product_id', 'title', 'category', 'price_aed', 'stock_total', 'stock_by_size', 'visible', 'removed', 'sizes', 'product_type', 'sku'],
         listProducts({ includeHidden: true, includeArchived: true }).map((p) => [
           p.id, p.title, p.category, p.price, p.stockCount,
           p.profiles.map((x) => `${x.id}=${p.stockBySize[x.id] ?? 0}`).join('; '),
           p.active ? 'yes' : 'no', p.archived ? 'yes' : '',
-          p.profiles.map((x) => `${x.name} (+${x.priceDelta})`).join('; '),
+          p.profiles.map((x) => `${x.name}${x.dimensions ? ` ${x.dimensions}` : ''} (+${x.priceDelta})`).join('; '),
+          p.productType === 'simple' ? 'simple' : 'bedding', p.sku ?? '',
         ])
       )),
     },

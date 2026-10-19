@@ -27,7 +27,17 @@ export interface BedProfileMeasurement {
   priceDelta: number;   // e.g. +0 for Single, +40 for King, +60 for Super King
   /** Packed weight of one set, in grams (admin only: never shown in the shop). */
   weightGrams?: number;
+  /** A simple product's variant only (towels, cushions, decor…): its size as shown, e.g. "50 × 50 cm". */
+  dimensions?: string;
 }
+
+/**
+ * What kind of product: bedding (bed sizes with sheet and pillowcase measurements, everything
+ * before BUH-02.17) or simple (towels, cushions, throws, curtains, decor: plain variants such as
+ * "50 × 50 cm" or "Bath towel", each with its own price difference, stock and weight). Absent
+ * means bedding.
+ */
+export type ProductType = 'bedding' | 'simple';
 
 export interface Product {
   id: string;
@@ -37,6 +47,8 @@ export interface Product {
   sku?: string;
   description: string;
   shortDescription: string;
+  /** Bedding (bed sizes) or simple (plain variants). Absent: bedding. */
+  productType?: ProductType;
   /** A category id from Settings → Catalogue (built-in: bedsheets, duvet-covers, fitted-sheets, hotel-luxury, silk-collection). */
   category: string;
   price: number; // Base price in AED
@@ -168,6 +180,10 @@ export interface Order {
     totalPrice: number;
     /** The size's packed weight when the order was placed (a snapshot: later edits don't change it). */
     weightGrams?: number;
+    /** A simple product's variant: its dimensions when the order was placed (e.g. "50 × 50 cm"). */
+    dimensions?: string;
+    /** 'simple' for a towel, cushion or other simple product (its profileName is a variant, not a bed size). */
+    productType?: 'simple';
   }[];
   subtotal: number;
   deliveryFee: number;
@@ -430,7 +446,8 @@ export interface CourierSettings {
 /** Settings → Catalogue: the size presets offered when adding a product, and the categories. */
 export interface CatalogSettings {
   sizes: BedProfileMeasurement[];
-  categories: Array<{ id: string; label: string; icon: string }>;
+  /** defaultType: what a new product in this category starts as (absent: bedding). */
+  categories: Array<{ id: string; label: string; icon: string; defaultType?: ProductType }>;
   /** Show "Only 1 left" when a size's stock is at or below this. */
   lowStockThreshold: number;
   /** The weaves a product may have, in the order the editor offers them (1–30, each 1–30 characters). */

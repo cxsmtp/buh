@@ -1,7 +1,7 @@
 'use client';
 
 import React, { useState } from 'react';
-import { ArrowDown, ArrowUp, Loader2, Plus, Trash2 } from 'lucide-react';
+import { ArrowDown, ArrowUp, Download, Loader2, Plus, Trash2 } from 'lucide-react';
 import { useAutoSave, type AutoSaveHooks } from './useAutoSave';
 import type { BedProfileMeasurement, CatalogSettings } from '@/types';
 import { DEFAULT_WEAVES } from '@/data/catalogDefaults';
@@ -10,7 +10,9 @@ import { WeavesEditor } from './WeavesEditor';
 /**
  * Settings → Catalogue: the size presets offered when adding a product (name,
  * measurements, price difference), the shop's categories, and when to warn
- * "Only N left", and the weaves (Sateen, Percale, …). Changing a preset does not change existing products: each
+ * "Only N left", and the weaves (Sateen, Percale, …). Each category can make new products start as
+ * bed linen or "other" (towels, cushions…: plain variants). "Export for Amazon / Noon" downloads the
+ * products as a CSV to copy into a marketplace's template (groundwork: no API). Changing a preset does not change existing products: each
  * product keeps its own copy of its sizes (edit them in the product).
  */
 
@@ -135,9 +137,9 @@ export function CatalogSettingsCard({ value, onSave, auto }: { value: CatalogSet
         <h3 className="font-bold text-sm text-ink">Categories</h3>
         {draft.categories.map((c, i) => (
           <div key={i} className="flex items-center gap-2">
-            <input className={`${field} w-12 text-center`} value={c.icon} maxLength={8} aria-label={`Category ${i + 1} icon`} onChange={(e) => setDraft((d) => ({ ...d, categories: d.categories.map((x, j) => (j === i ? { ...x, icon: e.target.value } : x)) }))} />
+            <input className={`${field.replace('w-full ', '')} w-12 shrink-0 text-center`} value={c.icon} maxLength={8} aria-label={`Category ${i + 1} icon`} onChange={(e) => setDraft((d) => ({ ...d, categories: d.categories.map((x, j) => (j === i ? { ...x, icon: e.target.value } : x)) }))} />
             <input
-              className={field}
+              className={`${field} min-w-0`}
               value={c.label}
               maxLength={40}
               aria-label={`Category ${i + 1} name`}
@@ -149,6 +151,16 @@ export function CatalogSettingsCard({ value, onSave, auto }: { value: CatalogSet
                 }))
               }
             />
+            <select
+              className="w-24 shrink-0 px-1.5 py-1.5 rounded-lg border border-line-strong bg-surface text-ink text-xs focus:outline-none focus:ring-2 focus:ring-gold"
+              value={c.defaultType === 'simple' ? 'simple' : 'bedding'}
+              aria-label={`New products in ${c.label || `category ${i + 1}`} are`}
+              title="What a new product in this category starts as"
+              onChange={(e) => setDraft((d) => ({ ...d, categories: d.categories.map((x, j) => (j === i ? (e.target.value === 'simple' ? { ...x, defaultType: 'simple' as const } : { id: x.id, label: x.label, icon: x.icon }) : x)) }))}
+            >
+              <option value="bedding">Bed linen</option>
+              <option value="simple">Other</option>
+            </select>
             <button type="button" onClick={() => setDraft((d) => ({ ...d, categories: d.categories.filter((_, j) => j !== i) }))} disabled={draft.categories.length === 1} className="p-1.5 text-ink-muted disabled:opacity-30" aria-label={`Delete category ${c.label}`}><Trash2 className="w-3.5 h-3.5" /></button>
           </div>
         ))}
@@ -156,6 +168,20 @@ export function CatalogSettingsCard({ value, onSave, auto }: { value: CatalogSet
           <button type="button" onClick={() => setDraft((d) => ({ ...d, categories: [...d.categories, { id: `category-${d.categories.length + 1}`, label: '', icon: '🧵' }] }))} className="font-semibold text-ink flex items-center gap-1"><Plus className="w-3.5 h-3.5" /> Add a category</button>
         )}
         <p className="text-ink-muted">A category with no products is not shown to customers. Deleting one keeps it on the products that use it until you change them.</p>
+        <p className="text-ink-muted">&ldquo;Bed linen&rdquo; or &ldquo;Other&rdquo;: what a new product in the category starts as. Other (towels, cushions, throws, curtains, decor) has plain variants such as &ldquo;50 × 50 cm&rdquo; instead of bed sizes. You can still change it on each product.</p>
+      </section>
+
+      <section className="space-y-2" aria-labelledby="marketplace-export-title">
+        <h3 id="marketplace-export-title" className="font-bold text-sm text-ink">Export for Amazon / Noon</h3>
+        <p className="text-ink-muted">
+          A spreadsheet of the products on sale, one row per size or variant: SKU, title, description, brand, price in AED, stock, photos, category and size. Products without an SKU get a fixed one made from their id.
+        </p>
+        <p className="rounded-lg border border-warning-line bg-warning-soft px-2.5 py-2 text-ink" data-testid="marketplace-groundwork">
+          <strong>Groundwork:</strong> check the template your seller account gives you; column names differ by category. Copy these columns into it. Nothing is sent to Amazon or Noon from here.
+        </p>
+        <a href="/api/admin/exports/marketplace" download className="inline-flex items-center gap-1.5 min-h-10 px-3 rounded-xl border border-line-strong bg-surface text-ink font-bold">
+          <Download className="w-3.5 h-3.5" aria-hidden="true" /> Download CSV
+        </a>
       </section>
 
       <WeavesEditor

@@ -566,7 +566,7 @@ export function placeOrder(input: unknown, context: PlaceOrderContext = {}): Pla
         const product = getProduct(line.productId);
         if (!product || !product.active) throw new HttpError(409, 'An item in your bag is no longer available. Please remove it and try again.');
         const profile = product.profiles.find((p) => p.id === line.profileId);
-        if (!profile) throw new HttpError(409, `${product.title}: that bed size is no longer offered.`);
+        if (!profile) throw new HttpError(409, `${product.title}: that ${product.productType === 'simple' ? 'option' : 'bed size'} is no longer offered.`);
         // No colours on the product: none is chosen (a colour sent from an older bag is ignored).
         const color = !product.colors.length ? undefined : line.color && product.colors.some((c2) => c2.name === line.color) ? line.color : product.colors[0]?.name;
         if (product.colors.length && line.color && color !== line.color) throw new HttpError(409, `${product.title}: that colour is no longer offered.`);
@@ -595,6 +595,8 @@ export function placeOrder(input: unknown, context: PlaceOrderContext = {}): Pla
           totalPrice: aed(unitFils * line.quantity),
           // The size's packed weight now (a snapshot: editing the product later does not change this order).
           ...(Number(profile.weightGrams) > 0 ? { weightGrams: Math.round(Number(profile.weightGrams)) } : {}),
+          // A simple product's variant (towels, cushions…): its dimensions, as shown when it was bought.
+          ...(product.productType === 'simple' ? { productType: 'simple' as const, ...(profile.dimensions ? { dimensions: profile.dimensions } : {}) } : {}),
         });
       }
 
@@ -2046,7 +2048,7 @@ export function lookupOrder(id: string, phone: string) {
     firstName: order.customer.fullName.split(/\s+/)[0],
     emirate: order.customer.emirate,
     area: order.customer.area,
-    items: order.items.map((i) => ({ title: i.title, image: i.image, profileName: i.profileName, color: i.color, quantity: i.quantity, totalPrice: i.totalPrice })),
+    items: order.items.map((i) => ({ title: i.title, image: i.image, profileName: i.profileName, ...(i.dimensions ? { dimensions: i.dimensions } : {}), color: i.color, quantity: i.quantity, totalPrice: i.totalPrice })),
     courier: trackingView(order),
     ...(order.whatsappCheck ? { whatsappCheck: whatsAppView(order.whatsappCheck) } : {}),
     ...(order.card ? { card: cardView(order.card) } : {}),

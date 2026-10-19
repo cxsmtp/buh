@@ -1,13 +1,14 @@
 'use client';
 
 import React, { useState, useEffect, useMemo, useCallback, useRef } from 'react';
+import Link from 'next/link';
 import { Product, Order, CartItem, BedProfileMeasurement, BrandSettings, CatalogSettings, StoreSettings, DeliverySettings, PhoneVerificationConfig } from '@/types';
 import { DEFAULT_CATALOG, DEFAULT_DELIVERY, DEFAULT_STORE } from '@/data/catalogDefaults';
 import { askWhatsAppLink, piecesLeft, refreshCart, ShopProvider, type FestivalView, type ShopInfo } from '@/lib/client/shop';
 import { captureLanding, decodeBag, type BagLine, type Landing } from '@/lib/client/landing';
 import { useLiveUpdates } from '@/lib/client/live';
 import { INITIAL_BRAND_SETTINGS } from '@/data/initialData';
-import { getJson } from '@/lib/apiClient';
+import { getJson, postJson } from '@/lib/apiClient';
 import { applyUpdate, checkForUpdate, registerServiceWorker, useUpdateWaiting } from '@/lib/client/pwa';
 
 /** Catalogue + public settings from the server (no React state here). */
@@ -59,6 +60,7 @@ import { StoryChips } from '@/components/store/StoryChips';
 import { FilterSheet } from '@/components/store/FilterSheet';
 import { SearchSheet } from '@/components/store/SearchSheet';
 import { ProductCard } from '@/components/store/ProductCard';
+import { CollectionHeader, type ShopCollection } from '@/components/store/CollectionHeader';
 import { ProductDetailModal } from '@/components/store/ProductDetailModal';
 import { CartDrawer } from '@/components/store/CartDrawer';
 import { CheckoutModal } from '@/components/store/CheckoutModal';
@@ -91,7 +93,7 @@ function writeSearch(search: string, mode: 'push' | 'replace') {
  * own page at the owner's private link (src/lib/server/frontGate.ts), so nothing in the shop's
  * pages or scripts leads to it.
  */
-export function ShopApp({ initialProductId }: { initialProductId?: string } = {}) {
+export function ShopApp({ initialProductId, collection }: { initialProductId?: string; collection?: ShopCollection } = {}) {
   // What the shop shows (search, filters, sort): mirrored in the address bar so it can be shared and Back works.
   const [filters, setFilters] = useState<Filters>(EMPTY_FILTERS);
   const [filterOpen, setFilterOpen] = useState(false);
@@ -273,8 +275,23 @@ export function ShopApp({ initialProductId }: { initialProductId?: string } = {}
     });
   }, [festival]);
 
+  // A shared selection (/c/<slug>): one view per visit, and each add to bag, as two plain counters.
+  const collectionSlug = collection?.slug;
+  useEffect(() => {
+    if (!collectionSlug) return;
+    const key = `buh_col_seen_${collectionSlug}`;
+    try {
+      if (sessionStorage.getItem(key)) return;
+      sessionStorage.setItem(key, '1');
+    } catch {
+      // storage blocked: counted once per page load instead
+    }
+    void postJson(`/api/collections/${encodeURIComponent(collectionSlug)}`, { kind: 'view' });
+  }, [collectionSlug]);
+
   // Cart Handlers
   const handleAddToCart = (product: Product, profile: BedProfileMeasurement, colorName: string, quantity: number) => {
+    if (collectionSlug) void postJson(`/api/collections/${encodeURIComponent(collectionSlug)}`, { kind: 'bag' });
     const color = colorName || undefined; // no colour choice on this product
     setCart((prev) => {
       // Never more in the bag than there are pieces of this size (across colours).
@@ -330,7 +347,12 @@ export function ShopApp({ initialProductId }: { initialProductId?: string } = {}
   );
 
   // The storefront: what the search, filters and sort leave, and the round "story" chips.
-  const filteredProducts = useMemo(() => applyFilters(products, filters, categories), [products, filters, categories]);
+  // On a shared selection's page: just its products (on sale), in the owner's order, no filters.
+  const collectionIds = collection?.productIds;
+  const filteredProducts = useMemo(
+    () => (collectionIds ? collectionIds.map((id) => products.find((p) => p.id === id)).filter((p): p is Product => Boolean(p)) : applyFilters(products, filters, categories)),
+    [products, filters, categories, collectionIds]
+  );
   const stories = useMemo(() => buildStories(products, categories), [products, categories]);
   const activeStory = stories.find((s) => s.isActive(filters))?.id ?? null;
   const chips = useMemo(() => activeChips(filters, products, categories), [filters, products, categories]);
@@ -421,6 +443,10 @@ export function ShopApp({ initialProductId }: { initialProductId?: string } = {}
       {/* Main Content Area (on phones, room at the bottom for the tab bar and the Help button) */}
       <main className="flex-1 max-w-7xl mx-auto w-full pb-[calc(5rem+env(safe-area-inset-bottom,0px))] md:pb-16 px-4 sm:px-6">
         <div className="pt-3 sm:pt-4 space-y-4">
+          {collection ? (
+            <CollectionHeader collection={collection} pieces={catalogLoaded ? filteredProducts.length : null} />
+          ) : (
+          <>
           <HeroBanner brand={brandSettings} pieces={catalogLoaded ? products.length : null} />
 
           <StoryChips
@@ -430,9 +456,12 @@ export function ShopApp({ initialProductId }: { initialProductId?: string } = {}
             logo={<BrandLogo brand={brandSettings} className="w-16 h-16 text-xl" />}
             motif={festival?.festivalId && festival.showBanner ? festival.theme.motif : null}
           />
+          </>
+          )}
 
           <div ref={resultsRef} className="scroll-mt-28 space-y-3">
             {/* Count, and Filter (a bottom sheet) only when wanted */}
+            {!collection && (
             <div className="flex flex-wrap items-center justify-between gap-3 border-t border-line pt-4">
               <p className="label-caps text-ink-muted" aria-live="polite">
                 {catalogLoaded ? `${filteredProducts.length} ${filteredProducts.length === 1 ? 'piece' : 'pieces'}` : ''}
@@ -455,8 +484,9 @@ export function ShopApp({ initialProductId }: { initialProductId?: string } = {}
               </button>
               </div>
             </div>
+            )}
 
-            {(chips.length > 0 || filters.sort !== 'featured') && (
+            {!collection && (chips.length > 0 || filters.sort !== 'featured') && (
               <div className="flex flex-wrap items-center gap-2" role="group" aria-label="Filters on">
                 {chips.map((chip) => (
                   <button
@@ -514,8 +544,12 @@ export function ShopApp({ initialProductId }: { initialProductId?: string } = {}
               </div>
             ) : catalogLoaded ? (
               <div className="rounded-2xl border border-dashed border-line-strong px-4 py-10 text-center space-y-3">
-                <p className="text-sm text-ink">{products.length ? 'Nothing matches these filters.' : 'New pieces are on their way. Please check back soon.'}</p>
-                {products.length > 0 && (
+                <p className="text-sm text-ink">{collection ? 'These pieces have all found homes. Have a look at the rest of the shop.' : products.length ? 'Nothing matches these filters.' : 'New pieces are on their way. Please check back soon.'}</p>
+                {collection ? (
+                  <Link href="/" className="inline-block rounded-full bg-ink text-paper text-sm font-semibold px-5 py-2.5">
+                    Browse the shop
+                  </Link>
+                ) : products.length > 0 && (
                   <button type="button" onClick={() => showFilters(EMPTY_FILTERS)} className="rounded-full bg-ink text-paper text-sm font-semibold px-5 py-2.5">
                     Show everything
                   </button>

@@ -690,7 +690,9 @@ const VALIDATORS: { [K in SettingsKey]: (input: Obj, current: SettingsMap[K]) =>
       if (!/^[a-z0-9][a-z0-9-]{0,39}$/.test(id)) throw new HttpError(400, `Category ${i + 1}: the id may use only lowercase letters, digits and dashes.`);
       const label = text(o.label, `Category ${i + 1} name`, 40);
       if (!label) throw new HttpError(400, `Category ${i + 1} needs a name.`);
-      return { id, label, icon: text(o.icon, `Category ${i + 1} icon`, 8) };
+      // What a new product in it starts as (towels, cushions…: simple); kept only when simple.
+      if (o.defaultType !== undefined && o.defaultType !== null && o.defaultType !== '' && o.defaultType !== 'bedding' && o.defaultType !== 'simple') throw new HttpError(400, `Category ${i + 1}: the default type must be bed linen or other.`);
+      return { id, label, icon: text(o.icon, `Category ${i + 1} icon`, 8), ...(o.defaultType === 'simple' ? { defaultType: 'simple' as const } : {}) };
     });
     if (new Set(categories.map((c) => c.id)).size !== categories.length) throw new HttpError(400, 'Each category needs its own id.');
     const threshold = input.lowStockThreshold === undefined ? current.lowStockThreshold : Number(input.lowStockThreshold);

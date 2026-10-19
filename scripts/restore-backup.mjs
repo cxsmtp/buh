@@ -231,6 +231,8 @@ const products = db.prepare('SELECT COUNT(*) AS n FROM products').get().n;
 const tableExists = (name) => Boolean(db.prepare("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ?").get(name));
 const stockMoves = tableExists('stock_moves') ? db.prepare('SELECT COUNT(*) AS n FROM stock_moves').get().n : 0;
 const drafts = tableExists('product_drafts') ? db.prepare('SELECT COUNT(*) AS n FROM product_drafts').get().n : 0;
+// Shared selections, /c/<slug> (backups from before BUH-02.17 have none).
+const collections = tableExists('collections') ? db.prepare('SELECT COUNT(*) AS n FROM collections').get().n : 0;
 // Expenses and their bills (backups from before BUH-02.10 have none). A bill is one of five kinds
 // of file named by its id: a row naming anything else is refused (it would be served from disk).
 const expenses = tableExists('expenses') ? db.prepare('SELECT COUNT(*) AS n FROM expenses').get().n : 0;
@@ -266,7 +268,7 @@ if (tableExists('kv')) {
 const hasAdminLink = tableExists('kv') && Boolean(db.prepare("SELECT 1 FROM kv WHERE key = 'admin:link' AND data != 'null'").get());
 db.close();
 const passkeys = passkeyIds.length;
-const counts = `${orders} orders, ${refunds} card refunds, ${products} products, ${stockMoves} stock moves, ${drafts} product drafts, ${expenses} expenses, ${bills} bills`;
+const counts = `${orders} orders, ${refunds} card refunds, ${products} products, ${stockMoves} stock moves, ${drafts} product drafts, ${collections} shared selections, ${expenses} expenses, ${bills} bills`;
 if (replace) {
   // Move the current data aside (kept), then the restored files into place.
   const aside = path.join(finalTarget, `replaced-${new Date().toISOString().replace(/[:.]/g, '-')}`);

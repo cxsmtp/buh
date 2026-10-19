@@ -12,7 +12,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { test } from 'node:test';
 import Database from 'better-sqlite3';
-import { tempDataDir, LATEST_DB_VERSION, UNDO_MIGRATION_14 } from './helpers.mjs';
+import { tempDataDir, LATEST_DB_VERSION, UNDO_MIGRATION_14, UNDO_MIGRATION_15 } from './helpers.mjs';
 
 const dir = tempDataDir();
 delete process.env.BACKUP_PASSPHRASE;
@@ -215,6 +215,7 @@ test('migration 8 only adds (columns and an index); an older shop’s orders upg
   assert.equal(seven.status, 0, seven.stderr);
   const db = new Database(path.join(old, 'shop.db'));
   // Recreate the version-7 orders table (drop migration 13's rows and 12's tables, then the columns of migrations 11, 10, 9 and 8) and put an old order in.
+  db.exec(UNDO_MIGRATION_15); // migration 15
   db.exec(UNDO_MIGRATION_14); // migration 14
   db.exec("DELETE FROM settings_history WHERE key = 'look'; DELETE FROM settings WHERE key = 'look'"); // migration 13
   db.exec('DROP TABLE card_refunds; DROP TABLE expense_bills; DROP TABLE expense_versions; DROP TABLE expenses; DROP TABLE expense_categories;'); // migration 12

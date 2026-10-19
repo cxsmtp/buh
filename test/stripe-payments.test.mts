@@ -14,7 +14,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { after, before, test } from 'node:test';
 import Database from 'better-sqlite3';
-import { jsonRequest, tempDataDir, LATEST_DB_VERSION, UNDO_MIGRATION_14 } from './helpers.mjs';
+import { jsonRequest, tempDataDir, LATEST_DB_VERSION, UNDO_MIGRATION_14, UNDO_MIGRATION_15 } from './helpers.mjs';
 import { startStripeMock, TEST_KEYS, type StripeMock } from './stripe-mock.mjs';
 
 const dir = tempDataDir();
@@ -773,6 +773,7 @@ test('migration 9 only adds (columns, indexes, a table); backups carry card paym
   const db = new Database(path.join(old, 'shop.db'));
   // Migration 10's columns go too (it runs again after 9).
   // Migrations 11 and 12 go too (they run again after 10): newest first.
+  db.exec(UNDO_MIGRATION_15); // migration 15
   db.exec(UNDO_MIGRATION_14); // migration 14
   db.exec("DELETE FROM settings_history WHERE key = 'look'; DELETE FROM settings WHERE key = 'look'"); // migration 13
   db.exec('DROP TABLE card_refunds; DROP TABLE expense_bills; DROP TABLE expense_versions; DROP TABLE expenses; DROP TABLE expense_categories;'); // migration 12

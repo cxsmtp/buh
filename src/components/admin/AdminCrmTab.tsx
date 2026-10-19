@@ -144,7 +144,7 @@ export const AdminCrmTab: React.FC<AdminCrmTabProps> = ({ customers, orders }) =
                       </span>
                     </div>
                     <div className="text-[11px] text-ink-muted mt-0.5">
-                      {ord.items.map((i) => `${i.quantity}x ${i.title} (${i.profileName.split(' ')[0]})`).join(', ')}
+                      {ord.items.map((i) => `${i.quantity}x ${i.title} (${i.mattressSize ? i.profileName.split(' ')[0] : i.profileName})`).join(', ')}
                     </div>
                   </div>
 

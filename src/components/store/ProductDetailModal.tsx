@@ -10,6 +10,7 @@ import { Sheet } from '@/components/common/Sheet';
 import { LocalPrice } from '@/lib/client/currency';
 import { PhotoCarousel } from './PhotoCarousel';
 import { measurementRows } from '@/lib/measurements';
+import { isSimple, sizeDetail } from '@/lib/productType';
 import { X, Check, Truck, ShieldCheck, Ruler, MessageCircle, MessagesSquare, Share2, Minus, Plus } from 'lucide-react';
 
 interface ProductDetailModalProps {
@@ -58,6 +59,8 @@ const ProductDetailContent: React.FC<ProductDetailModalProps & { product: Produc
   const sizeShort = shortSize(selectedProfile.name);
   // Only what the owner filled in on this product for this size.
   const measurements = measurementRows(product, selectedProfile);
+  // Towels, cushions, decor…: plain options, no thread count or weave.
+  const simple = isSimple(product);
 
   const handleAddToCart = () => {
     if (soldOut) return;
@@ -138,7 +141,7 @@ const ProductDetailContent: React.FC<ProductDetailModalProps & { product: Produc
               <LocalPrice aed={Number(unitPrice)} className="text-xs" />
             </p>
             <p className="text-xs text-ink-soft">
-              {product.material} · {product.threadCount} TC · {product.weave}
+              {simple ? product.material : `${product.material} · ${product.threadCount} TC · ${product.weave}`}
             </p>
           </div>
 
@@ -171,7 +174,7 @@ const ProductDetailContent: React.FC<ProductDetailModalProps & { product: Produc
                       {isSelected && <Check className="w-4 h-4 text-ink" aria-hidden="true" />}
                     </span>
                     <span className={`block text-[11px] leading-tight truncate text-ink-soft`}>
-                      {pieces === 0 ? 'Sold out' : pieces <= lowStockThreshold ? `Only ${pieces} left` : profile.mattressSize.split('(')[0].trim()}
+                      {pieces === 0 ? 'Sold out' : pieces <= lowStockThreshold ? `Only ${pieces} left` : sizeDetail(product, profile).split('(')[0].trim()}
                       {profile.priceDelta > 0 && pieces > 0 ? ` · +AED ${profile.priceDelta}` : ''}
                     </span>
                   </button>
@@ -180,7 +183,7 @@ const ProductDetailContent: React.FC<ProductDetailModalProps & { product: Produc
             </div>
             {measurements.length > 0 && (
               <details className="rounded-xl border border-line bg-ivory text-xs" data-testid="measurements">
-                <summary className="cursor-pointer px-3 py-2.5 font-semibold text-ink">Measurements for {sizeShort}</summary>
+                <summary className="cursor-pointer px-3 py-2.5 font-semibold text-ink">{simple ? 'Size details' : 'Measurements for'} {sizeShort}</summary>
                 <dl className="grid grid-cols-1 sm:grid-cols-2 gap-x-4 gap-y-2 px-3 pb-3 text-ink">
                   {measurements.map((m) => (
                     <div key={m.key} className="min-w-0">

@@ -6,7 +6,9 @@ import {
   ArchiveRestore,
   ArrowDown,
   ArrowUp,
+  CheckSquare,
   ChevronDown,
+  Link2,
   Copy,
   Edit3,
   Eye,
@@ -28,6 +30,7 @@ import { getJson, postJson, sendJson } from '@/lib/apiClient';
 import { DEFAULT_LOW_STOCK, isLow, isSoldOut, newKey, shortSizeName, stockAlerts, stockLevel, type StockLevel } from '@/lib/client/stock';
 import { Sheet } from '@/components/common/Sheet';
 import { ProductEditor } from './inventory/ProductEditor';
+import { CollectionsSheet, ShareSelectionSheet } from './inventory/Collections';
 import { REASONS, useStockMoves, type StockReason } from './inventory/useStockMoves';
 
 /**
@@ -77,6 +80,12 @@ export const AdminInventoryTab: React.FC<AdminInventoryTabProps> = ({ products, 
   const [history, setHistory] = useState<AdminProduct | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
   const [notice, setNotice] = useState<{ text: string; error?: boolean } | null>(null);
+  // Several products on one shareable page: Select (on a phone; checkboxes show on wider screens), then Share these.
+  const [selecting, setSelecting] = useState(false);
+  const [picked, setPicked] = useState<string[]>([]);
+  const [sharing, setSharing] = useState<AdminProduct[] | null>(null);
+  const [links, setLinks] = useState(false);
+  const pick = (id: string) => setPicked((list) => (list.includes(id) ? list.filter((x) => x !== id) : list.length >= 60 ? list : [...list, id]));
   const low = Number.isInteger(catalog.lowStockThreshold) ? catalog.lowStockThreshold : DEFAULT_LOW_STOCK;
 
   const stock = useStockMoves({
@@ -187,6 +196,22 @@ export const AdminInventoryTab: React.FC<AdminInventoryTabProps> = ({ products, 
           <Plus className="w-4 h-4" aria-hidden="true" /> Add product
         </button>
       </div>
+      <div className="flex flex-wrap gap-2">
+        <button
+          type="button"
+          onClick={() => {
+            setSelecting((x) => !x);
+            if (selecting) setPicked([]);
+          }}
+          aria-pressed={selecting}
+          className={`min-h-11 px-3 rounded-xl border text-xs font-semibold inline-flex items-center gap-1.5 ${selecting ? 'bg-ink text-paper border-ink' : 'bg-surface text-ink border-line-strong'}`}
+        >
+          <CheckSquare className="w-4 h-4" aria-hidden="true" /> {selecting ? 'Done selecting' : 'Select to share'}
+        </button>
+        <button type="button" onClick={() => setLinks(true)} className={actionBtn}>
+          <Link2 className="w-4 h-4" aria-hidden="true" /> Shared links
+        </button>
+      </div>
 
       {(alerts.soldOut.length > 0 || alerts.low.length > 0) && (
         <div className="grid grid-cols-2 gap-2" aria-label="Stock alerts" role="group">
@@ -259,14 +284,20 @@ export const AdminInventoryTab: React.FC<AdminInventoryTabProps> = ({ products, 
           const isOpen = open.has(p.id);
           const panelId = `inv-${p.id}`;
           return (
-            <li key={p.id} className={`bg-surface rounded-2xl border ${p.archived ? 'border-line opacity-80' : 'border-line'} overflow-hidden`}>
+            <li key={p.id} className={`bg-surface rounded-2xl border ${p.archived ? 'border-line opacity-80' : picked.includes(p.id) ? 'border-ink ring-1 ring-ink' : 'border-line'} overflow-hidden`}>
+              <div className="flex">
+              {!p.archived && (
+                <label className={`${selecting ? 'flex' : 'hidden sm:flex'} items-center pl-2.5 shrink-0 cursor-pointer`}>
+                  <input type="checkbox" className="w-5 h-5" checked={picked.includes(p.id)} onChange={() => pick(p.id)} aria-label={`Select ${p.title} to share`} />
+                </label>
+              )}
               <button
                 type="button"
-                onClick={() => toggle(p.id)}
-                aria-expanded={isOpen}
-                aria-controls={panelId}
-                aria-label={`Stock and actions for ${p.title}`}
-                className="w-full flex gap-3 p-2.5 text-left"
+                onClick={() => (selecting && !p.archived ? pick(p.id) : toggle(p.id))}
+                aria-expanded={selecting ? undefined : isOpen}
+                aria-controls={selecting ? undefined : panelId}
+                aria-label={selecting && !p.archived ? `${picked.includes(p.id) ? 'Unselect' : 'Select'} ${p.title}` : `Stock and actions for ${p.title}`}
+                className="w-full min-w-0 flex gap-3 p-2.5 text-left"
               >
                 {/* eslint-disable-next-line @next/next/no-img-element */}
                 <img src={p.featuredImage} alt="" className="w-14 h-14 rounded-xl object-cover bg-sand shrink-0" loading="lazy" />
@@ -302,6 +333,7 @@ export const AdminInventoryTab: React.FC<AdminInventoryTabProps> = ({ products, 
                   )}
                 </span>
               </button>
+              </div>
 
               {isOpen && (
                 <div id={panelId} className="border-t border-line px-2.5 pb-3 pt-2 space-y-3">
@@ -389,6 +421,19 @@ export const AdminInventoryTab: React.FC<AdminInventoryTabProps> = ({ products, 
 
       {/* Saved / Undo / conflict messages, above the bottom bar. */}
       <div className="fixed inset-x-0 bottom-[4.75rem] sm:bottom-20 z-[45] px-3 pointer-events-none flex flex-col items-center gap-2" role="status" aria-live="polite">
+        {picked.length > 0 && (
+          <div className="pointer-events-auto w-full max-w-md rounded-2xl shadow-lg px-3 py-2 flex items-center gap-2 text-sm bg-ink text-paper" data-testid="selection-bar">
+            <span className="flex-1 min-w-0 truncate">
+              {picked.length} selected
+            </span>
+            <button type="button" onClick={() => setPicked([])} className="min-h-11 px-3 rounded-xl font-semibold">
+              Clear
+            </button>
+            <button type="button" onClick={() => setSharing(picked.map((id) => products.find((p) => p.id === id)).filter((p): p is AdminProduct => Boolean(p)))} className="min-h-11 px-3 rounded-xl bg-paper text-ink font-bold flex items-center gap-1">
+              <Share2 className="w-4 h-4" aria-hidden="true" /> Share these
+            </button>
+          </div>
+        )}
         {stock.toast && (
           <div
             key={stock.toast.id}
@@ -434,6 +479,17 @@ export const AdminInventoryTab: React.FC<AdminInventoryTabProps> = ({ products, 
         />
       )}
       {history && <HistorySheet product={history} onClose={() => setHistory(null)} />}
+      {sharing && (
+        <ShareSelectionSheet
+          products={sharing}
+          onClose={() => setSharing(null)}
+          onCreated={() => {
+            setPicked([]);
+            setSelecting(false);
+          }}
+        />
+      )}
+      {links && <CollectionsSheet products={products} onClose={() => setLinks(false)} />}
 
       {editing && (
         <ProductEditor

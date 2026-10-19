@@ -16,7 +16,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { test } from 'node:test';
 import Database from 'better-sqlite3';
-import { jsonRequest, tempDataDir, LATEST_DB_VERSION, UNDO_MIGRATION_14 } from './helpers.mjs';
+import { jsonRequest, tempDataDir, LATEST_DB_VERSION, UNDO_MIGRATION_14, UNDO_MIGRATION_15 } from './helpers.mjs';
 
 const dir = tempDataDir();
 delete process.env.BACKUP_PASSPHRASE;
@@ -413,6 +413,7 @@ test('migration 10 only adds (columns, indexes) and fills its own columns; older
   assert.equal(run(`const m = await import('@/lib/server/db'); (m.getDb ?? m.default.getDb)();`).status, 0);
   const db = new Database(path.join(old, 'shop.db'));
   // Migrations 11 and 12 go too (they run again after 10): newest first.
+  db.exec(UNDO_MIGRATION_15); // migration 15
   db.exec(UNDO_MIGRATION_14); // migration 14
   db.exec("DELETE FROM settings_history WHERE key = 'look'; DELETE FROM settings WHERE key = 'look'"); // migration 13
   db.exec('DROP TABLE card_refunds; DROP TABLE expense_bills; DROP TABLE expense_versions; DROP TABLE expenses; DROP TABLE expense_categories;'); // migration 12

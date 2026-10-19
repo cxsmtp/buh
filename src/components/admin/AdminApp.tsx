@@ -19,6 +19,8 @@ import { AdminBrandingTab, type BrandDraft } from './AdminBrandingTab';
 import { AdminSmsTab } from './AdminSmsTab';
 import { AdminChatsTab } from './AdminChatsTab';
 import { AdminMoneyTab } from './money/AdminMoneyTab';
+import { HubOverview, TodayTodos } from './HubToday';
+import { initialHubTab, rememberHubTab } from '@/lib/client/hubLanding';
 import { AdminLoginModal } from './AdminLoginModal';
 import { AccountantHub, AccountantSetupForm } from './AccountantHub';
 import { AccountantAccessCard } from './settings/AccountantAccessCard';
@@ -69,7 +71,7 @@ interface AdminSettings {
 
 const NO_PAYMENTS: PaymentSettings = { cardEnabled: false, stripePublishableKey: '', stripeSecretKey: '', stripeWebhookSecret: '', cardFeePercent: DEFAULT_CARD_FEE_PERCENT, bankTransferMode: 'default' };
 
-type AdminTab = 'orders' | 'add-product' | 'inventory' | 'crm' | 'money' | 'settings' | 'chats';
+type AdminTab = 'overview' | 'orders' | 'add-product' | 'inventory' | 'crm' | 'money' | 'settings' | 'chats';
 export type HubView = 'phone' | 'laptop';
 
 const VIEW_KEY = 'buh_hub_view';
@@ -130,7 +132,12 @@ export function AdminApp() {
   // Who is signed in: the owner, or an accountant (read-only: only Money is shown, the server refuses the rest).
   const [role, setRole] = useState<'owner' | 'accountant'>('owner');
   const [signedInEmail, setSignedInEmail] = useState('');
-  const [adminTab, setAdminTab] = useState<AdminTab>('orders');
+  // Phones open on Orders (today's to-dos on top), laptops on the Overview; then this device's last choice.
+  const [adminTab, setAdminTabNow] = useState<AdminTab>(() => initialHubTab(initialView()));
+  const setAdminTab = (tab: AdminTab) => {
+    setAdminTabNow(tab);
+    rememberHubTab(view, tab);
+  };
   // The version badge opens Settings → Versions (re-creating the console on that section).
   const [settingsOpen, setSettingsOpen] = useState<{ id?: string; n: number }>({ n: 0 });
 
@@ -342,6 +349,7 @@ export function AdminApp() {
   if (role === 'accountant') return <AccountantHub email={signedInEmail} brand={brandSettings} phone={phone} onLogout={handleLogout} />;
 
   const tabs: Array<{ id: AdminTab; label: string; badge?: number; badgeLabel?: string }> = [
+    { id: 'overview', label: 'Overview' },
     { id: 'orders', label: 'Orders & Dispatches', badge: pendingOrdersCount, badgeLabel: `${pendingOrdersCount} to confirm` },
     { id: 'chats', label: 'Chats', badge: chatsWaiting, badgeLabel: `${chatsWaiting} waiting` },
     { id: 'add-product', label: 'Add product' },
@@ -472,6 +480,10 @@ export function AdminApp() {
             }}
           />
           {adminLoadError && <p role="alert" className="text-xs text-danger bg-danger-soft border border-danger-line rounded-xl px-3 py-2">{adminLoadError}</p>}
+
+          {adminTab === 'overview' && <HubOverview orders={orders} products={adminProducts} lowStockThreshold={adminSettings.catalog.value.lowStockThreshold} onGo={setAdminTab} />}
+
+          {adminTab === 'orders' && phone && <TodayTodos orders={orders} products={adminProducts} lowStockThreshold={adminSettings.catalog.value.lowStockThreshold} onGo={setAdminTab} />}
 
           {adminTab === 'orders' && <AdminOrdersTab orders={orders} onOrderChanged={(changed) => { setOrders((prev) => prev.map((o) => (o.id === changed.id ? changed : o))); void loadAdminData(); }} courierSettings={adminSettings.courier.value} courierSecretsSet={adminSettings.courier.secretsSet} bank={bankDetails} shopName={brandSettings.storeName} />}
 

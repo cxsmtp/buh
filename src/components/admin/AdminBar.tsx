@@ -1,10 +1,10 @@
 'use client';
 
 import React, { useId, useState } from 'react';
-import { Camera, ClipboardList, Menu, MessagesSquare, Package, Settings, Store, Users, Wallet, X } from 'lucide-react';
+import { Camera, ClipboardList, LayoutDashboard, Menu, MessagesSquare, Package, Settings, Store, Users, Wallet, X } from 'lucide-react';
 import { Sheet } from '@/components/common/Sheet';
 
-type AdminTabId = 'orders' | 'add-product' | 'inventory' | 'crm' | 'money' | 'settings' | 'chats';
+type AdminTabId = 'overview' | 'orders' | 'add-product' | 'inventory' | 'crm' | 'money' | 'settings' | 'chats';
 
 /**
  * The Admin Hub's bottom bar in the phone view: Orders, Inventory, Chats and More (big
@@ -28,7 +28,7 @@ export function AdminBar({
 }) {
   const [more, setMore] = useState(false);
   const titleId = useId();
-  const inMore = adminTab === 'crm' || adminTab === 'money' || adminTab === 'settings' || adminTab === 'add-product';
+  const inMore = adminTab === 'overview' || adminTab === 'crm' || adminTab === 'money' || adminTab === 'settings' || adminTab === 'add-product';
   const item = (active: boolean) =>
     `relative flex-1 min-w-0 flex-col items-center justify-center gap-0.5 min-h-14 px-1 rounded-xl text-[11px] ${active ? 'text-gold-deep font-semibold' : 'text-ink-soft'}`;
   const badge = (n: number, label: string) =>
@@ -78,6 +78,7 @@ export function AdminBar({
           <ul className="px-2 pb-4">
             {(
               [
+                ['overview', 'Overview', 'Today’s to-dos and money highlights', LayoutDashboard],
                 ['add-product', 'Add product', 'Photos, price, sizes and stock, step by step', Camera],
                 ['crm', 'Customers', 'Everyone who ordered, with totals', Users],
                 ['money', 'Money', 'Expenses with photos of bills, reports for your accountant, audit log', Wallet],

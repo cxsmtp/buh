@@ -2,7 +2,7 @@
 
 import React, { useCallback, useEffect, useId, useMemo, useRef, useState } from 'react';
 import { ArrowLeft, ArrowRight, Camera, Check, ChevronDown, GripVertical, ImagePlus, Loader2, Minus, Plus, Sparkles, Star, Trash2, X } from 'lucide-react';
-import type { BedProfileMeasurement, CatalogSettings, Product } from '@/types';
+import type { BedProfileMeasurement, CatalogSettings, Product, ProductType } from '@/types';
 import { getJson, postJson, sendJson } from '@/lib/apiClient';
 import { shrinkPhoto } from '@/lib/shrinkPhoto';
 import { shortSizeName } from '@/lib/client/stock';
@@ -10,6 +10,7 @@ import { ROOM_FILTERS, applyRoomFilter } from '@/lib/aiImageTransform';
 import { Sheet } from '@/components/common/Sheet';
 import { measurementRows, sizeFromPreset, standardMeasurements } from '@/lib/measurements';
 import { DEFAULT_WEAVES } from '@/data/catalogDefaults';
+import { blankVariant, defaultTypeFor, productTypeOf } from '@/lib/productType';
 import { StageInBedroom } from './StageInBedroom';
 import { WriteFromPhoto } from './WriteFromPhoto';
 
@@ -24,6 +25,10 @@ import { WriteFromPhoto } from './WriteFromPhoto';
  *      measurements of what this set includes (empty until filled in, or "Use standard sizes";
  *      the shop shows only what is filled in), and whether the sheet is fitted or flat.
  *   4. Publish (or keep hidden).
+ * A product is bed linen (bed sizes, as above) or "other" (towels, cushions, throws, curtains,
+ * decor): then step 3 has plain variants instead ("50 × 50 cm", "Bath towel"), each with its price
+ * difference, stock, weight and optional dimensions, and no bed measurements. A category can make
+ * new products start as "other" (Settings → Catalogue).
  * The draft saves itself on the server as the owner goes (like the settings), so
  * nothing is lost to a phone call; it can be finished on another device. Stock
  * edits are sent with the figures the owner saw, so a sale made meanwhile is never
@@ -35,6 +40,8 @@ const STEPS = ['Photos', 'Details', 'Sizes', 'Publish'] as const;
 
 interface Draft {
   step: number;
+  /** Bed linen (bed sizes) or other (plain variants). */
+  productType: ProductType;
   title: string;
   sku: string;
   shortDescription: string;
@@ -65,13 +72,17 @@ interface Draft {
 function draftFrom(product: Product | null, catalog: CatalogSettings): Draft {
   if (!product) {
     const king = catalog.sizes.find((s) => s.id === 'king') ?? catalog.sizes[0];
+    const category = catalog.categories[0]?.id ?? '';
+    const productType = defaultTypeFor(catalog, category);
+    const first = productType === 'simple' ? blankVariant([]) : king ? sizeFromPreset(king) : null;
     return {
       step: 0,
+      productType,
       title: '',
       sku: '',
       shortDescription: '',
       description: '',
-      category: catalog.categories[0]?.id ?? '',
+      category,
       material: '100% Cotton',
       threadCount: '300',
       weave: (catalog.weaves ?? DEFAULT_WEAVES).includes('Percale') ? 'Percale' : (catalog.weaves?.[0] ?? 'Percale'),
@@ -80,9 +91,9 @@ function draftFrom(product: Product | null, catalog: CatalogSettings): Draft {
       colors: [],
       photos: [],
       fitted: false,
-      sizes: king ? [sizeFromPreset(king)] : [],
-      stock: king ? { [king.id]: 1 } : {},
-      defaultProfileId: king?.id ?? '',
+      sizes: first ? [first] : [],
+      stock: first ? { [first.id]: 1 } : {},
+      defaultProfileId: first?.id ?? '',
       active: true,
       isFeatured: false,
       isNewArrival: true,
@@ -97,6 +108,7 @@ function draftFrom(product: Product | null, catalog: CatalogSettings): Draft {
     .slice(0, MAX_PHOTOS);
   return {
     step: 0,
+    productType: productTypeOf(product),
     title: product.title,
     sku: product.sku ?? '',
     shortDescription: product.shortDescription,
@@ -304,13 +316,37 @@ export function ProductEditor({
   };
   const setQty = (id: string, qty: number) => setDraft((d) => ({ ...d, stock: { ...d.stock, [id]: Math.max(0, Math.min(100_000, Math.round(qty) || 0)) } }));
 
+  /**
+   * Bed linen or other. A new product's untouched starting size swaps over (the King preset for a
+   * single "One size" variant, and back); sizes the owner added stay, with their stock.
+   */
+  const setType = (productType: ProductType) =>
+    setDraft((d) => {
+      if (d.productType === productType) return d;
+      const presetIds = new Set(catalog.sizes.map((x) => x.id));
+      const starting = !product && d.sizes.length === 1 && (productType === 'simple' ? presetIds.has(d.sizes[0].id) : d.sizes[0].id.startsWith('v-'));
+      if (!starting) return { ...d, productType, fitted: productType === 'simple' ? false : d.fitted };
+      const king = catalog.sizes.find((x) => x.id === 'king') ?? catalog.sizes[0];
+      const first = productType === 'simple' ? blankVariant([]) : king ? sizeFromPreset(king) : null;
+      const qty = d.stock[d.sizes[0].id] ?? 1;
+      return { ...d, productType, fitted: false, sizes: first ? [first] : [], stock: first ? { [first.id]: qty } : {}, defaultProfileId: first?.id ?? '' };
+    });
+  const addVariant = () =>
+    setDraft((d) => {
+      if (d.sizes.length >= 12) return d;
+      const v = blankVariant(d.sizes.map((x) => x.id), '');
+      return { ...d, sizes: [...d.sizes, v], stock: { ...d.stock, [v.id]: 1 }, defaultProfileId: d.defaultProfileId || v.id };
+    });
+  const simple = draft.productType === 'simple';
+
   // ── steps ─────────────────────────────────────────────────────────────────
   const problem = useCallback(
     (step: number): string => {
       if (step === 0 && !draft.photos.length) return 'Add at least one photo.';
       if (step === 1 && !draft.title.trim()) return 'Give the product a name.';
       if (step === 1 && !(Number(draft.price) > 0)) return 'Enter the price in AED.';
-      if (step === 2 && !draft.sizes.length) return 'Add at least one size.';
+      if (step === 2 && !draft.sizes.length) return draft.productType === 'simple' ? 'Add at least one variant.' : 'Add at least one size.';
+      if (step === 2 && draft.productType === 'simple' && draft.sizes.some((x) => !x.name.trim())) return 'Give each variant a name, e.g. “50 × 50 cm” or “Bath towel”.';
       return '';
     },
     [draft]
@@ -341,18 +377,19 @@ export function ProductEditor({
     if (uploading) return setError('Wait for the photos to finish uploading.');
     const [main, ...gallery] = draft.photos;
     const body: Record<string, unknown> = {
+      productType: draft.productType,
       title: draft.title.trim(),
       sku: draft.sku.trim(),
       shortDescription: draft.shortDescription.trim(),
       description: draft.description.trim(),
       category: draft.category,
       material: draft.material.trim(),
-      threadCount: Number(draft.threadCount) || 0,
+      threadCount: draft.productType === 'simple' ? 0 : Number(draft.threadCount) || 0,
       weave: draft.weave,
       price: Number(draft.price),
       compareAtPrice: draft.compareAtPrice ? Number(draft.compareAtPrice) : null,
       colors: draft.colors.filter((c) => c.name.trim()),
-      fitted: draft.fitted,
+      fitted: draft.productType === 'simple' ? false : draft.fitted,
       // Saved from the editor: the measurements are the owner's own now.
       measurementsReview: false,
       // What the update kept aside and the owner didn't put back stays kept (never deleted).
@@ -360,7 +397,7 @@ export function ProductEditor({
       featuredImage: main,
       galleryImages: gallery,
       aiTransformedImage: null,
-      profiles: draft.sizes,
+      profiles: draft.productType === 'simple' ? draft.sizes.map((x) => ({ ...x, name: x.name.trim(), dimensions: (x.dimensions ?? '').trim() })) : draft.sizes,
       defaultProfileId: draft.defaultProfileId || draft.sizes[0].id,
       active: draft.active,
       isFeatured: draft.isFeatured,
@@ -567,7 +604,16 @@ export function ProductEditor({
               <label className={label} htmlFor="pe-cat">
                 Category
               </label>
-              <select id="pe-cat" className={field} value={draft.category} onChange={(e) => set('category', e.target.value)}>
+              <select
+                id="pe-cat"
+                className={field}
+                value={draft.category}
+                onChange={(e) => {
+                  set('category', e.target.value);
+                  // A new product follows its category's kind (Towels → other); the owner can still change it below.
+                  if (!product) setType(defaultTypeFor(catalog, e.target.value));
+                }}
+              >
                 {catalog.categories.map((c) => (
                   <option key={c.id} value={c.id}>
                     {c.icon} {c.label}
@@ -576,6 +622,25 @@ export function ProductEditor({
                 {!catalog.categories.some((c) => c.id === draft.category) && draft.category && <option value={draft.category}>{draft.category} (removed)</option>}
               </select>
             </div>
+            <fieldset>
+              <legend className={label}>What is it?</legend>
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                {(
+                  [
+                    ['bedding', 'Bed linen', 'Bed sizes with sheet and pillowcase measurements'],
+                    ['simple', 'Other', 'Towels, cushions, throws, curtains, decor: plain sizes or options'],
+                  ] as Array<[ProductType, string, string]>
+                ).map(([id, name, hint]) => (
+                  <label key={id} className={`flex items-start gap-2 rounded-xl border px-3 py-2 min-h-14 cursor-pointer ${draft.productType === id ? 'border-ink ring-1 ring-ink bg-surface' : 'border-line bg-surface'}`}>
+                    <input type="radio" name="pe-type" className="w-5 h-5 mt-0.5 shrink-0" checked={draft.productType === id} onChange={() => setType(id)} />
+                    <span>
+                      <span className="block font-semibold text-ink">{name}</span>
+                      <span className="block text-xs text-ink-soft">{hint}</span>
+                    </span>
+                  </label>
+                ))}
+              </div>
+            </fieldset>
             <div className="grid grid-cols-2 gap-3">
               <div>
                 <label className={label} htmlFor="pe-price">
@@ -592,7 +657,7 @@ export function ProductEditor({
             </div>
             <details className="rounded-xl border border-line bg-surface px-3 py-1">
               <summary className="min-h-11 flex items-center gap-2 font-semibold cursor-pointer">
-                <ChevronDown className="w-4 h-4" aria-hidden="true" /> More details (SKU, description, fabric, colours){draft.colors.length > 0 && ` · ${draft.colors.length} ${draft.colors.length === 1 ? 'colour' : 'colours'}`}
+                <ChevronDown className="w-4 h-4" aria-hidden="true" /> More details (SKU, description, {simple ? 'material' : 'fabric'}, colours){draft.colors.length > 0 && ` · ${draft.colors.length} ${draft.colors.length === 1 ? 'colour' : 'colours'}`}
               </summary>
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 pb-3">
                 <div>
@@ -607,6 +672,8 @@ export function ProductEditor({
                   </label>
                   <input id="pe-material" className={field} value={draft.material} maxLength={120} onChange={(e) => set('material', e.target.value)} />
                 </div>
+                {!simple && (
+                <>
                 <div>
                   <label className={label} htmlFor="pe-tc">
                     Thread count
@@ -624,6 +691,8 @@ export function ProductEditor({
                     {!(catalog.weaves ?? DEFAULT_WEAVES).includes(draft.weave) && <option value={draft.weave}>{draft.weave} (removed)</option>}
                   </select>
                 </div>
+                </>
+                )}
                 <div className="sm:col-span-2">
                   <label className={label} htmlFor="pe-short">
                     Short description (on the card)
@@ -665,7 +734,78 @@ export function ProductEditor({
           </section>
         )}
 
-        {step === 2 && (
+        {step === 2 && simple && (
+          <section className="space-y-3" aria-label="Variants and stock" data-testid="variants">
+            <p className="text-ink-soft">
+              Variants and pieces in stock <span className="text-ink-soft">({totalStock} in total)</span>: a size or option shoppers choose, like “50 × 50 cm” or “Bath towel”. One is enough for a single item.
+            </p>
+            <ul className="space-y-2">
+              {draft.sizes.map((s, i) => {
+                const qty = draft.stock[s.id] ?? 0;
+                const vname = s.name || `variant ${i + 1}`;
+                return (
+                  <li key={s.id} className="rounded-xl border border-line bg-surface p-2 space-y-2">
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 text-xs">
+                      <label className="block min-w-0">
+                        <span className="text-ink-soft">Variant {i + 1} name</span>
+                        <input className={field} value={s.name} maxLength={60} placeholder="e.g. Bath towel, 50 × 50 cm" onChange={(e) => updateSize(s.id, { name: e.target.value })} />
+                      </label>
+                      <label className="block min-w-0">
+                        <span className="text-ink-soft">Dimensions (optional)</span>
+                        <input className={field} value={s.dimensions ?? ''} maxLength={80} placeholder="e.g. 70 × 140 cm" onChange={(e) => updateSize(s.id, { dimensions: e.target.value })} />
+                      </label>
+                      <label className="block">
+                        <span className="text-ink-soft">Price difference (AED, + or −)</span>
+                        <input className={field} type="number" step="0.01" value={s.priceDelta} onChange={(e) => updateSize(s.id, { priceDelta: Number(e.target.value) || 0 })} />
+                      </label>
+                      <label className="block">
+                        <span className="text-ink-soft">Weight (g)</span>
+                        <input
+                          className={field}
+                          type="number"
+                          inputMode="numeric"
+                          min={1}
+                          max={50000}
+                          step={1}
+                          value={s.weightGrams ?? ''}
+                          placeholder="e.g. 600"
+                          onChange={(e) => {
+                            const g = Math.round(Number(e.target.value));
+                            updateSize(s.id, { weightGrams: e.target.value === '' || !(g > 0) ? undefined : Math.min(50000, g) });
+                          }}
+                        />
+                        <span className="block text-[11px] text-ink-muted mt-0.5">Packed weight of one, for the courier. Not shown in the shop.</span>
+                      </label>
+                    </div>
+                    <div className="flex flex-wrap items-center gap-2">
+                      <span className="text-xs font-semibold text-ink">In stock</span>
+                      <button type="button" onClick={() => setQty(s.id, qty - 1)} disabled={qty === 0} className={stepBtn} aria-label={`One fewer ${vname}`}>
+                        <Minus className="w-5 h-5" aria-hidden="true" />
+                      </button>
+                      <input type="number" inputMode="numeric" min={0} value={qty} onFocus={(e) => e.target.select()} onChange={(e) => setQty(s.id, Number(e.target.value))} className={`w-16 h-12 text-center rounded-xl border-2 text-lg font-bold ${qty === 0 ? 'border-danger-line text-danger' : 'border-line-strong'}`} aria-label={`Pieces of ${vname} in stock`} />
+                      <button type="button" onClick={() => setQty(s.id, qty + 1)} className={stepBtn} aria-label={`One more ${vname}`}>
+                        <Plus className="w-5 h-5" aria-hidden="true" />
+                      </button>
+                      <label className="min-h-11 flex items-center gap-2 px-1 text-xs" title="The variant shown first">
+                        <input type="radio" name="pe-default" className="w-5 h-5" checked={draft.defaultProfileId === s.id} onChange={() => set('defaultProfileId', s.id)} /> Shown first
+                      </label>
+                      <button type="button" onClick={() => removeSize(s.id)} disabled={draft.sizes.length === 1} className="ml-auto min-h-11 min-w-11 flex items-center justify-center text-ink-soft disabled:opacity-30" aria-label={`Remove ${vname}`}>
+                        <Trash2 className="w-4 h-4" aria-hidden="true" />
+                      </button>
+                    </div>
+                  </li>
+                );
+              })}
+            </ul>
+            {draft.sizes.length < 12 && (
+              <button type="button" onClick={addVariant} className="min-h-11 text-sm font-semibold px-3 rounded-full border border-line-strong bg-surface hover:border-gold flex items-center gap-1">
+                <Plus className="w-4 h-4" aria-hidden="true" /> Add a variant
+              </button>
+            )}
+          </section>
+        )}
+
+        {step === 2 && !simple && (
           <section className="space-y-3" aria-label="Sizes and stock">
             {product?.measurementsReview && (
               <p className="rounded-xl border border-warning-line bg-warning-soft px-3 py-2 text-xs text-ink" data-testid="measurements-review">

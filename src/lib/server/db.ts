@@ -519,6 +519,29 @@ const MIGRATIONS: Array<(db: DB) => void> = [
       ALTER TABLE expenses ADD COLUMN supplier_trn TEXT;
     `);
   },
+  // 15: shareable selections ("collections", /c/<slug>): a few products under a short title, with
+  //     an optional last day. The slug never changes once made (it is in links already shared); the
+  //     idempotency key makes a double-tapped "Create link" one collection. views and bag_adds are
+  //     plain counters (no visitor data). A new table only: an older version simply ignores it.
+  (db) => {
+    db.exec(`
+      CREATE TABLE collections (
+        id               TEXT PRIMARY KEY,           -- col-<hex>
+        slug             TEXT NOT NULL UNIQUE,       -- eid-picks-7k2mq: the title's words + 5 random characters
+        title            TEXT NOT NULL,
+        product_ids      TEXT NOT NULL,              -- JSON array of product ids, in the order shown
+        expires_on       TEXT,                       -- YYYY-MM-DD (UAE date): the last day it opens, NULL for no end
+        views            INTEGER NOT NULL DEFAULT 0,
+        bag_adds         INTEGER NOT NULL DEFAULT 0,
+        idempotency_key  TEXT UNIQUE,
+        created_at       TEXT NOT NULL,
+        created_by       TEXT NOT NULL DEFAULT '',
+        updated_at       TEXT NOT NULL,
+        updated_by       TEXT NOT NULL DEFAULT ''
+      );
+      CREATE INDEX collections_by_created ON collections(created_at);
+    `);
+  },
 ];
 
 let db: DB | null = null;

@@ -405,6 +405,13 @@ Every 12 hours (see the deployment guide) the shop backs itself up:
 - **SMS codes** are stored hashed (keyed with the shop's own secret), single use, 10 minutes, in the database, so both copies of the shop during an update check them the same way.
 - **Customer details at checkout** are remembered in the customer's own browser only (never the phone check), with **Not you? Clear them**.
 
+## Shared links, simple products and the marketplace export (BUH-02.17)
+
+- **Public page `/c/<slug>`:** shows only products on sale (shown and not removed), read on the server; the page never receives hidden products, stock moves or anything about the owner. The slug is the title's words plus 5 random characters (31-letter alphabet, about 28 million choices per title), checked against a pattern before any lookup. It is `noindex` (links made to be sent, and they end), not in the sitemap, and an ended or unknown address shows a plain page with no product data.
+- **Counter `POST /api/collections/<slug>`:** `{ kind: 'view' | 'bag' }` only (allow-listed, 256-byte cap), same-origin only (403 otherwise), 60 per address per 10 minutes and 3,000 a minute shop-wide, and it counts nothing on an ended link. It stores two numbers: nothing about the visitor.
+- **Admin routes** `GET/POST /api/admin/collections`, `PATCH/DELETE /api/admin/collections/<id>` and `GET /api/admin/exports/marketplace`: `requireAdmin` (door, session, same-site), bodies through `readJsonBody` (16 KB) and an allow-list of fields, errors through `handleRouteError`. Product ids must exist; titles, dates (a real date, not in the past) and the idempotency key are checked. Creating, editing, deleting a shared link and each marketplace export are written to the audit log. The CSV is formula-safe (as every export) and sent `no-store` as a download.
+- **Simple products:** the product type is checked on the server (`bedding` or `simple`); a simple product's variants keep only their own fields (bed measurements sent by the browser are dropped) and prices, stock and weights are validated as for sizes. Prices are still computed in fils on the server at checkout.
+
 ## Known limits (next steps)
 
 - **One admin account; no staff roles yet.**

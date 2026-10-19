@@ -888,9 +888,9 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
           {/* Order Summary Strip */}
           <div className="bg-ivory rounded-2xl p-3 border border-line flex items-center justify-between text-xs">
             <div>
-              <span className="font-semibold text-ink">{items.length} Bedding Sets in Bag</span>
+              <span className="font-semibold text-ink">{items.length} {items.length === 1 ? 'item' : 'items'} in your bag</span>
               <div className="text-[10px] text-ink-soft mt-0.5">
-                {items.map((i) => `${i.quantity}x ${i.selectedProfile.name.split(' ')[0]}`).join(' • ')}
+                {items.map((i) => `${i.quantity}x ${i.product.productType === 'simple' ? i.selectedProfile.name : i.selectedProfile.name.split(' ')[0]}`).join(' • ')}
               </div>
             </div>
             <div className="text-right">
