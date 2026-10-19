@@ -19,7 +19,9 @@ FROM caddy:2.11.7-alpine@sha256:d8542f48d34a9cf4e4c11a478865229840e87e4c96ea3f43
 # /etc/shadow: the image must come out byte for byte the same when nothing in it changed,
 # so that a release does not restart the proxy (see container.yml).
 # curl (and the libraries only it uses) is not needed by Caddy: removed, so there is less to patch.
+# apk logs the time it ran in /var/log/apk.log: removed too, so the image stays the same.
 RUN apk del --no-cache --no-network curl \
+ && rm -f /var/log/apk.log \
  && printf 'buhproxy:x:1000:1000::/nonexistent:/sbin/nologin\n' >> /etc/passwd \
  && printf 'buhproxy:x:1000:\n' >> /etc/group \
  && mkdir -p /data/caddy /config/caddy \
