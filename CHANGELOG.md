@@ -1,6 +1,6 @@
 # Changelog
 
-## BUH-02.16.00 — 2026-10-19 09:30 UTC · [#NN](https://github.com/cxsmtp/buh/pull/NN)
+## BUH-02.16.00 — 2026-10-19 09:30 UTC · [#34](https://github.com/cxsmtp/buh/pull/34)
 
 - **Style in a bedroom (Gemini).** In the product editor, Gemini places your bedding in a styled bedroom (Dubai luxury master, Palm villa, Hotel suite, Clean catalogue, Kids' room) from a plain camera photo. You see the original and the result side by side and choose Add, Try again or Discard, and your real photo is never replaced.
 - **Honest about styled photos.** Styled photos show a small "Styled image" tag in the shop (on by default) and keep Gemini's AI-made marker for Google and Meta. They stay out of the product feed when the tag is off. The old fake "AI staging" that showed stock pictures is gone.
