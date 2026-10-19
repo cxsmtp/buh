@@ -174,7 +174,7 @@ for (const width of [375, 1280]) {
     await openSettings(page, 'AI writing');
     const card = page.getByTestId('ai-settings');
     assert.match((await card.getByLabel('Anthropic API key').getAttribute('placeholder'))!, /^••••L4ST saved$/);
-    assert.equal(await card.getByLabel('Model').inputValue(), 'claude-opus-5-5');
+    assert.equal(await card.getByLabel('Model').inputValue(), 'claude-sonnet-5-5');
     assert.ok(await card.getByLabel('Use AI writing').isChecked());
     await card.getByRole('button', { name: 'Test' }).click();
     await card.getByTestId('ai-test-result').filter({ hasText: /^Works/ }).waitFor();
