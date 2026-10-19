@@ -12,7 +12,7 @@ import { SMTP_PORTS, assertPublicMailHost } from './mail';
 import { FIREBASE_PROJECT_ID } from './firebaseAuth';
 import { bump, changedElsewhere } from './live';
 import { envGateways } from '@/lib/otpService';
-import { AI_MODELS } from '@/types';
+import { AI_MODELS, AI_PROVIDERS, GEMINI_MODEL_ID } from '@/types';
 import { HttpError } from './http';
 import { acceptImageRef, LOGO_MAX_SIDE } from './images';
 import { assertPublicHttpsUrl } from './outbound';
@@ -109,11 +109,11 @@ const SECRETS: Record<SettingsKey, string[]> = {
   payments: ['stripeSecretKey', 'stripeWebhookSecret'],
   phoneCheck: [],
   look: [],
-  ai: ['anthropicApiKey'],
+  ai: ['anthropicApiKey', 'geminiApiKey'],
 };
 
 /** Secrets the admin hub may see the last 4 characters of (to tell which key is saved). */
-const SHOW_LAST4 = new Set(['ai.anthropicApiKey']);
+const SHOW_LAST4 = new Set(['ai.anthropicApiKey', 'ai.geminiApiKey']);
 
 const cache = new Map<SettingsKey, unknown>();
 
@@ -364,11 +364,13 @@ export async function updateSettings<K extends SettingsKey>(key: K, input: unkno
       throw new HttpError(409, `Run the Sandbox check first: Jeebly Live mode can be switched on after a Sandbox check has passed (within ${SANDBOX_CHECK_DAYS} days).`, {}, { code: 'sandbox_check_required' });
     }
   }
-  // AI writing on means "Write from photo" calls Anthropic: it needs the key. Clearing the key switches it off.
+  // AI writing on means "Write from photo" calls the chosen AI: it needs that AI's key. Clearing
+  // the chosen AI's key switches it off.
   if (key === 'ai') {
     const a = next as unknown as AiSettings;
-    if (getPath(input as Obj, 'anthropicApiKey') === null) a.enabled = false;
-    if (a.enabled && !a.anthropicApiKey) throw new HttpError(400, 'Add your Anthropic API key before switching AI writing on.');
+    const activeKey = a.provider === 'gemini' ? 'geminiApiKey' : 'anthropicApiKey';
+    if (getPath(input as Obj, activeKey) === null) a.enabled = false;
+    if (a.enabled && !a[activeKey]) throw new HttpError(400, a.provider === 'gemini' ? 'Add your Gemini API key before switching AI writing on with Gemini.' : 'Add your Anthropic API key before switching AI writing on.');
   }
   if (options.beforeSave) await options.beforeSave(next as SettingsMap[K], current);
   save(key, next as SettingsMap[K], { keepHistory: options.keepHistory, auto: options.auto, expectUpdatedAt: currentAt });
@@ -695,11 +697,30 @@ const VALIDATORS: { [K in SettingsKey]: (input: Obj, current: SettingsMap[K]) =>
   async ai(input, current) {
     const model = input.model === undefined ? current.model : input.model;
     if (!AI_MODELS.includes(model as AiSettings['model'])) throw new HttpError(400, `Model: one of ${AI_MODELS.join(', ')}.`);
-    // The key is kept or replaced after this (write-only); only its shape is checked here.
+    const provider = input.provider === undefined ? current.provider : input.provider;
+    if (!AI_PROVIDERS.includes(provider as AiSettings['provider'])) throw new HttpError(400, 'Writing AI: Anthropic or Gemini.');
+    // Gemini model ids come from Google's own list (Test); only their shape is checked here.
+    const geminiModel = input.geminiModel === undefined ? current.geminiModel : input.geminiModel;
+    if (typeof geminiModel !== 'string' || (geminiModel !== '' && !GEMINI_MODEL_ID.test(geminiModel))) throw new HttpError(400, 'Gemini writing model: press Test and choose one from the list.');
+    const geminiImageModel = input.geminiImageModel === undefined ? current.geminiImageModel : input.geminiImageModel;
+    if (typeof geminiImageModel !== 'string' || !GEMINI_MODEL_ID.test(geminiImageModel)) throw new HttpError(400, 'Gemini image model: press Test and choose one from the list.');
+    // The keys are kept or replaced after this (write-only); only their shape is checked here.
     const k = input.anthropicApiKey;
     if (k !== undefined && k !== null && typeof k !== 'string') throw new HttpError(400, 'The API key must be text.');
     if (typeof k === 'string' && k.trim() && !ANTHROPIC_KEY.test(k.trim())) throw new HttpError(400, 'An Anthropic API key starts with sk-ant- (console.anthropic.com → API keys).');
-    return { enabled: bool(input.enabled, current.enabled), model: model as AiSettings['model'], anthropicApiKey: '' };
+    const g = input.geminiApiKey;
+    if (g !== undefined && g !== null && typeof g !== 'string') throw new HttpError(400, 'The API key must be text.');
+    if (typeof g === 'string' && g.trim() && !GEMINI_KEY.test(g.trim())) throw new HttpError(400, 'A Gemini API key starts with AIza (aistudio.google.com → Get API key).');
+    return {
+      enabled: bool(input.enabled, current.enabled),
+      provider: provider as AiSettings['provider'],
+      model: model as AiSettings['model'],
+      anthropicApiKey: '',
+      geminiApiKey: '',
+      geminiModel,
+      geminiImageModel,
+      labelStyledPhotos: bool(input.labelStyledPhotos, current.labelStyledPhotos),
+    };
   },
 
   async store(input, current) {
@@ -889,6 +910,8 @@ const VALIDATORS: { [K in SettingsKey]: (input: Obj, current: SettingsMap[K]) =>
 const FESTIVAL_ID_SET = new Set(FESTIVALS.map((f) => f.id));
 
 const ANTHROPIC_KEY = /^sk-ant-[A-Za-z0-9_-]{20,300}$/;
+/** Google AI Studio keys: AIza and 35 more characters (a little room either way). */
+export const GEMINI_KEY = /^AIza[A-Za-z0-9_-]{30,60}$/;
 
 /** A weave's name: letters and digits first, then also spaces and ' & / ( ) . + - (no markup). */
 const WEAVE_NAME = /^[\p{L}\p{N}][\p{L}\p{N} '’&\/().+-]*$/u;

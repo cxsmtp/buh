@@ -6,10 +6,11 @@ import type { BedProfileMeasurement, CatalogSettings, Product } from '@/types';
 import { getJson, postJson, sendJson } from '@/lib/apiClient';
 import { shrinkPhoto } from '@/lib/shrinkPhoto';
 import { shortSizeName } from '@/lib/client/stock';
-import { AI_STAGING_PRESETS, transformProductImage } from '@/lib/aiImageTransform';
+import { ROOM_FILTERS, applyRoomFilter } from '@/lib/aiImageTransform';
 import { Sheet } from '@/components/common/Sheet';
 import { measurementRows, sizeFromPreset, standardMeasurements } from '@/lib/measurements';
 import { DEFAULT_WEAVES } from '@/data/catalogDefaults';
+import { StageInBedroom } from './StageInBedroom';
 import { WriteFromPhoto } from './WriteFromPhoto';
 
 /**
@@ -153,7 +154,7 @@ export function ProductEditor({
   const [error, setError] = useState('');
   const [uploading, setUploading] = useState(0);
   const [openSize, setOpenSize] = useState<string | null>(null);
-  const [aiPreset, setAiPreset] = useState(AI_STAGING_PRESETS[0]?.id ?? '');
+  const [roomFilter, setRoomFilter] = useState(ROOM_FILTERS[0].id);
   const [dragFrom, setDragFrom] = useState<number | null>(null);
   // Photos added in this session, as taken (the room-style filter works on these).
   const [originals, setOriginals] = useState<Record<string, string>>({});
@@ -255,10 +256,8 @@ export function ProductEditor({
     setUploading((n) => n + 1);
     setError('');
     try {
-      // Its fallback is a stock room photo, which must never be shown as this product: only a real result is kept.
-      const result = await transformProductImage(original, aiPreset);
-      if (!result.transformedUrl.startsWith('data:image/')) throw new Error('no result');
-      const url = await upload(result.transformedUrl);
+      // Drawn on this device from the photo itself (no stock photos, no AI).
+      const url = await upload(await applyRoomFilter(original, roomFilter));
       setDraft((d) => ({ ...d, photos: [url, ...d.photos.filter((p) => p !== url)].slice(0, MAX_PHOTOS) }));
     } catch {
       setError('The room-style filter is not available right now. Your photo is kept as it is.');
@@ -519,14 +518,29 @@ export function ProductEditor({
               ))}
             </ol>
             <WriteFromPhoto photos={draft.photos} originals={originals} isNew={!product} current={draft} facts={draft} onApply={(patch) => setDraft((d) => ({ ...d, ...patch }))} />
+            <StageInBedroom
+              photos={draft.photos}
+              originals={originals}
+              room={MAX_PHOTOS - draft.photos.length - uploading}
+              onAdd={(url, after) =>
+                setDraft((d) => {
+                  if (d.photos.includes(url) || d.photos.length >= MAX_PHOTOS) return d;
+                  // Right after the photo it was made from: the real photo stays first.
+                  const at = d.photos.indexOf(after);
+                  const photos = [...d.photos];
+                  photos.splice(at < 0 ? photos.length : at + 1, 0, url);
+                  return { ...d, photos };
+                })
+              }
+            />
             {cover && originals[cover] && (
               <details className="rounded-xl border border-line bg-surface px-3 py-2">
                 <summary className="min-h-11 flex items-center gap-2 font-semibold cursor-pointer">
-                  <Sparkles className="w-4 h-4 text-gold-deep" aria-hidden="true" /> Room-style filter for the cover (optional)
+                  <Sparkles className="w-4 h-4 text-gold-deep" aria-hidden="true" /> Room-style filter for the cover (on this device, optional)
                 </summary>
                 <div className="flex flex-wrap items-center gap-2 pb-2">
-                  <select value={aiPreset} onChange={(e) => setAiPreset(e.target.value)} className={`${field} sm:w-auto`} aria-label="Room style">
-                    {AI_STAGING_PRESETS.map((p) => (
+                  <select value={roomFilter} onChange={(e) => setRoomFilter(e.target.value)} className={`${field} sm:w-auto`} aria-label="Room style">
+                    {ROOM_FILTERS.map((p) => (
                       <option key={p.id} value={p.id}>
                         {p.name}
                       </option>

@@ -52,6 +52,11 @@ export interface Product {
   aiTransformedImage?: string; // AI enhanced luxury bedroom mockup
   aiStagingPrompt?: string;
   isAiEnhanced?: boolean;
+  /**
+   * Photos made by "Style in a bedroom", by their address (/api/images/<name>). Set by the server
+   * only; shoppers see the map (as { staged: true }) only while "Label styled photos" is on.
+   */
+  stagedPhotos?: Record<string, StagedPhoto | { staged: true }>;
   /** Total pieces in stock across all sizes (the sum of stockBySize). */
   stockCount: number;
   /** Pieces in stock per size id. Most designs are one or two pieces, so stock is kept per size. */
@@ -255,12 +260,39 @@ export interface OrderAttention {
 export const AI_MODELS = ['claude-opus-5-5', 'claude-sonnet-5-5', 'claude-haiku-5-5'] as const;
 export type AiModel = (typeof AI_MODELS)[number];
 
-/** Settings → AI writing: names and descriptions written from a product photo (off until a key is saved). */
+/** Who writes "Write from photo": Anthropic (Claude) or Google Gemini. Styled photos are Gemini only. */
+export const AI_PROVIDERS = ['anthropic', 'gemini'] as const;
+export type AiProvider = (typeof AI_PROVIDERS)[number];
+
+/** A Gemini model id as the shop stores it (checked on the server; filled from Google's live list by Test). */
+export const GEMINI_MODEL_ID = /^gemini-[a-z0-9.\-]{1,60}$/;
+
+/** Settings → AI writing: names and descriptions written from a product photo (off until a key is saved), and styled photos. */
 export interface AiSettings {
   enabled: boolean;
+  /** Which AI writes the text (default Anthropic). */
+  provider: AiProvider;
   model: AiModel;
   /** The owner's Anthropic API key (secret: write-only, never sent to a browser or a backup). */
   anthropicApiKey: string;
+  /** The owner's Google Gemini API key, AIza… (secret: write-only, never sent to a browser or a backup). */
+  geminiApiKey: string;
+  /** Gemini model for writing ('' until Test fills the list). */
+  geminiModel: string;
+  /** Gemini model for "Style in a bedroom". */
+  geminiImageModel: string;
+  /** The shop shows a small "Styled image" tag on styled photos (default on). */
+  labelStyledPhotos: boolean;
+}
+
+/** A photo made by "Style in a bedroom" (Gemini): never the original, always marked. */
+export interface StagedPhoto {
+  staged: true;
+  /** The photo it was made from (a stored image name), or '' for a photo not kept in the shop. */
+  source: string;
+  /** One of STAGING_PRESETS' ids. */
+  preset: string;
+  at: string;
 }
 
 export interface PaymentSettings {

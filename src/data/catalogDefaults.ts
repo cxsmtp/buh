@@ -19,7 +19,16 @@ export const DEFAULT_CATALOG: CatalogSettings = {
 };
 
 /** Settings → AI writing before the owner adds a key: off. */
-export const DEFAULT_AI: AiSettings = { enabled: false, model: 'claude-opus-5-5', anthropicApiKey: '' };
+export const DEFAULT_AI: AiSettings = {
+  enabled: false,
+  provider: 'anthropic',
+  model: 'claude-opus-5-5',
+  anthropicApiKey: '',
+  geminiApiKey: '',
+  geminiModel: '',
+  geminiImageModel: 'gemini-3.1-flash-image',
+  labelStyledPhotos: true,
+};
 
 /** Settings → Store & contact before the owner fills it in. */
 export const DEFAULT_STORE: StoreSettings = {

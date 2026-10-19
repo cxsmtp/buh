@@ -117,7 +117,7 @@ const ProductDetailContent: React.FC<ProductDetailModalProps & { product: Produc
       <div className="flex-1 min-h-0 overflow-y-auto overscroll-contain twopane:grid twopane:grid-cols-2 twopane:grid-rows-[minmax(0,1fr)] twopane:overflow-hidden">
         <div className="twopane:overflow-y-auto twopane:p-5">
           <div className="twopane:rounded-2xl twopane:overflow-hidden">
-            <PhotoCarousel images={images} title={product.title} />
+            <PhotoCarousel images={images} title={product.title} styled={new Set(Object.keys(product.stagedPhotos ?? {}))} />
           </div>
         </div>
 

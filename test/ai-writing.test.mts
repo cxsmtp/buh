@@ -80,7 +80,7 @@ test('AI writing is off and keyless by default; switching it on needs a key; the
   // An autosave without the key keeps it.
   await settings.updateSettings('ai', { model: 'claude-opus-5-5', anthropicApiKey: '' }, { auto: true });
   assert.equal(settings.getSettings('ai').anthropicApiKey, KEY);
-  assert.deepEqual(ai.aiStatus(), { ready: true, reason: null, model: 'claude-opus-5-5' });
+  assert.deepEqual(ai.aiStatus(), { ready: true, reason: null, provider: 'anthropic', model: 'claude-opus-5-5' });
 });
 
 test('the request: fixed address, Anthropic headers, the photo as a base64 block, the hints as given, the key only in x-api-key', async () => {

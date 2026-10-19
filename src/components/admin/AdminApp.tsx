@@ -106,7 +106,7 @@ async function fetchPublic() {
 }
 
 /** The calls the front gate answers as an unknown address without a door (src/lib/server/frontGate.ts). */
-const ADMIN_CALL = /^\/api\/(?:admin(?:\/|$|\?)|courier\/(?:dispatch|test)(?:$|\?)|ai-transform(?:$|\?))/;
+const ADMIN_CALL = /^\/api\/(?:admin(?:\/|$|\?)|courier\/(?:dispatch|test)(?:$|\?))/;
 
 /** Is this page the admin link itself (not a password-reset email's single-reset path)? */
 const onAdminLink = () => /^\/[A-Za-z0-9_-]{32}$/.test(window.location.pathname);
@@ -615,7 +615,7 @@ export function AdminApp() {
                   id: 'ai',
                   label: 'AI writing',
                   icon: <Sparkles />,
-                  hint: 'Product names and descriptions written from a photo, with your own Anthropic key (off until you add one).',
+                  hint: 'Product names and descriptions written from a photo (Claude or Gemini), and styled bedroom photos (Gemini), with your own keys (off until you add one).',
                   content: (
                     <AiSettingsCard
                       key={`ai-${adminSettingsLoaded}-${settingsEpoch}-${undone['ai'] ?? 0}`}

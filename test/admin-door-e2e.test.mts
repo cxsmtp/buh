@@ -107,7 +107,7 @@ function routes(): Array<{ url: string; methods: string[]; file: string }> {
     }
   };
   walk('src/app/api/admin');
-  for (const f of ['src/app/api/courier/dispatch', 'src/app/api/courier/test', 'src/app/api/courier/live', 'src/app/api/courier/sandbox-check', 'src/app/api/ai-transform']) walk(f);
+  for (const f of ['src/app/api/courier/dispatch', 'src/app/api/courier/test', 'src/app/api/courier/live', 'src/app/api/courier/sandbox-check']) walk(f);
   return out;
 }
 

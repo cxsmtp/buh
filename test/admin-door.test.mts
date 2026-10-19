@@ -131,7 +131,7 @@ test('the front gate: admin addresses without a door become an unknown address; 
   const door = `${link.DOOR_COOKIE}=${link.issueDoorToken()}`;
   const unknownApi = { kind: 'unknown', url: gate.NOWHERE_API };
   const unknownPage = { kind: 'unknown', url: gate.NOWHERE_PAGE };
-  for (const p of ['/api/admin/login', '/api/admin', '/api/admin/orders/x/receipt', '/api/courier/dispatch', '/api/courier/test', '/api/ai-transform', '/api//admin/session', '/api/%61dmin/session', '/x/../api/admin/session', '/api/admin/%2e%2e/admin/session']) {
+  for (const p of ['/api/admin/login', '/api/admin', '/api/admin/orders/x/receipt', '/api/courier/dispatch', '/api/courier/test', '/api//admin/session', '/api/%61dmin/session', '/x/../api/admin/session', '/api/admin/%2e%2e/admin/session']) {
     assert.deepEqual(gate.decide(p, ''), unknownApi, p);
     assert.deepEqual(gate.decide(p, 'buh_door=forged.x'), unknownApi, `${p} forged`);
     assert.equal(gate.decide(p, door).kind, 'pass', `${p} with the door`);
