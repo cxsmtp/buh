@@ -170,6 +170,15 @@ URLs an admin can type (SMS webhook, Infobip base URL) must be https, use port 4
 
 Carrier endpoints are fixed in code.
 
+**Anthropic (AI writing).** "Write from photo" (`POST /api/admin/products/describe`) and Settings → AI writing → Test (`POST /api/admin/ai/test`) call one fixed address, `https://api.anthropic.com/v1/messages`, through `safeFetch` (https, no redirects, public addresses only, 60-second deadline, 256 KB reply cap). Nothing a person types changes where it goes.
+
+- **Admin only:** both routes are behind the door, `requireAdmin` (same-site, signed in) and an allow-list of body fields; the describe body is capped at 9 MB and the photo must be PNG, JPEG or WebP by its real bytes (at most 3.5 MB), a stored product photo by its exact name, or an https address (sent to Anthropic as a link, never fetched by the shop).
+- **The key (`ai.anthropicApiKey`)** is a write-only setting: reads return it blank with "saved" and its last 4 characters; it is blanked in settings history and in every backup, sent only in the `x-api-key` header, and never in a reply or a log (`logEvent` also masks any `sk-ant-…`). Anthropic's error messages are passed on with any key removed.
+- **Answers are data, not markup:** every field is checked on the server (JSON only, lengths cut, markup, emoji and control characters removed, the weave matched to the shop's list, at most 4 colours with valid swatches); a reply that isn't the JSON asked for is refused with a clear message. Nothing is saved: the editor shows suggestions for the owner to accept.
+- **Limits and audit:** 20 descriptions an hour per admin (10 tests per 10 minutes); each description is in the audit log (model, kind of photo, size; no image data).
+- **Tests only:** `BUH_TEST_ANTHROPIC_API` points the calls at a stand-in, and only at a plain-http loopback address; anything else is ignored.
+- **Weave rename** (`POST /api/admin/catalog/weaves`, admin only, 2 KB body): changes the weave on every product, every editor draft and the list in one transaction, audited (`catalog.weave_renamed`) before it commits; if the audit log can't be written nothing changes (503). Removing a weave products still use is refused.
+
 ## Couriers
 
 - Live bookings use the carrier's own AWB. If the carrier is down or refuses, the booking fails visibly. Older builds invented a random AWB and marked the order booked, and checkout gave every new order a made-up AWB and tracking link.

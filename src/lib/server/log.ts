@@ -20,6 +20,8 @@ const EMAIL = /([A-Za-z0-9._%+-])[A-Za-z0-9._%+-]*@([A-Za-z0-9.-]+\.[A-Za-z]{2,}
 const SECRET_PATH = /\/([A-Za-z0-9_-]{4})[A-Za-z0-9_-]{28,}/g;
 // Stripe keys, webhook signing secrets and payment client secrets, wherever they appear in a message.
 const STRIPE_SECRET = /\b((?:sk|rk)_(?:test|live)_|whsec_)[A-Za-z0-9+/=_-]{6,}|\b(pi|seti)_[A-Za-z0-9]+_secret_[A-Za-z0-9]+/g;
+// Anthropic API keys (Settings → AI writing).
+const ANTHROPIC_KEY = /\bsk-ant-[A-Za-z0-9_-]{6,}/g;
 
 export function maskPhone(phone: string): string {
   const digits = phone.replace(/\D/g, '');
@@ -36,6 +38,7 @@ function scrubString(s: string, max = 500): string {
   // Masked before it is cut, so a cut can never leave half a phone number unmasked.
   return maskSecretPaths(s.slice(0, max * 2))
     .replace(STRIPE_SECRET, (_m, key: string | undefined, intent: string | undefined) => (key ? `${key}[redacted]` : `${intent}_[redacted]`))
+    .replace(ANTHROPIC_KEY, 'sk-ant-[redacted]')
     .replace(EMAIL, '$1***@$2')
     .replace(PHONE, (m) => (ISO_DATE.test(m) ? m : maskPhone(m)))
     .slice(0, max);

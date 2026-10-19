@@ -50,6 +50,7 @@ test('hard-coded hex colours live only in the palette, the festival accents and 
     'src/app/globals.css',
     'src/lib/festivals/catalog.ts',
     'src/data/initialData.ts',
+    'src/data/fabricColours.ts',
     'src/lib/catalogFilter.ts',
     'src/lib/aiImageTransform.ts',
     'src/lib/server/settings.ts',

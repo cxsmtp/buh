@@ -1,9 +1,9 @@
 import net from 'node:net';
-import type { AssistantSettings, BankTransferDetails, DeliverySettings, Emirate, BedProfileMeasurement, BrandSettings, CatalogSettings, CourierSettings, EmailSettings, FirebaseWebConfig, PaymentSettings, PhoneCheckMode, PhoneCheckSettings, PhoneVerificationConfig, SmsGatewaySettings, StoreSettings, ThemeSettings, LookSettings } from '@/types';
+import type { AiSettings, AssistantSettings, BankTransferDetails, DeliverySettings, Emirate, BedProfileMeasurement, BrandSettings, CatalogSettings, CourierSettings, EmailSettings, FirebaseWebConfig, PaymentSettings, PhoneCheckMode, PhoneCheckSettings, PhoneVerificationConfig, SmsGatewaySettings, StoreSettings, ThemeSettings, LookSettings } from '@/types';
 import { DEFAULT_LOOK_MODE, DEFAULT_LOOK_PRESET, LOOK_PRESETS, MODE_LABELS, isLookMode, isLookPreset } from '@/lib/design/themes';
 import { FESTIVALS } from '@/lib/festivals/catalog';
 import { marqueeItems, marqueeProblem, stripEmoji } from '@/lib/marquee';
-import { DEFAULT_ASSISTANT, DEFAULT_CATALOG, DEFAULT_DELIVERY, DEFAULT_EMAIL_SETTINGS, DEFAULT_STORE, DEFAULT_THEME_SETTINGS } from '@/data/catalogDefaults';
+import { DEFAULT_AI, DEFAULT_ASSISTANT, DEFAULT_CATALOG, DEFAULT_DELIVERY, DEFAULT_EMAIL_SETTINGS, DEFAULT_STORE, DEFAULT_THEME_SETTINGS } from '@/data/catalogDefaults';
 import { INITIAL_BANK_DETAILS, INITIAL_BRAND_SETTINGS, INITIAL_COURIER_SETTINGS, INITIAL_SMS_SETTINGS } from '@/data/initialData';
 import { getDb } from './db';
 import { kvGet } from './kv';
@@ -12,6 +12,7 @@ import { SMTP_PORTS, assertPublicMailHost } from './mail';
 import { FIREBASE_PROJECT_ID } from './firebaseAuth';
 import { bump, changedElsewhere } from './live';
 import { envGateways } from '@/lib/otpService';
+import { AI_MODELS } from '@/types';
 import { HttpError } from './http';
 import { acceptImageRef, LOGO_MAX_SIDE } from './images';
 import { assertPublicHttpsUrl } from './outbound';
@@ -41,6 +42,7 @@ export interface SettingsMap {
   payments: PaymentSettings;
   phoneCheck: PhoneCheckSettings;
   look: LookSettings;
+  ai: AiSettings;
 }
 export type SettingsKey = keyof SettingsMap;
 
@@ -74,6 +76,8 @@ const DEFAULTS: SettingsMap = {
   // WhatsApp (free) for every shop, new or existing, until the owner chooses SMS codes.
   phoneCheck: { mode: 'whatsapp', unconfirmedCancelHours: 24, unopenedCancelHours: 6 },
   // Ivory & Gold, light or dark as the device is set (migration 13 records when it started).
+  // Off, and no key: "Write from photo" explains how to switch it on.
+  ai: DEFAULT_AI,
   look: { preset: DEFAULT_LOOK_PRESET, mode: DEFAULT_LOOK_MODE, label: lookLabel(DEFAULT_LOOK_PRESET, DEFAULT_LOOK_MODE), changedAt: '', changedBy: '' },
 };
 
@@ -102,7 +106,11 @@ const SECRETS: Record<SettingsKey, string[]> = {
   payments: ['stripeSecretKey', 'stripeWebhookSecret'],
   phoneCheck: [],
   look: [],
+  ai: ['anthropicApiKey'],
 };
+
+/** Secrets the admin hub may see the last 4 characters of (to tell which key is saved). */
+const SHOW_LAST4 = new Set(['ai.anthropicApiKey']);
 
 const cache = new Map<SettingsKey, unknown>();
 
@@ -228,14 +236,18 @@ export async function restoreSettingsVersion(id: number, by = ''): Promise<Setti
 }
 
 /** What the admin hub may see: secrets blanked, with which ones are saved. */
-export function adminView<K extends SettingsKey>(key: K): { value: SettingsMap[K]; secretsSet: Record<string, boolean> } {
+export function adminView<K extends SettingsKey>(key: K): { value: SettingsMap[K]; secretsSet: Record<string, boolean>; secretsHint?: Record<string, string> } {
   const value = structuredClone(getSettings(key)) as unknown as Record<string, unknown>;
   const secretsSet: Record<string, boolean> = {};
+  const secretsHint: Record<string, string> = {};
   for (const p of SECRETS[key]) {
-    secretsSet[p] = Boolean(getPath(value, p));
+    const saved = String(getPath(value, p) ?? '');
+    secretsSet[p] = Boolean(saved);
+    // ••••last4 (never more, and only for a key long enough that 4 characters say nothing about it).
+    if (saved.length >= 20 && SHOW_LAST4.has(`${key}.${p}`)) secretsHint[p] = `••••${saved.slice(-4)}`;
     setPath(value, p, '');
   }
-  return { value: value as unknown as SettingsMap[K], secretsSet };
+  return { value: value as unknown as SettingsMap[K], secretsSet, ...(Object.keys(secretsHint).length ? { secretsHint } : {}) };
 }
 
 export interface UpdateOptions<K extends SettingsKey> {
@@ -344,6 +356,12 @@ export async function updateSettings<K extends SettingsKey>(key: K, input: unkno
       throw new HttpError(409, `Run the Sandbox check first: Jeebly Live mode can be switched on after a Sandbox check has passed (within ${SANDBOX_CHECK_DAYS} days).`, {}, { code: 'sandbox_check_required' });
     }
   }
+  // AI writing on means "Write from photo" calls Anthropic: it needs the key. Clearing the key switches it off.
+  if (key === 'ai') {
+    const a = next as unknown as AiSettings;
+    if (getPath(input as Obj, 'anthropicApiKey') === null) a.enabled = false;
+    if (a.enabled && !a.anthropicApiKey) throw new HttpError(400, 'Add your Anthropic API key before switching AI writing on.');
+  }
   if (options.beforeSave) await options.beforeSave(next as SettingsMap[K], current);
   save(key, next as SettingsMap[K], { keepHistory: options.keepHistory, auto: options.auto, expectUpdatedAt: currentAt });
 }
@@ -387,6 +405,7 @@ const SECRET_HOSTS: Record<SettingsKey, Record<string, string>> = {
   delivery: {},
   payments: {},
   phoneCheck: {},
+  ai: {},
 };
 
 /**
@@ -626,7 +645,31 @@ const VALIDATORS: { [K in SettingsKey]: (input: Obj, current: SettingsMap[K]) =>
     if (new Set(categories.map((c) => c.id)).size !== categories.length) throw new HttpError(400, 'Each category needs its own id.');
     const threshold = input.lowStockThreshold === undefined ? current.lowStockThreshold : Number(input.lowStockThreshold);
     if (!Number.isInteger(threshold) || threshold < 0 || threshold > 50) throw new HttpError(400, 'Low-stock warning must be a whole number from 0 to 50.');
-    return { sizes, categories, lowStockThreshold: threshold };
+    const weaves = input.weaves === undefined ? current.weaves : cleanWeaves(input.weaves);
+    // A weave products still use can't go: they would show a weave the shop no longer has.
+    for (const gone of current.weaves.filter((w) => !weaves.includes(w))) {
+      const using = productsWithWeave(gone);
+      if (using.length) {
+        const names = using.slice(0, 5).map((p) => p.title).join(', ');
+        throw new HttpError(
+          400,
+          `“${gone}” is still the weave of ${using.length} ${using.length === 1 ? 'product' : 'products'} (${names}${using.length > 5 ? ', …' : ''}). Change their weave first, or use Rename to move them to another weave.`,
+          {},
+          { code: 'weave_in_use', weave: gone, count: using.length }
+        );
+      }
+    }
+    return { sizes, categories, lowStockThreshold: threshold, weaves };
+  },
+
+  async ai(input, current) {
+    const model = input.model === undefined ? current.model : input.model;
+    if (!AI_MODELS.includes(model as AiSettings['model'])) throw new HttpError(400, `Model: one of ${AI_MODELS.join(', ')}.`);
+    // The key is kept or replaced after this (write-only); only its shape is checked here.
+    const k = input.anthropicApiKey;
+    if (k !== undefined && k !== null && typeof k !== 'string') throw new HttpError(400, 'The API key must be text.');
+    if (typeof k === 'string' && k.trim() && !ANTHROPIC_KEY.test(k.trim())) throw new HttpError(400, 'An Anthropic API key starts with sk-ant- (console.anthropic.com → API keys).');
+    return { enabled: bool(input.enabled, current.enabled), model: model as AiSettings['model'], anthropicApiKey: '' };
   },
 
   async store(input, current) {
@@ -801,6 +844,53 @@ const VALIDATORS: { [K in SettingsKey]: (input: Obj, current: SettingsMap[K]) =>
 };
 
 const FESTIVAL_ID_SET = new Set(FESTIVALS.map((f) => f.id));
+
+const ANTHROPIC_KEY = /^sk-ant-[A-Za-z0-9_-]{20,300}$/;
+
+/** A weave's name: letters and digits first, then also spaces and ' & / ( ) . + - (no markup). */
+const WEAVE_NAME = /^[\p{L}\p{N}][\p{L}\p{N} '’&\/().+-]*$/u;
+export const MAX_WEAVES = 30;
+export const WEAVE_MAX_LENGTH = 30;
+
+/** One weave name, trimmed and checked (1–30 characters). */
+export function cleanWeaveName(v: unknown, field = 'Weave'): string {
+  const name = text(v, field, 200).replace(/\s+/g, ' ');
+  if (!name) throw new HttpError(400, `${field} needs a name.`);
+  if (name.length > WEAVE_MAX_LENGTH) throw new HttpError(400, `${field}: at most ${WEAVE_MAX_LENGTH} characters.`);
+  if (!WEAVE_NAME.test(name)) throw new HttpError(400, `${field}: letters, digits, spaces and ' & / ( ) . + - only.`);
+  return name;
+}
+
+/** Settings → Catalogue → Weaves: 1 to 30 names, each once (ignoring capitals). */
+function cleanWeaves(v: unknown): string[] {
+  if (!Array.isArray(v) || v.length === 0 || v.length > MAX_WEAVES) throw new HttpError(400, `Keep 1 to ${MAX_WEAVES} weaves.`);
+  const weaves = v.map((w, i) => cleanWeaveName(w, `Weave ${i + 1}`));
+  const seen = new Set<string>();
+  for (const w of weaves) {
+    if (seen.has(w.toLowerCase())) throw new HttpError(400, `“${w}” is in the list twice.`);
+    seen.add(w.toLowerCase());
+  }
+  return weaves;
+}
+
+/** Products in the shop (not archived) with this weave, by title. Read straight from the database (no import cycle). */
+export function productsWithWeave(weave: string): Array<{ id: string; title: string }> {
+  const rows = getDb().prepare("SELECT id, json_extract(data, '$.title') AS title FROM products WHERE archived = 0 AND json_extract(data, '$.weave') = ? ORDER BY position, rowid").all(weave) as Array<{ id: string; title: string | null }>;
+  return rows.map((r) => ({ id: r.id, title: String(r.title ?? r.id) }));
+}
+
+/**
+ * The weave list with one name renamed (or, when the new name is already in the list, merged into
+ * it), saved at once. For src/lib/server/weaves.ts, inside its transaction with the products.
+ */
+export function saveRenamedWeave(from: string, to: string): string[] {
+  const current = getSettings('catalog');
+  if (!current.weaves.includes(from)) throw new HttpError(404, `“${from}” is not in the weave list.`);
+  const target = current.weaves.find((w) => w.toLowerCase() === to.toLowerCase() && w !== from);
+  const weaves = target ? current.weaves.filter((w) => w !== from) : current.weaves.map((w) => (w === from ? to : w));
+  save('catalog', { ...current, weaves }, { keepHistory: true });
+  return weaves;
+}
 
 /** The look: a known preset and mode only; the time is the server's, never the browser's. */
 async function validateLook(input: Obj, current: LookSettings): Promise<LookSettings> {

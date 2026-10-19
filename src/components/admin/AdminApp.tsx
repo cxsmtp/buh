@@ -1,9 +1,9 @@
 'use client';
 
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Archive, Box, Copy, CreditCard, Feather, KeyRound, LayoutGrid, Laptop, Link2, Mail, MessageSquare, Palette, ShieldCheck, Smartphone, Store, SwatchBook, Truck } from 'lucide-react';
-import type { AssistantSettings, BankTransferDetails, BrandSettings, CatalogSettings, CourierSettings, Customer, DeliverySettings, EmailSettings, Order, PaymentSettings, PhoneCheckSettings, Product, SmsGatewaySettings, StoreSettings, ThemeSettings } from '@/types';
-import { DEFAULT_ASSISTANT, DEFAULT_CATALOG, DEFAULT_DELIVERY, DEFAULT_EMAIL_SETTINGS, DEFAULT_STORE, DEFAULT_THEME_SETTINGS } from '@/data/catalogDefaults';
+import { Archive, Box, Copy, CreditCard, Feather, KeyRound, LayoutGrid, Laptop, Link2, Mail, MessageSquare, Palette, ShieldCheck, Smartphone, Sparkles, Store, SwatchBook, Truck } from 'lucide-react';
+import type { AiSettings, AssistantSettings, BankTransferDetails, BrandSettings, CatalogSettings, CourierSettings, Customer, DeliverySettings, EmailSettings, Order, PaymentSettings, PhoneCheckSettings, Product, SmsGatewaySettings, StoreSettings, ThemeSettings } from '@/types';
+import { DEFAULT_AI, DEFAULT_ASSISTANT, DEFAULT_CATALOG, DEFAULT_DELIVERY, DEFAULT_EMAIL_SETTINGS, DEFAULT_STORE, DEFAULT_THEME_SETTINGS } from '@/data/catalogDefaults';
 import { INITIAL_BANK_DETAILS, INITIAL_BRAND_SETTINGS, INITIAL_COURIER_SETTINGS, INITIAL_SMS_SETTINGS } from '@/data/initialData';
 import { getJson, postJson, sendJson, UNAUTHORIZED_EVENT, UNKNOWN_ADDRESS_EVENT } from '@/lib/apiClient';
 import { useLiveUpdates } from '@/lib/client/live';
@@ -23,6 +23,7 @@ import { AdminLoginModal } from './AdminLoginModal';
 import { BackupStatus } from './BackupStatus';
 import { RestoreNotice } from './RestoreNotice';
 import { AdminLinkCard } from './settings/AdminLinkCard';
+import { AiSettingsCard } from './settings/AiSettingsCard';
 import { AssistantSettingsCard } from './settings/AssistantSettingsCard';
 import { CatalogSettingsCard } from './settings/CatalogSettingsCard';
 import { DeliverySettingsCard } from './settings/DeliverySettingsCard';
@@ -43,6 +44,8 @@ import { VersionsCard } from './settings/VersionsCard';
 interface AdminSetting<T> {
   value: T;
   secretsSet: Record<string, boolean>;
+  /** ••••last4 of a saved key, where the hub may show it (the AI key). */
+  secretsHint?: Record<string, string>;
 }
 interface AdminSettings {
   bank?: AdminSetting<BankTransferDetails>;
@@ -56,6 +59,7 @@ interface AdminSettings {
   delivery: AdminSetting<DeliverySettings>;
   payments: AdminSetting<PaymentSettings>;
   phoneCheck: AdminSetting<PhoneCheckSettings>;
+  ai: AdminSetting<AiSettings>;
 }
 
 const NO_PAYMENTS: PaymentSettings = { cardEnabled: false, stripePublishableKey: '', stripeSecretKey: '', stripeWebhookSecret: '' };
@@ -137,6 +141,7 @@ export function AdminApp() {
     delivery: { value: DEFAULT_DELIVERY, secretsSet: {} },
     payments: { value: NO_PAYMENTS, secretsSet: {} },
     phoneCheck: { value: DEFAULT_PHONE_CHECK, secretsSet: {} },
+    ai: { value: DEFAULT_AI, secretsSet: {} },
   });
   const [adminLoadError, setAdminLoadError] = useState('');
   const [adminSettingsLoaded, setAdminSettingsLoaded] = useState(false);
@@ -201,7 +206,7 @@ export function AdminApp() {
     if (p.ok) setAdminProducts(p.data.products);
     if (st.ok) {
       if (st.data.bank) setBankDetails(st.data.bank.value);
-      setAdminSettings({ courier: st.data.courier, sms: st.data.sms, catalog: st.data.catalog, store: st.data.store, theme: st.data.theme, email: st.data.email, assistant: st.data.assistant, delivery: st.data.delivery, payments: st.data.payments ?? { value: NO_PAYMENTS, secretsSet: {} }, phoneCheck: st.data.phoneCheck ?? { value: DEFAULT_PHONE_CHECK, secretsSet: {} } });
+      setAdminSettings({ courier: st.data.courier, sms: st.data.sms, catalog: st.data.catalog, store: st.data.store, theme: st.data.theme, email: st.data.email, assistant: st.data.assistant, delivery: st.data.delivery, payments: st.data.payments ?? { value: NO_PAYMENTS, secretsSet: {} }, phoneCheck: st.data.phoneCheck ?? { value: DEFAULT_PHONE_CHECK, secretsSet: {} }, ai: st.data.ai ?? { value: DEFAULT_AI, secretsSet: {} } });
       setAdminSettingsLoaded(true);
       if (st.data.phoneCheckInfo) setPhoneCheckInfo(st.data.phoneCheckInfo);
     }
@@ -248,7 +253,7 @@ export function AdminApp() {
   });
 
   /** Save one settings group on the server; resolves to an error message or null. */
-  const saveSettings = async (key: 'brand' | 'bank' | 'courier' | 'sms' | 'catalog' | 'store' | 'theme' | 'email' | 'assistant' | 'delivery' | 'payments' | 'phoneCheck', settings: unknown, onWarning?: (warning: string) => void): Promise<string | null> => {
+  const saveSettings = async (key: 'brand' | 'bank' | 'courier' | 'sms' | 'catalog' | 'store' | 'theme' | 'email' | 'assistant' | 'delivery' | 'payments' | 'phoneCheck' | 'ai', settings: unknown, onWarning?: (warning: string) => void): Promise<string | null> => {
     const { ok, data } = await sendJson<{ message?: string; warning?: string }>('PUT', `/api/admin/settings/${key}`, { settings });
     if (!ok) return data.message || 'Could not save. Please try again.';
     if (data.warning) onWarning?.(data.warning);
@@ -485,7 +490,7 @@ export function AdminApp() {
                   id: 'catalog',
                   label: 'Catalogue',
                   icon: <LayoutGrid />,
-                  hint: 'Size presets, categories and the low-stock warning.',
+                  hint: 'Size presets, categories, weaves and the low-stock warning.',
                   content: <CatalogSettingsCard key={`catalog-${adminSettingsLoaded}-${settingsEpoch}-${undone['catalog'] ?? 0}`} value={adminSettings.catalog.value} onSave={(v) => saveSettings('catalog', v)} auto={autoSaveHooks} />,
                 },
                 {
@@ -598,6 +603,22 @@ export function AdminApp() {
                       value={adminSettings.assistant.value}
                       sizes={adminSettings.catalog.value.sizes}
                       onSave={(v) => saveSettings('assistant', v)}
+                      auto={autoSaveHooks}
+                    />
+                  ),
+                },
+                {
+                  id: 'ai',
+                  label: 'AI writing',
+                  icon: <Sparkles />,
+                  hint: 'Product names and descriptions written from a photo, with your own Anthropic key (off until you add one).',
+                  content: (
+                    <AiSettingsCard
+                      key={`ai-${adminSettingsLoaded}-${settingsEpoch}-${undone['ai'] ?? 0}`}
+                      value={adminSettings.ai.value}
+                      secretsSet={adminSettings.ai.secretsSet}
+                      secretsHint={adminSettings.ai.secretsHint}
+                      onSave={(v) => saveSettings('ai', v)}
                       auto={autoSaveHooks}
                     />
                   ),

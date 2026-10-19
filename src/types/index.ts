@@ -43,7 +43,8 @@ export interface Product {
   compareAtPrice?: number;
   material: string; // e.g. "100% Giza Egyptian Cotton"
   threadCount: number; // e.g. 600 TC
-  weave: 'Sateen' | 'Percale' | 'Linen' | 'Jacquard';
+  /** One of the weaves in Settings → Catalogue (built-in: Sateen, Percale, Linen, Jacquard). */
+  weave: string;
   colors: { name: string; hex: string }[];
   featuredImage: string;
   galleryImages: string[];
@@ -244,6 +245,18 @@ export interface OrderAttention {
 }
 
 /** Settings → Payments: card payments (with Apple Pay and Google Pay) through the owner's Stripe account. */
+/** The models "Write from photo" may use (Settings → AI writing). */
+export const AI_MODELS = ['claude-opus-5-5', 'claude-sonnet-5-5', 'claude-haiku-5-5'] as const;
+export type AiModel = (typeof AI_MODELS)[number];
+
+/** Settings → AI writing: names and descriptions written from a product photo (off until a key is saved). */
+export interface AiSettings {
+  enabled: boolean;
+  model: AiModel;
+  /** The owner's Anthropic API key (secret: write-only, never sent to a browser or a backup). */
+  anthropicApiKey: string;
+}
+
 export interface PaymentSettings {
   /** Offer "Card" (and Apple Pay / Google Pay) at checkout. Off until the keys are in. */
   cardEnabled: boolean;
@@ -366,6 +379,8 @@ export interface CatalogSettings {
   categories: Array<{ id: string; label: string; icon: string }>;
   /** Show "Only 1 left" when a size's stock is at or below this. */
   lowStockThreshold: number;
+  /** The weaves a product may have, in the order the editor offers them (1–30, each 1–30 characters). */
+  weaves: string[];
 }
 
 /** Settings → Store & contact: how customers reach the shop. */
