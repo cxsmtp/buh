@@ -10,12 +10,15 @@ import { allowFields, assertSameOrigin, handleRouteError, HttpError, json, readJ
 export async function POST(req: Request, { params }: { params: Promise<{ slug: string }> }) {
   try {
     assertSameOrigin(req);
+    // Only the shop's own pages count: a browser always sends Origin (or Referer) on this POST.
+    if (!req.headers.get('origin') && !req.headers.get('referer')) throw new HttpError(403, 'Not allowed.');
     const body = await readJsonBody(req, 256);
     allowFields(body, ['kind']);
     if (body.kind !== 'view' && body.kind !== 'bag') throw new HttpError(400, 'kind must be view or bag.');
     enforceIpLimit(req, 'collection-count', 60, 10 * 60 * 1000, 'Too many requests.');
-    enforceLimit('global:collection-count', 3000, 60 * 1000, 'Too many requests.');
+    enforceLimit('global:collection-count', 300, 60 * 1000, 'Too many requests.');
     const { slug } = await params;
+    enforceLimit(`collection-count:${slug.slice(0, 80)}`, 120, 60 * 1000, 'Too many requests.');
     return json({ counted: countCollectionEvent(slug, body.kind) });
   } catch (err) {
     return handleRouteError(err, 'collections/count');

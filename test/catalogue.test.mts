@@ -264,6 +264,7 @@ test('counters: views and adds to bag, through the public route (same site only,
   assert.equal((await call({ kind: 'bag' })).status, 200);
   assert.equal((await call({ kind: 'bag' })).status, 200);
   assert.equal((await call({ kind: 'view' }, { origin: 'https://evil.example' })).status, 403, 'cross-site refused');
+  assert.equal((await call({ kind: 'view' }, {})).status, 403, 'no Origin or Referer (a script, not the shop page) is refused');
   assert.equal((await call({ kind: 'like' })).status, 400);
   assert.equal((await call({ kind: 'view', who: 'me' })).status, 400, 'only kind is accepted');
   assert.deepEqual(await (await call({ kind: 'view' }, undefined, 'nope-aaaaa')).json(), { counted: false });
@@ -343,4 +344,17 @@ test("today's to-dos and the money highlights (fils, UAE dates; cancelled and un
   assert.deepEqual(month, { label: 'This month', fils: 20030, orders: 5 });
   const todos = todayTodos(list, [{ ...template, stockBySize: { [template.profiles[0].id]: 1 }, active: true }, { ...template, id: 'x', stockBySize: {}, active: true }], 2);
   assert.deepEqual(todos, { toConfirm: 1, toDispatch: 5, lowStock: 1, soldOut: 1 });
+});
+
+test('the Amazon/Noon export leaves styled (AI) photos out while the shop does not label them, like the Meta feed', async () => {
+  const { marketplaceRows } = await import('@/lib/server/marketplace');
+  const [a] = products.listProducts();
+  const styled = '/api/images/' + 'b'.repeat(64) + '.png';
+  const real = '/api/images/' + 'c'.repeat(64) + '.png';
+  const p = { ...a, galleryImages: [real, styled], stagedPhotos: { [styled]: { staged: true as const } } };
+  const opts = { base: 'https://shop.test', brand: 'B', categories: [] };
+  const images = (label: boolean) => String(marketplaceRows([p], { ...opts, labelStyledPhotos: label })[0].find((c) => typeof c === 'string' && c.includes(real)) ?? '');
+  assert.match(images(true), new RegExp(styled.replace(/[/.]/g, '\\$&')), 'labelled: styled photos may go out');
+  assert.doesNotMatch(images(false), /b{64}/, 'not labelled: no styled photo goes out');
+  assert.match(images(false), /c{64}/, 'the real photo still goes out');
 });

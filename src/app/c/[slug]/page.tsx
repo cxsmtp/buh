@@ -1,5 +1,6 @@
 import type { Metadata } from 'next';
 import Link from 'next/link';
+import { notFound } from 'next/navigation';
 import { ShopApp } from '@/components/ShopApp';
 import { publicCollection } from '@/lib/server/collections';
 import { getProduct } from '@/lib/server/products';
@@ -49,13 +50,15 @@ export async function generateMetadata({ params }: Props): Promise<Metadata> {
 export default async function CollectionPage({ params }: Props) {
   const { slug } = await params;
   const c = publicCollection(slug);
-  if (!c || c.ended) {
+  // An unknown link answers like any unknown address (and counts for the scanner slow-down).
+  if (!c) notFound();
+  if (c.ended) {
     return (
       <main className="min-h-screen flex flex-col items-center justify-center px-4 py-16 text-center bg-ivory" data-testid="collection-ended">
         <p className="label-caps text-gold-deep">{shopName()}</p>
-        <h1 className="mt-3 font-serif text-3xl sm:text-4xl text-ink">{c ? 'This selection has ended' : 'This selection isn’t available'}</h1>
+        <h1 className="mt-3 font-serif text-3xl sm:text-4xl text-ink">This selection has ended</h1>
         <p className="mt-3 max-w-sm text-sm text-ink-soft leading-relaxed">
-          {c ? 'The pieces chosen here were only shown for a while.' : 'The link may have been changed or taken down.'} Have a look at everything in the shop instead.
+          The pieces chosen here were only shown for a while. Have a look at everything in the shop instead.
         </p>
         <Link href="/" className="mt-6 inline-flex items-center justify-center min-h-12 rounded-full bg-ink text-paper text-sm font-semibold px-6">
           Browse the shop

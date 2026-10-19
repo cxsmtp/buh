@@ -53,6 +53,16 @@ import { toCsv } from './csv';
 
 const scrypt = promisify(crypto.scrypt) as (pass: string, salt: Buffer, len: number, opts: crypto.ScryptOptions) => Promise<Buffer>;
 
+/** A collection's product ids for collections.csv; one unreadable row never stops a backup. */
+function productIdsText(raw: unknown): string {
+  try {
+    const ids = JSON.parse(String(raw));
+    return Array.isArray(ids) ? ids.map(String).join('; ') : '';
+  } catch {
+    return '';
+  }
+}
+
 export const BACKUP_MAGIC = 'BUHBK1\n';
 /**
  * The most data one backup takes (the database, receipts, photos, bills and the audit log), and
@@ -177,7 +187,7 @@ function csvFiles(): TarEntry[] {
       data: Buffer.from(toCsv(
         ['collection_id', 'link', 'title', 'product_ids', 'last_day', 'views', 'added_to_bag', 'created_at', 'created_by', 'updated_at'],
         (getDb().prepare('SELECT id, slug, title, product_ids, expires_on, views, bag_adds, created_at, created_by, updated_at FROM collections ORDER BY created_at').all() as Array<Record<string, string | number | null>>).map((r) => [
-          r.id, `/c/${r.slug}`, r.title, (JSON.parse(String(r.product_ids)) as string[]).join('; '), r.expires_on ?? '', r.views, r.bag_adds, r.created_at, r.created_by, r.updated_at,
+          r.id, `/c/${r.slug}`, r.title, productIdsText(r.product_ids), r.expires_on ?? '', r.views, r.bag_adds, r.created_at, r.created_by, r.updated_at,
         ])
       )),
     },

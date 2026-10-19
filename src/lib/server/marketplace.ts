@@ -58,13 +58,15 @@ export function variantSku(p: Pick<Product, 'id' | 'sku'>, sizeId: string): stri
 
 const money = (aed: number) => (Math.round(aed * 100) / 100).toFixed(2);
 
-export function marketplaceRows(products: Product[], opts: { base: string; brand: string; categories: CatalogSettings['categories'] }): unknown[][] {
+export function marketplaceRows(products: Product[], opts: { base: string; brand: string; categories: CatalogSettings['categories']; labelStyledPhotos?: boolean }): unknown[][] {
   const abs = (u: string) => (!u ? '' : u.startsWith('http') ? u : `${opts.base}${u}`);
   return products.flatMap((p) => {
     const simple = p.productType === 'simple';
     const category = opts.categories.find((c) => c.id === p.category)?.label ?? p.category;
     const main = abs(p.aiTransformedImage || p.featuredImage);
-    const others = [p.featuredImage, ...p.galleryImages].map(abs).filter((u) => u && u !== main).filter((u, i, all) => all.indexOf(u) === i).slice(0, 8).join('|');
+    // Styled (AI) photos go out only while the shop labels them, as in the Meta feed.
+    const shown = p.galleryImages.filter((u) => opts.labelStyledPhotos !== false || !p.stagedPhotos?.[u]);
+    const others = [p.featuredImage, ...shown].map(abs).filter((u) => u && u !== main).filter((u, i, all) => all.indexOf(u) === i).slice(0, 8).join('|');
     return p.profiles.map((s) => [
       variantSku(p, s.id),
       parentSku(p),
@@ -88,6 +90,6 @@ export function marketplaceRows(products: Product[], opts: { base: string; brand
   });
 }
 
-export function marketplaceCsv(products: Product[], opts: { base: string; brand: string; categories: CatalogSettings['categories'] }): string {
+export function marketplaceCsv(products: Product[], opts: { base: string; brand: string; categories: CatalogSettings['categories']; labelStyledPhotos?: boolean }): string {
   return toCsv([...MARKETPLACE_HEADERS], marketplaceRows(products, opts));
 }

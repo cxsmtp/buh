@@ -345,9 +345,9 @@ for (const width of [375, 1280]) {
     await shop.getByRole('link', { name: 'Browse the shop' }).waitFor();
     assert.deepEqual(await overflow(shop), [], 'ended page');
     await shot(shop, `collection-ended-${width}.png`);
-    // An address that names nothing: the same friendly page.
-    await shop.goto(`${server.base}/c/nothing-here-aaaaa`, { waitUntil: 'domcontentloaded' });
-    await shop.getByRole('heading', { name: /isn’t available/ }).waitFor();
+    // An address that names nothing: a plain 404, like any unknown address (so it counts for the scanner slow-down).
+    const missing = await shop.goto(`${server.base}/c/nothing-here-aaaaa`, { waitUntil: 'domcontentloaded' });
+    assert.equal(missing?.status(), 404);
 
     page.once('dialog', (d) => void d.accept());
     await links.getByTestId('collection-row').filter({ hasText: `${title} (edited)` }).getByRole('button', { name: /^Delete/ }).click();

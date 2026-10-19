@@ -14,7 +14,7 @@ export async function GET(req: Request) {
   try {
     const session = await requireAdmin(req);
     const products = listProducts();
-    const csv = marketplaceCsv(products, { base: await siteUrl(), brand: getSettings('brand').storeName, categories: getSettings('catalog').categories });
+    const csv = marketplaceCsv(products, { base: await siteUrl(), brand: getSettings('brand').storeName, categories: getSettings('catalog').categories, labelStyledPhotos: getSettings('ai').labelStyledPhotos });
     audit('export.marketplace', { by: session.email, products: products.length });
     const day = new Date().toISOString().slice(0, 10);
     return new Response(csv, {
