@@ -272,6 +272,8 @@ test('the shop and the admin hub share one store: a customer order reaches the o
   await admin.locator('input[autocomplete=current-password]').fill('Browser-Owner-Pass-1');
   await admin.getByRole('button', { name: /Unlock Admin Portal/ }).click();
   await admin.getByText(/Orders & Dispatches/).first().waitFor();
+  // A laptop opens on the Overview (BUH-02.17.00): go to Orders.
+  await admin.getByRole('button', { name: /Orders & Dispatches/ }).first().click();
   const card = admin.locator('div.rounded-2xl', { hasText: orderId }).last();
   await card.waitFor();
   // No courier keys: Test mode, a practice booking, only after the owner says yes (and is told after).
