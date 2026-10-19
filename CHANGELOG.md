@@ -1,5 +1,18 @@
 # Changelog
 
+## BUH-02.12.00 — 2026-10-19 03:08 UTC · [#29](https://github.com/cxsmtp/buh/pull/29)
+
+- **Four luxury looks, each light and dark.** Settings → Look: Ivory & Gold (today's look, unchanged in light), Noir & Champagne, Pearl & Emerald and Sand & Rose, each with a matching dark version.
+- **Follows each customer's device.** A phone or laptop in dark mode sees the dark version of your look, in the shop and in your hub; you can also choose "Always light" or "Always dark".
+- **Switch back any time.** Every change is kept with its date, time and who made it; "Earlier looks" has a Switch back for each, and the look before themes is always there.
+- **Festivals untouched.** Festival dates and settings are as they were; the festival colour sits on top of every look and stays readable in dark mode.
+- **Every screen follows the look,** including checkout's card fields, the bank-transfer page, the WhatsApp panels, Money and Settings.
+- **Status.**
+  - **Benchmark:** BENCH
+  - **Tests:** TESTS
+  - **Dependency audit:** production 0 vulnerabilities; no new packages.
+  - **Security scan:** the new owner route (/api/admin/look) follows the hub's checks (door, session, same site, allow-list); /look.css serves only colours. Readability checked for every look, light and dark, on every screen at 375 and 1280 px.
+
 ## BUH-02.11.00 — 2026-10-18 22:44 UTC · [#28](https://github.com/cxsmtp/buh/pull/28)
 
 - **Expenses with photos of bills.** Admin Hub → Money → Expenses: add an expense from your phone with a photo or PDF of the bill (date, amount, category, who you paid, how). Nothing is ever silently deleted or overwritten: edits keep every version and a removed expense stays on record with who removed it and why.
