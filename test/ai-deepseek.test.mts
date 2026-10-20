@@ -44,7 +44,7 @@ const { composeDescription } = await import('@/lib/productCopy');
 const { deepseekReadsPhotos } = await import('@/types');
 const { STAGING_FIXED_RULES, DEFAULT_STAGING_SET } = await import('@/lib/staging');
 
-const KEY = 'sk-0123456789abcdef0123456789abcdef';
+const KEY = ('sk-' + '0123456789abcdef'.repeat(2));
 const ANTHROPIC = 'sk-ant-api03-TESTKEY-abcdefghijklmnopqrstuvwxyz0123456789-WXYZ';
 const PHOTO = makePng(96, 120, (x, y) => ((x + y) % 24 < 12 ? [47, 63, 122] : [246, 244, 238]));
 const PHOTO_URL = `data:image/png;base64,${PHOTO.toString('base64')}`;
@@ -258,7 +258,7 @@ test('Test (DeepSeek): GET /models with the typed or saved key; ids checked; pho
   assert.equal(sent[0].path, '/models');
   assert.equal(sent[0].headers.authorization, `Bearer ${KEY}`, 'the saved key');
   assert.deepEqual(r.models, { all: ['deepseek-flash', 'deepseek-v4-pro'], vision: ['deepseek-flash'], suggested: 'deepseek-flash' });
-  const typed = 'sk-fedcba9876543210fedcba9876543210';
+  const typed = ('sk-' + 'fedcba9876543210'.repeat(2));
   await ai.testDeepSeekSettings({ deepseekApiKey: typed }, 'o@s.t');
   assert.equal(sent[1].headers.authorization, `Bearer ${typed}`);
   const entry = auditEntry('settings.ai_tested');

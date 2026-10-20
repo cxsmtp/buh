@@ -14,11 +14,14 @@ import { bump, changedElsewhere } from './live';
 import { envGateways } from '@/lib/otpService';
 import { AI_MODELS, AI_PROVIDERS, DEEPSEEK_MODEL_ID, GEMINI_MODEL_ID } from '@/types';
 import { HttpError } from './http';
-import { acceptImageRef, LOGO_MAX_SIDE } from './images';
+import { IMAGE_NAME, acceptImageRef, cleanImage, LOGO_MAX_SIDE, readImage } from './images';
 import { assertPublicHttpsUrl } from './outbound';
 import { supportEmail as envSupportEmail } from './runtimeConfig';
 import { DEFAULT_CARD_FEE_PERCENT, MAX_CARD_FEE_PERCENT } from '@/lib/money';
 import { waMeLink } from '@/lib/whatsappConfirm';
+import { DEFAULT_AI_PROMPT, FIELD_GUIDE_MAX, PROMPT_INSTRUCTIONS_MAX, WRITING_FIELDS, cleanGuide, cleanInstructions, type AiPromptSettings, type WritingFieldId } from '@/lib/aiPrompt';
+import { FAL_KEY, FAL_KEY_HINT, FAL_MODEL_ID, OPENAI_IMAGE_MODEL_ID, OPENAI_KEY, OPENAI_KEY_HINT, PICTURE_PROVIDERS } from '@/lib/pictureProviders';
+import { DEFAULT_AI_PICTURES, SCENE_ID, STYLE_MAX, STYLE_REFS_MAX, STYLE_SIDE_MAX, STAGING_LOOK_MAX, STAGING_MAX_SCENES, STAGING_NAME_MAX, STAGING_SCENE_MAX, STAGING_TRIO, oneLine, type AiPicturesSettings, type StagingScene } from '@/lib/staging';
 
 /**
  * Shop settings, kept on the server so every visitor sees the same branding
@@ -45,6 +48,10 @@ export interface SettingsMap {
   phoneCheck: PhoneCheckSettings;
   look: LookSettings;
   ai: AiSettings;
+  /** Settings → AI writing → Prompt: the shop's instructions and the field guides (the fixed rules are not settings). */
+  aiPrompt: AiPromptSettings;
+  /** Settings → AI pictures: the scenes, the default trio, the look and mood. */
+  aiPictures: AiPicturesSettings;
 }
 export type SettingsKey = keyof SettingsMap;
 
@@ -81,6 +88,8 @@ const DEFAULTS: SettingsMap = {
   // Ivory & Gold, light or dark as the device is set (migration 13 records when it started).
   // Off, and no key: "Write from photo" explains how to switch it on.
   ai: DEFAULT_AI,
+  aiPrompt: DEFAULT_AI_PROMPT,
+  aiPictures: DEFAULT_AI_PICTURES,
   look: { preset: DEFAULT_LOOK_PRESET, mode: DEFAULT_LOOK_MODE, label: lookLabel(DEFAULT_LOOK_PRESET, DEFAULT_LOOK_MODE), changedAt: '', changedBy: '' },
 };
 
@@ -109,11 +118,13 @@ const SECRETS: Record<SettingsKey, string[]> = {
   payments: ['stripeSecretKey', 'stripeWebhookSecret'],
   phoneCheck: [],
   look: [],
-  ai: ['anthropicApiKey', 'geminiApiKey', 'deepseekApiKey'],
+  ai: ['anthropicApiKey', 'geminiApiKey', 'deepseekApiKey', 'openaiApiKey', 'falApiKey'],
+  aiPrompt: [],
+  aiPictures: [],
 };
 
 /** Secrets the admin hub may see the last 4 characters of (to tell which key is saved). */
-const SHOW_LAST4 = new Set(['ai.anthropicApiKey', 'ai.geminiApiKey', 'ai.deepseekApiKey']);
+const SHOW_LAST4 = new Set(['ai.anthropicApiKey', 'ai.geminiApiKey', 'ai.deepseekApiKey', 'ai.openaiApiKey', 'ai.falApiKey']);
 
 const cache = new Map<SettingsKey, unknown>();
 
@@ -425,6 +436,8 @@ const SECRET_HOSTS: Record<SettingsKey, Record<string, string>> = {
   payments: {},
   phoneCheck: {},
   ai: {},
+  aiPrompt: {},
+  aiPictures: {},
 };
 
 /**
@@ -739,6 +752,19 @@ const VALIDATORS: { [K in SettingsKey]: (input: Obj, current: SettingsMap[K]) =>
     const ds = input.deepseekApiKey;
     if (ds !== undefined && ds !== null && typeof ds !== 'string') throw new HttpError(400, 'The API key must be text.');
     if (typeof ds === 'string' && ds.trim() && !DEEPSEEK_KEY.test(ds.trim())) throw new HttpError(400, DEEPSEEK_KEY_HINT);
+    // AI pictures: who makes them, their keys (shape only here) and models.
+    const picturesProvider = input.picturesProvider === undefined ? current.picturesProvider ?? '' : input.picturesProvider;
+    if (picturesProvider !== '' && !(PICTURE_PROVIDERS as readonly unknown[]).includes(picturesProvider)) throw new HttpError(400, 'Pictures: Google Gemini, OpenAI or fal.ai.');
+    const oa = input.openaiApiKey;
+    if (oa !== undefined && oa !== null && typeof oa !== 'string') throw new HttpError(400, 'The API key must be text.');
+    if (typeof oa === 'string' && oa.trim() && !OPENAI_KEY.test(oa.trim())) throw new HttpError(400, OPENAI_KEY_HINT);
+    const fk = input.falApiKey;
+    if (fk !== undefined && fk !== null && typeof fk !== 'string') throw new HttpError(400, 'The API key must be text.');
+    if (typeof fk === 'string' && fk.trim() && !FAL_KEY.test(fk.trim())) throw new HttpError(400, FAL_KEY_HINT);
+    const openaiImageModel = input.openaiImageModel === undefined ? current.openaiImageModel ?? '' : input.openaiImageModel;
+    if (typeof openaiImageModel !== 'string' || (openaiImageModel !== '' && !OPENAI_IMAGE_MODEL_ID.test(openaiImageModel))) throw new HttpError(400, 'OpenAI image model: press Test and choose one from the list.');
+    const falModel = input.falModel === undefined ? current.falModel : input.falModel;
+    if (typeof falModel !== 'string' || falModel.length > 120 || !FAL_MODEL_ID.test(falModel)) throw new HttpError(400, 'fal model: choose one from the list, or type a fal model id such as fal-ai/nano-banana/edit.');
     return {
       enabled: bool(input.enabled, current.enabled),
       provider: provider as AiSettings['provider'],
@@ -750,7 +776,20 @@ const VALIDATORS: { [K in SettingsKey]: (input: Obj, current: SettingsMap[K]) =>
       deepseekApiKey: '',
       deepseekModel,
       labelStyledPhotos: bool(input.labelStyledPhotos, current.labelStyledPhotos),
+      picturesProvider: picturesProvider as AiSettings['picturesProvider'],
+      openaiApiKey: '',
+      openaiImageModel,
+      falApiKey: '',
+      falModel,
     };
+  },
+
+  async aiPrompt(input, current) {
+    return validateAiPrompt(input, current);
+  },
+
+  async aiPictures(input, current) {
+    return validateAiPictures(input, current);
   },
 
   async store(input, current) {
@@ -1170,4 +1209,111 @@ function deepMerge(base: unknown, over: unknown): unknown {
 /** Test hook. */
 export function _clearSettingsCache() {
   cache.clear();
+}
+
+// ── AI prompts (Settings → AI writing → Prompt, Settings → AI pictures) ─────
+
+/**
+ * The owner's writing prompt: the instructions (line breaks kept, at most 4,000 characters) and a
+ * guide per field (one line, at most 300), control characters taken out. Nothing else is accepted:
+ * the fixed rules and the answer format are not settings. Also checks the unsaved prompt that "Try on
+ * a photo" sends. Empty means "the shop's default".
+ */
+export function validateAiPrompt(v: unknown, current: AiPromptSettings): AiPromptSettings {
+  if (!v || typeof v !== 'object' || Array.isArray(v)) throw new HttpError(400, 'The prompt must be an object.');
+  const input = v as Obj;
+  for (const k of Object.keys(input)) if (k !== 'instructions' && k !== 'fields') throw new HttpError(400, `Unexpected field: ${k.slice(0, 30)}.`);
+  let instructions = current.instructions ?? '';
+  if (input.instructions !== undefined) {
+    if (typeof input.instructions !== 'string') throw new HttpError(400, 'The instructions must be text.');
+    instructions = cleanInstructions(input.instructions);
+    if (instructions.length > PROMPT_INSTRUCTIONS_MAX) throw new HttpError(400, `The instructions: at most ${PROMPT_INSTRUCTIONS_MAX.toLocaleString('en-GB')} characters.`);
+  }
+  const fields: Partial<Record<WritingFieldId, string>> = {};
+  for (const f of WRITING_FIELDS) {
+    const kept = current.fields?.[f.id];
+    if (typeof kept === 'string' && kept) fields[f.id] = kept;
+  }
+  if (input.fields !== undefined) {
+    if (!input.fields || typeof input.fields !== 'object' || Array.isArray(input.fields)) throw new HttpError(400, 'The field guides must be an object.');
+    const given = input.fields as Obj;
+    for (const k of Object.keys(given)) {
+      const f = WRITING_FIELDS.find((x) => x.id === k);
+      if (!f) throw new HttpError(400, `Unexpected field: ${k.slice(0, 30)}.`);
+      const g = given[k];
+      if (g !== null && typeof g !== 'string') throw new HttpError(400, `${f.label}: must be text.`);
+      const clean = typeof g === 'string' ? cleanGuide(g) : '';
+      if (clean.length > FIELD_GUIDE_MAX) throw new HttpError(400, `${f.label}: at most ${FIELD_GUIDE_MAX} characters.`);
+      if (clean) fields[f.id] = clean;
+      else delete fields[f.id];
+    }
+  }
+  return { instructions, fields };
+}
+
+/**
+ * Settings → AI pictures: 1 to 16 scenes (an id, a name of at most 60 characters, a scene of at most
+ * 400, one line each, ids unique), the default trio (1 to 3 of those ids), and the look and mood (at
+ * most 1,000, '' = the shop's default). The fixed rules are not settings.
+ */
+export function validateAiPictures(input: Obj, current: AiPicturesSettings): AiPicturesSettings {
+  for (const k of Object.keys(input)) if (!['look', 'scenes', 'defaultSet', 'references', 'useReferences'].includes(k)) throw new HttpError(400, `Unexpected field: ${k.slice(0, 30)}.`);
+  let look = current.look ?? '';
+  if (input.look !== undefined) {
+    if (typeof input.look !== 'string') throw new HttpError(400, 'The look and mood must be text.');
+    look = oneLine(input.look);
+    if (look.length > STAGING_LOOK_MAX) throw new HttpError(400, `The look and mood: at most ${STAGING_LOOK_MAX.toLocaleString('en-GB')} characters.`);
+  }
+  let scenes = current.scenes;
+  if (input.scenes !== undefined) {
+    if (!Array.isArray(input.scenes) || input.scenes.length < 1) throw new HttpError(400, 'Keep at least one scene.');
+    if (input.scenes.length > STAGING_MAX_SCENES) throw new HttpError(400, `At most ${STAGING_MAX_SCENES} scenes.`);
+    const seen = new Set<string>();
+    scenes = input.scenes.map((x, i): StagingScene => {
+      const o = (x && typeof x === 'object' && !Array.isArray(x) ? x : {}) as Obj;
+      for (const k of Object.keys(o)) if (k !== 'id' && k !== 'name' && k !== 'scene' && k !== 'style') throw new HttpError(400, `Unexpected field: ${k.slice(0, 30)}.`);
+      if (o.style !== undefined && o.style !== 'references' && o.style !== 'scene') throw new HttpError(400, `Scene ${i + 1}: use my style photos, or this scene description only.`);
+      const id = typeof o.id === 'string' ? o.id : '';
+      if (!SCENE_ID.test(id) || seen.has(id)) throw new HttpError(400, `Scene ${i + 1}: a missing or repeated id.`);
+      seen.add(id);
+      const name = typeof o.name === 'string' ? oneLine(o.name) : '';
+      if (!name) throw new HttpError(400, `Scene ${i + 1}: give it a name.`);
+      if (name.length > STAGING_NAME_MAX) throw new HttpError(400, `Scene ${i + 1}: a name of at most ${STAGING_NAME_MAX} characters.`);
+      const scene = typeof o.scene === 'string' ? oneLine(o.scene) : '';
+      if (!scene) throw new HttpError(400, `${name}: describe the scene.`);
+      if (scene.length > STAGING_SCENE_MAX) throw new HttpError(400, `${name}: a scene of at most ${STAGING_SCENE_MAX} characters.`);
+      return { id, name, scene, ...(o.style === 'scene' ? { style: 'scene' as const } : {}) };
+    });
+  }
+  const givenSet: unknown = input.defaultSet === undefined ? current.defaultSet : input.defaultSet;
+  if (!Array.isArray(givenSet) || givenSet.some((d) => typeof d !== 'string')) throw new HttpError(400, 'Choose the scenes made with one press.');
+  let defaultSet: string[] = [...new Set(givenSet as string[])];
+  // Scenes taken away leave the trio too; an empty trio falls back to the first scenes.
+  if (input.scenes !== undefined && input.defaultSet === undefined) defaultSet = defaultSet.filter((d) => scenes.some((s) => s.id === d));
+  if (defaultSet.some((d) => !scenes.some((s) => s.id === d))) throw new HttpError(400, 'The scenes made with one press must be among the scenes.');
+  if (defaultSet.length > STAGING_TRIO) throw new HttpError(400, `Choose at most ${STAGING_TRIO} scenes to make with one press.`);
+  if (!defaultSet.length) defaultSet = scenes.slice(0, STAGING_TRIO).map((s) => s.id);
+  const references = input.references === undefined ? current.references ?? [] : cleanReferences(input.references);
+  return { look, scenes, defaultSet, references, useReferences: bool(input.useReferences, current.useReferences ?? true) };
+}
+
+/**
+ * The style photos ("Make them look like these"): 0 to 5 of the shop's own stored pictures, each
+ * stored through the style-photo upload (checked, metadata taken out), at most 1.5 MB and 2,048 px.
+ */
+function cleanReferences(v: unknown): string[] {
+  if (!Array.isArray(v)) throw new HttpError(400, 'Style photos: a list.');
+  if (v.length > STYLE_REFS_MAX) throw new HttpError(400, `At most ${STYLE_REFS_MAX} style photos.`);
+  const out: string[] = [];
+  for (const [i, u] of v.entries()) {
+    const name = typeof u === 'string' ? u.replace(/^\/api\/images\//, '') : '';
+    if (!IMAGE_NAME.test(name)) throw new HttpError(400, `Style photo ${i + 1}: upload it again.`);
+    const img = readImage(name);
+    if (!img) throw new HttpError(400, `Style photo ${i + 1} is no longer stored: upload it again.`);
+    const clean = cleanImage(img.bytes, STYLE_MAX);
+    if (!clean || clean.width > STYLE_SIDE_MAX || clean.height > STYLE_SIDE_MAX) throw new HttpError(400, `Style photo ${i + 1} is too large: upload it again (it is made smaller on the way).`);
+    const url = `/api/images/${name}`;
+    if (!out.includes(url)) out.push(url);
+  }
+  return out;
 }

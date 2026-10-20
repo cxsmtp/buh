@@ -322,8 +322,21 @@ export interface AiSettings {
   deepseekApiKey: string;
   /** DeepSeek model for writing (deepseek-flash reads photos; deepseek-v4-pro does not). */
   deepseekModel: string;
-  /** Gemini model for "Style in a bedroom". */
+  /** Gemini model for AI pictures. */
   geminiImageModel: string;
+  /**
+   * Who makes AI pictures (Settings → AI pictures): '' until the owner chooses (then Gemini when a
+   * Gemini key is saved, else OpenAI's or fal's when that key is). Independent of the writer.
+   */
+  picturesProvider: '' | 'gemini' | 'openai' | 'fal';
+  /** The owner's OpenAI API key, sk-… (secret: write-only, never sent to a browser or a backup). */
+  openaiApiKey: string;
+  /** OpenAI image model ('' until Test lists them). */
+  openaiImageModel: string;
+  /** The owner's fal.ai key, key-id:key-secret (secret: write-only, never sent to a browser or a backup). */
+  falApiKey: string;
+  /** The fal model id (one of the curated list, or any fal edit model). */
+  falModel: string;
   /** The shop shows a small "Styled image" tag on styled photos (default on). */
   labelStyledPhotos: boolean;
 }

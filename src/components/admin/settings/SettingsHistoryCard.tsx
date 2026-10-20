@@ -21,6 +21,8 @@ const NAMES: Record<string, string> = {
   theme: 'Festival themes',
   look: 'Look',
   ai: 'AI writing',
+  aiPrompt: 'AI writing prompt',
+  aiPictures: 'AI pictures',
 };
 
 interface Version {

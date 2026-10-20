@@ -8,7 +8,7 @@ import { safeFetch } from './outbound';
 /**
  * Google Gemini (Settings → AI writing), from the server only, with the owner's own key:
  * - "Write from photo" when Gemini is the chosen writer (src/lib/server/aiWriting.ts);
- * - "Style in a bedroom" (src/lib/server/stagePhoto.ts);
+ * - AI pictures: the Picture studio and the editor's styled photos (src/lib/server/stagePhoto.ts);
  * - Test, which reads the models the key can use (Google's live list).
  *
  * One fixed host (generativelanguage.googleapis.com), through safeFetch: https only, no redirects,
@@ -102,7 +102,7 @@ interface ErrorReply {
 }
 
 /** One call to Gemini; Google's answer, or a readable reason (never the key). */
-export async function geminiCall(key: string, req: Omit<GeminiRequest, 'headers'> & { headers?: Record<string, string> }, what = 'Gemini'): Promise<unknown> {
+export async function geminiCall(key: string, req: Omit<GeminiRequest, 'headers'> & { headers?: Record<string, string> }, what = 'Gemini', place = 'Settings → AI writing'): Promise<unknown> {
   const headers: Record<string, string> = { 'x-goog-api-key': key, ...(req.body !== undefined ? { 'content-type': 'application/json' } : {}), ...req.headers };
   let reply: GeminiReply;
   try {
@@ -122,18 +122,18 @@ export async function geminiCall(key: string, req: Omit<GeminiRequest, 'headers'
   const reason = (e.details ?? []).map((d) => String(d?.reason ?? '')).join(' ');
   logEvent('warn', 'gemini_error', { status: reply.status, type: String(e.status ?? '').slice(0, 60) });
   if (reply.status === 401 || reply.status === 403 || /API_KEY_INVALID/.test(reason) || (reply.status === 400 && /api key/i.test(said))) {
-    throw new HttpError(502, 'Google did not accept the Gemini API key. Check it in Settings → AI writing.', {}, { code: 'ai_key_refused', detail: said });
+    throw new HttpError(502, `Google did not accept the Gemini API key. Check it in ${place}.`, {}, { code: 'ai_key_refused', detail: said });
   }
-  if (reply.status === 404) throw new HttpError(502, 'Google does not offer that Gemini model to this key. Press Test in Settings → AI writing and choose another.', {}, { code: 'ai_model_missing', detail: said });
+  if (reply.status === 404) throw new HttpError(502, `Google does not offer that Gemini model to this key. Press Test in ${place} and choose another.`, {}, { code: 'ai_model_missing', detail: said });
   if (reply.status === 429) throw new HttpError(502, 'Google’s limit for your Gemini key was reached (or it needs billing switched on). Wait a minute and try again.', {}, { code: 'ai_busy', detail: said });
   if (reply.status >= 500) throw new HttpError(502, 'Gemini is busy right now. Please try again in a moment.', {}, { code: 'ai_busy', detail: said });
   throw new HttpError(502, `Gemini said: ${said || `error ${reply.status}`}`, {}, { code: 'ai_error', detail: said });
 }
 
 /** POST /models/<id>:generateContent. The model id is checked first (it goes in the path). */
-export function generateContent(key: string, model: string, request: Record<string, unknown>, { timeoutMs, maxBytes, what }: { timeoutMs: number; maxBytes: number; what?: string }): Promise<unknown> {
-  if (!GEMINI_MODEL_ID.test(model)) return Promise.reject(new HttpError(409, 'Choose a Gemini model first: press Test in Settings → AI writing.', {}, { code: 'ai_no_model' }));
-  return geminiCall(key, { method: 'POST', path: `/models/${model}:generateContent`, body: JSON.stringify(request), timeoutMs, maxBytes }, what);
+export function generateContent(key: string, model: string, request: Record<string, unknown>, { timeoutMs, maxBytes, what, place = 'Settings → AI writing' }: { timeoutMs: number; maxBytes: number; what?: string; place?: string }): Promise<unknown> {
+  if (!GEMINI_MODEL_ID.test(model)) return Promise.reject(new HttpError(409, `Choose a Gemini model first: press Test in ${place}.`, {}, { code: 'ai_no_model' }));
+  return geminiCall(key, { method: 'POST', path: `/models/${model}:generateContent`, body: JSON.stringify(request), timeoutMs, maxBytes }, what, place);
 }
 
 // ── the answer ─────────────────────────────────────────────────────────────
