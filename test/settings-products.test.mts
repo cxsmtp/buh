@@ -107,6 +107,8 @@ test('a new product gets a server id, its photo stored as a file, and goes first
   const created = products.createProduct({
     ...template,
     id: 'attacker-chosen',
+    // A new product: not the template's SKU (SKUs are unique; the shop makes one).
+    sku: undefined,
     title: 'New Linen Set',
     featuredImage: `data:image/png;base64,${png.toString('base64')}`,
     galleryImages: [],

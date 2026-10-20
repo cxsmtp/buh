@@ -12,6 +12,7 @@ import { startMonitor } from './monitor';
 import { startCardSweep } from './payments';
 import { auditStaffRestoreOnce } from './staffAuth';
 import { startFestivalRefresh } from './theme';
+import { startSeoWatch } from './seoWatch';
 import { logEvent } from './log';
 import { liveGateways } from '@/lib/otpService';
 
@@ -34,6 +35,8 @@ export async function onStartup() {
   step('drive_secrets', migrateDriveSecrets);
   step('backup_schedule', startBackupSchedule);
   step('festival_refresh', startFestivalRefresh);
+  // A festival's gift page going live: told to IndexNow once (only when the owner switched IndexNow on).
+  step('seo_watch', startSeoWatch);
   step('monitor', startMonitor);
   step('chat', startChat);
   // Card orders not paid within 10 minutes: stopped at Stripe, cancelled, pieces back on sale.

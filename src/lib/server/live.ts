@@ -159,6 +159,15 @@ const seen: Partial<Record<Channel, number>> = {};
 let checkedAt = 0;
 let lastVersions: Record<Channel, number> | null = null;
 
+/**
+ * Look at the counters again on the next read (not up to 2 seconds later): for pages that are
+ * built once and then kept (src/lib/server/pageCache.ts), which must not be built from a copy
+ * of the settings or catalogue that another part of the server has just changed.
+ */
+export function readFreshNow(): void {
+  checkedAt = 0;
+}
+
 export function changedElsewhere(channel: Channel): boolean {
   const now = Date.now();
   if (!lastVersions || now - checkedAt > 2000) {

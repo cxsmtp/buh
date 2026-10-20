@@ -11,6 +11,11 @@ import { getSettings } from './settings';
 import { logEvent } from './log';
 import { stagedPhotosFor } from './stagedPhotos';
 import { cleanGiftLines } from './giftLines';
+import { queueIndexNow } from './indexNow';
+import { refreshShopPages } from './pageCache';
+import { allocateSku, checkTypedSku, noteSkuUsed, skuOwner } from './sku';
+import { cleanSeoText } from '@/lib/seo/text';
+import { SEO_LIMITS } from '@/lib/seo/types';
 import { isDuvetProduct } from '@/lib/measurements';
 import { WEIGHT_GRAMS_MAX, WEIGHT_GRAMS_MIN } from '@/lib/shipmentWeight';
 import { auditBacklog, auditMove, insertMove, type SizeChange, type StockMove } from './stockLedger';
@@ -205,6 +210,7 @@ export function getProduct(id: string): StoredProduct | undefined {
 export function invalidateProducts() {
   cache = null;
   bump('catalog'); // open pages reload the catalogue
+  refreshShopPages({ home: false }); // the category and festival pages show it at once
 }
 
 /**
@@ -243,6 +249,7 @@ export function createProduct(input: unknown, actor = 'admin'): StoredProduct {
   seedIfEmpty();
   let movedNow: StockMove | null = null;
   inTransaction(() => {
+    settleSku(rest as Product, product.id);
     // New products go first in the catalogue.
     getDb()
       .prepare('INSERT INTO products (id, data, stock, active, position, updated_at) VALUES (?, ?, 0, ?, (SELECT COALESCE(MIN(position), 0) - 1 FROM products), ?)')
@@ -253,6 +260,8 @@ export function createProduct(input: unknown, actor = 'admin'): StoredProduct {
   });
   invalidateProducts();
   recordMove(movedNow, product.title);
+  // On sale now: Bing and the others hear of it (only when IndexNow is switched on).
+  if (active) queueIndexNow([`/p/${product.id}`]);
   return getProduct(product.id)!;
 }
 
@@ -276,6 +285,9 @@ export function updateProduct(id: string, input: unknown, actor = 'admin'): Stor
   const db = getDb();
   let movedNow: StockMove | null = null;
   inTransaction(() => {
+    // A product saved without an SKU gets one now (older products, on their next save).
+    settleSku(rest as Product, id);
+    product.sku = rest.sku;
     db.prepare('UPDATE products SET data = ?, active = ?, updated_at = ? WHERE id = ?').run(JSON.stringify(rest), active ? 1 : 0, new Date().toISOString(), id);
     const moved: SizeChange[] = [];
     for (const [size, qty] of Object.entries(stock ?? {})) {
@@ -308,6 +320,7 @@ export function updateProduct(id: string, input: unknown, actor = 'admin'): Stor
   });
   invalidateProducts();
   recordMove(movedNow, product.title);
+  if (active || existing.active) queueIndexNow([`/p/${id}`]);
   return getProduct(id)!;
 }
 
@@ -319,6 +332,7 @@ function productDiff(before: StoredProduct, after: Product & { active?: boolean 
   };
   put('price', before.price, after.price);
   put('title', before.title, after.title);
+  put('sku', before.sku ?? '', after.sku ?? '');
   put('category', before.category, after.category);
   put('active', before.active, after.active);
   const deltas = (p: Product) => Object.fromEntries(p.profiles.map((pr) => [pr.id, pr.priceDelta || 0]));
@@ -391,6 +405,8 @@ export function duplicateProduct(id: string, key: string, actor = 'admin'): { pr
     if (replay) return;
     const pos = (db.prepare('SELECT position FROM products WHERE id = ?').get(id) as { position: number }).position;
     db.prepare('UPDATE products SET position = position + 1 WHERE position > ?').run(pos);
+    // The copy is its own product: its own SKU.
+    (data as Product).sku = allocateSku(title, original.category, copyId);
     db.prepare('INSERT INTO products (id, data, stock, active, position, updated_at) VALUES (?, ?, 0, 0, ?, ?)').run(copyId, JSON.stringify(data), pos + 1, new Date().toISOString());
     writeStock(copyId, Object.fromEntries(original.profiles.map((s) => [s.id, 0])));
     db.prepare('INSERT INTO kv (key, data, updated_at) VALUES (?, ?, ?)').run(`dup:${key}`, JSON.stringify({ sourceId: id, copyId }), new Date().toISOString());
@@ -399,6 +415,34 @@ export function duplicateProduct(id: string, key: string, actor = 'admin'): { pr
   invalidateProducts();
   audit('product.duplicated', { by: actor, productId: id, copyId, title });
   return { product: getProduct(copyId)!, replayed: false };
+}
+
+/** Products (not removed) that have no SKU yet. */
+export function productsWithoutSku(): StoredProduct[] {
+  return listProducts({ includeHidden: true }).filter((p) => !p.sku);
+}
+
+/**
+ * Inventory → "Fill them in": an SKU for every product (not removed) that has none, in one audited
+ * step (nothing is saved if the audit log can't be written). SKUs already there are never changed;
+ * pressed again, it finds nothing to do.
+ */
+export function fillMissingSkus(actor = 'admin'): Array<{ id: string; title: string; sku: string }> {
+  const db = getDb();
+  const filled: Array<{ id: string; title: string; sku: string }> = [];
+  inTransaction(() => {
+    const rows = db.prepare("SELECT id, data FROM products WHERE archived = 0 AND (json_extract(data, '$.sku') IS NULL OR json_extract(data, '$.sku') = '') ORDER BY position, rowid").all() as Array<{ id: string; data: string }>;
+    const write = db.prepare('UPDATE products SET data = ?, updated_at = ? WHERE id = ?');
+    for (const r of rows) {
+      const p = JSON.parse(r.data) as Product;
+      p.sku = allocateSku(p.title, p.category, r.id);
+      write.run(JSON.stringify(p), new Date().toISOString(), r.id);
+      filled.push({ id: r.id, title: p.title, sku: p.sku });
+    }
+    if (filled.length) auditOrThrow('product.skus_filled', { by: actor, count: filled.length, products: filled.slice(0, 200).map((f) => ({ productId: f.id, sku: f.sku })) });
+  });
+  if (filled.length) invalidateProducts();
+  return filled;
 }
 
 /** Remove from the shop for good (kept for past orders); restore brings it back hidden. */
@@ -424,6 +468,23 @@ export function reorderProducts(ids: unknown): void {
 // ── validation ──────────────────────────────────────────────────────────────
 
 /** The stored product without going through the cache (used during validation). */
+function seoField(v: unknown, field: string, max: number): string | undefined {
+  if (v === undefined || v === null) return undefined;
+  if (typeof v !== 'string') throw new HttpError(400, `${field} must be text.`);
+  if (v.length > max + 100) throw new HttpError(400, `${field}: at most ${max} characters.`);
+  return cleanSeoText(v, max) || undefined;
+}
+
+/** The SKU as saved: the one given (checked again here, inside the save), else a new one. */
+function settleSku(product: Product, exceptId: string): void {
+  if (product.sku) {
+    if (skuOwner(product.sku, exceptId)) throw new HttpError(409, `Another product already has the SKU ${product.sku}.`, {}, { code: 'sku_taken' });
+    noteSkuUsed(product.sku);
+  } else {
+    product.sku = allocateSku(product.title, product.category, exceptId);
+  }
+}
+
 function getProductRaw(id: string): Product | undefined {
   const r = getDb().prepare('SELECT data FROM products WHERE id = ?').get(id) as { data: string } | undefined;
   return r ? (JSON.parse(r.data) as Product) : undefined;
@@ -521,8 +582,8 @@ export function validateProduct(input: unknown): StoredProduct {
   // A product may keep a category the owner later removed; new values must exist.
   const existing = typeof p.id === 'string' ? getProductRaw(p.id) : undefined;
   if (category !== existing?.category && !getSettings('catalog').categories.some((c) => c.id === category)) throw new HttpError(400, 'Unknown category: add it in Settings → Catalogue first.');
-  const sku = text(p.sku, 'SKU', 40);
-  if (sku && !/^[A-Za-z0-9][A-Za-z0-9 ._\/-]*$/.test(sku)) throw new HttpError(400, 'SKU may use letters, digits, spaces and . _ / -');
+  // Checked (and refused when another product has it); empty: the shop makes one when it saves.
+  const sku = checkTypedSku(text(p.sku, 'SKU', 60), { productId: typeof p.id === 'string' ? p.id : undefined, current: existing?.sku, title, category });
   // The weaves in Settings → Catalogue; a product may keep one the list no longer has (as with categories).
   const weaves = getSettings('catalog').weaves;
   const weave = text(p.weave, 'Weave', 30) || weaves[0] || 'Sateen';
@@ -567,6 +628,9 @@ export function validateProduct(input: unknown): StoredProduct {
     slug: title.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '').slice(0, 80),
     description: text(p.description, 'Description', 4000),
     shortDescription: text(p.shortDescription, 'Short description', 300),
+    // The owner's own words for Google (Publish step); empty: the shop writes them.
+    seoTitle: seoField(p.seoTitle, 'SEO title', SEO_LIMITS.title),
+    seoDescription: seoField(p.seoDescription, 'SEO description', SEO_LIMITS.description),
     // Gift lines by festival: kept as saved when the browser sends none.
     giftLines: p.giftLines === undefined ? existing?.giftLines : cleanGiftLines(p.giftLines),
     category,

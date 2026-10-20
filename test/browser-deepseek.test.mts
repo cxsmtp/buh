@@ -237,10 +237,14 @@ for (const width of [375, 1280]) {
     assert.match(full, /^Indigo motifs stamped by hand/);
     assert.match(full, /\n\n• Hand block printed indigo\n• Fits a King mattress$/);
     // The gift lines are kept with the draft (and saved with the product on publish).
-    await page.waitForTimeout(1500);
-    const draft = (await (await api('GET', '/api/admin/products/drafts/new')).json()).draft.data;
-    assert.equal(draft.giftLines.everyday, 'A everyday gift for a calm home.', 'the batch wrote the everyday line too');
-    if (festivals.length) assert.equal(draft.giftLines[festivals[0].id], `My own ${festivals[0].id} line.`);
+    // (The draft saves itself a moment after the last change; the SKU filled in by the shop is one too.)
+    let draft: { giftLines?: Record<string, string> } = {};
+    for (let i = 0; i < 40 && !draft.giftLines?.everyday; i++) {
+      await page.waitForTimeout(250);
+      draft = (await (await api('GET', '/api/admin/products/drafts/new')).json()).draft?.data ?? {};
+    }
+    assert.equal(draft.giftLines?.everyday, 'A everyday gift for a calm home.', 'the batch wrote the everyday line too');
+    if (festivals.length) assert.equal(draft.giftLines?.[festivals[0].id], `My own ${festivals[0].id} line.`);
     assert.deepEqual(await overflow(page), []);
     assert.deepEqual(errors, []);
     await ctx.close();

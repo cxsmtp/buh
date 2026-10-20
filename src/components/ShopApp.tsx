@@ -93,7 +93,19 @@ function writeSearch(search: string, mode: 'push' | 'replace') {
  * own page at the owner's private link (src/lib/server/frontGate.ts), so nothing in the shop's
  * pages or scripts leads to it.
  */
-export function ShopApp({ initialProductId, collection }: { initialProductId?: string; collection?: ShopCollection } = {}) {
+export function ShopApp({
+  initialProductId,
+  collection,
+  festivalLink,
+  explore,
+}: {
+  initialProductId?: string;
+  collection?: ShopCollection;
+  /** The live festival's gift page (rendered on the server, src/app/page.tsx): under the banner. */
+  festivalLink?: React.ReactNode;
+  /** Links to the category and festival pages (rendered on the server): above the shop's promise. */
+  explore?: React.ReactNode;
+} = {}) {
   // What the shop shows (search, filters, sort): mirrored in the address bar so it can be shared and Back works.
   const [filters, setFilters] = useState<Filters>(EMPTY_FILTERS);
   const [filterOpen, setFilterOpen] = useState(false);
@@ -448,6 +460,7 @@ export function ShopApp({ initialProductId, collection }: { initialProductId?: s
           ) : (
           <>
           <HeroBanner brand={brandSettings} pieces={catalogLoaded ? products.length : null} />
+          {festivalLink}
 
           <StoryChips
             stories={stories}
@@ -557,6 +570,8 @@ export function ShopApp({ initialProductId, collection }: { initialProductId?: s
               </div>
             ) : null}
           </div>
+
+          {!collection && explore}
 
           {/* The shop's promise */}
           <div className="border-y border-line px-5 py-10 sm:py-12 text-center my-8 space-y-3">

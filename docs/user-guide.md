@@ -203,7 +203,7 @@ Customers confirm their number with one WhatsApp message they send you; nothing 
 
 **Inventory** lists every product with a photo and its pieces per size as coloured chips: **brick red** sold out, **ochre** low (at or below the warning level in Settings → Catalogue, 2 unless you change it), **sage green** in stock. Most designs are one or two pieces, so stock is kept per size.
 
-- **Search** by name or SKU (your own stock code, set under the editor's **More details**).
+- **Search** by name or SKU. Every product gets an SKU made by the shop, like `BUH-HBS-INDCHV-007` (prefix, category code, a code from the name, and a running number that is never reused); the editor fills it in next to the name as you type, with **Regenerate**, and you can type your own codes instead (an SKU another product has is refused, with the next free one offered). Changing a saved SKU asks first: it may already be on labels or marketplace listings. Products from before SKUs: Inventory shows **N products have no SKU → Fill them in** (one press; SKUs already there are never changed), and each also gets one on its next save. The prefix and each category's code are in Settings → Catalogue → **SKUs**; a size's SKU adds the size (`…-007-KING`), as in the Amazon / Noon export and on order lines.
 - **Show:** All, **Low** (a few pieces left in all), **Sold out** (none left in any size), **Hidden**, **Removed**; and a **Category** list. The two cards at the top (sold out, running low) open those lists, and the number on **Inventory** in the bottom bar is the same count.
 - Tap a product to open it: the sizes with **− / +**, then the quick actions below.
 - **Edit** opens the step-by-step editor; **+ Add product** starts a new one (see below).
@@ -417,6 +417,33 @@ The greeting is a short, gracious line (for example *Eid Mubarak* with *Fresh li
 - Dates are built in and checked online every week from public holiday calendars (UAE official dates win for the Islamic festivals); **Refresh dates now** checks straight away.
 - **Always this look** keeps one theme; **Everyday look only** turns themes off; untick **Show** to skip a festival.
 - **Preview** (at the top of the section) shows any festival's greeting band and bar line before you choose it; nothing changes in the shop until you pick it under **Always this look**.
+
+### Search (SEO): Google, Bing and the festival gift pages
+
+What happens by itself:
+
+- **Category pages:** every category in Settings → Catalogue has its own page, `https://yourdomain.ae/shop/<category>` (for example `/shop/bedsheets`), with its products, a heading and a short introduction written from your delivery settings.
+- **Festival gift pages:** the major festivals have their own page, the same address every year: `/gifts/diwali`, `/gifts/eid-al-fitr`, `/gifts/eid-al-adha`, `/gifts/ramadan`, `/gifts/uae-national-day`, `/gifts/christmas`, `/gifts/new-year` and more. Products with a gift line for that festival come first, with the line. A page goes **live 45 days before** the festival until it ends: Google gets it in the sitemap with a high priority, the home page links to it, and the home page's title becomes the festival's (for example "Diwali gift bedsheets & bed sets in the UAE"), then goes back by itself. Between seasons the page stays at the same address with next year's dates, so it keeps what it has earned in Google.
+- **Product pages** tell Google their price per size in AED, whether each size is in stock, the SKU and the photos (no ratings: the shop has no reviews to show). Titles are "Name | Shop" and descriptions come from the short description, cut at a whole sentence.
+- **`/sitemap.xml`** lists the home page, the category pages, the festival pages and every product on sale (with its photos); hidden and removed products, shared links and private pages never. **`/robots.txt`** points to it.
+
+Where to control it: **Settings → Search (SEO)** (the Overview shows a short summary too).
+
+- **Festival schedule:** each festival's next dates, when its page goes live and ends, and **Automatic / Off / Always live**. Off: the page is not in Google (noindex), not in the sitemap and not linked. Smaller festivals (Flag Day, Isra and Mi'raj…) are Off until you choose Automatic. **Edit words** changes its title, description, heading and introduction; empty fields stay automatic; **Reset to automatic** goes back.
+- **What Google sees:** every page as a Google result (title, address, description), with its status (Live, Waiting until…, Off) and problems (title too long, no description, two products with the same title, no photo). **Edit** changes a page's words; for a product they are also in the product editor's **Publish** step under **Search (Google)**, with a live preview and character counts.
+- **Health checks**, **Open sitemap**, and what a product page tells Google (read-only).
+- **Days before a festival** its page goes live (7 to 90, 45 unless you change it).
+
+**Google Search Console, once (about 5 minutes):**
+
+1. Open search.google.com/search-console, add a property, choose **URL prefix** and type `https://beautifuluaehome.com`.
+2. Choose **HTML tag**, copy the code inside `content="…"`, paste it in Settings → Search (SEO) → **Google Search Console code** and press **Save**.
+3. Back in Search Console press **Verify** (a minute or two after saving).
+4. Open **Sitemaps**, type `sitemap.xml` and press **Submit**. Google then comes back by itself; the shop keeps the sitemap current. (Google no longer takes sitemap "pings": submitting once is all it needs.)
+
+Bing Webmaster Tools can import the site from Search Console, or take its own code (**Bing Webmaster code**). **IndexNow** (off unless you switch it on) tells Bing and others at once when you publish or change a product and when a festival page goes live; the last pings are listed there. It needs the shop's `https://` address set (`NEXT_PUBLIC_APP_URL`).
+
+Search engines decide themselves when and where a page shows: the shop makes every page clear, fast and honest, and tells them as soon as something changes, but no one can promise a position in Google.
 
 ### Instagram, WhatsApp and the product feed
 

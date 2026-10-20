@@ -492,6 +492,7 @@ export const AdminOrdersTab: React.FC<AdminOrdersTabProps> = ({
                         <img src={i.image} alt={i.title} className="w-6 h-6 rounded object-cover" />
                         <span className="truncate">
                           <strong>{i.quantity}x</strong> {i.title} ({i.mattressSize ? i.profileName.split(' ')[0] : i.profileName})
+                          {i.sku && <span className="text-ink-muted font-mono text-[11px]"> · {i.sku}</span>}
                         </span>
                       </div>
                     ))}

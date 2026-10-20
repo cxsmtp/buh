@@ -13,6 +13,8 @@ import { DEFAULT_WEAVES } from '@/data/catalogDefaults';
 import { blankVariant, defaultTypeFor, productTypeOf } from '@/lib/productType';
 import { StageInBedroom } from './StageInBedroom';
 import { WriteFromPhoto } from './WriteFromPhoto';
+import { SkuField } from './SkuField';
+import { ProductSeoFields } from '../SnippetPreview';
 
 /**
  * Add or edit a product in four steps, made for a phone:
@@ -44,6 +46,11 @@ interface Draft {
   productType: ProductType;
   title: string;
   sku: string;
+  /** The SKU is the shop's suggestion (it follows the name and category until the owner types one). */
+  skuAuto: boolean;
+  /** Optional words for Google (empty: made by the shop). */
+  seoTitle: string;
+  seoDescription: string;
   shortDescription: string;
   description: string;
   category: string;
@@ -87,6 +94,9 @@ function draftFrom(product: Product | null, catalog: CatalogSettings): Draft {
       productType,
       title: '',
       sku: '',
+      skuAuto: true,
+      seoTitle: '',
+      seoDescription: '',
       shortDescription: '',
       description: '',
       category,
@@ -122,6 +132,10 @@ function draftFrom(product: Product | null, catalog: CatalogSettings): Draft {
     productType: productTypeOf(product),
     title: product.title,
     sku: product.sku ?? '',
+    // An existing SKU stays; one without gets an SKU made when it is saved (or press Regenerate).
+    skuAuto: false,
+    seoTitle: product.seoTitle ?? '',
+    seoDescription: product.seoDescription ?? '',
     shortDescription: product.shortDescription,
     description: product.description,
     category: product.category,
@@ -398,6 +412,8 @@ export function ProductEditor({
       productType: draft.productType,
       title: draft.title.trim(),
       sku: draft.sku.trim(),
+      seoTitle: draft.seoTitle.trim(),
+      seoDescription: draft.seoDescription.trim(),
       shortDescription: draft.shortDescription.trim(),
       description: draft.description.trim(),
       giftLines: Object.fromEntries(Object.entries(draft.giftLines ?? {}).filter(([, v]) => v.trim())),
@@ -434,11 +450,21 @@ export function ProductEditor({
       body.stockBySize = Object.fromEntries(draft.sizes.map((s) => [s.id, draft.stock[s.id] ?? 0]));
     }
 
+    // An SKU may already be on labels and marketplace listings: changing it is asked once.
+    if (product?.sku && draft.sku.trim().toUpperCase() !== product.sku.toUpperCase()) {
+      if (!window.confirm(`Change the SKU from ${product.sku} to ${draft.sku.trim() || 'a new one made by the shop'}? It may already be on labels or marketplace listings.`)) return;
+    }
     setSaving(true);
     const res = product
       ? await sendJson<{ product?: Product; message?: string }>('PATCH', `/api/admin/products/${encodeURIComponent(product.id)}`, { product: body })
       : await postJson<{ product?: Product; message?: string }>('/api/admin/products', { product: body });
     setSaving(false);
+    if (res.status === 409 && (res.data as { code?: string }).code === 'sku_taken') {
+      // Another product has this SKU: back to Details, with the next free one offered.
+      const suggestion = (res.data as { suggestion?: string }).suggestion;
+      setDraft((d) => ({ ...d, step: 1, ...(suggestion ? { sku: suggestion, skuAuto: false } : {}) }));
+      return setError(`${res.data.message || 'Another product has this SKU.'}${suggestion ? ' The free one is filled in: save again to use it.' : ''}`);
+    }
     if (res.status === 409 && product) {
       // A sale (or another phone) changed the stock meanwhile: show today's figures and let them save again.
       const fresh = await getJson<{ products: Product[] }>('/api/admin/products');
@@ -623,6 +649,16 @@ export function ProductEditor({
               </label>
               <input id="pe-title" className={field} value={draft.title} maxLength={160} onChange={(e) => set('title', e.target.value)} placeholder="e.g. Jaipur Indigo Hand Block Set" />
             </div>
+            <SkuField
+              value={draft.sku}
+              auto={draft.skuAuto}
+              title={draft.title}
+              category={draft.category}
+              productId={product?.id}
+              fieldClass={field}
+              labelClass={label}
+              onChange={(sku, skuAuto) => setDraft((d) => ({ ...d, sku, skuAuto }))}
+            />
             <div>
               <label className={label} htmlFor="pe-cat">
                 Category
@@ -680,15 +716,9 @@ export function ProductEditor({
             </div>
             <details className="rounded-xl border border-line bg-surface px-3 py-1">
               <summary className="min-h-11 flex items-center gap-2 font-semibold cursor-pointer">
-                <ChevronDown className="w-4 h-4" aria-hidden="true" /> More details (SKU, description, {simple ? 'material' : 'fabric'}, colours){draft.colors.length > 0 && ` · ${draft.colors.length} ${draft.colors.length === 1 ? 'colour' : 'colours'}`}
+                <ChevronDown className="w-4 h-4" aria-hidden="true" /> More details (description, {simple ? 'material' : 'fabric'}, colours){draft.colors.length > 0 && ` · ${draft.colors.length} ${draft.colors.length === 1 ? 'colour' : 'colours'}`}
               </summary>
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 pb-3">
-                <div>
-                  <label className={label} htmlFor="pe-sku">
-                    SKU (your stock code)
-                  </label>
-                  <input id="pe-sku" className={field} value={draft.sku} maxLength={40} onChange={(e) => set('sku', e.target.value)} placeholder="e.g. BUH-JAI-01" />
-                </div>
                 <div>
                   <label className={label} htmlFor="pe-material">
                     Material
@@ -995,6 +1025,16 @@ export function ProductEditor({
                 </label>
               ))}
             </div>
+            <ProductSeoFields
+              name={draft.title}
+              url={`${typeof window === 'undefined' ? '' : window.location.origin}/p/${product?.id ?? 'new-product'}`}
+              categoryLabel={catalog.categories.find((c) => c.id === draft.category)?.label}
+              shortDescription={draft.shortDescription}
+              description={draft.description}
+              seoTitle={draft.seoTitle ?? ''}
+              seoDescription={draft.seoDescription ?? ''}
+              onChange={(patch) => setDraft((d) => ({ ...d, ...patch }))}
+            />
           </section>
         )}
       </div>
