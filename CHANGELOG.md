@@ -6,7 +6,7 @@
 - **"Book the courier" fits a phone.** Pickup Date has its own row and Weight and Parcels sit side by side, so nothing spills out of its box.
 - **Status.**
   - **Benchmark:** 3 alternating rounds (main first), 0 failed requests. Storefront branch 873 / 893 / 920 req/s vs main 902 / 927 / 945 (p95 108 / 102 / 119 vs 153 / 106 / 86 ms); catalogue API branch 825 / 850 / 781 vs main 830 / 803 / 845; serviceability API branch 707 / 695 / 798 vs main 659 / 705 / 738. One CSS rule and one dialog's layout changed, nothing on the server, so these differences are noise.
-  - **Tests:** TESTS_PLACEHOLDER
+  - **Tests:** 1,064 passed, 0 failed (unit and end-to-end, including the 2 new phone checks).
   - **Dependency audit:** production 0 vulnerabilities; no new packages.
   - **Security scan:** no server, route or data change. Two new browser checks fail before the fix and pass after: the chat box text was 14px, and the date box was 98px wide. Real iPhone Safari wasn't available; the checks test the 16px rule and box widths behind the zoom.
 
