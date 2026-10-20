@@ -12,7 +12,7 @@ import { spawn } from 'node:child_process';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { after, before, test } from 'node:test';
+import { after, before, mock, test } from 'node:test';
 import Database from 'better-sqlite3';
 import { tempDataDir } from './helpers.mjs';
 import { addForeignFile, makeServiceAccount, startGoogleMock, type GoogleMock } from './google-drive-mock.mjs';
@@ -36,7 +36,8 @@ for (const k of ['log', 'warn', 'error'] as const) {
 
 const drive = await import('@/lib/server/driveBackup');
 const backup = await import('@/lib/server/backup');
-const { kvGet } = await import('@/lib/server/kv');
+const { kvGet, kvSet } = await import('@/lib/server/kv');
+const { localBackupTime } = await import('@/lib/server/backupPolicy');
 const { logEvent, redact } = await import('@/lib/server/log');
 const { issuePhoneToken } = await import('@/lib/server/phoneToken');
 const { placeOrder } = await import('@/lib/server/orders');
@@ -219,6 +220,109 @@ test('retention keeps the newest N copies and deletes only copies this feature m
   for (const id of [...foreign, elsewhere]) assert.ok(google.files.has(id));
 });
 
+const H = 3600_000;
+const DAY = 24 * H;
+const localNames = () => (fs.existsSync(path.join(dir, 'backups')) ? fs.readdirSync(path.join(dir, 'backups')).filter((f) => f.startsWith('buh-backup-')) : []);
+
+/** Undo a test's backups and copies (named in the future: "latest" for the restore test otherwise). */
+function snapshotCopies() {
+  const files = new Set(google.files.keys());
+  const tracked = kvGet('backup:drive-files')?.data ?? [];
+  const local = new Set(localNames());
+  return () => {
+    for (const id of [...google.files.keys()]) if (!files.has(id)) google.files.delete(id);
+    kvSet('backup:drive-files', tracked);
+    kvSet('backup:clock', {});
+    for (const n of localNames()) if (!local.has(n)) fs.rmSync(path.join(dir, 'backups', n));
+  };
+}
+
+test('the server’s clock a year ahead for 5 backups: no copy is removed in Drive or on the server, the hub warns; put right, all is as before', async () => {
+  enable(60);
+  const undo = snapshotCopies();
+  // One backup a day for 10 days with the server's clock and Google's agreeing, then 5 with the
+  // server's a year ahead (Google's: the real time), then the clock put right.
+  const start = Date.now() + DAY;
+  const step = async (server: number, googleTime: number) => {
+    mock.timers.setTime(server);
+    google.clock = () => googleTime;
+    const r = await backup.createBackup(new Date(server));
+    const st = await drive.copyBackupToDrive(r.file);
+    assert.equal(st?.lastError, undefined, st?.lastError);
+  };
+  mock.timers.enable({ apis: ['Date'], now: start });
+  try {
+    for (let i = 0; i < 10; i++) await step(start + i * DAY, start + i * DAY);
+    const uploadStart = google.requests.filter((r) => r.method === 'POST' && r.path.startsWith('/upload/drive/v3/files')).at(-1)!;
+    assert.match(uploadStart.path, /fields=[^&]*createdTime/, 'Google is asked when it made the copy');
+    const tracked = kvGet<Array<{ id: string; createdTime?: string }>>('backup:drive-files')!.data;
+    assert.ok(tracked.every((c) => c.createdTime), 'each copy keeps Google’s createdTime');
+    const history = ours().map((f) => f.id);
+    assert.ok(history.length >= 10, String(history.length));
+    const last = start + 9 * DAY;
+    const localHistory = localNames().filter((n) => last - localBackupTime(n)! <= 14 * DAY);
+    assert.ok(localHistory.length >= 10);
+    for (let j = 1; j <= 5; j++) await step(last + 365 * DAY + j * DAY, last + j * DAY);
+    for (const id of history) assert.ok(google.files.has(id), 'every copy from before is still in Drive');
+    assert.equal(ours().length, history.length + 5);
+    for (const n of localHistory) assert.ok(localNames().includes(n), `${n} is still on the server`);
+    assert.ok(logged.some((l) => l.includes('backup_clock_skew')), 'logged');
+    assert.equal(drive.serverClockSuspect(), true);
+    const health = backup.backupHealth();
+    assert.equal(health.clockWarning, drive.CLOCK_WRONG);
+    assert.notEqual(health.level, 'ok');
+    assert.ok(monitor.currentProblems().some((p) => p.id === 'clock' && p.level === 'warning' && p.text === drive.CLOCK_WRONG));
+    // The clock put right: the warning goes, and Drive's retention runs as before (by Google's times).
+    const fixed = last + 6 * DAY;
+    await step(fixed, fixed);
+    assert.equal(drive.serverClockSuspect(), false);
+    assert.equal(backup.backupHealth().clockWarning, undefined);
+    for (const id of history) assert.ok(google.files.has(id), 'within the rules (4 a day, 60 copies): all kept');
+  } finally {
+    mock.timers.reset();
+    google.clock = () => new Date().getTime();
+    undo();
+  }
+});
+
+test('copies recorded before createdTime was kept: dated from Drive’s list, and never removed until they are', async (t) => {
+  enable(60);
+  const undo = snapshotCopies();
+  t.after(undo);
+  const now = Date.now();
+  for (let i = 0; i < 3; i++) {
+    const r = await backup.createBackup(new Date(now + (i + 30) * 60_000));
+    assert.equal((await drive.copyBackupToDrive(r.file))?.lastError, undefined);
+  }
+  const tracked = kvGet<Array<{ id: string; name: string; size: number; at: string; createdTime?: string }>>('backup:drive-files')!.data;
+  const [oldId, recentId] = tracked.slice(-3).map((c) => c.id);
+  // Google made one 400 days ago and one yesterday; an older version recorded neither's createdTime.
+  google.files.get(oldId)!.createdTime = new Date(now - 400 * DAY).toISOString();
+  google.files.get(recentId)!.createdTime = new Date(now - DAY).toISOString();
+  kvSet('backup:drive-files', tracked.map((c) => (c.id === oldId || c.id === recentId ? { id: c.id, name: c.name, size: c.size, at: new Date(now - 400 * DAY).toISOString() } : c)));
+  // Drive's list fails: neither can be dated, so neither is removed (even the old-looking one).
+  google.before = (req) => (req.method === 'GET' && req.path.startsWith('/drive/v3/files?') ? { status: 500, json: { error: { code: 500, message: 'Backend Error' } } } : undefined);
+  try {
+    const r = await backup.createBackup(new Date(now + 40 * 60_000));
+    assert.equal((await drive.copyBackupToDrive(r.file))?.lastError, undefined, 'a failed list never fails the copy');
+  } finally {
+    google.before = null;
+  }
+  assert.ok(google.files.has(oldId) && google.files.has(recentId), 'nothing undated was removed');
+  const undated = kvGet<Array<{ id: string; createdTime?: string }>>('backup:drive-files')!.data.filter((c) => !c.createdTime).map((c) => c.id);
+  assert.deepEqual(undated.sort(), [oldId, recentId].sort());
+  // The list works: both are dated with Google's times; the one Google made 400 days ago goes, yesterday's stays.
+  const r = await backup.createBackup(new Date(now + 41 * 60_000));
+  assert.equal((await drive.copyBackupToDrive(r.file))?.lastError, undefined);
+  const list = google.requests.filter((q) => q.method === 'GET' && q.path.startsWith('/drive/v3/files?')).at(-1)!;
+  assert.match(decodeURIComponent(list.path), /fields=nextPageToken,files\(id,createdTime\)/);
+  assert.ok(!google.files.has(oldId), 'Google says it is 400 days old: removed');
+  assert.ok(google.files.has(recentId));
+  const after = kvGet<Array<{ id: string; createdTime?: string }>>('backup:drive-files')!.data;
+  assert.equal(after.find((c) => c.id === recentId)?.createdTime, new Date(now - DAY).toISOString());
+  assert.ok(after.every((c) => c.createdTime));
+});
+
 test('the key is never shown, never in a backup or settings history, never logged; log.ts removes keys and tokens', async () => {
   enable(30);
   const status = drive.driveStatus();
@@ -390,6 +494,36 @@ test('one-command rebuild: --from-drive latest into an empty folder brings back 
   assert.match(wrong.out, /Wrong password: this backup was made with another backup password/);
   assert.ok(!fs.existsSync(c) || fs.readdirSync(c).length === 0, 'nothing left behind');
   fs.rmSync(scratch, { recursive: true, force: true });
+});
+
+test('nothing new: no backup and no Drive copy; a "Back up now" with nothing new is not copied again; a change is', async () => {
+  enable(30);
+  google.failStart = null;
+  await settings.updateSettings('store', { supportEmail: 'before@shop.test' });
+  await backup.runBackup('manual');
+  await drive.waitForDriveCopy();
+  const copies = ours().length;
+  const tried = drive.driveStatus().lastAttemptAt;
+  assert.equal(drive.driveStatus().lastFile, backup.readBackupState().lastFile, 'the backup is in Drive');
+  // Nothing changes: the schedule takes no backup, so nothing goes to Drive.
+  assert.equal(backup.backupTick(Date.now() + 3 * 3600_000), null);
+  await drive.waitForDriveCopy();
+  assert.equal(ours().length, copies);
+  assert.equal(drive.driveStatus().lastAttemptAt, tried, 'no copy tried');
+  // "Back up now" with nothing new: a backup on the server, but Drive already holds the same data.
+  const again = await backup.runBackup('manual');
+  await drive.waitForDriveCopy();
+  assert.equal(again.lastError, undefined);
+  assert.equal(ours().length, copies, 'not copied again');
+  assert.equal(drive.driveStatus().lastAttemptAt, tried, 'no copy tried');
+  assert.equal(monitor.currentProblems().find((x) => x.id === 'drive_backup'), undefined, 'and no alert for it');
+  // A change: the next backup is copied.
+  await settings.updateSettings('store', { supportEmail: 'after@shop.test' });
+  await backup.runBackup('changes');
+  await drive.waitForDriveCopy();
+  assert.notEqual(drive.driveStatus().lastAttemptAt, tried, 'copied');
+  assert.equal(drive.driveStatus().lastFile, backup.readBackupState().lastFile);
+  assert.equal(drive.driveStatus().level, 'ok');
 });
 
 test('the image ships the Drive restore next to the restore script', () => {

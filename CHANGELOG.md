@@ -1,5 +1,18 @@
 # Changelog
 
+## BUH-02.22.00 — 2026-10-20 23:30 UTC · [#41](https://github.com/cxsmtp/buh/pull/41)
+
+- **Backups follow what happens in the shop.** A new order, payment, stock or price change, product, customer, expense or setting starts a 2-hour clock, and the shop is backed up by then; later changes don't push it back. When nothing has changed there is no backup, no email and no Drive copy. Chat messages and visits ride along with the next backup, or once a day.
+- **A weekly check** backs up even a quiet shop once a week, to prove backups still work. It is skipped if a backup already ran that week.
+- **Far fewer emails.** By default at most one backup email a day plus the weekly check. Choose every backup, once a day, weekly only or never in Settings → System & backups → When to back up; failure alerts still come at once.
+- **History kept by age.** On the server: every backup from the last 24 hours, then one a day for 14 days. On Google Drive: up to 4 a day for a week, one a day for a month, then one a week for 6 months. Ages on Drive are Google's own times, so a wrong server clock can never make copies look old; if the server's clock is more than a day out, nothing is removed anywhere and the status says so.
+- **Clearer status.** The status reads, for example, "Last backup 2:10 pm after 14 changes (orders, stock)" and "Next by 4:10 pm, 3 changes waiting", or "Nothing new — none needed". A quiet shop is never shown as failing. You are warned if your newest backups have been only on the server for 2 days (a new shop is not warned at its first backup).
+- **Status.**
+  - **Benchmark:** 3 alternating rounds (branch first), 0 failed requests. Storefront branch 930 / 893 / 857 req/s vs main 880 / 849 / 849 (p95 137 / 125 / 100 vs 145 / 156 / 124 ms); catalogue API branch 812 / 881 / 820 vs main 832 / 867 / 798; serviceability API branch 751 / 742 / 776 vs main 744 / 709 / 639; gift page branch 769 / 677 / 745 vs main 700 / 707 / 712. Each write now also bumps one small change counter; no slower tail.
+  - **Tests:** 1,177 passed, 0 failed, including a server clock a year ahead for 5 backups (Drive and local history kept) and 12 backups a day for 60 days (history spans the promised windows).
+  - **Dependency audit:** production 0 vulnerabilities; no new packages.
+  - **Security scan:** two independent reviews. The first found 1 high (history would shrink to about a day), 3 medium and 2 low issues. The second found that the clock check never fired (high), plus 2 low issues. All are fixed with tests, apart from one documented as a code note: trigger changes need a new migration. Not tried: real Google Drive deletions and real SMTP.
+
 ## BUH-02.21.00 — 2026-10-20 23:00 UTC · [#40](https://github.com/cxsmtp/buh/pull/40)
 
 - **Festival gift pages that run themselves.** Each festival has its own page, such as /gifts/diwali, /gifts/eid-al-fitr or /gifts/uae-national-day. Each goes live about 45 days before the festival, with products that have a gift line for it first, and your home page's Google title follows the festival. After the festival the page stays at the same address with next year's dates, so it keeps its ranking.

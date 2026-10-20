@@ -503,10 +503,25 @@ Under **Settings → Branding & bank → Bank transfer details**. These are **ne
 The line at the top of the Admin Hub shows when the last backup ran:
 
 - **green:** recent and emailed;
-- **amber:** taken but not emailed (check the `SMTP_*` settings), or emailed without a backup password;
-- **red:** failed or overdue.
+- **amber:** taken but not emailed (check the `SMTP_*` settings), emailed without a backup password, "Your newest backups are only on the server" (no Google Drive, and none emailed for 2 days, counted from the shop's first backup), or "The server's clock looks wrong — backups are kept, old copies aren't removed until it's fixed" (Google Drive saw the server's clock more than a day out: set the server's time, and it clears at the next backup);
+- **red:** failed, or changes have waited more than an hour past their time (or no backup for 8 days with the weekly check on). A quiet shop with nothing new stays green.
 
-**Back up now** runs one immediately. Backups run every 12 hours on their own, with your expenses and every bill photo. Courier, SMS and Stripe keys are not in backups: after a restore, enter them again. Restoring: see HOSTINGER_DEPLOYMENT_GUIDE.md.
+Below it: **Last backup** (when, and how many changes it held: orders, stock…), **Next** (by when, and how many changes are waiting) or "Nothing new since the last backup — none needed", and the day of the **weekly check**.
+
+**Back up now** runs one immediately. Backups run on their own when there is something new, with your expenses and every bill photo (see "When backups run" below). Courier, SMS and Stripe keys are not in backups: after a restore, enter them again. Restoring: see HOSTINGER_DEPLOYMENT_GUIDE.md.
+
+#### When backups run
+
+Settings → System & backups → **When to back up**. The shop backs up when there is something new to keep, instead of on a clock:
+
+- **After the first change:** an order, a payment or refund, stock, a product or price, a photo, an expense, a VAT document, a setting or an account starts the clock; the backup runs that long after (**2 hours** by default; choose 30 minutes to 12 hours). More changes meanwhile ride along and never push it back.
+- **Chats and visits** alone wait for the next backup, or a day at most.
+- **Nothing changed:** no backup, no email, no Google Drive copy.
+- **Weekly check** (on by default): a backup once a week even when nothing changes, to show backups still work. Skipped when one ran in the last 7 days.
+- **Email backups:** **At most one a day** (default: the first backup after changes each day, UAE time, plus the weekly check and Back up now; later ones that day are emailed the next day), **Email every backup**, **Only the weekly check**, or **Never** (Google Drive or downloads only). Failed backups are always emailed. Without Google Drive, choosing the weekly check or never shows a warning: backups would stay on the server alone for up to a week.
+- A restart or an update keeps the time a backup is due. Each choice is kept in Settings history (Undo puts it back).
+
+Press **Save backup choices**.
 
 #### Protect backups with a password
 
@@ -521,6 +536,8 @@ Settings → System & backups → **Protect backups with a password**. Backups h
 #### Copy each backup to Google Drive
 
 An off-server copy: if the server is lost, the shop can be rebuilt from Drive on a new one. Copies are always encrypted: without a backup password the card offers **Make a password first** right there.
+
+**Copies kept in Drive:** up to 4 a day for the last week, one a day to 30 days, one a week to 6 months, at most **Copies to keep** (60 by default; the newest days are thinned first, so the history still reaches back months).
 
 **Connect my Google Drive (recommended, works with a personal Gmail):** Google lets an app use your Drive only once you have registered it in Google Cloud, so there is a one-time setup (about 10 minutes). The card guides you through it in **Set up Google Drive**: four steps, each with an **Open this page** button to the exact Google Cloud page and **Copy** buttons for what to type. Tick each step when done; the ticks are remembered.
 

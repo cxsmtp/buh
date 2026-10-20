@@ -3,6 +3,7 @@ import fs from 'node:fs';
 import http from 'node:http';
 import path from 'node:path';
 import { audit } from './audit';
+import { CLOCK_SUSPECT_MS, clockSkewed, clockSuspectActive, driveRetention } from './backupPolicy';
 import { dataDir, dataFile, writePrivateFile } from './dataDir';
 import { HttpError } from './http';
 import { kvGet, kvSet } from './kv';
@@ -39,8 +40,11 @@ import { backupPassphrase } from './backupSecret';
  *   Google Cloud project id (for the console links) are kept in kv `backup:drive-wizard` (nothing
  *   secret). The connected Google account's email comes from Drive's about.get (drive.file allows
  *   it: no extra permission), shown as "Connected to …".
- * - The newest `keep` copies (default 30) are kept; older ones that this feature uploaded (their
- *   Drive file ids are recorded) are deleted. Nothing else in the folder is ever touched.
+ * - Copies kept: up to 4 a day for the last 7 days, then the newest of each day to 30 days and of
+ *   each week (Monday to Sunday, UAE) to 6 months, at most `keep` (default 60, the newest days
+ *   thinned first), never the newest (backupPolicy.ts); older ones
+ *   that this feature uploaded (their Drive file ids are recorded) are deleted. Nothing else in the
+ *   folder is ever touched.
  * - The key, the OAuth client secret, the refresh token and a device sign-in in progress are
  *   secrets: kept in their own file, DATA_DIR/drive-secrets.json (owner-only, written atomically),
  *   never in the database (kv `backup:drive` holds only the rest), so no backup, made by this
@@ -71,13 +75,15 @@ export const DRIVE_FILE_SCOPE = 'https://www.googleapis.com/auth/drive.file';
 export const APP_FOLDER_NAME = 'Beautiful UAE Home backups';
 /** Resumable upload pieces: a multiple of 256 KiB, as Google asks; the wait before a retry grows by retryMs each time. (Changeable by tests only.) */
 export const DRIVE_LIMITS = { chunkBytes: 8 * 1024 * 1024, retryMs: 1000 };
-export const DRIVE_KEEP_DEFAULT = 30;
+export const DRIVE_KEEP_DEFAULT = 60;
 export const DRIVE_KEEP_MAX = 365;
 const BACKUP_MAGIC = 'BUHBK1\n'; // as in backup.ts: an encrypted backup's first bytes
 
 const CONFIG_KEY = 'backup:drive';
 const STATE_KEY = 'backup:drive-state';
 const FILES_KEY = 'backup:drive-files';
+/** The server's clock as Google last saw it (kv, nothing secret): a wrong one stops every removal of old backups. */
+const CLOCK_KEY = 'backup:clock';
 /** The first version kept a device sign-in here (now in the secrets file; moved, then removed). */
 const DEVICE_KEY = 'backup:drive-device';
 /** The secrets, outside the database: never in a backup (createBackup takes only shop.db and the shop's folders). */
@@ -139,7 +145,10 @@ interface DriveCopy {
   id: string;
   name: string;
   size: number;
+  /** When the shop recorded it (its own clock). */
   at: string;
+  /** When Google made it (Drive's createdTime, Google's clock): what retention ages copies by. */
+  createdTime?: string;
 }
 
 const EMPTY: DriveConfig = { enabled: false, mode: 'oauth', keep: DRIVE_KEEP_DEFAULT, folderId: '', clientEmail: '', privateKey: '', keyId: '', oauthClientId: '', oauthClientSecret: '', refreshToken: '', oauthFolderId: '' };
@@ -249,6 +258,81 @@ function setState(patch: DriveState) {
 function copies(): DriveCopy[] {
   const list = kvGet<DriveCopy[]>(FILES_KEY)?.data;
   return Array.isArray(list) ? list.filter((c) => c && typeof c.id === 'string' && DRIVE_ID.test(c.id)) : [];
+}
+
+// ── The server's clock, checked against Google's ────────────────────────────
+
+/** The text the hub and the owner alert show while the server's clock is wrong. */
+export const CLOCK_WRONG = 'The server’s clock looks wrong — backups are kept, old copies aren’t removed until it’s fixed.';
+
+export interface ClockMark {
+  /** When (server time) a wrong clock was last seen, and until when it holds. */
+  setAt?: string;
+  until?: string;
+  /** Server time minus Google's, in ms, at the last check. */
+  skewMs?: number;
+  checkedAt?: string;
+}
+
+export function clockMark(): ClockMark {
+  return kvGet<ClockMark>(CLOCK_KEY)?.data ?? {};
+}
+
+/** Is the server's clock taken as wrong now (seen wrong by Google within the last 7 days, and not put back since)? */
+export function serverClockSuspect(now = Date.now()): boolean {
+  return clockSuspectActive(clockMark(), now);
+}
+
+/** Record what Google's clock said: wrong (old backups are kept: local and Drive) or right (the mark is cleared). */
+function noteClock(serverNow: number, googleNow: number): boolean {
+  const skewMs = serverNow - googleNow;
+  const wrong = clockSkewed(serverNow, googleNow);
+  const checkedAt = new Date(serverNow).toISOString();
+  if (wrong) {
+    kvSet(CLOCK_KEY, { setAt: checkedAt, until: new Date(serverNow + CLOCK_SUSPECT_MS).toISOString(), skewMs, checkedAt });
+    logEvent('warn', 'backup_clock_skew', { skewHours: Math.round(skewMs / 3600_000), note: 'no old backup is removed (local or Google Drive) until the clock is right' });
+    audit('backup.clock_skew', { skewHours: Math.round(skewMs / 3600_000) });
+  } else if (clockMark().setAt) {
+    kvSet(CLOCK_KEY, { skewMs, checkedAt });
+    logEvent('info', 'backup_clock_ok', { skewSeconds: Math.round(skewMs / 1000) });
+  }
+  return wrong;
+}
+
+/**
+ * Copies recorded before createdTime was kept: Google's createdTime for each, from a files.list of
+ * the folder (only this feature's copies). Best effort: one not found stays undated, and so is
+ * never removed. Returns how many were dated.
+ */
+async function dateUntimedCopies(token: string, folder: string): Promise<number> {
+  const missing = new Set(copies().filter((c) => !c.createdTime).map((c) => c.id));
+  if (!missing.size || !DRIVE_ID.test(folder)) return 0;
+  const found = new Map<string, string>();
+  let pageToken = '';
+  for (let page = 0; page < 20 && found.size < missing.size; page++) {
+    const params = new URLSearchParams({
+      q: `'${folder}' in parents and trashed = false and appProperties has { key='buhBackup' and value='1' }`,
+      pageSize: '1000',
+      supportsAllDrives: 'true',
+      includeItemsFromAllDrives: 'true',
+      fields: 'nextPageToken,files(id,createdTime)',
+      ...(pageToken ? { pageToken } : {}),
+    });
+    const res = await google(`${DRIVE_FILES_URL}?${params}`, { method: 'GET', headers: { Authorization: `Bearer ${token}` }, timeoutMs: 20_000, maxBytes: 4 * 1024 * 1024 });
+    if (!res.ok) break;
+    const data = jsonOf(res);
+    const files = Array.isArray(data.files) ? (data.files as Array<Record<string, unknown>>) : [];
+    for (const f of files) {
+      const id = String(f?.id ?? '');
+      const created = String(f?.createdTime ?? '');
+      if (missing.has(id) && Number.isFinite(Date.parse(created))) found.set(id, new Date(Date.parse(created)).toISOString());
+    }
+    const next = typeof data.nextPageToken === 'string' ? data.nextPageToken : '';
+    if (!next || next === pageToken) break;
+    pageToken = next;
+  }
+  if (found.size) kvSet(FILES_KEY, copies().map((c) => (found.has(c.id) ? { ...c, createdTime: found.get(c.id) } : c)));
+  return found.size;
 }
 
 /**
@@ -775,7 +859,7 @@ export async function deleteDriveFile(token: string, id: string, clientEmail: st
  * The file is opened once: its size, MD5 and every piece come from that same open file (a backup
  * replaced at the same path meanwhile is not mixed in; one cut short fails).
  */
-export async function uploadToDrive(token: string, folderId: string, file: string, name: string, clientEmail: string, onProgress?: (sent: number, size: number) => void): Promise<{ id: string; size: number }> {
+export async function uploadToDrive(token: string, folderId: string, file: string, name: string, clientEmail: string, onProgress?: (sent: number, size: number) => void): Promise<{ id: string; size: number; createdTime: string }> {
   const fh = await fs.promises.open(file, 'r');
   let done: SafeResponse | null = null;
   let size = 0;
@@ -783,7 +867,7 @@ export async function uploadToDrive(token: string, folderId: string, file: strin
   try {
     size = (await fh.stat()).size;
     md5 = await md5Of(fh, size);
-    const start = await google(`${DRIVE_UPLOAD_URL}?uploadType=resumable&supportsAllDrives=true&fields=id,name,size,md5Checksum`, {
+    const start = await google(`${DRIVE_UPLOAD_URL}?uploadType=resumable&supportsAllDrives=true&fields=id,name,size,md5Checksum,createdTime`, {
       method: 'POST',
       headers: {
         Authorization: `Bearer ${token}`,
@@ -853,7 +937,9 @@ export async function uploadToDrive(token: string, folderId: string, file: strin
     await deleteDriveFile(token, id, clientEmail).catch(() => {});
     throw new Error(`Google Drive’s copy does not match the backup (size ${String(meta.size ?? '?').slice(0, 20)} of ${size} bytes, or its checksum): it was removed. The next backup tries again.`);
   }
-  return { id, size };
+  // Google's clock: when Drive made the file (retention ages copies by it, never by the server's).
+  const created = Date.parse(String(meta.createdTime ?? ''));
+  return { id, size, createdTime: Number.isFinite(created) ? new Date(created).toISOString() : '' };
 }
 
 // ── Copying each backup ─────────────────────────────────────────────────────
@@ -986,7 +1072,7 @@ async function copyOnce(file: string, reason: string): Promise<DriveState | null
       return state();
     }
     const before = copies();
-    kvSet(FILES_KEY, [...before.filter((c) => c.id !== up.id), { id: up.id, name, size: up.size, at: new Date().toISOString() }]);
+    kvSet(FILES_KEY, [...before.filter((c) => c.id !== up.id), { id: up.id, name, size: up.size, at: new Date().toISOString(), ...(up.createdTime ? { createdTime: up.createdTime } : {}) }]);
     audit('backup.drive_copied', { reason, mode: cfg.mode, file: name, size: up.size, fileId: up.id });
     // An earlier copy with the same name (two backups in one minute: the local file was replaced) goes.
     for (const same of before.filter((c) => c.name === name && c.id !== up.id)) {
@@ -997,13 +1083,27 @@ async function copyOnce(file: string, reason: string): Promise<DriveState | null
         logEvent('warn', 'backup_drive_prune_failed', { file: same.name, error: err instanceof Error ? err.message : String(err) });
       }
     }
-    // Retention: only copies this feature made, oldest first. A delete that fails for now (no
-    // answer, Google busy) is tried next time; one Google refuses for good (403: the file is no
-    // longer ours to delete) is no longer tracked (audited), so retention never stalls on it.
+    // Retention: only copies this feature made (backupPolicy.ts: up to 4 a day for 7 days, then one
+    // a day to 30 days, one a week to 6 months, at most `keep`; never the newest, never the one just
+    // made, never one Google has not dated; at most 10 a run), oldest first, aged by Google's clock
+    // (each copy's createdTime against the new one's). The server's clock more than a day from
+    // Google's: nothing is removed (here or on the server) until it is right. A delete that fails
+    // for now (no answer, Google busy) is tried next time; one Google refuses for good (403: the
+    // file is no longer ours to delete) is no longer tracked (audited), so retention never stalls on it.
     const keep = Math.max(1, cfg.keep || DRIVE_KEEP_DEFAULT);
-    let kept = copies();
-    while (kept.length > keep) {
-      const old = kept[0];
+    const googleNow = Date.parse(up.createdTime);
+    if (!Number.isFinite(googleNow)) {
+      logEvent('warn', 'backup_drive_no_time', { note: 'Google did not date the copy: no old copy removed this time' });
+      return state();
+    }
+    if (noteClock(Date.now(), googleNow)) return state();
+    try {
+      await dateUntimedCopies(token, folder);
+    } catch (err) {
+      logEvent('warn', 'backup_drive_list_failed', { error: err instanceof Error ? err.message : String(err) });
+    }
+    const plan = driveRetention(copies(), keep, googleNow, up.id);
+    for (const old of plan.remove) {
       try {
         await deleteDriveFile(token, old.id, account);
         audit('backup.drive_removed', { file: old.name, fileId: old.id, keep });
@@ -1013,8 +1113,7 @@ async function copyOnce(file: string, reason: string): Promise<DriveState | null
         if (!refusedForGood(err)) break;
         audit('backup.drive_remove_failed', { file: old.name, fileId: old.id, status: (err as DriveDeleteError).status, error: message, tracked: false });
       }
-      kept = copies().filter((c) => c.id !== old.id);
-      kvSet(FILES_KEY, kept);
+      kvSet(FILES_KEY, copies().filter((c) => c.id !== old.id));
     }
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);

@@ -12,18 +12,24 @@ import { backupTo, getDb } from './db';
 import { logEvent } from './log';
 import { emailConfigured, ownerEmail, sender, transport } from './mail';
 import { allOrders, listCustomers } from './orders';
-import { blankSecretsIn } from './settings';
+import { blankSecretsIn, getSettings } from './settings';
 import { listProducts } from './products';
 import { readTar, TAR_END, tarHeader, tarPadding, type TarEntry } from './tar';
 import { diskRoomProblem } from './diskRoom';
 import { kvGet, kvSet } from './kv';
 import { expenseCsvFiles } from './expenses';
 import { toCsv } from './csv';
-import { blankDriveKeyIn, copyBackupToDrive } from './driveBackup';
+import { blankDriveKeyIn, CLOCK_WRONG, copyBackupToDrive, driveStatus, serverClockSuspect } from './driveBackup';
+import { changeMark, describeAreas, markBackedUp, pendingChanges } from './dataChanges';
+import { catchUpEmailDue, decideBackup, localBackupsToRemove, RETRY_MS, shouldEmail, WEEKLY_OVERDUE_DAYS, type BackupReason, type BackupSettings } from './backupPolicy';
 import { backupPassphrase, currentBackupKey, describeFingerprint, MIN_PASSPHRASE_LENGTH, passphraseFingerprintSync, passphraseSource, UNREADABLE_MESSAGE } from './backupSecret';
 
 /**
- * Backups, every 12 hours (BACKUP_INTERVAL_HOURS), taken by the running shop:
+ * Backups, taken by the running shop when there is something new to keep (backupPolicy.ts):
+ * 2 hours after the first change to orders, stock, products, payments, expenses, settings or
+ * accounts (Settings → System & backups → "Back up after"); chats and visits alone within a day; a
+ * weekly check when nothing changes; none at all when nothing has changed. What changed is counted
+ * by the database itself (dataChanges.ts). Each backup holds:
  *
  *  - a consistent copy of the database (SQLite online backup, safe mid-sale),
  *    with the courier and SMS keys blanked (re-enter them after a restore);
@@ -48,9 +54,11 @@ import { backupPassphrase, currentBackupKey, describeFingerprint, MIN_PASSPHRASE
  * the password's fingerprint and the day it was set (never the password). The data to back up may be at most
  * BACKUP_LIMITS.totalBytes (6 GB): the monitor warns from 80%, and beyond it the backup is refused
  * (and the owner told) rather than made too big to restore. It is emailed to
- * BACKUP_EMAIL through the SMTP server in SMTP_*, and the newest 14 are kept
- * in DATA_DIR/backups. Every run is recorded (backup-state.json and the audit
- * log) and shown in the admin hub; a failure is emailed when email works.
+ * BACKUP_EMAIL through the SMTP server in SMTP_* as the owner chose (by default at most one a day,
+ * the weekly check, and "Back up now"), and kept in DATA_DIR/backups (every one of the last 14 days,
+ * thinned to one a day when the disk is tight, never fewer than 14). Every run is
+ * recorded (backup-state.json and the audit log, with why it ran and how many changes it held, never
+ * what they were) and shown in the admin hub; a failure is emailed when email works.
  *
  * With Settings → System & backups → "Copy each backup to Google Drive" switched on (and a
  * backup password set), each backup is also copied to a Drive folder (driveBackup.ts).
@@ -77,7 +85,21 @@ export const BACKUP_MAGIC = 'BUHBK1\n';
  * tests only.)
  */
 export const BACKUP_LIMITS = { totalBytes: 6 * 1024 ** 3, warnRatio: 0.8, minFreeBytes: 512 * 1024 ** 2 };
-const KEEP = 14;
+/**
+ * Local backups kept (backupPolicy.ts localBackupsToRemove): the newest 14 always; with room on
+ * the disk every backup of the 14 days before the 14th newest; with the disk tight (no room for
+ * three more of the newest's size), all from the 24 hours before it and then the newest of each UAE
+ * day; at most 5 removed a run. None at all while Google says the server's clock is wrong
+ * (driveBackup.ts serverClockSuspect).
+ */
+function pruneLocalBackups(dir: string, newestSize: number, now = Date.now()): number {
+  if (serverClockSuspect()) return 0;
+  const names = fs.readdirSync(dir).filter((f) => f.startsWith('buh-backup-'));
+  const tight = Boolean(diskRoomProblem(dir, 3 * newestSize, BACKUP_LIMITS.minFreeBytes));
+  const remove = localBackupsToRemove(names, now, tight);
+  for (const old of remove) fs.rmSync(path.join(dir, old), { force: true });
+  return remove.length;
+}
 // Gmail and most mail servers accept 25 MB per message; base64 adds a third.
 const EMAIL_LIMIT_BYTES = 17 * 1024 * 1024;
 
@@ -92,11 +114,38 @@ export interface BackupState {
   lastEmailError?: string;
   lastFailureEmailAt?: string;
   encrypted?: boolean;
+  /** Why the last successful backup ran. */
+  lastReason?: BackupReason;
+  /** The changes it held: how many, and per area (never what they were). */
+  lastChanges?: { total: number; areas: Record<string, number> };
+  /** The last change-driven backup emailed ("at most one a day" counts these). */
+  lastChangeEmailAt?: string;
+  /** A backup since the last emailed one was not emailed (the daily catch-up sends the newest). */
+  unemailedSince?: string;
+  lastCatchUpTryAt?: string;
+  /** Why the last backup was not emailed, when the email choice skipped it. */
+  lastEmailSkipped?: string;
+  /** When a backup was last handed to Google Drive (or Drive already held the same data). */
+  lastDriveHandoffAt?: string;
+  /** The shop's first successful backup (the "only on the server" warning waits 2 days from it). */
+  firstSuccessAt?: string;
 }
 
+/** BACKUP_INTERVAL_HOURS (the old fixed schedule) when set on the server: an upper bound between backups while changes wait. */
+export function fallbackIntervalHours(): number | null {
+  if (!process.env.BACKUP_INTERVAL_HOURS) return null;
+  const h = Number(process.env.BACKUP_INTERVAL_HOURS);
+  return Number.isFinite(h) && h >= 1 && h <= 168 ? h : null;
+}
+
+/** The old fixed interval (12 h unless BACKUP_INTERVAL_HOURS): how long Drive may lag the local backups before the monitor says so. */
 export function intervalHours(): number {
-  const h = Number(process.env.BACKUP_INTERVAL_HOURS || 12);
-  return Number.isFinite(h) && h >= 1 && h <= 168 ? h : 12;
+  return fallbackIntervalHours() ?? 12;
+}
+
+/** The owner's backup choices (Settings → System & backups). */
+export function backupSettings(): BackupSettings {
+  return getSettings('backups');
 }
 
 function backupsDir(): string {
@@ -367,7 +416,9 @@ export async function createBackup(now = new Date()): Promise<BackupResult> {
   if (size.bytes > size.limit) {
     throw new Error(`The shop's data is ${gb(size.bytes)}, more than one backup can hold (${gb(size.limit)}): no backup was made. Remove old product photos or bills you no longer need, or ask for the limit to be raised.`);
   }
-  const room = diskRoomProblem(dir, size.bytes, BACKUP_LIMITS.minFreeBytes);
+  // No room: older backups thinned first (never the newest 14), then checked again.
+  let room = diskRoomProblem(dir, size.bytes, BACKUP_LIMITS.minFreeBytes);
+  if (room && pruneLocalBackups(dir, size.bytes)) room = diskRoomProblem(dir, size.bytes, BACKUP_LIMITS.minFreeBytes);
   if (room) throw new Error(`There is no room for the backup: ${room}. Free some space on the server.`);
   const tmpDb = path.join(dir, `.snapshot-${process.pid}-${Date.now()}.db`);
   const partial = path.join(dir, `.partial-${process.pid}-${Date.now()}`);
@@ -444,9 +495,7 @@ export async function createBackup(now = new Date()): Promise<BackupResult> {
     const expenses = (getDb().prepare('SELECT COUNT(*) AS n FROM expenses').get() as { n: number }).n;
     const summary = `${counts} orders, ${listProducts({ includeHidden: true }).length} products, ${items.filter((e) => e.name.startsWith('receipts/')).length} receipts, ${expenses} expenses, ${items.filter((e) => e.name.startsWith('expenses/')).length} bills`;
 
-    // Keep the newest KEEP backups.
-    const all = fs.readdirSync(dir).filter((f) => f.startsWith('buh-backup-')).sort();
-    for (const old of all.slice(0, Math.max(0, all.length - KEEP))) fs.rmSync(path.join(dir, old), { force: true });
+    pruneLocalBackups(dir, written, now.getTime());
 
     return { file, size: written, encrypted, summary, csv };
   } finally {
@@ -541,14 +590,59 @@ async function emailFailure(error: string) {
 // ── Running and scheduling ──────────────────────────────────────────────────
 
 let running: Promise<BackupState> | null = null;
+/**
+ * A backup was made but what it held could not be recorded (markBackedUp failed): the changes still
+ * look new, so no change-driven backup runs again before this time (no loop of backups).
+ */
+let markFloorAt = 0;
+export const MARK_FAILED = 'The backup was made, but the shop could not record which changes it holds: the next one runs in an hour.';
+/** Health's warning when nothing has left the server for 2 days (no Drive, emails off or weekly). */
+export const ONLY_ON_SERVER = 'Your newest backups are only on the server: connect Google Drive or email them.';
 
-/** Take a backup and send it. Never throws: the outcome is in the returned state. */
-export function runBackup(reason: 'scheduled' | 'manual' | 'startup'): Promise<BackupState> {
+const NOT_SET_UP = 'Backup email is not set up (Settings → Email, or SMTP_HOST and BACKUP_EMAIL): the backup is only on this server.';
+const SKIPPED: Record<BackupSettings['email'], string> = {
+  every: '',
+  daily: 'Not emailed: one backup a day is emailed (Settings → System & backups).',
+  weekly: 'Not emailed: only the weekly check is emailed (Settings → System & backups).',
+  never: 'Not emailed: backups are not emailed (Settings → System & backups).',
+};
+
+export interface RunOptions {
+  /** "Back up now": email this one (true) or not (false); left out, the email choice decides. */
+  email?: boolean;
+  /** The time the email rules use (tests). */
+  now?: () => number;
+}
+
+/**
+ * Take a backup and send it. Never throws: the outcome is in the returned state. 'scheduled' is the
+ * old name of 'changes' (kept for callers from before).
+ */
+export function runBackup(reasonIn: BackupReason | 'scheduled', options: RunOptions = {}): Promise<BackupState> {
   if (running) return running;
+  const reason: BackupReason = reasonIn === 'scheduled' ? 'changes' : reasonIn;
+  const clock = options.now ?? Date.now;
   running = (async () => {
     const attemptAt = new Date().toISOString();
+    const before = readBackupState();
+    // What the backup will hold, read before it starts: a change made meanwhile stays pending.
+    const mark = changeMark();
     try {
       const result = await createBackup();
+      // Only now is what it holds no longer waiting (if this can't be written, it is backed up again
+      // later: never lost; not at once, so a broken record can't start a loop of backups).
+      let markFailed = false;
+      try {
+        markBackedUp(mark);
+      } catch (err) {
+        markFailed = true;
+        markFloorAt = Date.now() + RETRY_MS;
+        logEvent('error', 'backup_mark_failed', { error: err instanceof Error ? err.message : String(err) });
+      }
+      const settings = backupSettings();
+      const drive = driveStatus();
+      const now = clock();
+      const nowIso = new Date(now).toISOString();
       const patch: BackupState = {
         lastAttemptAt: attemptAt,
         lastSuccessAt: new Date().toISOString(),
@@ -557,35 +651,69 @@ export function runBackup(reason: 'scheduled' | 'manual' | 'startup'): Promise<B
         lastSummary: result.summary,
         lastError: undefined,
         encrypted: result.encrypted,
+        lastReason: reason,
+        lastChanges: { total: mark.pending.total, areas: mark.pending.areas },
+        lastEmailSkipped: undefined,
+        // Shops from before this was kept count from their last backup before this one.
+        firstSuccessAt: before.firstSuccessAt ?? before.lastSuccessAt ?? new Date().toISOString(),
       };
-      if (emailConfigured()) {
-        try {
-          await emailBackup(result);
-          patch.lastEmailedAt = new Date().toISOString();
-          patch.lastEmailError = undefined;
-        } catch (err) {
-          patch.lastEmailError = err instanceof Error ? err.message : String(err);
+      let emailed = false;
+      if (shouldEmail(settings.email, reason, now, before.lastChangeEmailAt, options.email)) {
+        if (emailConfigured()) {
+          try {
+            await emailBackup(result);
+            emailed = true;
+            patch.lastEmailedAt = new Date().toISOString();
+            patch.lastEmailError = undefined;
+            if (reason === 'changes' || reason === 'startup') patch.lastChangeEmailAt = nowIso;
+          } catch (err) {
+            patch.lastEmailError = err instanceof Error ? err.message : String(err);
+          }
+        } else {
+          patch.lastEmailError = NOT_SET_UP;
         }
       } else {
-        patch.lastEmailError = 'Backup email is not set up (Settings → Email, or SMTP_HOST and BACKUP_EMAIL): the backup is only on this server.';
+        patch.lastEmailSkipped = SKIPPED[settings.email] || undefined;
+        // No email and no Drive: the backup is only on this server (said, as before).
+        if (!emailConfigured()) patch.lastEmailError = drive.enabled ? undefined : NOT_SET_UP;
       }
-      writeBackupState(patch);
-      audit('backup.taken', { reason, file: patch.lastFile, size: result.size, encrypted: result.encrypted, emailed: Boolean(patch.lastEmailedAt && !patch.lastEmailError), emailError: patch.lastEmailError });
-      if (patch.lastEmailError) logEvent('warn', 'backup_not_emailed', { error: patch.lastEmailError });
-      else logEvent('info', 'backup_done', { file: patch.lastFile, summary: result.summary });
+      patch.unemailedSince = emailed ? undefined : before.unemailedSince ?? nowIso;
       // The off-server copy (when switched on): its failure is its own (an owner alert), never the
       // backup's. Not waited for: "Back up now" and the next backup never wait on Google (the hub
-      // shows the copy in progress); it never throws and runs one at a time.
-      void copyBackupToDrive(result.file, reason);
+      // shows the copy in progress); it never throws and runs one at a time. A "Back up now" with
+      // nothing new, when Drive already holds the last backup, is not copied again.
+      const driveHasIt = reason === 'manual' && mark.pending.total === 0 && Boolean(before.lastFile) && drive.lastFile === before.lastFile && !drive.lastError;
+      let copied = false;
+      if (drive.enabled) {
+        patch.lastDriveHandoffAt = new Date().toISOString();
+        copied = !driveHasIt;
+      }
+      writeBackupState(patch);
+      // Shown as failing until a backup records its changes again (retried hourly).
+      if (markFailed) writeBackupState({ lastError: MARK_FAILED, lastAttemptAt: new Date().toISOString() });
+      audit('backup.taken', {
+        reason,
+        changes: mark.pending.total,
+        areas: describeAreas(mark.pending.areas),
+        file: patch.lastFile,
+        size: result.size,
+        encrypted: result.encrypted,
+        emailed,
+        emailError: patch.lastEmailError,
+        ...(patch.lastEmailSkipped ? { emailSkipped: settings.email } : {}),
+        drive: drive.enabled ? (copied ? 'copying' : 'already there') : 'off',
+      });
+      if (patch.lastEmailError) logEvent('warn', 'backup_not_emailed', { error: patch.lastEmailError, reason });
+      else logEvent('info', 'backup_done', { file: patch.lastFile, summary: result.summary, reason, changes: mark.pending.total });
+      if (copied) void copyBackupToDrive(result.file, reason);
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
-      const before = readBackupState();
       // Email when it starts failing, when the error changes, on "Back up now", and then at most daily.
       const lastMail = before.lastFailureEmailAt ? Date.parse(before.lastFailureEmailAt) : 0;
       const mail = reason === 'manual' || !before.lastError || before.lastError !== message || Date.now() - lastMail > 24 * 3600_000;
       writeBackupState({ lastAttemptAt: attemptAt, lastError: message, ...(mail ? { lastFailureEmailAt: new Date().toISOString() } : {}) });
-      audit('backup.failed', { reason, error: message });
-      logEvent('error', 'backup_failed', { error: message });
+      audit('backup.failed', { reason, changes: mark.pending.total, error: message });
+      logEvent('error', 'backup_failed', { error: message, reason });
       if (mail) await emailFailure(message);
     }
     return readBackupState();
@@ -595,12 +723,60 @@ export function runBackup(reason: 'scheduled' | 'manual' | 'startup'): Promise<B
   return running;
 }
 
-/** Health of the backups, for the admin hub: ok, warning (not emailed / due soon) or failing. */
-export function backupHealth(now = Date.now()) {
+/**
+ * "At most one a day": the newest backup, when it and others since the last email were not
+ * emailed, goes by email on the next UAE day (no new backup: nothing changed since it). Tried at
+ * most hourly. Never throws.
+ */
+export async function emailCatchUp(now = Date.now()): Promise<boolean> {
   const state = readBackupState();
-  const hours = intervalHours();
+  if (!state.lastFile || !emailConfigured()) return false;
+  if (state.lastCatchUpTryAt && now - Date.parse(state.lastCatchUpTryAt) < RETRY_MS) return false;
+  const file = path.join(backupsDir(), state.lastFile);
+  if (!fs.existsSync(file)) {
+    writeBackupState({ unemailedSince: undefined });
+    return false;
+  }
+  const nowIso = new Date(now).toISOString();
+  try {
+    await emailBackup({ file, size: fs.statSync(file).size, encrypted: file.endsWith('.enc'), summary: state.lastSummary ?? 'the latest backup', csv: [] });
+    writeBackupState({ lastEmailedAt: new Date().toISOString(), lastEmailError: undefined, lastChangeEmailAt: nowIso, unemailedSince: undefined, lastCatchUpTryAt: nowIso });
+    audit('backup.emailed', { reason: 'daily', file: state.lastFile });
+    return true;
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    writeBackupState({ lastEmailError: message, lastCatchUpTryAt: nowIso });
+    logEvent('warn', 'backup_not_emailed', { error: message, reason: 'daily' });
+    return false;
+  }
+}
+
+/** The schedule's view now: what waits, when it is due, when the weekly check is. */
+export function backupSchedule(now = Date.now()) {
+  const state = readBackupState();
+  const settings = backupSettings();
+  const pending = pendingChanges();
+  const decision = decideBackup({ now, settings, pending, state, fallbackHours: fallbackIntervalHours() });
+  return { state, settings, pending, decision };
+}
+
+/** Health of the backups, for the admin hub: ok, warning (not emailed) or failing (failed, or changes waiting too long). */
+export function backupHealth(now = Date.now()) {
+  const { state, settings, pending, decision } = backupSchedule(now);
   const last = state.lastSuccessAt ? Date.parse(state.lastSuccessAt) : 0;
-  const overdue = !last || now - last > (hours + 1) * 3600_000;
+  // Overdue: changes waiting past their time (plus an hour's grace), or no backup for 8 days with
+  // the weekly check on. A quiet shop with nothing new is never overdue.
+  const changesLate = decision.dueAt !== null && now > decision.dueAt + 3600_000;
+  const weeklyLate = settings.weeklyCheck && Boolean(last) && now - last > WEEKLY_OVERDUE_DAYS * 24 * 3600_000;
+  const overdue = !last || changesLate || weeklyLate;
+  const waitedHours = pending.firstChangeAt ? Math.floor((now - Date.parse(pending.firstChangeAt)) / 3600_000) : 0;
+  const overdueText = !last
+    ? 'No backup yet.'
+    : changesLate
+    ? `${pending.total} change${pending.total === 1 ? '' : 's'} (${describeAreas(pending.areas)}) ${pending.total === 1 ? 'has' : 'have'} waited ${waitedHours} h for a backup.`
+    : weeklyLate
+    ? `No backup for more than ${WEEKLY_OVERDUE_DAYS} days, though the weekly check is on.`
+    : undefined;
   // The password file there but unreadable: no backup is made (never unencrypted) until it is fixed.
   let passphrase = '';
   let unreadable = false;
@@ -613,44 +789,89 @@ export function backupHealth(now = Date.now()) {
   const notice = unreadable
     ? UNREADABLE_MESSAGE
     : !passphrase
-    ? emailConfigured()
+    ? emailConfigured() && settings.email !== 'never'
       ? 'Backups are emailed unencrypted: anyone with a backup email can read customers’ details. Protect them with a password in Settings → System & backups.'
       : undefined
     : passphraseSource() === 'env' && passphrase.length < MIN_PASSPHRASE_LENGTH
     ? `The backup password set on the server is short: use at least ${MIN_PASSPHRASE_LENGTH} characters.`
     : undefined;
+  // Nothing has left the server for 2 days: no Drive, and the newer backups were not emailed.
+  let driveOn = false;
+  try {
+    driveOn = driveStatus().enabled;
+  } catch {
+    driveOn = false;
+  }
+  // Counted from the last email, or from the shop's first backup when none was emailed since (a new
+  // shop is not warned the moment its first backup is made).
+  const emailedAt = state.lastEmailedAt ? Date.parse(state.lastEmailedAt) || 0 : 0;
+  const firstAt = state.firstSuccessAt ? Date.parse(state.firstSuccessAt) || 0 : 0;
+  const offServerWarning = !driveOn && last > 0 && emailedAt < last && now - Math.max(emailedAt, firstAt) > 2 * 24 * 3600_000 ? ONLY_ON_SERVER : undefined;
+  // Google said the server's clock is wrong: backups go on, old ones are kept (local and Drive).
+  let clockWarning: string | undefined;
+  try {
+    clockWarning = serverClockSuspect(now) ? CLOCK_WRONG : undefined;
+  } catch {
+    clockWarning = undefined;
+  }
   const level: 'ok' | 'warning' | 'failing' =
     unreadable || (state.lastError && (!last || Date.parse(state.lastAttemptAt || '') > last))
       ? 'failing'
       : overdue
       ? 'failing'
-      : state.lastEmailError || notice
+      : state.lastEmailError || notice || offServerWarning || clockWarning
       ? 'warning'
       : 'ok';
   return {
     level,
     notice,
-    intervalHours: hours,
+    overdueText,
+    offServerWarning,
+    clockWarning,
+    intervalHours: intervalHours(),
     emailConfigured: emailConfigured(),
     encrypted: Boolean(passphrase),
-    nextDueAt: last ? new Date(last + hours * 3600_000).toISOString() : null,
+    settings,
+    pending: { total: pending.total, areas: pending.areas, critical: pending.critical, firstChangeAt: pending.firstChangeAt, labels: describeAreas(pending.areas) },
+    nextDueAt: decision.dueAt !== null ? new Date(decision.dueAt).toISOString() : null,
+    weeklyCheckAt: decision.weeklyAt !== null ? new Date(decision.weeklyAt).toISOString() : null,
+    retryAt: decision.retryAt !== null ? new Date(decision.retryAt).toISOString() : null,
+    lastChangesText: state.lastChanges ? describeAreas(state.lastChanges.areas) : '',
     ...state,
   };
 }
 
+/** One look at the schedule: start a backup when one is due (or the daily catch-up email). Returns what it started. */
+export function backupTick(now = Date.now()): BackupReason | 'email' | null {
+  const { state, settings, decision } = backupSchedule(now);
+  if (decision.run === 'changes' && now < markFloorAt) return null;
+  if (decision.run) {
+    void runBackup(decision.run, { now: () => now });
+    return decision.run;
+  }
+  if (catchUpEmailDue(settings.email, now, state) && emailConfigured()) {
+    void emailCatchUp(now);
+    return 'email';
+  }
+  return null;
+}
+
 let timer: NodeJS.Timeout | null = null;
 
-/** Check every 15 minutes; back up when the last success is older than the interval (catches up after a restart). */
+/**
+ * Look every 5 minutes. Pending changes are kept in the database, so after a restart (or an update)
+ * a backup is still due at the time the first change set; the first look is a minute after start.
+ */
 export function startBackupSchedule() {
   if (timer || process.env.BACKUP_DISABLED === 'true') return;
   const tick = () => {
-    const state = readBackupState();
-    const last = state.lastSuccessAt;
-    // After a failure, retry hourly rather than every 15 minutes.
-    if (state.lastError && state.lastAttemptAt && Date.now() - Date.parse(state.lastAttemptAt) < 3600_000) return;
-    if (!last || Date.now() - Date.parse(last) >= intervalHours() * 3600_000) void runBackup(last ? 'scheduled' : 'startup');
+    try {
+      if (!running) backupTick();
+    } catch (err) {
+      logEvent('error', 'backup_schedule_failed', { error: err instanceof Error ? err.message : String(err) });
+    }
   };
   setTimeout(tick, 60_000).unref();
-  timer = setInterval(tick, 15 * 60_000);
+  timer = setInterval(tick, 5 * 60_000);
   timer.unref();
 }

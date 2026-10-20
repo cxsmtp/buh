@@ -4,7 +4,7 @@ import { ensureAdminAccount } from './adminAuth';
 import { ensureAdminLink } from './adminLinkSetup';
 import { MIN_PASSPHRASE_LENGTH, auditRestoreOnce, emailConfigured, startBackupSchedule } from './backup';
 import { refreshPayHashes } from './bankPay';
-import { getDb } from './db';
+import { ensureChangeTriggers, getDb } from './db';
 import { migrateDriveSecrets } from './driveBackup';
 import { backupPassphrase } from './backupSecret';
 import { backfillRefundLedger, normalizeBankStates, startUnconfirmedSweep } from './orders';
@@ -27,6 +27,11 @@ export async function onStartup() {
   // Each step on its own: one that fails (the database busy during an update, a full disk) is
   // logged and never stops the others (backups and monitoring above all).
   step('database_open', () => getDb()); // open (and migrate) the database now, not on the first customer's request
+  // What changed since the last backup is counted by triggers: any a table rebuild lost are made again.
+  step('change_triggers', () => {
+    const made = ensureChangeTriggers(getDb());
+    if (made.length) logEvent('warn', 'backup_triggers_repaired', { count: made.length, triggers: made.join(', ') });
+  });
   // Restored from a backup since the last start: in the audit log, once.
   step('restore_audit', auditRestoreOnce);
   // Accountants a restore revoked (the backup may predate a revoke): in the audit log, once.

@@ -16,6 +16,7 @@ const NAMES: Record<string, string> = {
   courier: 'Couriers',
   sms: 'SMS gateway',
   phoneCheck: 'Phone check',
+  backups: 'Backups',
   catalog: 'Catalogue',
   store: 'Store & contact',
   theme: 'Festival themes',

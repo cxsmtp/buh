@@ -26,6 +26,7 @@ import { DEFAULT_SEO, type SeoSettings } from '@/lib/seo/types';
 import { validateSeoSettings } from './seoSettings';
 import { refreshShopPages } from './pageCache';
 import { SKU_PREFIX_RE, CATEGORY_CODE_RE } from '@/lib/sku';
+import { DEFAULT_BACKUP_SETTINGS, validateBackupSettings, type BackupSettings } from './backupPolicy';
 
 /**
  * Shop settings, kept on the server so every visitor sees the same branding
@@ -50,6 +51,8 @@ export interface SettingsMap {
   delivery: DeliverySettings;
   payments: PaymentSettings;
   phoneCheck: PhoneCheckSettings;
+  /** When backups run and which are emailed (backupPolicy.ts). */
+  backups: BackupSettings;
   look: LookSettings;
   ai: AiSettings;
   /** Settings → AI writing → Prompt: the shop's instructions and the field guides (the fixed rules are not settings). */
@@ -91,6 +94,8 @@ const DEFAULTS: SettingsMap = {
   payments: { cardEnabled: false, stripePublishableKey: '', stripeSecretKey: '', stripeWebhookSecret: '', cardFeePercent: DEFAULT_CARD_FEE_PERCENT, bankTransferMode: 'default' },
   // WhatsApp (free) for every shop, new or existing, until the owner chooses SMS codes.
   phoneCheck: { mode: 'whatsapp', unconfirmedCancelHours: 24, unopenedCancelHours: 6 },
+  // A backup 2 h after the first change, at most one emailed a day, a weekly check when nothing changes.
+  backups: DEFAULT_BACKUP_SETTINGS,
   // Ivory & Gold, light or dark as the device is set (migration 13 records when it started).
   // Off, and no key: "Write from photo" explains how to switch it on.
   ai: DEFAULT_AI,
@@ -124,6 +129,7 @@ const SECRETS: Record<SettingsKey, string[]> = {
   delivery: [],
   payments: ['stripeSecretKey', 'stripeWebhookSecret'],
   phoneCheck: [],
+  backups: [],
   look: [],
   ai: ['anthropicApiKey', 'geminiApiKey', 'deepseekApiKey', 'openaiApiKey', 'falApiKey'],
   aiPrompt: [],
@@ -460,6 +466,7 @@ const SECRET_HOSTS: Record<SettingsKey, Record<string, string>> = {
   delivery: {},
   payments: {},
   phoneCheck: {},
+  backups: {},
   ai: {},
   aiPrompt: {},
   aiPictures: {},
@@ -877,6 +884,14 @@ const VALIDATORS: { [K in SettingsKey]: (input: Obj, current: SettingsMap[K]) =>
       unopened = hours;
     }
     return { mode: mode as PhoneCheckMode, unconfirmedCancelHours: hours, unopenedCancelHours: unopened };
+  },
+
+  async backups(input, current) {
+    try {
+      return validateBackupSettings(input, current);
+    } catch (err) {
+      throw new HttpError(400, err instanceof Error ? err.message : 'Backups: check the settings.');
+    }
   },
 
   async email(input, current) {

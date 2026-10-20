@@ -6,14 +6,14 @@
 - Caddy, which gets and renews the free HTTPS certificate and sends visitors to the copy that is healthy;
 - optionally, the **updater**, which installs new versions without downtime, rolls back a version that does not start, and restarts the shop if it stops answering (section 5).
 
-Everything the shop stores lives in one Docker volume and is backed up every 12 hours, by email.
+Everything the shop stores lives in one Docker volume and is backed up when something changes (two hours after the first change to orders, stock or settings), by email and optionally to Google Drive.
 
 | Option | Use it? | Why |
 | --- | --- | --- |
 | **KVM VPS + Docker Compose** (this guide) | ✅ Recommended | One command to start. Updates switch between two copies without closing the shop, and a version that fails is rolled back on its own. HTTPS is automatic. The database, photos and receipts persist in a volume. Backups run on their own. The shop containers run read-only, as non-root, with no extra privileges. |
 | KVM VPS + Podman, images only | ✅ Supported | Nothing on the server but three published images (shop, HTTPS proxy, updater) and one settings file; set up with a few commands, then updates install themselves (a few seconds' pause at each switch). See "Hostinger VPS with Podman, images only". |
 | KVM VPS + PM2 + nginx | Possible | It works (see the end of this guide), but you look after Node, nginx, certbot and the data folder yourself. |
-| Shared / Cloud hosting (hPanel Node.js) | ❌ Not for this shop | The shop needs a persistent data folder for its database, a native SQLite module, and a process that keeps running for the 12-hourly backups. hPanel Node.js hosting is not built for that. |
+| Shared / Cloud hosting (hPanel Node.js) | ❌ Not for this shop | The shop needs a persistent data folder for its database, a native SQLite module, and a process that keeps running for the automatic backups. hPanel Node.js hosting is not built for that. |
 
 **Size:** KVM 2 (2 vCPU, 8 GB) is comfortable. KVM 1 is enough to start. Choose the data centre region closest to the UAE that Hostinger offers.
 
@@ -100,9 +100,19 @@ The Admin Hub has no button or address on the shop: addresses like `/admin` are 
 
 **Chat replies by email (optional):** in Admin Hub → Settings → Email & admin account, fill in the mailbox (IMAP) server, e.g. `imap.hostinger.com`. Then replying to a chat email answers in the chat. Without it, reply in Admin Hub → Chats.
 
-## 3. Backups (automatic, every 12 hours)
+## 3. Backups (automatic, when something changes)
 
-The shop backs itself up every 12 hours, and straight after a restart if one is due. It emails the backup to `BACKUP_EMAIL` and keeps the newest 14 on the server. Each backup contains:
+The shop backs itself up when there is something new, and keeps every backup of the last 14 days on the server (one a day when the disk gets tight, never fewer than 14):
+
+- **Two hours after the first change** to orders, payments, stock, products, prices, photos, expenses, VAT documents, settings or accounts (Admin Hub → Settings → System & backups → **When to back up**: 30 minutes to 12 hours). Later changes never push it back.
+- **Chats and visits alone** wait for the next backup, or a day at most.
+- **Nothing changed:** no backup, no email, no Drive copy. A **weekly check** (on by default) still runs when no backup succeeded for 7 days, to show backups work.
+- **Emails** go to `BACKUP_EMAIL`: by default at most one a day (the first backup after changes, UAE days), the weekly check and **Back up now**. Other choices: every backup, only the weekly check, or never. Failures are always emailed.
+- **Restarts and updates:** what is waiting is kept in the database, so after a restart the backup is still due at the same time. The updater's own snapshot before each update holds the waiting changes too, and a version switch from the hub (Settings → Versions) backs them up first.
+- `BACKUP_INTERVAL_HOURS` (old, optional): when set, at most that many hours pass between backups while changes wait.
+- **Server clock:** with Google Drive connected, a clock more than a day out means old backups are kept (none removed) and the hub says "The server's clock looks wrong". Check it with `timedatectl`, and turn on time sync with `timedatectl set-ntp true`.
+
+Each backup contains:
 
 - **The full database** (`shop.db`): every order, product, setting and booking. Courier, SMS and Stripe keys are blanked: re-enter them after a restore.
 - **Flat files you can open in Excel:** `orders.csv`, `order_items.csv`, `customers.csv`, `products.csv`, `chats.csv`, `stock_moves.csv` (every stock change: who, why, old → new).
@@ -116,7 +126,7 @@ The shop backs itself up every 12 hours, and straight after a restart if one is 
 
 **Off-server copy (recommended):** the shop can also copy each backup, encrypted, to a Google Drive folder (Admin Hub → Settings → System & backups → **Copy each backup to Google Drive**; steps in docs/user-guide.md). Then a lost server can be rebuilt from Drive ("Hostinger VPS with Podman, images only" → "Rebuilding on a new server from Google Drive").
 
-**If something is wrong**, the status line at the top of the Admin Hub turns amber (taken but not emailed) or red (failed or overdue), and a failure is also emailed. **Back up now** runs one immediately.
+**If something is wrong**, the status line at the top of the Admin Hub turns amber (taken but not emailed) or red (failed, changes waiting more than an hour past their time, or no backup for 8 days with the weekly check on), and a failure is also emailed. A quiet shop with nothing new is never red. **Back up now** runs one immediately.
 
 Before every update, the updater also saves a copy of the database on the server, as `backups/pre-update-<time>.db` (the newest 5 are kept).
 
@@ -589,7 +599,7 @@ Only if you cannot use Docker.
 4. Run `bash deploy/deploy.sh`. It builds and starts one PM2 process, with `DATA_DIR=/var/lib/buhome` and `TRUST_PROXY=1` from `ecosystem.config.cjs`.
 5. Put nginx in front using `deploy/nginx-buhome.conf`, and get a certificate with certbot.
 
-Back up `/var/lib/buhome`: the built-in 12-hour email backups run the same way.
+Back up `/var/lib/buhome`: the built-in backups (when something changes) run the same way.
 
 ---
 

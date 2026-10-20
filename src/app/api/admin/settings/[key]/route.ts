@@ -41,7 +41,7 @@ function auditPrompts(key: SettingsKey, before: unknown, by: string) {
   }
 }
 
-const KEYS: SettingsKey[] = ['brand', 'bank', 'courier', 'sms', 'catalog', 'store', 'theme', 'email', 'assistant', 'delivery', 'payments', 'phoneCheck', 'ai', 'aiPrompt', 'aiPictures'];
+const KEYS: SettingsKey[] = ['brand', 'bank', 'courier', 'sms', 'catalog', 'store', 'theme', 'email', 'assistant', 'delivery', 'payments', 'phoneCheck', 'ai', 'aiPrompt', 'aiPictures', 'backups'];
 
 export async function PUT(req: Request, { params }: { params: Promise<{ key: string }> }) {
   try {

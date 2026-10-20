@@ -2,9 +2,9 @@ import { audit } from '@/lib/server/audit';
 import { backupHealth, runBackup } from '@/lib/server/backup';
 import { driveStatus } from '@/lib/server/driveBackup';
 import { requireAdmin } from '@/lib/server/guard';
-import { handleRouteError, json } from '@/lib/server/http';
+import { handleRouteError, HttpError, json, readJsonBody } from '@/lib/server/http';
 
-/** Backup status for the admin hub, with the last copy to Google Drive (when switched on). */
+/** Backup status for the admin hub (last, next, what waits), with the last copy to Google Drive (when switched on). */
 export async function GET(req: Request) {
   try {
     await requireAdmin(req);
@@ -14,12 +14,20 @@ export async function GET(req: Request) {
   }
 }
 
-/** "Back up now": takes and emails a backup, then returns the new status. */
+/**
+ * "Back up now": takes a backup (emailed as Settings → System & backups says, or as asked with
+ * { email: true | false }), then returns the new status.
+ */
 export async function POST(req: Request) {
   try {
     const session = await requireAdmin(req);
-    audit('backup.requested', { by: session.email });
-    await runBackup('manual');
+    // The body is optional (older pages send none); when given: only { email }.
+    const body = /^application\/json\b/i.test(req.headers.get('content-type') || '') && req.body ? await readJsonBody(req, 1024) : {};
+    for (const k of Object.keys(body)) if (k !== 'email') throw new HttpError(400, 'Unknown field.');
+    if (body.email !== undefined && typeof body.email !== 'boolean') throw new HttpError(400, 'email: true or false.');
+    const email = body.email as boolean | undefined;
+    audit('backup.requested', { by: session.email, ...(email !== undefined ? { email } : {}) });
+    await runBackup('manual', { email });
     return json({ ...backupHealth(), drive: driveStatus() });
   } catch (err) {
     return handleRouteError(err, 'admin/backup/run');

@@ -5,6 +5,7 @@ import { AlertTriangle, CheckCircle2, DatabaseBackup, Loader2, XCircle } from 'l
 import { getJson, postJson } from '@/lib/apiClient';
 import { copyingText, mb, type DriveCopying } from './settings/DriveBackupCard';
 import { BACKUP_PASSWORD_EVENT } from './settings/BackupPasswordCard';
+import { BACKUP_SCHEDULE_EVENT } from './settings/BackupScheduleCard';
 
 interface Health {
   level: 'ok' | 'warning' | 'failing';
@@ -17,7 +18,20 @@ interface Health {
   lastError?: string;
   lastEmailedAt?: string;
   lastEmailError?: string;
+  lastEmailSkipped?: string;
   notice?: string;
+  /** Nothing has left the server for 2 days (no Drive, newer backups not emailed). */
+  offServerWarning?: string;
+  clockWarning?: string;
+  /** Why it is failing when no backup failed: changes waiting too long, or no backup for 8 days. */
+  overdueText?: string;
+  /** What waits for the next backup. */
+  pending?: { total: number; labels: string };
+  lastChanges?: { total: number };
+  lastChangesText?: string;
+  lastReason?: 'changes' | 'weekly-check' | 'manual' | 'startup';
+  weeklyCheckAt?: string | null;
+  retryAt?: string | null;
   /** The off-server copy (Settings → System & backups → Google Drive). */
   drive?: { enabled: boolean; level: 'off' | 'ok' | 'failing'; lastSuccessAt?: string; lastSize?: number; lastError?: string; copying?: DriveCopying | null };
 }
@@ -30,6 +44,20 @@ function ago(iso?: string) {
   const hours = Math.round(mins / 60);
   return hours < 48 ? `${hours} h ago` : `${Math.round(hours / 24)} days ago`;
 }
+
+/** "2:10 pm", "yesterday 2:10 pm" or "Sun 18 Oct, 2:10 pm", in the viewer's time. */
+export function when(iso?: string | null, now = Date.now()) {
+  if (!iso) return '';
+  const d = new Date(iso);
+  const time = d.toLocaleTimeString('en-GB', { hour: 'numeric', minute: '2-digit', hour12: true });
+  const day = (x: Date) => x.toDateString();
+  if (day(d) === day(new Date(now))) return time;
+  if (day(d) === day(new Date(now + 86_400_000))) return `tomorrow ${time}`;
+  if (day(d) === day(new Date(now - 86_400_000))) return `yesterday ${time}`;
+  return `${d.toLocaleDateString('en-GB', { weekday: 'short', day: 'numeric', month: 'short' })}, ${time}`;
+}
+
+const plural = (n: number, one: string) => `${n} ${one}${n === 1 ? '' : 's'}`;
 
 /** Backups at a glance: green when the last one is recent and was emailed, amber or red otherwise. */
 export const BackupStatus: React.FC = () => {
@@ -45,9 +73,12 @@ export const BackupStatus: React.FC = () => {
     const t = setInterval(load, 5 * 60_000);
     // A backup password just set (or changed): the "unencrypted" notice goes at once.
     window.addEventListener(BACKUP_PASSWORD_EVENT, load);
+    // The backup choices just saved (Settings → System & backups): the next time changes.
+    window.addEventListener(BACKUP_SCHEDULE_EVENT, load);
     return () => {
       clearInterval(t);
       window.removeEventListener(BACKUP_PASSWORD_EVENT, load);
+      window.removeEventListener(BACKUP_SCHEDULE_EVENT, load);
     };
   }, []);
 
@@ -87,12 +118,32 @@ export const BackupStatus: React.FC = () => {
     health.level === 'failing'
       ? health.lastError
         ? `Last backup failed: ${health.lastError}`
-        : `No backup in the last ${health.intervalHours + 1} hours.`
+        : health.overdueText || 'Backups need attention.'
+      : health.clockWarning
+      ? health.clockWarning
       : health.lastEmailError
       ? health.lastEmailError
       : health.notice
       ? `${health.notice} Emailed ${ago(health.lastEmailedAt)}.`
+      : health.offServerWarning
+      ? `${health.offServerWarning} Last emailed ${ago(health.lastEmailedAt)}.`
+      : health.lastEmailSkipped && health.lastEmailedAt
+      ? `Last emailed ${ago(health.lastEmailedAt)}${health.encrypted ? ', encrypted' : ''}.`
+      : health.lastEmailSkipped
+      ? health.lastEmailSkipped
       : `Emailed ${ago(health.lastEmailedAt)}${health.encrypted ? ', encrypted' : ''}.`;
+  const pending = health.pending?.total ?? 0;
+  const why = health.lastReason === 'weekly-check' ? 'weekly check' : health.lastReason === 'manual' ? 'Back up now' : health.lastReason === 'startup' ? 'first backup' : '';
+  const held = health.lastChanges?.total
+    ? `after ${plural(health.lastChanges.total, 'change')}${health.lastChangesText ? `: ${health.lastChangesText}` : ''}`
+    : why
+    ? why
+    : '';
+  const next = pending
+    ? `Next: by ${when(health.retryAt && health.nextDueAt && health.retryAt > health.nextDueAt ? health.retryAt : health.nextDueAt)} — ${plural(pending, 'change')} waiting${health.pending?.labels ? ` (${health.pending.labels})` : ''}.`
+    : health.retryAt
+    ? `Trying again by ${when(health.retryAt)}.`
+    : 'Nothing new since the last backup — none needed.';
 
   return (
     <div className={`rounded-2xl border px-3.5 py-2.5 text-xs space-y-1.5 ${tone}`} role="status">
@@ -115,7 +166,22 @@ export const BackupStatus: React.FC = () => {
         </button>
       </div>
       <p data-testid="backup-detail" className="opacity-80 break-words">
-        {detail} Every {health.intervalHours} h{health.lastSummary ? ` • ${health.lastSummary}` : ''}.
+        {detail}
+        {health.lastSummary ? ` Holds ${health.lastSummary}.` : ''}
+      </p>
+      {health.lastSuccessAt && (
+        <p data-testid="backup-last" className="opacity-80 break-words">
+          Last backup: {when(health.lastSuccessAt)}
+          {held ? ` (${held})` : ''}.
+        </p>
+      )}
+      <p data-testid="backup-next" className="opacity-80 break-words">
+        {next}
+        {health.weeklyCheckAt ? (
+          <span data-testid="backup-weekly">
+            {' '}Weekly check: {new Date(health.weeklyCheckAt).toLocaleDateString('en-GB', { weekday: 'long' })}.
+          </span>
+        ) : null}
       </p>
       {drive && (
         <p data-testid="backup-drive" className="opacity-80 break-words">
