@@ -11,6 +11,9 @@ import { getJson, sendJson } from '@/lib/apiClient';
  * The server checks every value again (backupPolicy.ts).
  */
 
+/** The warning when nothing leaves the server (the same words as the status line's). */
+const ONLY_ON_SERVER = 'Your newest backups are only on the server: connect Google Drive or email them.';
+
 /** Sent when the backup choices are saved, so the status line above reloads. */
 export const BACKUP_SCHEDULE_EVENT = 'buh:backup-schedule';
 
@@ -59,9 +62,9 @@ export function BackupScheduleCard() {
     driveOn
       ? null
       : d.email === 'never'
-      ? 'Google Drive is not connected and backups would not be emailed: they would be only on this server. Connect Google Drive below, or choose to email them.'
+      ? `${ONLY_ON_SERVER} Google Drive is not connected and backups would not be emailed at all.`
       : d.email === 'weekly'
-      ? 'Google Drive is not connected: with only the weekly check emailed, changes can be on this server alone for up to a week. Connect Google Drive below, or email at most one a day.'
+      ? `${ONLY_ON_SERVER} Google Drive is not connected, and with only the weekly check emailed changes can stay on this server alone for up to a week.`
       : !health.emailConfigured
       ? 'Email is not set up and Google Drive is not connected: backups are only on this server. Set up email (Settings → Email) or connect Google Drive below.'
       : null;

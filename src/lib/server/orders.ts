@@ -1,5 +1,6 @@
 import { shopVariantSku } from './marketplace';
 import crypto from 'node:crypto';
+import { markChanged } from './dataChanges';
 import fs from 'node:fs';
 import net from 'node:net';
 import path from 'node:path';
@@ -699,6 +700,8 @@ export function placeOrder(input: unknown, context: PlaceOrderContext = {}): Pla
   if (receipt) {
     try {
       fs.renameSync(freshReceipt, path.join(receiptsDir(), `${order.id}.${receipt.ext}`));
+      // The file lands after the order's commit: the next backup must take it too.
+      markChanged('orders');
     } catch (err) {
       logEvent_('error', 'receipt_write_failed', { orderId: order.id, error: err instanceof Error ? err.message : String(err) });
     }
@@ -899,6 +902,8 @@ export function uploadTransfer(orderId: string, file: unknown, context: { ip?: s
       if (fs.existsSync(current)) fs.renameSync(current, path.join(dir, `${orderId}.v${n - 1}.${ext}`));
     }
     fs.renameSync(fresh, path.join(dir, `${orderId}.${receipt.ext}`));
+    // The file lands after the order's commit: the next backup must take it too.
+    markChanged('orders');
     pruneReceiptVersions(dir, orderId, n);
   } catch (err) {
     logEvent_('error', 'receipt_swap_failed', { orderId, n, error: err instanceof Error ? err.message : String(err) });

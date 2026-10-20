@@ -65,7 +65,7 @@ export function currentProblems(now = Date.now()): Problem[] {
   if (!databaseOk(now)) problems.push({ id: 'database', level: 'failing', text: 'The database check failed. Restore the latest backup (see the deployment guide).' });
   const backup = backupHealth(now);
   if (backup.level === 'failing') problems.push({ id: 'backup', level: 'failing', text: backup.lastError ? `Backups are failing: ${backup.lastError}` : backup.overdueText || backup.notice || 'Backups need attention.' });
-  else if (backup.level === 'warning') problems.push({ id: 'backup', level: 'warning', text: backup.lastEmailError || backup.notice || 'Backups need attention.' });
+  else if (backup.level === 'warning') problems.push({ id: 'backup', level: 'warning', text: backup.lastEmailError || backup.notice || backup.offServerWarning || 'Backups need attention.' });
   // The off-server copy in Google Drive (when switched on): failing or paused, never the local backup's problem.
   // Compared with the last backup handed to Drive (a "Back up now" with nothing new is not copied again).
   const drive = driveProblem(backup.lastDriveHandoffAt ?? backup.lastSuccessAt, backup.intervalHours, now);

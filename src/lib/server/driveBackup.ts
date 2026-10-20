@@ -3,7 +3,7 @@ import fs from 'node:fs';
 import http from 'node:http';
 import path from 'node:path';
 import { audit } from './audit';
-import { driveCopiesToRemove } from './backupPolicy';
+import { driveRetention } from './backupPolicy';
 import { dataDir, dataFile, writePrivateFile } from './dataDir';
 import { HttpError } from './http';
 import { kvGet, kvSet } from './kv';
@@ -40,8 +40,9 @@ import { backupPassphrase } from './backupSecret';
  *   Google Cloud project id (for the console links) are kept in kv `backup:drive-wizard` (nothing
  *   secret). The connected Google account's email comes from Drive's about.get (drive.file allows
  *   it: no extra permission), shown as "Connected to …".
- * - Copies kept: every one of the last 7 days, then the newest of each day to 30 days and of each
- *   week to 6 months, at most `keep` (default 30), never the newest (backupPolicy.ts); older ones
+ * - Copies kept: up to 4 a day for the last 7 days, then the newest of each day to 30 days and of
+ *   each week (Monday to Sunday, UAE) to 6 months, at most `keep` (default 60, the newest days
+ *   thinned first), never the newest (backupPolicy.ts); older ones
  *   that this feature uploaded (their Drive file ids are recorded) are deleted. Nothing else in the
  *   folder is ever touched.
  * - The key, the OAuth client secret, the refresh token and a device sign-in in progress are
@@ -74,7 +75,7 @@ export const DRIVE_FILE_SCOPE = 'https://www.googleapis.com/auth/drive.file';
 export const APP_FOLDER_NAME = 'Beautiful UAE Home backups';
 /** Resumable upload pieces: a multiple of 256 KiB, as Google asks; the wait before a retry grows by retryMs each time. (Changeable by tests only.) */
 export const DRIVE_LIMITS = { chunkBytes: 8 * 1024 * 1024, retryMs: 1000 };
-export const DRIVE_KEEP_DEFAULT = 30;
+export const DRIVE_KEEP_DEFAULT = 60;
 export const DRIVE_KEEP_MAX = 365;
 const BACKUP_MAGIC = 'BUHBK1\n'; // as in backup.ts: an encrypted backup's first bytes
 
@@ -1000,13 +1001,15 @@ async function copyOnce(file: string, reason: string): Promise<DriveState | null
         logEvent('warn', 'backup_drive_prune_failed', { file: same.name, error: err instanceof Error ? err.message : String(err) });
       }
     }
-    // Retention: only copies this feature made (backupPolicy.ts: every copy of the last 7 days, then
-    // one a day to 30 days, one a week to 6 months, at most `keep`; never the newest, never the one
-    // just made), oldest first. A delete that fails for now (no answer, Google busy) is tried next
+    // Retention: only copies this feature made (backupPolicy.ts: up to 4 a day for 7 days, then one
+    // a day to 30 days, one a week to 6 months, at most `keep`; never the newest, never the one just
+    // made; at most 10 a run; nothing when the clock is ahead of the copies), oldest first. A delete that fails for now (no answer, Google busy) is tried next
     // time; one Google refuses for good (403: the file is no longer ours to delete) is no longer
     // tracked (audited), so retention never stalls on it.
     const keep = Math.max(1, cfg.keep || DRIVE_KEEP_DEFAULT);
-    for (const old of driveCopiesToRemove(copies(), keep, Date.now(), up.id)) {
+    const plan = driveRetention(copies(), keep, Date.now(), up.id);
+    if (plan.clockAhead) logEvent('warn', 'backup_drive_clock_ahead', { note: 'the clock is more than 2 days ahead of the newest copy: no copy removed' });
+    for (const old of plan.remove) {
       try {
         await deleteDriveFile(token, old.id, account);
         audit('backup.drive_removed', { file: old.name, fileId: old.id, keep });

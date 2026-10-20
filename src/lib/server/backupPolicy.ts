@@ -142,7 +142,21 @@ export function catchUpEmailDue(choice: BackupEmailChoice, now: number, state: {
   return dubaiDay(now) !== dubaiDay(since) && (prev === null || dubaiDay(prev) !== dubaiDay(now));
 }
 
-// ── Google Drive retention ──────────────────────────────────────────────────
+// ── Retention: local backups and Google Drive copies ────────────────────────
+
+/** The Monday a UAE day's week starts on ('YYYY-MM-DD'). */
+export function dubaiWeek(t: number): string {
+  const d = new Date(t + 4 * HOUR);
+  const back = (d.getUTCDay() + 6) % 7; // Monday 0 … Sunday 6
+  return new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate() - back)).toISOString().slice(0, 10);
+}
+
+/** More than this ahead of the newest copy, the clock is not trusted: nothing is deleted. */
+export const CLOCK_AHEAD_MS = 2 * DAY;
+/** At most this many Drive copies are deleted in one run. */
+export const DRIVE_DELETE_PER_RUN = 10;
+/** Drive: copies kept per UAE day in the last 7 days (before the cap thins them). */
+export const DRIVE_PER_DAY = 4;
 
 export interface DriveCopy {
   id: string;
@@ -150,40 +164,106 @@ export interface DriveCopy {
   at: string;
 }
 
+const time = (c: { at: string }) => at(c.at) ?? 0;
+
 /**
- * Which tracked Drive copies to remove: every copy from the last 7 days stays; from 7 to 30 days
- * old, the newest of each UAE day; from 30 days to 6 months, the newest of each week; older ones
- * go. Then, beyond `keep` copies, the oldest go. The newest copy (and so an only copy) is never
- * removed, nor `protect` (the one just uploaded).
+ * Which tracked Drive copies to remove. Ages count from the newest copy's time when the clock is
+ * ahead of it (a clock that jumped forward never makes copies look old), and when the clock is more
+ * than 2 days ahead nothing is removed at all (`clockAhead`, for a warning).
+ *
+ *  - the last 7 days: the newest 4 of each UAE day;
+ *  - 7 to 30 days: the newest of each UAE day;
+ *  - 30 days to 6 months: the newest of each UAE week (Monday to Sunday);
+ *  - older: removed.
+ *
+ * Over `keep`, the newest buckets are thinned first: fewer a day in the last week (down to one),
+ * then the recent days, then the daily ones, then the weekly ones from the newest; the oldest
+ * weekly copy and the newest copy (and `protect`, the one just made) are never removed for the
+ * cap. At most DRIVE_DELETE_PER_RUN go in one run, oldest first.
  */
-export function driveCopiesToRemove(copies: DriveCopy[], keep: number, now: number, protect = ''): DriveCopy[] {
-  if (copies.length <= 1) return [];
-  const sorted = [...copies].sort((a, b) => (at(b.at) ?? 0) - (at(a.at) ?? 0)); // newest first
+export function driveRetention(copies: DriveCopy[], keep: number, now: number, protect = ''): { remove: DriveCopy[]; clockAhead: boolean } {
+  if (copies.length <= 1) return { remove: [], clockAhead: false };
+  const sorted = [...copies].sort((a, b) => time(b) - time(a)); // newest first
+  const newestAt = time(sorted[0]);
+  if (now - newestAt > CLOCK_AHEAD_MS) return { remove: [], clockAhead: true };
+  const ref = Math.min(now, newestAt);
   const newest = sorted[0].id;
-  const kept: DriveCopy[] = [];
-  const remove: DriveCopy[] = [];
-  const seen = new Set<string>();
-  for (const c of sorted) {
-    const t = at(c.at) ?? now;
-    const age = now - t;
-    let bucket = '';
-    if (age > 182 * DAY) bucket = 'old';
-    else if (age > 30 * DAY) bucket = `w${Math.floor(t / (7 * DAY))}`;
-    else if (age > WEEKLY_DAYS * DAY) bucket = `d${dubaiDay(t)}`;
-    const safe = c.id === newest || c.id === protect;
-    if (!safe && (bucket === 'old' || (bucket && seen.has(bucket)))) remove.push(c);
-    else kept.push(c);
-    if (bucket) seen.add(bucket);
-  }
+  const safe = (c: DriveCopy) => c.id === newest || c.id === protect;
+  const tierOf = (c: DriveCopy) => {
+    const age = ref - time(c);
+    return age > 182 * DAY ? 'old' : age > 30 * DAY ? 'weekly' : age > WEEKLY_DAYS * DAY ? 'daily' : 'recent';
+  };
+  const pick = (perDay: number) => {
+    const kept: DriveCopy[] = [];
+    const used = new Map<string, number>();
+    for (const c of sorted) {
+      const tier = tierOf(c);
+      const key = tier === 'recent' || tier === 'daily' ? `d${dubaiDay(time(c))}` : tier === 'weekly' ? `w${dubaiWeek(time(c))}` : 'old';
+      const limit = tier === 'recent' ? perDay : tier === 'old' ? 0 : 1;
+      const n = used.get(key) ?? 0;
+      if (safe(c) || n < limit) kept.push(c);
+      used.set(key, n + 1);
+    }
+    return kept;
+  };
   const cap = Math.max(1, keep);
-  // Over the cap: the oldest kept go first (never the newest or the protected one).
-  let count = kept.length;
-  for (let i = kept.length - 1; i >= 0 && count > cap; i--) {
-    const c = kept[i];
-    if (c.id === newest || c.id === protect) continue;
-    remove.push(c);
-    count--;
+  let kept = pick(DRIVE_PER_DAY);
+  for (let perDay = DRIVE_PER_DAY - 1; kept.length > cap && perDay >= 1; perDay--) kept = pick(perDay);
+  if (kept.length > cap) {
+    // Still over: newest buckets first (recent, then daily, then weekly), never the oldest weekly copy.
+    const weekly = kept.filter((c) => tierOf(c) === 'weekly');
+    const oldestWeekly = weekly.length ? weekly[weekly.length - 1].id : '';
+    const order = ['recent', 'daily', 'weekly'].flatMap((tier) => kept.filter((c) => tierOf(c) === tier && !safe(c) && c.id !== oldestWeekly));
+    const drop = new Set<string>();
+    for (const c of order) {
+      if (kept.length - drop.size <= cap) break;
+      drop.add(c.id);
+    }
+    kept = kept.filter((c) => !drop.has(c.id));
   }
-  // Oldest first, as before.
-  return remove.sort((a, b) => (at(a.at) ?? 0) - (at(b.at) ?? 0));
+  const keepIds = new Set(kept.map((c) => c.id));
+  const remove = sorted.filter((c) => !keepIds.has(c.id)).sort((a, b) => time(a) - time(b));
+  return { remove: remove.slice(0, DRIVE_DELETE_PER_RUN), clockAhead: false };
+}
+
+/** The copies driveRetention removes (oldest first). */
+export function driveCopiesToRemove(copies: DriveCopy[], keep: number, now: number, protect = ''): DriveCopy[] {
+  return driveRetention(copies, keep, now, protect).remove;
+}
+
+/** Local backups: never fewer than this many (the newest). */
+export const LOCAL_KEEP_MIN = 14;
+export const LOCAL_KEEP_DAYS = 14;
+
+/** When a local backup was made, from its name (buh-backup-YYYYMMDD-HHMM…, UTC), or null. */
+export function localBackupTime(name: string): number | null {
+  const m = /^buh-backup-(\d{4})(\d{2})(\d{2})-(\d{2})(\d{2})/.exec(name);
+  if (!m) return null;
+  const t = Date.UTC(Number(m[1]), Number(m[2]) - 1, Number(m[3]), Number(m[4]), Number(m[5]));
+  return Number.isFinite(t) ? t : null;
+}
+
+/**
+ * Which local backups (file names) to remove. The newest 14 always stay. With room on the disk,
+ * only those older than 14 days go; with the disk tight, also all but the newest of each UAE day
+ * older than 24 hours. Ages count from the newest backup when the clock is ahead of it, and with
+ * the clock more than 2 days ahead nothing is removed.
+ */
+export function localBackupsToRemove(names: string[], now: number, diskTight: boolean): string[] {
+  const dated = names.map((name) => ({ name, t: localBackupTime(name) })).filter((x): x is { name: string; t: number } => x.t !== null).sort((a, b) => b.t - a.t || (a.name < b.name ? 1 : -1));
+  if (dated.length <= LOCAL_KEEP_MIN) return [];
+  if (now - dated[0].t > CLOCK_AHEAD_MS) return [];
+  const ref = Math.min(now, dated[0].t);
+  const remove: string[] = [];
+  const days = new Set<string>();
+  dated.forEach((b, i) => {
+    const age = ref - b.t;
+    const day = dubaiDay(b.t);
+    const firstOfDay = !days.has(day);
+    days.add(day);
+    if (i < LOCAL_KEEP_MIN) return;
+    if (age > LOCAL_KEEP_DAYS * DAY) remove.push(b.name);
+    else if (diskTight && age > DAY && !firstOfDay) remove.push(b.name);
+  });
+  return remove;
 }

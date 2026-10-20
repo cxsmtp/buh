@@ -503,7 +503,7 @@ Under **Settings → Branding & bank → Bank transfer details**. These are **ne
 The line at the top of the Admin Hub shows when the last backup ran:
 
 - **green:** recent and emailed;
-- **amber:** taken but not emailed (check the `SMTP_*` settings), or emailed without a backup password;
+- **amber:** taken but not emailed (check the `SMTP_*` settings), emailed without a backup password, or "Your newest backups are only on the server" (no Google Drive, and none emailed for 2 days);
 - **red:** failed, or changes have waited more than an hour past their time (or no backup for 8 days with the weekly check on). A quiet shop with nothing new stays green.
 
 Below it: **Last backup** (when, and how many changes it held: orders, stock…), **Next** (by when, and how many changes are waiting) or "Nothing new since the last backup — none needed", and the day of the **weekly check**.
@@ -536,6 +536,8 @@ Settings → System & backups → **Protect backups with a password**. Backups h
 #### Copy each backup to Google Drive
 
 An off-server copy: if the server is lost, the shop can be rebuilt from Drive on a new one. Copies are always encrypted: without a backup password the card offers **Make a password first** right there.
+
+**Copies kept in Drive:** up to 4 a day for the last week, one a day to 30 days, one a week to 6 months, at most **Copies to keep** (60 by default; the newest days are thinned first, so the history still reaches back months).
 
 **Connect my Google Drive (recommended, works with a personal Gmail):** Google lets an app use your Drive only once you have registered it in Google Cloud, so there is a one-time setup (about 10 minutes). The card guides you through it in **Set up Google Drive**: four steps, each with an **Open this page** button to the exact Google Cloud page and **Copy** buttons for what to type. Tick each step when done; the ticks are remembered.
 

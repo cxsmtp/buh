@@ -20,6 +20,8 @@ interface Health {
   lastEmailError?: string;
   lastEmailSkipped?: string;
   notice?: string;
+  /** Nothing has left the server for 2 days (no Drive, newer backups not emailed). */
+  offServerWarning?: string;
   /** Why it is failing when no backup failed: changes waiting too long, or no backup for 8 days. */
   overdueText?: string;
   /** What waits for the next backup. */
@@ -120,6 +122,8 @@ export const BackupStatus: React.FC = () => {
       ? health.lastEmailError
       : health.notice
       ? `${health.notice} Emailed ${ago(health.lastEmailedAt)}.`
+      : health.offServerWarning
+      ? `${health.offServerWarning} Last emailed ${ago(health.lastEmailedAt)}.`
       : health.lastEmailSkipped && health.lastEmailedAt
       ? `Last emailed ${ago(health.lastEmailedAt)}${health.encrypted ? ', encrypted' : ''}.`
       : health.lastEmailSkipped

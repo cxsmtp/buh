@@ -84,7 +84,7 @@ export function DriveBackupCard() {
   const [mode, setMode] = useState<DriveStatus['mode']>('oauth');
   const [enabled, setEnabled] = useState(false);
   const [folder, setFolder] = useState('');
-  const [keep, setKeep] = useState('30');
+  const [keep, setKeep] = useState('60');
   const [key, setKey] = useState('');
   const [clientId, setClientId] = useState('');
   const [clientSecret, setClientSecret] = useState('');

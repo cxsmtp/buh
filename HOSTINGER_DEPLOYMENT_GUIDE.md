@@ -102,7 +102,7 @@ The Admin Hub has no button or address on the shop: addresses like `/admin` are 
 
 ## 3. Backups (automatic, when something changes)
 
-The shop backs itself up when there is something new, and keeps the newest 14 on the server:
+The shop backs itself up when there is something new, and keeps every backup of the last 14 days on the server (one a day when the disk gets tight, never fewer than 14):
 
 - **Two hours after the first change** to orders, payments, stock, products, prices, photos, expenses, VAT documents, settings or accounts (Admin Hub → Settings → System & backups → **When to back up**: 30 minutes to 12 hours). Later changes never push it back.
 - **Chats and visits alone** wait for the next backup, or a day at most.

@@ -30,7 +30,7 @@ const { issuePhoneToken } = await import('@/lib/server/phoneToken');
 const orders = await import('@/lib/server/orders');
 const products = await import('@/lib/server/products');
 const settings = await import('@/lib/server/settings');
-const { kvSet } = await import('@/lib/server/kv');
+const { kvGet, kvSet } = await import('@/lib/server/kv');
 
 const H = 3600_000;
 const DAY = 24 * H;
@@ -158,27 +158,113 @@ test('emails: each choice; "at most one a day" counts UAE days, across UTC midni
   assert.equal(policy.catchUpEmailDue('weekly', Date.parse('2026-10-21T20:05:00Z'), st), false);
 });
 
-test('Drive retention: every copy of the last week, then one a day, one a week; never the newest or the only one', () => {
-  const now = Date.parse('2026-10-20T12:00:00Z');
-  const c = (id: string, ageH: number) => ({ id, name: `${id}.enc`, at: iso(now - ageH * H) });
-  assert.deepEqual(policy.driveCopiesToRemove([c('only', 400 * 24)], 1, now), [], 'the only copy, however old');
-  assert.deepEqual(policy.driveCopiesToRemove([], 30, now), []);
-  // Two old copies, keep 1: the newest stays even though it is over 6 months old.
-  assert.deepEqual(policy.driveCopiesToRemove([c('a', 300 * 24), c('b', 200 * 24)], 1, now).map((x) => x.id), ['a']);
-  const list = [
-    c('w1', 1), c('w2', 30), c('w3', 6 * 24), // this week: all stay
-    c('d1a', 10 * 24), c('d1b', 10 * 24 + 1), // the same UAE day, 10 days ago: the newer stays
-    c('d2', 20 * 24),
-    c('k1', 60 * 24), c('k2', 60 * 24 + 2), // the same week, 2 months ago: one stays
-    c('old', 200 * 24), // over 6 months: goes
-  ];
-  const removed = policy.driveCopiesToRemove(list, 30, now).map((x) => x.id).sort();
-  assert.deepEqual(removed, ['d1b', 'k2', 'old']);
-  // keep 2: the oldest go first; the newest and the copy just made never.
-  const capped = policy.driveCopiesToRemove(list, 2, now, 'w3').map((x) => x.id);
-  assert.ok(!capped.includes('w1') && !capped.includes('w3'), JSON.stringify(capped));
-  assert.equal(list.length - capped.length, 2);
-  assert.equal(capped[0], 'old', 'oldest first');
+test('UAE weeks start on Monday; days turn at 20:00 UTC', () => {
+  assert.equal(policy.dubaiWeek(Date.parse('2026-10-25T19:59:00Z')), '2026-10-19', 'Sunday 23:59 in Dubai: the week from Monday 19th');
+  assert.equal(policy.dubaiWeek(Date.parse('2026-10-25T20:00:00Z')), '2026-10-26', 'Monday 00:00 in Dubai: a new week');
+  assert.equal(policy.dubaiWeek(Date.parse('2026-10-19T00:00:00Z')), '2026-10-19');
+});
+
+/** 12 backups a day (every 2 h) for 60 days, ending at `end`. */
+function twelveADay(end: number, days = 60) {
+  const out: number[] = [];
+  for (let t = end - days * DAY + 2 * H; t <= end; t += 2 * H) out.push(t);
+  return out;
+}
+
+test('Drive: 12 backups a day for 60 days keep 4 a day for a week, one a day to 30 days, one a week beyond, within 60 copies', () => {
+  const end = Date.parse('2026-10-20T10:00:00Z');
+  let kept: Array<{ id: string; name: string; at: string }> = [];
+  let mostInOneRun = 0;
+  for (const t of twelveADay(end)) {
+    // As copyOnce does: the new copy is added, then retention runs at that moment.
+    const id = `c${t}`;
+    kept.push({ id, name: `buh-backup-${t}.tar.gz.enc`, at: iso(t) });
+    const remove = policy.driveCopiesToRemove(kept, 60, t, id);
+    mostInOneRun = Math.max(mostInOneRun, remove.length);
+    const gone = new Set(remove.map((r) => r.id));
+    assert.ok(!gone.has(id), 'never the copy just made');
+    kept = kept.filter((c) => !gone.has(c.id));
+  }
+  assert.ok(kept.length <= 60, `${kept.length} copies`);
+  assert.ok(mostInOneRun <= policy.DRIVE_DELETE_PER_RUN);
+  const ages = kept.map((c) => (end - Date.parse(c.at)) / DAY);
+  const perDay = (from: number, to: number) => {
+    const m = new Map<string, number>();
+    for (const c of kept) {
+      const age = (end - Date.parse(c.at)) / DAY;
+      if (age > from && age <= to) m.set(policy.dubaiDay(Date.parse(c.at)), (m.get(policy.dubaiDay(Date.parse(c.at))) ?? 0) + 1);
+    }
+    return m;
+  };
+  // The last 7 days: every UAE day there, up to 4 each (the full days have 4).
+  const week = perDay(-1, 7);
+  assert.ok(week.size >= 7, `${week.size} days in the last week`);
+  assert.ok([...week.values()].every((n) => n >= 1 && n <= 4), JSON.stringify([...week]));
+  assert.ok([...week.values()].filter((n) => n === 4).length >= 6, JSON.stringify([...week]));
+  // 7 to 30 days: one each day, no day missing.
+  const month = perDay(7.01, 30);
+  assert.ok(month.size >= 22, `${month.size} days between 7 and 30 days`);
+  assert.ok([...month.values()].every((n) => n === 1));
+  // Beyond 30 days: one a UAE week, back to the start.
+  const old = kept.filter((c) => (end - Date.parse(c.at)) / DAY > 30.01);
+  const weeks = new Set(old.map((c) => policy.dubaiWeek(Date.parse(c.at))));
+  assert.equal(weeks.size, old.length, 'one per week');
+  assert.ok(old.length >= 4, `${old.length} weekly copies`);
+  assert.ok(Math.max(...ages) >= 53, `the oldest copy is ${Math.max(...ages).toFixed(1)} days old`);
+});
+
+test('Drive: over the cap, the newest days are thinned first and the oldest weekly copy stays', () => {
+  const end = Date.parse('2026-10-20T10:00:00Z');
+  const list = twelveADay(end, 120).map((t) => ({ id: `c${t}`, name: `n${t}`, at: iso(t) }));
+  // keep 20 and no per-run limit in the way: run retention until nothing more goes.
+  let kept = list;
+  for (let i = 0; i < 200; i++) {
+    const remove = policy.driveCopiesToRemove(kept, 20, end);
+    if (!remove.length) break;
+    const gone = new Set(remove.map((r) => r.id));
+    kept = kept.filter((c) => !gone.has(c.id));
+  }
+  assert.ok(kept.length <= 20, String(kept.length));
+  const oldest = Math.min(...kept.map((c) => Date.parse(c.at)));
+  assert.ok((end - oldest) / DAY > 110, 'the oldest weekly copy (about 4 months old) is still there');
+  assert.ok(kept.some((c) => Date.parse(c.at) === end), 'and the newest');
+  // Only one or two copies: the newest and the only one are never removed, however old.
+  assert.deepEqual(policy.driveCopiesToRemove([{ id: 'only', name: 'x', at: iso(end - 400 * DAY) }], 1, end), []);
+  assert.deepEqual(policy.driveCopiesToRemove([{ id: 'a', name: 'a', at: iso(end - 300 * DAY) }, { id: 'b', name: 'b', at: iso(end - 100 * DAY) }], 1, end - 100 * DAY).map((x) => x.id), ['a']);
+});
+
+test('Drive: a clock 200 days ahead deletes nothing; at most 10 go in one run', () => {
+  const end = Date.parse('2026-10-20T10:00:00Z');
+  const list = twelveADay(end).map((t) => ({ id: `c${t}`, name: `n${t}`, at: iso(t) }));
+  const ahead = policy.driveRetention(list, 60, end + 200 * DAY);
+  assert.equal(ahead.clockAhead, true);
+  assert.deepEqual(ahead.remove, []);
+  // A day ahead: ages still count from the newest copy, so no more go than at the right time.
+  assert.deepEqual(policy.driveCopiesToRemove(list, 60, end + DAY).map((c) => c.id), policy.driveCopiesToRemove(list, 60, end).map((c) => c.id));
+  assert.equal(policy.driveCopiesToRemove(list, 60, end).length, policy.DRIVE_DELETE_PER_RUN);
+});
+
+test('local backups: 12 a day for 60 days keep every one of 14 days; with the disk tight, all of the last day then one a day; never fewer than 14', () => {
+  const end = Date.parse('2026-10-20T10:00:00Z');
+  const stamp = (t: number) => `buh-backup-${iso(t).slice(0, 16).replace(/[-:]/g, '').replace('T', '-')}.tar.gz.enc`;
+  const names = twelveADay(end).map(stamp);
+  const keptWith = (tight: boolean, now = end) => {
+    const gone = new Set(policy.localBackupsToRemove(names, now, tight));
+    return names.filter((n) => !gone.has(n)).map((n) => policy.localBackupTime(n)!);
+  };
+  const fine = keptWith(false);
+  assert.deepEqual(fine, twelveADay(end).filter((t) => end - t <= 14 * DAY), 'every backup of the last 14 days, none older');
+  assert.ok(fine.length >= 14 * 12);
+  const tight = keptWith(true);
+  const lastDay = tight.filter((t) => end - t <= DAY);
+  assert.deepEqual(lastDay, twelveADay(end).filter((t) => end - t <= DAY), 'all of the last 24 hours');
+  const older = tight.filter((t) => end - t > DAY);
+  assert.equal(new Set(older.map((t) => policy.dubaiDay(t))).size, older.length, 'then one a UAE day');
+  assert.ok(older.length >= 13 && tight.every((t) => end - t <= 14 * DAY), String(older.length));
+  // Never fewer than the newest 14, and nothing goes with the clock far ahead.
+  assert.deepEqual(policy.localBackupsToRemove(names.slice(-14), end + 100 * DAY, true), []);
+  assert.deepEqual(policy.localBackupsToRemove(names, end + 200 * DAY, true), []);
+  assert.equal(policy.localBackupsToRemove(['pre-update-1.db', ...names.slice(-3)], end, true).length, 0, 'other files are never touched');
 });
 
 test('settings: validated, kept in history, restorable, and in the backup', async () => {
@@ -416,5 +502,103 @@ test('failure emails are unchanged: one per error, again on "Back up now"', asyn
     fs.rmSync(bdir, { force: true });
     fs.renameSync(aside, bdir);
   }
+  await backup.runBackup('manual', { email: false });
+});
+
+test('health warns when the newest backups are only on the server (no Drive, not emailed for 2 days)', async () => {
+  await settings.updateSettings('backups', { email: 'never' });
+  order('Never emailed');
+  const st = await backup.runBackup('changes');
+  assert.equal(st.lastError, undefined);
+  assert.equal(backup.backupHealth().offServerWarning, undefined, 'the last email is recent');
+  const later = backup.backupHealth(Date.now() + 3 * DAY);
+  assert.equal(later.offServerWarning, backup.ONLY_ON_SERVER);
+  assert.equal(later.level, 'warning', 'allowed, but warned (never failing)');
+  // Emailed again: the warning goes.
+  await backup.runBackup('manual', { email: true });
+  assert.equal(backup.backupHealth(Date.now() + 3 * DAY).offServerWarning, undefined);
+  await settings.updateSettings('backups', { email: 'daily' });
+  await backup.runBackup('manual', { email: false });
+});
+
+test('a backup whose changes cannot be recorded is failing, and no change-driven backup runs again within the hour', async () => {
+  order('Before the broken record');
+  const db = getDb();
+  db.pragma('query_only = ON'); // the backup reads; recording what it held (a write) fails
+  let st;
+  try {
+    st = await backup.runBackup('changes');
+  } finally {
+    db.pragma('query_only = OFF');
+  }
+  assert.equal(st.lastError, backup.MARK_FAILED);
+  assert.ok(st.lastSuccessAt, 'the backup itself was made');
+  assert.equal(backup.backupHealth().level, 'failing');
+  assert.ok(changes.pendingChanges().total > 0, 'its changes still wait');
+  const files = backupFiles().length;
+  for (const later of [60_000, 5 * 60_000, 30 * 60_000, 55 * 60_000]) assert.equal(backup.backupTick(Date.now() + later), null, `no loop (${later / 60_000} min)`);
+  assert.equal(backupFiles().length, files);
+  // An hour on, the next one runs and records them.
+  assert.equal(backup.backupTick(Date.now() + 61 * 60_000), 'changes');
+  const next = await backup.runBackup('manual', { email: false });
+  assert.equal(next.lastError, undefined);
+  assert.equal(changes.pendingChanges().total, 0);
+});
+
+test('a bank-transfer screenshot moved into place after the order is saved still counts as a change', async () => {
+  await settings.updateSettings('bank', { bankName: 'Emirates NBD', accountName: 'BEAUTIFUL UAE HOME TEXTILES LLC', iban: 'AE070331234567890123456', accountNumber: '1012345678901', swiftCode: 'EBILAEAD' });
+  const p = products.listProducts()[0];
+  const o = orders.placeOrder({
+    idempotencyKey: `sched-bank-${crypto.randomUUID()}`,
+    verificationToken: issuePhoneToken(`+97150${String(crypto.randomInt(1_000_000, 9_999_999))}`),
+    customer: { fullName: 'Aisha Test', emirate: 'Dubai', area: 'Marina', streetAddress: 'Walk 1', buildingVilla: 'Tower', flatVillaNo: '7' },
+    items: [{ productId: p.id, profileId: p.profiles[0].id, quantity: 1 }],
+    paymentMethod: 'bank_transfer',
+  }).order;
+  const PNG = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==';
+  // Note the orders count at the moment the screenshot is moved into place (after the commit).
+  const rename = fs.renameSync;
+  let atMove = -1;
+  fs.renameSync = ((from: fs.PathLike, to: fs.PathLike) => {
+    if (String(to).endsWith(`${path.sep}${o.id}.png`)) atMove = counts().orders;
+    return rename(from, to);
+  }) as typeof fs.renameSync;
+  try {
+    orders.uploadTransfer(o.id, PNG);
+  } finally {
+    fs.renameSync = rename;
+  }
+  assert.ok(atMove >= 0, 'the screenshot was moved into place');
+  assert.ok(counts().orders > atMove, 'a change was counted after the file landed');
+});
+
+test('every watched table has its 3 triggers; ones a table rebuild lost are made again at start', async () => {
+  const db = getDb();
+  const { changeTriggerDefs, ensureChangeTriggers } = await import('@/lib/server/db');
+  const triggers = () => new Set((db.prepare("SELECT name FROM sqlite_master WHERE type = 'trigger'").all() as Array<{ name: string }>).map((r) => r.name));
+  const have = triggers();
+  const byTable = new Map<string, string[]>();
+  for (const t of changeTriggerDefs()) byTable.set(t.table, [...(byTable.get(t.table) ?? []), t.name]);
+  for (const [table, names] of byTable) {
+    if (table === 'collections') assert.equal(names.length, 4, 'collections: its 3 and the visits counter');
+    else if (table === 'kv') assert.equal(names.length, 9, 'kv: 3 for each of its 3 groups');
+    else assert.equal(names.length, 3, table);
+    for (const n of names) assert.ok(have.has(n), `${table}: ${n} is missing`);
+  }
+  assert.deepEqual(ensureChangeTriggers(db), [], 'nothing to repair');
+  // A tool rebuilds a table (create new, copy, drop, rename): its triggers are gone.
+  db.exec("CREATE TABLE product_drafts_new (id TEXT PRIMARY KEY, data TEXT NOT NULL, updated_at TEXT NOT NULL, updated_by TEXT NOT NULL DEFAULT ''); INSERT INTO product_drafts_new SELECT * FROM product_drafts; DROP TABLE product_drafts; ALTER TABLE product_drafts_new RENAME TO product_drafts;");
+  assert.ok(!triggers().has('data_changes_product_drafts_products_insert'));
+  const repaired = ensureChangeTriggers(db);
+  assert.deepEqual(repaired.sort(), ['data_changes_product_drafts_products_delete', 'data_changes_product_drafts_products_insert', 'data_changes_product_drafts_products_update']);
+  const drafts = await import('@/lib/server/productDrafts');
+  await moved('products', () => drafts.saveDraft('new', { title: 'After the rebuild', price: '150' }, 'owner@test'));
+  // The start-up step does this and says so in the log.
+  const startupSrc = fs.readFileSync('src/lib/server/startup.ts', 'utf8');
+  assert.match(startupSrc, /ensureChangeTriggers\(getDb\(\)\)[\s\S]*backup_triggers_repaired/);
+  // The Drive settings (kv backup:drive) count as settings; the copies' own state does not.
+  const before = kvGet('backup:drive');
+  await moved('settings', () => kvSet('backup:drive', before?.data ?? { enabled: false, keep: 60 }));
+  await still('the Drive copies list', () => kvSet('backup:drive-files', []));
   await backup.runBackup('manual', { email: false });
 });
