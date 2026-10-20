@@ -14,8 +14,23 @@ export function FillSkusNotice({ products, onFilled }: { products: Array<Product
   const [busy, setBusy] = useState(false);
   const [msg, setMsg] = useState<{ ok: boolean; text: string } | null>(null);
   const missing = products.filter((p) => !p.archived && !p.sku).length;
-  if (!missing && !msg) return null;
+  // SKUs older data holds twice (ignoring case): both products still save; the owner changes one.
+  const groups = new Map<string, Array<{ title: string; sku: string }>>();
+  for (const p of products) if (p.sku) groups.set(p.sku.toUpperCase(), [...(groups.get(p.sku.toUpperCase()) ?? []), { title: p.title, sku: p.sku }]);
+  const clashes = [...groups.values()].filter((g) => g.length > 1);
+  if (!missing && !msg && !clashes.length) return null;
   return (
+    <>
+    {clashes.length > 0 && (
+      <ul className="rounded-2xl border border-warning-line bg-warning-soft px-3 py-2.5 space-y-1 text-sm text-warning" data-testid="sku-clashes">
+        {clashes.map((g) => (
+          <li key={g[0].sku.toUpperCase()} className="break-words">
+            {g.length} products share {g[0].sku}: change one ({g.map((x) => x.title).join(', ')})
+          </li>
+        ))}
+      </ul>
+    )}
+    {(missing > 0 || msg) && (
     <div className="rounded-2xl border border-line-strong bg-surface px-3 py-2.5 flex flex-wrap items-center gap-2" data-testid="fill-skus">
       {missing > 0 && (
         <>
@@ -42,5 +57,7 @@ export function FillSkusNotice({ products, onFilled }: { products: Array<Product
       )}
       {msg && <p role={msg.ok ? 'status' : 'alert'} className={`w-full text-xs ${msg.ok ? 'text-success' : 'text-danger'}`}>{msg.text}</p>}
     </div>
+    )}
+    </>
   );
 }

@@ -7,7 +7,7 @@ import { GIFT_PAGE_DEFAULT_ON, type FestivalPageMode, type SeoOverview, type Seo
 import type { Product } from '@/types';
 import { getDb } from './db';
 import { festivalEventsAround } from './festivalDates';
-import { variantSku, parentSku } from './marketplace';
+import { shopSku, shopVariantSku } from './marketplace';
 import { listProducts, type StoredProduct } from './products';
 import { appUrl } from './runtimeConfig';
 import { getSettings } from './settings';
@@ -314,7 +314,7 @@ export function productJsonLd(p: Product, base: string) {
   const category = getSettings('catalog').categories.find((c) => c.id === p.category)?.label;
   const offers = p.profiles.map((s) => ({
     '@type': 'Offer',
-    sku: variantSku(p, s.id),
+    sku: shopVariantSku(p, s.id),
     name: s.name,
     url,
     priceCurrency: 'AED',
@@ -330,7 +330,7 @@ export function productJsonLd(p: Product, base: string) {
     '@id': `${url}#product`,
     name: p.title,
     description: plainText(p.description || p.shortDescription || '').slice(0, 5000) || productDescription(p),
-    sku: parentSku(p),
+    sku: shopSku(p),
     image: productImages(p, base),
     url,
     brand: { '@type': 'Brand', name: shop },

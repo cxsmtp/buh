@@ -719,6 +719,11 @@ export function ProductEditor({
                 <ChevronDown className="w-4 h-4" aria-hidden="true" /> More details (description, {simple ? 'material' : 'fabric'}, colours){draft.colors.length > 0 && ` · ${draft.colors.length} ${draft.colors.length === 1 ? 'colour' : 'colours'}`}
               </summary>
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 pb-3">
+                {product?.marketplaceSku && (
+                  <p className="sm:col-span-2 text-xs text-ink-soft break-words" data-testid="marketplace-code">
+                    Marketplace code: <span className="font-mono text-ink">{product.marketplaceSku}</span> (kept for listings already made)
+                  </p>
+                )}
                 <div>
                   <label className={label} htmlFor="pe-material">
                     Material

@@ -10,10 +10,11 @@ import { shopUrl } from '@/lib/server/runtimeConfig';
  * products, rendered on the server, with a heading and a short introduction the owner can change
  * (Settings → Search (SEO)). Always indexed; an unknown category is not found.
  */
-// Built on the first visit and kept for 5 minutes (rebuilt in the background after that, and at
-// once after a product or a setting changes): as fast as a static page for crawlers. The shop's
-// address comes from NEXT_PUBLIC_APP_URL only (no request headers, which would make it per request).
-export const revalidate = 300;
+// Built on the first visit and kept for a minute (rebuilt in the background after that, and at
+// once after a product or a setting changes, src/lib/server/pageCache.ts): as fast as a static
+// page for crawlers. The shop's address comes from NEXT_PUBLIC_APP_URL only (no request headers,
+// which would make it per request). Unknown ids are not found before any other work.
+export const revalidate = 60;
 export function generateStaticParams() {
   return [];
 }

@@ -14,6 +14,7 @@ import { cleanGiftLines } from './giftLines';
 import { queueIndexNow } from './indexNow';
 import { refreshShopPages } from './pageCache';
 import { allocateSku, checkTypedSku, noteSkuUsed, skuOwner } from './sku';
+import { parentSku } from './marketplace';
 import { cleanSeoText } from '@/lib/seo/text';
 import { SEO_LIMITS } from '@/lib/seo/types';
 import { isDuvetProduct } from '@/lib/measurements';
@@ -193,7 +194,12 @@ function fromRow(r: Row, stock: Record<string, number>): StoredProduct {
 }
 
 export function listProducts({ includeHidden = false, includeArchived = false } = {}): StoredProduct[] {
-  if (cache && changedElsewhere('catalog')) cache = null;
+  if (cache && changedElsewhere('catalog')) {
+    cache = null;
+    // Changed by another part of the shop (a timer returning stock, the other copy during an
+    // update): the kept pages are rebuilt too, from the first request that notices.
+    refreshShopPages({ home: false });
+  }
   if (!cache) {
     seedIfEmpty();
     carryOverMeasurementsOnce();
@@ -241,6 +247,8 @@ function stockFromInput(input: Obj, product: StoredProduct): Record<string, numb
 export function createProduct(input: unknown, actor = 'admin'): StoredProduct {
   const product = validateProduct(input);
   product.id = `prod-${crypto.randomBytes(6).toString('hex')}`;
+  // A new product has no marketplace code of its own yet (its listings will use its SKU).
+  delete product.marketplaceSku;
   product.createdAt = new Date().toISOString();
   const stock = stockFromInput(input as Obj, product) ?? {};
   const { stockCount, stockBySize, active, ...rest } = product;
@@ -286,7 +294,7 @@ export function updateProduct(id: string, input: unknown, actor = 'admin'): Stor
   let movedNow: StockMove | null = null;
   inTransaction(() => {
     // A product saved without an SKU gets one now (older products, on their next save).
-    settleSku(rest as Product, id);
+    settleSku(rest as Product, id, getProductRaw(id));
     product.sku = rest.sku;
     db.prepare('UPDATE products SET data = ?, active = ?, updated_at = ? WHERE id = ?').run(JSON.stringify(rest), active ? 1 : 0, new Date().toISOString(), id);
     const moved: SizeChange[] = [];
@@ -407,6 +415,7 @@ export function duplicateProduct(id: string, key: string, actor = 'admin'): { pr
     db.prepare('UPDATE products SET position = position + 1 WHERE position > ?').run(pos);
     // The copy is its own product: its own SKU.
     (data as Product).sku = allocateSku(title, original.category, copyId);
+    delete (data as Product).marketplaceSku;
     db.prepare('INSERT INTO products (id, data, stock, active, position, updated_at) VALUES (?, ?, 0, 0, ?, ?)').run(copyId, JSON.stringify(data), pos + 1, new Date().toISOString());
     writeStock(copyId, Object.fromEntries(original.profiles.map((s) => [s.id, 0])));
     db.prepare('INSERT INTO kv (key, data, updated_at) VALUES (?, ?, ?)').run(`dup:${key}`, JSON.stringify({ sourceId: id, copyId }), new Date().toISOString());
@@ -436,6 +445,8 @@ export function fillMissingSkus(actor = 'admin'): Array<{ id: string; title: str
     for (const r of rows) {
       const p = JSON.parse(r.data) as Product;
       p.sku = allocateSku(p.title, p.category, r.id);
+      // The code it was exported under until now stays its marketplace code.
+      p.marketplaceSku ??= parentSku({ id: r.id, sku: undefined });
       write.run(JSON.stringify(p), new Date().toISOString(), r.id);
       filled.push({ id: r.id, title: p.title, sku: p.sku });
     }
@@ -476,13 +487,21 @@ function seoField(v: unknown, field: string, max: number): string | undefined {
 }
 
 /** The SKU as saved: the one given (checked again here, inside the save), else a new one. */
-function settleSku(product: Product, exceptId: string): void {
+/**
+ * The SKU as saved: the one given (checked again here, inside the save), else a new one.
+ * `before`: the product as stored (updates). An SKU it already had is kept without a uniqueness
+ * check (older data may hold the same SKU twice: both still save; changing one to a taken SKU is
+ * refused). An existing product getting its first SKU keeps the code it was exported to
+ * marketplaces under (marketplaceSku), so listings already made keep matching.
+ */
+function settleSku(product: Product, exceptId: string, before?: Product): void {
   if (product.sku) {
-    if (skuOwner(product.sku, exceptId)) throw new HttpError(409, `Another product already has the SKU ${product.sku}.`, {}, { code: 'sku_taken' });
+    if (product.sku !== before?.sku && skuOwner(product.sku, exceptId)) throw new HttpError(409, `Another product already has the SKU ${product.sku}.`, {}, { code: 'sku_taken' });
     noteSkuUsed(product.sku);
   } else {
     product.sku = allocateSku(product.title, product.category, exceptId);
   }
+  if (before && !before.sku && !product.marketplaceSku) product.marketplaceSku = parentSku({ id: exceptId, sku: undefined });
 }
 
 function getProductRaw(id: string): Product | undefined {
@@ -625,6 +644,8 @@ export function validateProduct(input: unknown): StoredProduct {
     ...(simple ? { productType: 'simple' as const } : {}),
     title,
     sku: sku || undefined,
+    // Set by the server only (settleSku): never from what the browser sends.
+    marketplaceSku: existing?.marketplaceSku,
     slug: title.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '').slice(0, 80),
     description: text(p.description, 'Description', 4000),
     shortDescription: text(p.shortDescription, 'Short description', 300),

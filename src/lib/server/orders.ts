@@ -1,4 +1,4 @@
-import { variantSku } from './marketplace';
+import { shopVariantSku } from './marketplace';
 import crypto from 'node:crypto';
 import fs from 'node:fs';
 import net from 'node:net';
@@ -599,7 +599,7 @@ export function placeOrder(input: unknown, context: PlaceOrderContext = {}): Pla
           // A simple product's variant (towels, cushions…): its dimensions, as shown when it was bought.
           ...(product.productType === 'simple' ? { productType: 'simple' as const, ...(profile.dimensions ? { dimensions: profile.dimensions } : {}) } : {}),
           // The size's SKU as it was (BUH-…-KING), for packing and the books.
-          ...(product.sku ? { sku: variantSku(product, profile.id) } : {}),
+          ...(product.sku ? { sku: shopVariantSku(product, profile.id) } : {}),
         });
       }
 

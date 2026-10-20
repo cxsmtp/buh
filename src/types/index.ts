@@ -45,6 +45,11 @@ export interface Product {
   slug: string;
   /** The owner's own stock code (optional), searchable in the Admin Hub. */
   sku?: string;
+  /**
+   * The code the product was exported under to Amazon / Noon before it had an SKU (BUH-<id>),
+   * kept when the shop gives it one so listings already made keep matching. Set by the server only.
+   */
+  marketplaceSku?: string;
   /** The owner's own title for Google (empty: "<title> | <shop>", made by the shop). */
   seoTitle?: string;
   /** The owner's own description for Google (empty: from the short description). */

@@ -23,10 +23,11 @@ import { shopUrl } from '@/lib/server/runtimeConfig';
  * seasons it stays up (indexed) with the next dates; switched off by the owner: noindex
  * (src/lib/server/seo.ts). Products with a gift line for the festival come first, with the line.
  */
-// Built on the first visit and kept for 5 minutes (rebuilt in the background after that, and at
-// once after a product or a setting changes): as fast as a static page for crawlers. The shop's
-// address comes from NEXT_PUBLIC_APP_URL only (no request headers, which would make it per request).
-export const revalidate = 300;
+// Built on the first visit and kept for a minute (rebuilt in the background after that, and at
+// once after a product or a setting changes, src/lib/server/pageCache.ts): as fast as a static
+// page for crawlers. The shop's address comes from NEXT_PUBLIC_APP_URL only (no request headers,
+// which would make it per request). Unknown ids are not found before any other work.
+export const revalidate = 60;
 export function generateStaticParams() {
   return [];
 }

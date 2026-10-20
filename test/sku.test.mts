@@ -174,6 +174,73 @@ test('sizes’ SKUs: the product’s plus the size; the marketplace export keeps
   assert.equal(order.items[0].sku, marketplace.variantSku(p, size.id));
 });
 
+test('marketplace codes: listings exported before a product had an SKU keep matching after it gets one', async () => {
+  const opts = { base: 'https://shop.example', brand: 'Beautiful UAE Home', categories: settings.getSettings('catalog').categories };
+  const skus = (ps: Parameters<typeof marketplace.marketplaceRows>[0]) => marketplace.marketplaceRows(ps, opts).map((r) => [r[0], r[1]]);
+  // Two products from before SKUs (no SKU stored).
+  const db = new Database(path.join(dir, 'shop.db'));
+  const rows = (db.prepare('SELECT id, data FROM products WHERE archived = 0 ORDER BY rowid LIMIT 2').all() as Array<{ id: string; data: string }>);
+  for (const r of rows) {
+    const d = JSON.parse(r.data);
+    delete d.sku;
+    delete d.marketplaceSku;
+    db.prepare('UPDATE products SET data = ? WHERE id = ?').run(JSON.stringify(d), r.id);
+  }
+  db.close();
+  products.invalidateProducts();
+  const [a, b] = rows.map((r) => products.getProduct(r.id)!);
+  const before = skus([a, b]);
+  assert.equal(before[0][1], `BUH-${a.id.replace(/^prod-/, '').toUpperCase()}`, 'exported under the id-based code');
+  // One gets its SKU on an ordinary save (a stock change), the other through Fill them in.
+  const saved = products.updateProduct(a.id, { stockBySize: a.stockBySize });
+  assert.match(saved.sku!, FORMAT);
+  assert.equal(saved.marketplaceSku, before[0][1]);
+  products.fillMissingSkus('owner@shop.test');
+  const filled = products.getProduct(b.id)!;
+  assert.match(filled.sku!, FORMAT);
+  assert.deepEqual(skus([products.getProduct(a.id)!, filled]), before, 'the export is unchanged');
+  // The browser can't set or change it.
+  const spoof = products.updateProduct(a.id, { marketplaceSku: 'EVIL-1' });
+  assert.equal(spoof.marketplaceSku, before[0][1]);
+  // New products and copies have none: they are listed under their readable SKU.
+  const fresh = newProduct('Fresh Listing Set');
+  assert.equal(fresh.marketplaceSku, undefined);
+  assert.equal(skus([fresh])[0][1], fresh.sku);
+  const { product: copy } = products.duplicateProduct(a.id, `dup-${Date.now()}-mkt`);
+  assert.equal(copy.marketplaceSku, undefined);
+  assert.equal(marketplace.parentSku(copy), copy.sku);
+  // The shop itself (order lines, Google) shows the readable SKU.
+  assert.equal(marketplace.shopSku(saved), saved.sku);
+  // Backups carry it.
+  const result = await backup.createBackup();
+  const target = fs.mkdtempSync(path.join(os.tmpdir(), 'buh-mkt-restore-'));
+  fs.rmSync(target, { recursive: true });
+  execFileSync(process.execPath, ['scripts/restore-backup.mjs', result.file, target]);
+  const rdb = new Database(path.join(target, 'shop.db'), { readonly: true });
+  const restored = JSON.parse((rdb.prepare('SELECT data FROM products WHERE id = ?').get(a.id) as { data: string }).data);
+  rdb.close();
+  assert.equal(restored.marketplaceSku, before[0][1]);
+});
+
+test('older data holding one SKU twice: both products still save; changing one to a taken SKU is refused; Fill never makes a clash', () => {
+  const x = newProduct('Clash One');
+  const y = newProduct('Clash Two');
+  const db = new Database(path.join(dir, 'shop.db'));
+  const d = JSON.parse((db.prepare('SELECT data FROM products WHERE id = ?').get(y.id) as { data: string }).data);
+  d.sku = x.sku;
+  db.prepare('UPDATE products SET data = ? WHERE id = ?').run(JSON.stringify(d), y.id);
+  db.close();
+  products.invalidateProducts();
+  assert.equal(products.updateProduct(x.id, { price: 111 }).sku, x.sku, 'unchanged: saves');
+  assert.equal(products.updateProduct(y.id, { price: 112 }).sku, x.sku, 'the other too');
+  const z = newProduct('Clash Three');
+  assert.throws(() => products.updateProduct(z.id, { sku: x.sku!.toLowerCase() }), (err: { status?: number }) => err.status === 409);
+  products.fillMissingSkus('owner@shop.test');
+  const all = products.listProducts({ includeHidden: true, includeArchived: true }).map((p) => p.sku!.toUpperCase());
+  assert.equal(all.filter((s) => s === x.sku!.toUpperCase()).length, 2, 'only the old clash');
+  products.updateProduct(y.id, { sku: 'CLASH-FIXED-1' });
+});
+
 test('the running number survives a backup and restore: a restored shop never repeats one', async () => {
   const last = newProduct('Before Backup');
   const n = sku.skuNumber(last.sku!, 'BUH')!;

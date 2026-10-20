@@ -259,6 +259,19 @@ for (const width of [375, 1280]) {
     await fill.getByRole('button', { name: 'Fill them in' }).click();
     await fill.getByText(/SKUs given to \d+ product/).waitFor();
     for (const r of rows) assert.match((await allProducts()).find((p) => p.id === r.id)!.sku!, FORMAT);
+    // The code it was exported to marketplaces under is kept, and shown in the editor.
+    const kept = (await allProducts()).find((p) => p.id === rows[0].id)! as P & { marketplaceSku?: string };
+    assert.ok(kept.marketplaceSku, 'marketplace code kept');
+    await page.getByRole('searchbox', { name: 'Search name or SKU' }).fill(kept.title.slice(0, 20));
+    await page.getByRole('button', { name: `Stock and actions for ${kept.title}` }).click();
+    await page.getByRole('button', { name: `Edit ${kept.title}` }).click();
+    const old = page.getByRole('dialog', { name: `Edit ${kept.title}` });
+    await old.getByRole('button', { name: /^Next: Details/ }).click();
+    await old.getByText(/More details/).click();
+    assert.match(await old.getByTestId('marketplace-code').innerText(), new RegExp(`Marketplace code: ${kept.marketplaceSku} \\(kept for listings already made\\)`));
+    await old.getByRole('button', { name: 'Close (the draft is kept)' }).click();
+    await old.waitFor({ state: 'detached' });
+    await page.getByRole('searchbox', { name: 'Search name or SKU' }).fill('');
 
     await page.getByRole('button', { name: 'Add product' }).first().click();
     const editor = page.getByRole('dialog', { name: 'Add a product' });
@@ -297,6 +310,25 @@ for (const width of [375, 1280]) {
     await ctx.close();
   });
 }
+
+test('a change made outside a request (a timer returning stock) reaches the category page from the first request that notices', { skip }, async () => {
+  const list = (await (await rawFetch(`${server.base}/api/products`)).json()).products as Array<P & { stockCount: number }>;
+  const p = list.find((x) => x.category === 'bedsheets' && x.stockCount > 0)!;
+  assert.ok(p);
+  const soldOut = (h: string) => new RegExp(`href="/p/${p.id}"((?!</li>)[\\s\\S])*Sold out`).test(h);
+  await eventually('/shop/bedsheets', (h) => h.includes(`/p/${p.id}`) && !soldOut(h), 'in stock first');
+  // As the card sweep or another copy of the shop would: the database and the change counter, no request.
+  const db = new Database(path.join(server.dataDir, 'shop.db'));
+  db.prepare('UPDATE product_stock SET qty = 0 WHERE product_id = ?').run(p.id);
+  db.prepare("UPDATE kv SET data = CAST(CAST(data AS INTEGER) + 1 AS TEXT) WHERE key = 'v:catalog'").run();
+  db.close();
+  // A shopper opens the shop (the catalogue request notices the change).
+  for (let i = 0; i < 15; i++) {
+    await (await rawFetch(`${server.base}/api/products`)).arrayBuffer();
+    await new Promise((r) => setTimeout(r, 200));
+  }
+  await eventually('/shop/bedsheets', soldOut, 'sold out on the kept page');
+});
 
 test('home page: the shop as structured data and the live festival linked, after the page is rebuilt', { skip }, async () => {
   assert.equal((await api('PUT', '/api/admin/seo', { settings: { festivals: { diwali: { mode: 'live' } }, googleVerification: 'HomeCode_abcdef12' } })).status, 200);

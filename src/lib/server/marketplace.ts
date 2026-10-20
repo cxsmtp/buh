@@ -41,7 +41,10 @@ const clean = (s: string) => s.toUpperCase().replace(/[^A-Z0-9]+/g, '-').replace
 const short = (s: string) => crypto.createHash('sha256').update(s).digest('hex').slice(0, 10).toUpperCase();
 
 /** The parent SKU: the owner's SKU, or one made from the product's id (stable across exports). */
-export function parentSku(p: Pick<Product, 'id' | 'sku'>): string {
+export function parentSku(p: Pick<Product, 'id' | 'sku'> & { marketplaceSku?: string }): string {
+  // The code listings were made under before the product had an SKU: kept, so they still match.
+  const kept = clean(p.marketplaceSku ?? '');
+  if (kept) return kept.slice(0, SKU_MAX);
   const own = clean(p.sku ?? '');
   if (own) return own.slice(0, SKU_MAX);
   const fromId = clean(p.id.replace(/^prod-/, ''));
@@ -50,10 +53,20 @@ export function parentSku(p: Pick<Product, 'id' | 'sku'>): string {
 }
 
 /** One size's SKU: the parent's plus the size (or a short fingerprint when that would be too long). */
-export function variantSku(p: Pick<Product, 'id' | 'sku'>, sizeId: string): string {
+export function variantSku(p: Pick<Product, 'id' | 'sku'> & { marketplaceSku?: string }, sizeId: string): string {
   const parent = parentSku(p);
   const sku = `${parent}-${clean(sizeId) || short(sizeId)}`;
   return sku.length <= SKU_MAX ? sku : `${parent.slice(0, SKU_MAX - 11)}-${short(`${p.id}|${sizeId}`)}`;
+}
+
+/** The size's SKU as the shop shows it (its own SKU plus the size), whatever code marketplaces know it by. */
+export function shopVariantSku(p: Pick<Product, 'id' | 'sku'>, sizeId: string): string {
+  return variantSku({ id: p.id, sku: p.sku }, sizeId);
+}
+
+/** The product's SKU as the shop shows it (its own; else the fixed one from its id). */
+export function shopSku(p: Pick<Product, 'id' | 'sku'>): string {
+  return parentSku({ id: p.id, sku: p.sku });
 }
 
 const money = (aed: number) => (Math.round(aed * 100) / 100).toFixed(2);

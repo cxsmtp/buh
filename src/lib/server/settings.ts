@@ -141,7 +141,10 @@ const SAMPLE_PICKUP_NAMES = new Set(['Beautiful UAE Home Artisan Studio', 'Beaut
 const SAMPLE_PICKUP_ADDRESSES = new Set(['Studio 08, Alserkal Avenue Creative Zone, Al Quoz 1', 'Warehouse 14, Al Quoz Industrial Area 3']);
 
 export function getSettings<K extends SettingsKey>(key: K): SettingsMap[K] {
-  if (cache.size && changedElsewhere('settings')) cache.clear();
+  if (cache.size && changedElsewhere('settings')) {
+    cache.clear();
+    refreshShopPages();
+  }
   if (cache.has(key)) return cache.get(key) as SettingsMap[K];
   const row = getDb().prepare('SELECT data FROM settings WHERE key = ?').get(key) as { data: string } | undefined;
   const stored = row ? JSON.parse(row.data) : {};
