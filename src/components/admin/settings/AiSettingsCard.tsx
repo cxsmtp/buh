@@ -1,7 +1,7 @@
 'use client';
 
 import React, { useState } from 'react';
-import { BedDouble, Loader2, PlugZap, Sparkles } from 'lucide-react';
+import { ImagePlus, Loader2, PlugZap, Sparkles } from 'lucide-react';
 import { postJson } from '@/lib/apiClient';
 import { AI_MODELS, deepseekReadsPhotos, type AiModel, type AiProvider, type AiSettings } from '@/types';
 import { useAutoSave, type AutoSaveHooks } from './useAutoSave';
@@ -12,9 +12,10 @@ import { useAutoSave, type AutoSaveHooks } from './useAutoSave';
  *   DeepSeek, with each one's key and model, and the switch (off until the chosen AI's key is saved);
  * - DeepSeek's Test lists the models the key can use (deepseek-flash reads photos; deepseek-v4-pro
  *   does not, so it can't write from a photo);
- * - Google Gemini also makes "Style in a bedroom" photos (Claude does not make images): its Test
+ * - Gemini's key here is the same one Settings → AI pictures uses (pictures, the image model and the
+ *   "Styled image" label live there; this card never sends them);
+ * - Gemini's Test
  *   reads the models the key can use from Google and fills the two lists (writing, images);
- * - "Label styled photos for customers" (on by default).
  * Keys are write-only: the hub only ever shows their last 4 characters, they are never sent to a
  * browser, a log or a backup.
  */
@@ -43,6 +44,13 @@ interface ModelLists {
   suggested: { writing: string; image: string };
 }
 
+/** What this card saves: the writing settings (the pictures' model and label are Settings → AI pictures'). */
+function writingOnly(x: AiSettings): Partial<AiSettings> {
+  const { geminiImageModel, labelStyledPhotos, picturesProvider, openaiApiKey, openaiImageModel, falApiKey, falModel, ...rest } = x;
+  void [geminiImageModel, labelStyledPhotos, picturesProvider, openaiApiKey, openaiImageModel, falApiKey, falModel];
+  return rest;
+}
+
 /** The list to choose from: Google's (after Test), always with the saved choice in it. */
 function options(list: string[] | undefined, current: string): string[] {
   const all = [...(list ?? [])];
@@ -55,18 +63,21 @@ export function AiSettingsCard({
   secretsSet,
   secretsHint,
   onSave,
+  onOpenPictures,
   auto,
 }: {
   value: AiSettings;
   secretsSet: Record<string, boolean>;
   secretsHint?: Record<string, string>;
-  onSave: (v: AiSettings) => Promise<string | null>;
+  onSave: (v: Partial<AiSettings>) => Promise<string | null>;
+  /** Opens Settings → AI pictures. */
+  onOpenPictures?: () => void;
   auto?: AutoSaveHooks;
 }) {
   const [d, setD] = useState<AiSettings>(value);
   const typingKey = Boolean(d.anthropicApiKey || d.geminiApiKey || d.deepseekApiKey);
   // Keys are never autosaved (a half-typed one would replace a working one): Save sends them.
-  const autosave = useAutoSave({ settingsKey: 'ai', value: { ...d, anthropicApiKey: '', geminiApiKey: '', deepseekApiKey: '' }, enabled: Boolean(auto) && !typingKey, ...auto });
+  const autosave = useAutoSave({ settingsKey: 'ai', value: writingOnly({ ...d, anthropicApiKey: '', geminiApiKey: '', deepseekApiKey: '' }), enabled: Boolean(auto) && !typingKey, ...auto });
   const [saving, setSaving] = useState(false);
   const [status, setStatus] = useState<{ ok: boolean; text: string } | null>(null);
   const [testing, setTesting] = useState<AiProvider | null>(null);
@@ -83,7 +94,7 @@ export function AiSettingsCard({
     autosave.cancel();
     setSaving(true);
     setStatus(null);
-    const problem = await onSave(d);
+    const problem = await onSave(writingOnly(d));
     setSaving(false);
     if (!problem) setD((x) => ({ ...x, anthropicApiKey: '', geminiApiKey: '', deepseekApiKey: '' }));
     setStatus(problem ? { ok: false, text: problem } : { ok: true, text: d.enabled ? 'Saved. “Write from photo” is on in the product editor.' : 'Saved. AI writing is off.' });
@@ -117,13 +128,11 @@ export function AiSettingsCard({
     setD((x) => ({
       ...x,
       geminiModel: x.geminiModel && m.writing.includes(x.geminiModel) ? x.geminiModel : m.suggested.writing,
-      geminiImageModel: x.geminiImageModel && m.image.includes(x.geminiImageModel) ? x.geminiImageModel : m.suggested.image,
     }));
     setTest({ provider, ok: true, text: `Works: Google offers ${m.writing.length} writing and ${m.image.length} image ${m.image.length === 1 ? 'model' : 'models'} to this key. Choose them below and save.` });
   };
 
   const writingOptions = options(lists?.writing, d.geminiModel);
-  const imageOptions = options(lists?.image, d.geminiImageModel);
   const deepseekOptions = options(dsLists?.all ?? ['deepseek-flash', 'deepseek-v4-pro'], d.deepseekModel);
 
   return (
@@ -207,9 +216,9 @@ export function AiSettingsCard({
       </section>
 
       <section className="grid grid-cols-1 sm:grid-cols-2 gap-3 rounded-xl border border-line p-3" aria-label="Google Gemini" data-testid="gemini-settings">
-        <h4 className="sm:col-span-2 font-bold text-ink">Google Gemini{d.provider === 'gemini' ? ' · writes the text' : ''} · styled photos</h4>
+        <h4 className="sm:col-span-2 font-bold text-ink">Google Gemini{d.provider === 'gemini' ? ' · writes the text' : ''}</h4>
         <p className="sm:col-span-2 text-xs text-ink-soft">
-          Gemini also makes &ldquo;Style in a bedroom&rdquo; photos in the product editor: the same product placed in a bedroom, as a new photo next to your real one. Claude doesn&rsquo;t make pictures, so this needs a Gemini key even when Claude writes.
+          The same Gemini key also makes pictures (Settings → AI pictures). Claude and DeepSeek can&rsquo;t make pictures, so pictures need a Gemini key whoever writes.
         </p>
         <div className="sm:col-span-2">
           <label className={label} htmlFor="ai-gemini-key">
@@ -248,18 +257,6 @@ export function AiSettingsCard({
           <select id="ai-gemini-model" className={field} value={d.geminiModel} onChange={(e) => setD((x) => ({ ...x, geminiModel: e.target.value }))} disabled={!writingOptions.length}>
             {!d.geminiModel && <option value="">Press Test to list the models</option>}
             {writingOptions.map((m) => (
-              <option key={m} value={m}>
-                {m}
-              </option>
-            ))}
-          </select>
-        </div>
-        <div className="min-w-0">
-          <label className={label} htmlFor="ai-gemini-image-model">
-            Image model (styled photos)
-          </label>
-          <select id="ai-gemini-image-model" className={field} value={d.geminiImageModel} onChange={(e) => setD((x) => ({ ...x, geminiImageModel: e.target.value }))}>
-            {imageOptions.map((m) => (
               <option key={m} value={m}>
                 {m}
               </option>
@@ -325,15 +322,16 @@ export function AiSettingsCard({
         )}
       </section>
 
-      <section className="space-y-1">
+      <section className="space-y-1 rounded-xl border border-line p-3">
         <h3 className="font-bold text-ink flex items-center gap-2">
-          <BedDouble className="w-4 h-4 text-gold-deep" aria-hidden="true" /> Styled photos in the shop
+          <ImagePlus className="w-4 h-4 text-gold-deep" aria-hidden="true" /> Pictures
         </h3>
-        <label className="flex items-center gap-2 text-sm font-semibold min-h-11">
-          <input type="checkbox" className="w-5 h-5" checked={d.labelStyledPhotos} onChange={(e) => setD((x) => ({ ...x, labelStyledPhotos: e.target.checked }))} />
-          Label styled photos for customers
-        </label>
-        <p className="text-xs text-ink-soft">Shows a small &ldquo;Styled image&rdquo; tag on photos made by &ldquo;Style in a bedroom&rdquo;, so customers know the room is not real. Recommended: keep it on.</p>
+        <p className="text-xs text-ink-soft">Pictures of your products in beautiful settings are made by Google Gemini, set up in Settings → AI pictures (its key, scenes and prompt). Your writing AI stays as chosen above.</p>
+        {onOpenPictures && (
+          <button type="button" onClick={onOpenPictures} className={testBtn}>
+            Open AI pictures
+          </button>
+        )}
       </section>
 
       <div className="flex flex-wrap items-center gap-3">

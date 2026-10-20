@@ -1,5 +1,18 @@
 # Changelog
 
+## BUH-02.20.00 — 2026-10-20 22:00 UTC · [#39](https://github.com/cxsmtp/buh/pull/39)
+
+- **See and edit the AI writing prompt.** Settings → AI writing → Prompt shows exactly what is sent to Claude, Gemini or DeepSeek. You can edit the shop's instructions and the guide for each part (name, design, comfort…), preview the full prompt, try it on a photo before saving, and reset to the default. The honesty rules stay fixed and are always sent.
+- **AI pictures from Gemini, OpenAI or fal.ai.** A new Settings → AI pictures section lets you choose who makes your pictures, each with its own key, a Test button, the model choice and a rough cost per picture. You can keep DeepSeek for writing.
+- **Pictures that look like real photographs.** The default now asks for natural window light, real fabric creases, true proportions and realistic UAE rooms. Your scenes (Dubai master bedroom, Palm villa, hotel suite, desert-modern, Eid evening…) can be edited, added and reordered.
+- **Make them look like your own photos.** Upload 2–5 style photos and every picture copies their light, colours, camera angle and mood, with your new bed linen in it. Location data is removed from them, and they are kept in backups.
+- **Picture studio for every product.** Inventory → Make pictures: pick a photo and scenes, then add the results you like to the product's photos. Without a picture key, it shows the setup steps.
+- **Status.**
+  - **Benchmark:** 3 alternating rounds (branch first), 0 failed requests. Storefront branch 844 / 898 / 879 req/s vs main 809 / 863 / 858 (p95 87 / 91 / 108 vs 101 / 113 / 102 ms); catalogue API branch 854 / 779 / 767 vs main 787 / 776 / 717; serviceability API branch 669 / 613 / 611 vs main 597 / 579 / 526. Another helper's build was running on the same machine (load average about 5), affecting both builds alike; the new pages are admin-only, and the shop's own pages are unchanged.
+  - **Tests:** 1,114 passed, 0 failed (unit and end-to-end, including 11 new browser checks of the prompt editor, AI pictures and Picture studio at 375 and 1280 px).
+  - **Dependency audit:** production 0 vulnerabilities; no new packages.
+  - **Security scan:** independent review found 0 high, 1 medium and 2 low issues, all fixed with tests. The studio now waits as long as the server, so a picture already paid for is never thrown away. Restoring older AI settings keeps today's picture choices and skips missing style photos. Test keys are built at run time. None of Gemini, OpenAI, fal.ai or DeepSeek has been tried with real keys.
+
 ## BUH-02.19.00 — 2026-10-20 18:30 UTC · [#38](https://github.com/cxsmtp/buh/pull/38)
 
 - **DeepSeek for AI writing.** Settings → AI writing now offers DeepSeek beside Claude and Gemini. Paste your key (`sk-…`) and press Test to see your models. `deepseek-flash` reads your product photos; `deepseek-v4-pro` writes text only.

@@ -111,7 +111,9 @@ test('the stage-photo route: hidden from strangers, sign-in required, off until 
   const off = await api('POST', route, { image: PHOTO_URL, preset: 'dubai-master' });
   assert.equal(off.status, 409);
   assert.match((await off.json()).message, /aistudio\.google\.com/);
-  assert.deepEqual(await (await api('GET', route)).json(), { ready: false, reason: 'no_key', model: 'gemini-3.1-flash-image', writer: 'anthropic' });
+  const st = await (await api('GET', route)).json();
+  assert.deepEqual({ ready: st.ready, reason: st.reason, provider: st.provider, writer: st.writer }, { ready: false, reason: 'no_provider', provider: '', writer: 'anthropic' });
+  assert.deepEqual(st.defaultSet, ['whole-bed', 'close-up', 'lifestyle']);
   // Save the key (Anthropic stays the writer): shown back as ••••last4 only.
   const saved = await api('PUT', '/api/admin/settings/ai', { settings: { geminiApiKey: KEY } });
   const savedText = await saved.text();
@@ -198,9 +200,8 @@ for (const width of [375, 1280]) {
     await g.getByRole('button', { name: 'Test Gemini' }).click();
     await g.getByTestId('gemini-test-result').filter({ hasText: /^Works: Google offers 3 writing and 2 image models/ }).waitFor();
     assert.equal(await g.getByLabel('Writing model').inputValue(), 'gemini-3.1-pro', 'the newest Pro');
-    assert.equal(await g.getByLabel('Image model (styled photos)').inputValue(), 'gemini-3.1-flash-image');
     assert.deepEqual(await g.getByLabel('Writing model').locator('option').allTextContents(), ['gemini-3.1-pro', 'gemini-3-flash', 'gemini-2.5-pro']);
-    assert.ok(await card.getByLabel('Label styled photos for customers').isChecked(), 'on by default');
+    assert.equal(await card.getByLabel('Image model (styled photos)').count(), 0, 'pictures are set up in Settings → AI pictures');
     assert.deepEqual(await overflow(page), []);
     await shot(page, `gemini-settings-${width}`, page.locator('section[aria-labelledby="settings-title"]'));
     await card.getByRole('button', { name: 'Save AI settings' }).click();
@@ -214,7 +215,7 @@ for (const width of [375, 1280]) {
     await ctx.close();
   });
 
-  test(`product editor at ${width}px: "Style in a bedroom" makes 3 pictures in a grid (1 column on a phone, 3 on a desktop); Add one, Try again one, Discard one, Add all; the note and scene edited`, { skip }, async () => {
+  test(`product editor at ${width}px: AI pictures makes 3 pictures in a grid (1 column on a phone, 3 on a desktop); Add one, Try again one, Discard one, Add all; the note and scene edited`, { skip }, async () => {
     // A fresh editor (not the other width's draft).
     await api('DELETE', '/api/admin/products/drafts/new');
     const { ctx, page, errors } = await hub(width);
@@ -224,23 +225,23 @@ for (const width of [375, 1280]) {
     await editor.waitFor();
     const panel = editor.getByTestId('stage-in-bedroom');
     await panel.waitFor();
-    const button = panel.getByRole('button', { name: 'Style in a bedroom (3 pictures, Gemini)' });
+    const button = panel.getByRole('button', { name: 'Make 3 pictures (Gemini)' });
     assert.ok(await button.isDisabled(), 'needs a photo first');
     await editor.getByLabel('Choose photos from the gallery').setInputFiles([{ name: 'sheet-indigo.png', mimeType: 'image/png', buffer: PHOTO }]);
     await editor.getByAltText('Cover photo').waitFor();
     // The default set: whole bed, close-up, lifestyle.
-    for (const name of ['Whole bed (Dubai master bedroom)', 'Close-up of print and texture', 'Lifestyle moment']) assert.ok(await panel.getByRole('checkbox', { name }).isChecked(), name);
+    for (const name of ['Whole bed — Dubai master bedroom', 'Close-up of print and texture', 'Lifestyle — breakfast tray']) assert.ok(await panel.getByRole('checkbox', { name }).isChecked(), name);
     assert.equal(await panel.getByRole('checkbox', { name: 'Palm villa' }).isChecked(), false);
     await panel.getByLabel('Your note (optional)').fill('morning light');
     // The prompt, editable: each scene, with the fixed rules shown and not editable.
     await panel.getByTestId('stage-prompt').locator('summary').click();
-    await panel.getByLabel('Scene for Lifestyle moment').fill('a tray of karak chai at the foot of the bed, soft morning light');
+    await panel.getByLabel('Scene for Lifestyle — breakfast tray').fill('a tray of karak chai at the foot of the bed, soft morning light');
     await panel.getByText('Always added after your words').waitFor();
     // Keyboard: focus the button and press Enter; each picture shows as it arrives.
     const sentBefore = calls.length;
     await button.focus();
     await page.keyboard.press('Enter');
-    await panel.getByRole('button', { name: 'Styling the photo…' }).waitFor();
+    await panel.getByRole('button', { name: 'Making the pictures…' }).waitFor();
     const results = panel.getByTestId('stage-result');
     await page.waitForFunction(() => document.querySelectorAll('[data-testid="stage-result"] img[alt^="Styled photo"]').length === 3);
     assert.equal(await results.count(), 3);
@@ -257,7 +258,7 @@ for (const width of [375, 1280]) {
     await panel.getByTestId('stage-results').scrollIntoViewIfNeeded();
     if (SHOTS) await page.screenshot({ path: path.join(SHOTS, `styled-3-${width}.png`) });
     // Add one: it goes after the original, which stays first.
-    await panel.getByRole('button', { name: 'Add to gallery: Whole bed (Dubai master bedroom)' }).click();
+    await panel.getByRole('button', { name: 'Add to gallery: Whole bed — Dubai master bedroom' }).click();
     await panel.getByText(/Added after the original photo/).waitFor();
     const photos = editor.getByRole('list', { name: 'Photos in order' }).locator('li img');
     assert.equal(await photos.count(), 2);
@@ -271,9 +272,9 @@ for (const width of [375, 1280]) {
     }, firstUrl);
     assert.equal((await api('GET', firstUrl!)).status, 404, 'the first picture was thrown away');
     // Discard one.
-    const lifestyle = panel.getByTestId('stage-result').filter({ hasText: 'Lifestyle moment' });
+    const lifestyle = panel.getByTestId('stage-result').filter({ hasText: 'Lifestyle — breakfast tray' });
     const lifeUrl = await lifestyle.getByRole('img').getAttribute('src');
-    await panel.getByRole('button', { name: 'Discard: Lifestyle moment' }).click();
+    await panel.getByRole('button', { name: 'Discard: Lifestyle — breakfast tray' }).click();
     await lifestyle.waitFor({ state: 'detached' });
     await page.waitForTimeout(300);
     assert.equal((await api('GET', lifeUrl!)).status, 404);

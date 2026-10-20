@@ -1,32 +1,38 @@
-import { GEMINI_MODEL_ID, type AiProvider, type StagedPhoto } from '@/types';
-import { STAGING_EXTRA_MAX, STAGING_FIXED_RULES, STAGING_SCENE_MAX, stagingPreset } from '@/lib/staging';
+import { type AiProvider, type StagedPhoto } from '@/types';
+import { FAL_KEY, FAL_KEY_HINT, OPENAI_KEY, OPENAI_KEY_HINT, PROVIDER_INFO, type PictureProvider } from '@/lib/pictureProviders';
+import { STAGING_EXTRA_MAX, STAGING_SCENE_MAX, STYLE_MAX, STYLE_SIDE_MAX, lookOf, oneLine, stagingPrompt, usesReferences, type StagingContext, type StagingScene } from '@/lib/staging';
 import { audit } from './audit';
 import { getDb } from './db';
-import { answerOf, generateContent, type GeminiPart } from './gemini';
+import { PICTURE_MODULES, modelOk, pictureKey, pictureModel, picturesProviderOf, providerName } from './pictures';
 import { HttpError } from './http';
 import { parseImageDataUrl } from './imageInput';
 import { IMAGE_NAME, cleanImage, deleteImage, readImage, saveImageBytes } from './images';
 import { logEvent } from './log';
+import { getProduct, updateProduct } from './products';
 import { rateLimit } from './rateLimit';
-import { getSettings } from './settings';
+import { getSettings, withStoredSecrets } from './settings';
 import { forgetStaged, recordStaged, stagedRecords } from './stagedPhotos';
 
+export { stagingPrompt, type StagingContext };
+
 /**
- * "Style in a bedroom" (product editor → Photos): one of the product's photos goes to Google Gemini
- * (an image model, the owner's own key from Settings → AI writing) with a fixed prompt that keeps
- * the product exactly as photographed and changes only the room around it. The picture that comes
- * back is checked (a whole PNG, JPEG or WebP, size and pixel limits), its metadata is taken out
- * except its AI provenance (C2PA, XMP DigitalSourceType: kept, or added when missing), and
- * it is stored as a NEW photo, recorded as styled (src/lib/server/stagedPhotos.ts). The original is
- * never touched. The owner looks at both side by side and adds it to the product, or discards it.
+ * AI pictures (the Picture studio in Inventory, and the product editor's Photos step): one of the
+ * product's photos goes to Google Gemini (an image model, the owner's own key from Settings → AI
+ * pictures) with a prompt that keeps the product exactly as photographed and changes only the
+ * setting around it: one of the owner's scenes, the owner's look and mood, then the fixed rules
+ * (src/lib/staging.ts). The picture that comes back is checked (a whole PNG, JPEG or WebP, size and
+ * pixel limits), its metadata is taken out except its AI provenance (C2PA, XMP DigitalSourceType:
+ * kept, or added when missing), and it is stored as a NEW photo, recorded as styled
+ * (src/lib/server/stagedPhotos.ts). The original is never touched. The owner looks at both side by
+ * side and adds it to the product, or discards it.
  *
- * - The editor asks for 3 pictures with one press (whole bed, close-up, lifestyle), one request each,
- *   side by side: each picture is checked, stored and audited on its own, and one failing loses none
- *   of the others.
+ * - One press makes the default trio (or up to 4 chosen scenes), one request each: each picture is
+ *   checked, stored and audited on its own, and one failing loses none of the others.
  * - The prompt can carry the product's own words (name, motif, colours, design) so the scene suits
- *   it; the owner can reword the scene and add a note; the fixed rules always come after them.
+ *   it; the owner can reword the scene for one picture and add a note; the fixed rules always come
+ *   after them.
  * - 30 pictures an hour per admin (each one is a paid call on the owner's Google account).
- * - Each one is in the audit log (preset, model, sizes; never image data, never the key).
+ * - Each one is in the audit log (scene, model, sizes; never image data, never the key).
  */
 
 export const STAGE_LIMIT = { max: 30, windowMs: 60 * 60 * 1000 };
@@ -35,47 +41,27 @@ const LIMIT_MESSAGE = 'That is 30 styled pictures this hour. Please wait a while
 export const SOURCE_MAX_BYTES = 4 * 1024 * 1024;
 /** The picture Gemini sends back (a 1K picture is 1–2 MB). */
 export const RESULT_MAX_BYTES = 10 * 1024 * 1024;
-/** Image models take 10–30 seconds; the editor waits as long. */
-const TIMEOUT_MS = 90_000;
 const ASPECTS = new Set(['4:5', '1:1']);
-const BODY_FIELDS = new Set(['imageId', 'image', 'preset', 'extra', 'aspect', 'scene', 'context']);
+const BODY_FIELDS = new Set(['imageId', 'image', 'preset', 'extra', 'aspect', 'scene', 'context', 'useReferences']);
+/** Where the owner fixes the key or the model. */
+export const PICTURES_PLACE = 'Settings → AI pictures';
 
 /** The owner's extra words: plain text, one line, at most 200 characters. */
 export function cleanExtra(v: unknown): string {
   if (v === undefined || v === null) return '';
   if (typeof v !== 'string') throw new HttpError(400, 'Extra words must be text.');
-  const s = v
-    .replace(/[\u0000-\u001f\u007f\u200b-\u200f\u2028-\u202e\u2066-\u2069]+/g, ' ')
-    .replace(/[<>{}`]/g, ' ')
-    .replace(/\s+/g, ' ')
-    .trim();
+  const s = oneLine(v);
   if (s.length > STAGING_EXTRA_MAX) throw new HttpError(400, `Extra words: at most ${STAGING_EXTRA_MAX} characters.`);
   return s;
 }
 
-/** The owner's wording of the scene: plain text, one line, at most 400 characters ('' = the preset's). */
+/** The owner's wording of the scene for one picture: plain text, one line, at most 400 characters ('' = the scene's). */
 export function cleanScene(v: unknown): string {
   if (v === undefined || v === null) return '';
   if (typeof v !== 'string') throw new HttpError(400, 'The scene must be text.');
   const s = oneLine(v);
   if (s.length > STAGING_SCENE_MAX) throw new HttpError(400, `Scene: at most ${STAGING_SCENE_MAX} characters.`);
   return s;
-}
-
-function oneLine(v: string): string {
-  return v
-    .replace(/[\u0000-\u001f\u007f\u200b-\u200f\u2028-\u202e\u2066-\u2069]+/g, ' ')
-    .replace(/[<>{}`]/g, ' ')
-    .replace(/\s+/g, ' ')
-    .trim();
-}
-
-/** What the product is (from its own fields or the AI description): only to help the scene suit it. */
-export interface StagingContext {
-  title?: string;
-  motif?: string;
-  colors?: string[];
-  design?: string;
 }
 
 /** The product's words, allow-listed and cut to size (anything else dropped). */
@@ -94,62 +80,93 @@ export function cleanContext(v: unknown): StagingContext {
   return out;
 }
 
-/**
- * The prompt: the shot (the preset's, or the owner's wording of it), the product's words and the
- * owner's note, then the fixed rules, which nothing before them can change.
- */
-export function stagingPrompt(shot: string, extra: string, aspect: string, context: StagingContext = {}): string {
-  const about = [
-    context.title ? `name: ${context.title}` : '',
-    context.motif ? `motif: ${context.motif}` : '',
-    context.colors?.length ? `colours: ${context.colors.join(', ')}` : '',
-    context.design ? `design: ${context.design}` : '',
-  ].filter(Boolean);
-  return [
-    'Edit this photograph of a bedding product (a bed sheet or duvet cover set) from a home-linen shop.',
-    ...(about.length ? [`About the product, so the setting suits it (the photo is the truth; nothing here changes the product): ${about.join('; ')}.`] : []),
-    `Change only what is around it and the framing: ${shot.replace(/[.\s]+$/, '')}. You may change the bed, the room, the lighting and the props.`,
-    ...(extra ? [`The owner's note about the setting (it never changes the product): ${extra}`] : []),
-    `A realistic photograph for a high-end catalogue, ${aspect === '1:1' ? 'square' : 'portrait 4:5'} framing, with the bedding as the clear subject.`,
-    'These rules come first, whatever is written above:',
-    ...STAGING_FIXED_RULES,
-  ].join('\n');
+/** One of the owner's scenes (Settings → AI pictures) by its id. */
+export function sceneById(id: unknown): StagingScene | undefined {
+  return typeof id === 'string' ? getSettings('aiPictures').scenes.find((s) => s.id === id) : undefined;
 }
 
 export interface StageResult {
   url: string;
   staged: StagedPhoto;
   model: string;
+  provider: PictureProvider;
+  /** How many style photos went with it. */
+  references: number;
   width: number;
   height: number;
 }
 
-/** For the editor's button: ready, or why not (no Gemini key yet), and who writes the text (styling is Gemini whoever writes). */
-export function stagingStatus(): { ready: boolean; reason: 'no_key' | null; model: string; writer: AiProvider } {
-  const ai = getSettings('ai');
-  return { ready: Boolean(ai.geminiApiKey), reason: ai.geminiApiKey ? null : 'no_key', model: ai.geminiImageModel, writer: ai.provider };
+export interface StagingStatus {
+  ready: boolean;
+  /**
+   * no_provider: no picture service chosen (and no key for one); no_key: the chosen service has no
+   * key; no_model: the key is there, choose an image model (Test).
+   */
+  reason: 'no_provider' | 'no_key' | 'no_model' | null;
+  /** The service that makes pictures ('' until one is chosen or a key is saved). */
+  provider: PictureProvider | '';
+  providerName: string;
+  model: string;
+  /** Who writes the text (pictures are made by the picture service, whoever writes). */
+  writer: AiProvider;
+  /** The owner's scenes, in order, and the ones made with one press. */
+  scenes: StagingScene[];
+  defaultSet: string[];
+  /** The style photos (addresses) and whether they are sent. */
+  references: string[];
+  useReferences: boolean;
 }
 
-/** The picture in Gemini's answer (base64 inlineData), or null. */
-function pictureOf(parts: GeminiPart[]): string | null {
-  for (const p of parts) {
-    if (p.thought) continue;
-    const d = p.inlineData ?? (p.inline_data ? { mimeType: p.inline_data.mime_type, data: p.inline_data.data } : undefined);
-    if (d && typeof d.data === 'string' && /^image\//.test(String(d.mimeType ?? ''))) return d.data;
+/** For the studio and the editor: ready, or why not, who makes pictures, and the scenes to offer. */
+export function stagingStatus(): StagingStatus {
+  const ai = getSettings('ai');
+  const pictures = getSettings('aiPictures');
+  const provider = picturesProviderOf(ai);
+  const model = provider ? pictureModel(ai, provider) : '';
+  const reason = !provider ? 'no_provider' : !pictureKey(ai, provider) ? 'no_key' : !modelOk(provider, model) ? 'no_model' : null;
+  return {
+    ready: !reason,
+    reason,
+    provider,
+    providerName: provider ? providerName(provider) : '',
+    model,
+    writer: ai.provider,
+    scenes: pictures.scenes,
+    defaultSet: pictures.defaultSet,
+    references: pictures.references ?? [],
+    useReferences: pictures.useReferences !== false,
+  };
+}
+
+/** The style photos to send, in the owner's order, each checked (metadata out) and within the size cap. */
+function referenceImages(urls: string[], max: number): Array<{ mime: string; bytes: Buffer }> {
+  const out: Array<{ mime: string; bytes: Buffer }> = [];
+  for (const u of urls.slice(0, Math.max(0, max))) {
+    const img = readImage(u.replace(/^\/api\/images\//, ''));
+    const clean = img ? cleanImage(img.bytes, STYLE_MAX) : null;
+    if (clean) out.push({ mime: clean.mime, bytes: clean.bytes });
   }
-  return null;
+  return out;
 }
 
 /** POST /api/admin/products/stage-photo, after the admin check and the size-capped read. */
 export async function stagePhoto(body: Record<string, unknown>, actor: string): Promise<StageResult> {
   for (const k of Object.keys(body)) if (!BODY_FIELDS.has(k)) throw new HttpError(400, `Unexpected field: ${k.slice(0, 30)}.`);
   const ai = getSettings('ai');
-  if (!ai.geminiApiKey) throw new HttpError(409, 'Add your Gemini API key in Settings → AI writing (aistudio.google.com → Get API key).', {}, { code: 'staging_off' });
-  if (!GEMINI_MODEL_ID.test(ai.geminiImageModel)) throw new HttpError(409, 'Choose a Gemini image model: press Test in Settings → AI writing.', {}, { code: 'staging_off' });
-  const preset = stagingPreset(body.preset);
-  if (!preset) throw new HttpError(400, 'Choose a style.');
+  const settings = getSettings('aiPictures');
+  const provider = picturesProviderOf(ai);
+  if (!provider) throw new HttpError(409, `Pictures need a picture service: choose Google Gemini, OpenAI or fal.ai in ${PICTURES_PLACE} and add its key (for Gemini: aistudio.google.com/apikey → Create API key).`, {}, { code: 'staging_off', reason: 'no_provider' });
+  const info = PROVIDER_INFO[provider];
+  const key = pictureKey(ai, provider);
+  if (!key) throw new HttpError(409, `Pictures need a ${info.name} key: add one in ${PICTURES_PLACE} (${info.keyUrlLabel}).`, {}, { code: 'staging_off', reason: 'no_key' });
+  const model = pictureModel(ai, provider);
+  if (!modelOk(provider, model)) throw new HttpError(409, `Your ${info.name} key is saved: now choose an image model (press Test in ${PICTURES_PLACE}).`, {}, { code: 'staging_off', reason: 'no_model' });
+  const preset = sceneById(body.preset);
+  if (!preset) throw new HttpError(400, 'Choose a scene.');
+  if (body.useReferences !== undefined && typeof body.useReferences !== 'boolean') throw new HttpError(400, 'Style photos: on or off.');
   const extra = cleanExtra(body.extra);
-  const shot = cleanScene(body.scene) || preset.shot;
+  const shot = cleanScene(body.scene) || preset.scene;
+  const look = lookOf(settings);
   const context = cleanContext(body.context);
   const aspect = body.aspect === undefined ? '4:5' : String(body.aspect);
   if (!ASPECTS.has(aspect)) throw new HttpError(400, 'Shape: 4:5 or 1:1.');
@@ -171,46 +188,32 @@ export async function stagePhoto(body: Record<string, unknown>, actor: string): 
     throw new HttpError(400, 'Choose a photo first (PNG, JPEG or WebP).');
   }
 
+  const maker = PICTURE_MODULES[provider];
+  // The style photos: after the product photo, as many as the model takes.
+  const references = usesReferences(settings, preset, body.useReferences as boolean | undefined) ? referenceImages(settings.references, maker.maxImages(model) - 1) : [];
+
   const r = rateLimit(`ai-stage:${actor}`, STAGE_LIMIT.max, STAGE_LIMIT.windowMs);
   if (!r.ok) throw new HttpError(429, LIMIT_MESSAGE, { 'Retry-After': String(r.retryAfterSec) });
 
-  const model = ai.geminiImageModel;
-  const request = (modalities: string[]) => ({
-    contents: [{ role: 'user', parts: [{ text: stagingPrompt(shot, extra, aspect, context) }, { inlineData: { mimeType: photo.mime, data: photo.bytes.toString('base64') } }] }],
-    generationConfig: {
-      responseModalities: modalities,
-      // gemini-2.5-flash-image takes the shape only; newer image models also take the size.
-      imageConfig: /^gemini-2\./.test(model) ? { aspectRatio: aspect } : { aspectRatio: aspect, imageSize: '1K' },
+  const raw = await maker.edit({
+    key,
+    model,
+    product: photo,
+    references,
+    prompt: stagingPrompt(shot, extra, aspect, context, look, references.length),
+    aspect: aspect as '4:5' | '1:1',
+    again: () => {
+      // A second paid call for the same picture counts against the hour's limit too.
+      const again = rateLimit(`ai-stage:${actor}`, STAGE_LIMIT.max, STAGE_LIMIT.windowMs);
+      if (!again.ok) throw new HttpError(429, LIMIT_MESSAGE, { 'Retry-After': String(again.retryAfterSec) });
     },
   });
-  const opts = { timeoutMs: TIMEOUT_MS, maxBytes: Math.ceil(RESULT_MAX_BYTES * 1.4) + 512 * 1024, what: 'Gemini' };
-  let data: unknown;
-  try {
-    data = await generateContent(ai.geminiApiKey, model, request(['IMAGE']), opts);
-  } catch (err) {
-    // A model that only answers with text and pictures together: asked again that way.
-    const detail = String((err as { details?: { detail?: string } }).details?.detail ?? '');
-    if ((err as { details?: { code?: string } }).details?.code !== 'ai_error' || !/modalit/i.test(detail)) throw err;
-    // The second call is paid for too: it counts against the hour's limit.
-    const again = rateLimit(`ai-stage:${actor}`, STAGE_LIMIT.max, STAGE_LIMIT.windowMs);
-    if (!again.ok) throw new HttpError(429, LIMIT_MESSAGE, { 'Retry-After': String(again.retryAfterSec) });
-    data = await generateContent(ai.geminiApiKey, model, request(['TEXT', 'IMAGE']), opts);
-  }
-
-  const { parts, finishReason, blocked } = answerOf(data);
-  if (blocked || /SAFETY|PROHIBITED|BLOCKLIST|SPII|RECITATION/.test(finishReason)) {
-    logEvent('warn', 'gemini_stage_refused', { blocked, finishReason });
-    throw new HttpError(502, 'Gemini would not style this photo. Try another photo or style.', {}, { code: 'ai_refused' });
-  }
-  const b64 = pictureOf(parts);
-  if (!b64) {
-    logEvent('warn', 'gemini_stage_no_image', { finishReason, parts: parts.length });
-    throw new HttpError(502, 'Gemini did not send a picture back. Please try again.', {}, { code: 'ai_no_image' });
-  }
-  const clean = b64.length <= Math.ceil(RESULT_MAX_BYTES * 1.37) && /^[A-Za-z0-9+/_-]+={0,2}$/.test(b64) ? cleanImage(Buffer.from(b64, 'base64'), RESULT_MAX_BYTES, { keepProvenance: true }) : null;
+  // Checked whoever made it: a whole PNG, JPEG or WebP within the limits, metadata out, and marked
+  // as made with AI (kept from the service, or added).
+  const clean = cleanImage(raw, RESULT_MAX_BYTES, { keepProvenance: true });
   if (!clean) {
-    logEvent('warn', 'gemini_stage_bad_image', { length: b64.length });
-    throw new HttpError(502, 'Gemini’s picture could not be used (not a whole PNG, JPEG or WebP, or too large). Nothing was saved; please try again.', {}, { code: 'ai_bad_image' });
+    logEvent('warn', 'pictures_bad_image', { provider, length: raw.length });
+    throw new HttpError(502, `${maker.name}’s picture could not be used (not a whole PNG, JPEG or WebP, or too large). Nothing was saved; please try again.`, {}, { code: 'ai_bad_image' });
   }
 
   // Stored by its SHA-256: a picture already stored (the photo sent, or any other) is not a new
@@ -218,13 +221,29 @@ export async function stagePhoto(body: Record<string, unknown>, actor: string): 
   const { url, created } = saveImageBytes(clean.bytes, clean.mime);
   const name = url.slice('/api/images/'.length);
   if (!created || name === source) {
-    logEvent('warn', 'gemini_stage_same_image', { created });
-    throw new HttpError(502, 'Gemini returned the same photo; try another style.', {}, { code: 'ai_same_image' });
+    logEvent('warn', 'gemini_stage_same_image', { created, provider });
+    throw new HttpError(502, `${maker.name} returned the same photo; try another scene.`, {}, { code: 'ai_same_image' });
   }
   const at = new Date().toISOString();
   recordStaged(name, { source, preset: preset.id, at });
-  audit('product.photo_staged', { by: actor, model, preset: preset.id, source: source || 'upload', sourceBytes: photo.bytes.length, result: name, resultBytes: clean.bytes.length, width: clean.width, height: clean.height, extraLength: extra.length, sceneEdited: shot !== preset.shot, context: Object.keys(context), aspect });
-  return { url, staged: { staged: true, source, preset: preset.id, at }, model, width: clean.width, height: clean.height };
+  audit('product.photo_staged', { by: actor, provider, model, preset: preset.id, source: source || 'upload', sourceBytes: photo.bytes.length, references: references.length, result: name, resultBytes: clean.bytes.length, width: clean.width, height: clean.height, extraLength: extra.length, sceneEdited: shot !== preset.scene, lookDefault: !settings.look, context: Object.keys(context), aspect });
+  return { url, staged: { staged: true, source, preset: preset.id, at }, model, provider, references: references.length, width: clean.width, height: clean.height };
+}
+
+/**
+ * Settings → AI pictures → style photos: one photo (a data URL, shrunk to about 1,024 px in the hub)
+ * checked as every image is, its metadata (EXIF, GPS, comments) taken out, at most 1.5 MB and
+ * 2,048 px, stored by its hash. It is used once the owner saves it in the list.
+ */
+export function uploadStylePhoto(body: Record<string, unknown>, actor: string): { url: string; width: number; height: number } {
+  for (const k of Object.keys(body)) if (k !== 'image') throw new HttpError(400, `Unexpected field: ${k.slice(0, 30)}.`);
+  const { bytes } = parseImageDataUrl(body.image, STYLE_MAX);
+  const clean = cleanImage(bytes, STYLE_MAX);
+  if (!clean) throw new HttpError(400, 'That photo could not be read (PNG, JPEG or WebP, at least 64 px).');
+  if (clean.width > STYLE_SIDE_MAX || clean.height > STYLE_SIDE_MAX) throw new HttpError(413, `The photo is too large (at most ${STYLE_SIDE_MAX} px): it is made smaller on the way; try again.`);
+  const { url } = saveImageBytes(clean.bytes, clean.mime);
+  audit('settings.ai_style_photo_uploaded', { by: actor, result: url.slice('/api/images/'.length), bytes: clean.bytes.length, width: clean.width, height: clean.height });
+  return { url, width: clean.width, height: clean.height };
 }
 
 /**
@@ -246,4 +265,75 @@ export function discardStagedPhoto(body: Record<string, unknown>, actor: string)
   forgetStaged(name);
   audit('product.photo_staged_discarded', { by: actor, result: name });
   return { deleted };
+}
+
+/** A product holds at most this many photos (the cover and 7 more), as the editor does. */
+export const PRODUCT_MAX_PHOTOS = 8;
+
+const nameOf = (url: string) => url.replace(/^\/api\/images\//, '');
+
+/**
+ * The Picture studio's "Add to gallery" / "Add all": styled photos this feature made, added to an
+ * existing product right after the photo each was made from (the real cover stays first). Safe to
+ * send twice: a photo the product already has is not added again. Anything that is not a styled
+ * photo is refused; what does not fit (8 photos) is said, not added. Saved through updateProduct
+ * (validated, marked styled by the server, audited before it is saved).
+ */
+export function addStyledPhotos(productId: string, body: Record<string, unknown>, actor: string) {
+  for (const k of Object.keys(body)) if (k !== 'urls') throw new HttpError(400, `Unexpected field: ${k.slice(0, 30)}.`);
+  if (!Array.isArray(body.urls) || body.urls.length < 1 || body.urls.length > PRODUCT_MAX_PHOTOS) throw new HttpError(400, 'Which styled photos?');
+  const made = stagedRecords();
+  const names = body.urls.map((u) => (typeof u === 'string' ? nameOf(u) : ''));
+  for (const n of names) {
+    if (!IMAGE_NAME.test(n)) throw new HttpError(400, 'Which styled photos?');
+    if (!(n in made)) throw new HttpError(404, 'That is not a styled photo (make it again).');
+    if (!readImage(n)) throw new HttpError(404, 'That styled photo is no longer stored (make it again).');
+  }
+  const product = getProduct(productId);
+  if (!product) throw new HttpError(404, 'Product not found.');
+  const photos = [product.featuredImage, ...(product.galleryImages ?? [])].filter(Boolean);
+  const added: string[] = [];
+  const full: string[] = [];
+  /** Where the next one from each source goes: right after the source, in the order sent (as the editor does). */
+  const next = new Map<string, number>();
+  for (const name of [...new Set(names)]) {
+    const url = `/api/images/${name}`;
+    if (photos.includes(url)) continue;
+    if (photos.length >= PRODUCT_MAX_PHOTOS) {
+      full.push(url);
+      continue;
+    }
+    const source = made[name].source;
+    const from = source ? photos.indexOf(`/api/images/${source}`) : -1;
+    // Not made from one of its photos (an upload): at the end.
+    let at = from < 0 ? photos.length : (next.get(source) ?? from + 1);
+    at = Math.min(at, photos.length);
+    photos.splice(at, 0, url);
+    if (from >= 0) next.set(source, at + 1);
+    added.push(url);
+  }
+  if (!added.length) return { product, added, full };
+  const saved = updateProduct(productId, { featuredImage: photos[0], galleryImages: photos.slice(1) }, actor);
+  audit('product.photo_staged_added', { by: actor, productId, added: added.map(nameOf), notAddedFull: full.length });
+  return { product: saved, added, full };
+}
+
+const PICTURE_TEST_LIMIT = { max: 10, windowMs: 10 * 60 * 1000 };
+
+/**
+ * Settings → AI pictures → Test for OpenAI or fal.ai: the image models the key (typed, or the saved
+ * one) can use. A refused key says so in plain words (never the key).
+ */
+export async function testPictures(provider: 'openai' | 'fal', input: Record<string, unknown>, actor: string): Promise<{ ok: true; models: { image: string[]; suggested: { image: string } } }> {
+  const field = provider === 'openai' ? 'openaiApiKey' : 'falApiKey';
+  const typed = withStoredSecrets('ai', { [field]: input[field] }) as Record<string, unknown>;
+  const key = typeof typed[field] === 'string' ? (typed[field] as string).trim() : '';
+  const info = PROVIDER_INFO[provider];
+  if (!key) throw new HttpError(400, `Type your ${info.name} key first (${info.keyUrlLabel}).`, {}, { code: 'ai_off' });
+  if (!(provider === 'openai' ? OPENAI_KEY : FAL_KEY).test(key)) throw new HttpError(400, provider === 'openai' ? OPENAI_KEY_HINT : FAL_KEY_HINT);
+  const r = rateLimit(`ai-test:${actor}`, PICTURE_TEST_LIMIT.max, PICTURE_TEST_LIMIT.windowMs);
+  if (!r.ok) throw new HttpError(429, 'Too many tests. Please wait a few minutes.', { 'Retry-After': String(r.retryAfterSec) });
+  const { models, suggested } = await PICTURE_MODULES[provider].listModels(key);
+  audit('settings.ai_tested', { by: actor, provider, ok: true, imageModels: models.length });
+  return { ok: true, models: { image: models, suggested: { image: suggested } } };
 }

@@ -13,8 +13,9 @@ import { safeFetch } from './outbound';
 import { rateLimit } from './rateLimit';
 import { answerOf, generateContent, listGeminiModels, textOf, type ModelLists } from './gemini';
 import { chatAnswer, deepseekCall, listDeepSeekModels, type DeepSeekModels } from './deepseek';
-import { DEEPSEEK_KEY, DEEPSEEK_KEY_HINT, GEMINI_KEY, GEMINI_KEY_HINT, getSettings, withStoredSecrets } from './settings';
+import { DEEPSEEK_KEY, DEEPSEEK_KEY_HINT, GEMINI_KEY, GEMINI_KEY_HINT, getSettings, validateAiPrompt, withStoredSecrets } from './settings';
 import { EVERYDAY, cleanGiftLine, defaultGiftTarget, giftFestivals, type GiftFestival } from './giftLines';
+import { DEFAULT_AI_PROMPT, giftPromptText, writingSystem, writingUser, type AiPromptSettings } from '@/lib/aiPrompt';
 
 /**
  * "Write from photo" (Admin Hub → Inventory → product editor): the product's photo goes to
@@ -291,39 +292,15 @@ export function cleanHints(v: unknown): Hints {
 }
 
 /**
- * The rules every writer gets. The copy is there to help a shopper choose and buy, and it must be
- * true: nothing that can't be seen or that the owner did not write down.
+ * The rules every writer gets, with the shop's default instructions (src/lib/aiPrompt.ts): the
+ * owner's own instructions first, then the fixed honesty rules. The copy is there to help a shopper
+ * choose and buy, and it must be true: nothing that can't be seen or that the owner did not write down.
  */
-export const SYSTEM = `You write product copy for Beautiful UAE Home, a small luxury home-linen boutique in the United Arab Emirates (bed sheets, duvet covers, hand block prints).
-The copy is there to help a shopper choose with confidence and buy: clear, specific and useful, so they can picture it in their own bedroom.
-Look closely at the photo: the pattern and motif, the colours, the texture and any sheen, and the style (for example hand block print, Mughal, floral, geometric, minimal hotel white).
-Write warm, confident, specific copy in British English (colour, centre), for customers in the UAE.
-Rules:
-- Describe only what is visible in the photo.
-- Never state a thread count, material, fibre, certification, country of origin, or washing or care instructions unless the owner's notes give them; then use them exactly as given.
-- Feel and comfort only as they look ("looks soft and matte", "a crisp, cool look") unless the owner's notes give the fabric.
-- Sizes and what is in the set only from the owner's notes; never guess them.
-- No brand names, no awards, no reviews or ratings, no superlatives you can't see (no "best", "finest in the world"), no hype words (no "stunning", "must-have"), no fake urgency (no "hurry", "only a few left").
-- No emoji, no prices, no discounts, no hashtags, no markdown.
-Answer with one JSON object only, with no text before or after it.`;
+export const SYSTEM = writingSystem(DEFAULT_AI_PROMPT);
 
-export function userText(hints: Hints, weaves: string[]): string {
-  const notes = Object.keys(hints).length ? JSON.stringify(hints) : 'none';
-  return `The owner's notes about this product (facts you may use as given): ${notes}
-The shop's weaves: ${JSON.stringify(weaves)}
-
-Return exactly this JSON:
-{"title": "clear and searchable: the motif, the style and the product type, e.g. Indigo Chevron Hand Block Print Bed Set; at most 60 characters",
- "shortDescription": "the main reason to buy it, in one line of at most 140 characters",
- "design": "one short paragraph: the pattern, motif and colours, the print or weave technique you can see, the mood it gives a bedroom, and which bedrooms and decor it suits (e.g. pairs with white or walnut furniture, suits a calm master bedroom or a guest room); at most 450 characters",
- "comfort": "one short paragraph on how it looks to feel (texture, drape, sheen) and when it is nice to use, from what is visible or the owner's notes; at most 350 characters",
- "closing": "one warm closing line, at most 140 characters",
- "highlights": ["3 to 5 short, benefit-led lines a shopper scans, at most 70 characters each; sizes and what is in the set only from the owner's notes"],
- "giftLine": "the gift line described below (at most 140 characters), or an empty string",
- "colors": [{"name": "a plain colour name you can see, e.g. Indigo", "hex": "#rrggbb"}],
- "weave": "one of the shop's weaves if the photo clearly shows it, otherwise null",
- "motif": "the main motif in a few words"}
-Give at most 4 colours, the main ones first.`;
+/** The request text: the owner's facts, the gift line asked for, then the answer format (always last). */
+export function userText(hints: Hints, weaves: string[], prompt: AiPromptSettings = DEFAULT_AI_PROMPT, gift: string = giftPromptText(null)): string {
+  return writingUser(hints as Record<string, unknown>, weaves, prompt, gift);
 }
 
 export type ImageSource = { kind: 'upload' | 'stored'; mime: string; bytes: Buffer } | { kind: 'url'; url: string };
@@ -379,7 +356,7 @@ export function aiStatus(): { ready: boolean; reason: 'no_key' | 'off' | 'no_mod
   return { ready: !reason, reason, provider: ai.provider, model: writerModel(ai) };
 }
 
-const BODY_FIELDS = new Set(['image', 'imageId', 'imageUrl', 'hints', 'giftFor']);
+const BODY_FIELDS = new Set(['image', 'imageId', 'imageUrl', 'hints', 'giftFor', 'prompt']);
 
 type StoredPhoto = { kind: 'upload' | 'stored'; mime: string; bytes: Buffer };
 /** The writer's text, and whether it stopped for length (so a broken answer says "cut short"). */
@@ -389,15 +366,15 @@ interface Answer {
 }
 
 /** The photo and the request text to the chosen writer; its answer's text (each writer's refusals and errors made readable). */
-async function ask(ai: AiSettings, image: ImageSource, user: string): Promise<Answer> {
-  if (ai.provider === 'gemini' && image.kind !== 'url') return askGemini(ai, image, user);
-  if (ai.provider === 'deepseek' && image.kind !== 'url') return askDeepSeek(ai, image, user);
+async function ask(ai: AiSettings, image: ImageSource, user: string, system: string): Promise<Answer> {
+  if (ai.provider === 'gemini' && image.kind !== 'url') return askGemini(ai, image, user, system);
+  if (ai.provider === 'deepseek' && image.kind !== 'url') return askDeepSeek(ai, image, user, system);
   const source = image.kind === 'url' ? { type: 'url', url: image.url } : { type: 'base64', media_type: image.mime, data: image.bytes.toString('base64') };
   const { text, stopReason } = await callAnthropic(ai.anthropicApiKey, ai.model, {
     max_tokens: MAX_TOKENS,
     // Short copy: little thinking needed (and every thinking token counts against max_tokens).
     output_config: { effort: 'low' },
-    system: SYSTEM,
+    system,
     messages: [{ role: 'user', content: [{ type: 'image', source }, { type: 'text', text: user }] }],
   });
   return { text, cutShort: stopReason === 'max_tokens' };
@@ -407,12 +384,12 @@ async function ask(ai: AiSettings, image: ImageSource, user: string): Promise<An
  * Gemini: the same rules (system instruction), the photo as inlineData, JSON asked for with
  * responseMimeType.
  */
-async function askGemini(ai: AiSettings, image: StoredPhoto, user: string): Promise<Answer> {
+async function askGemini(ai: AiSettings, image: StoredPhoto, user: string, system: string): Promise<Answer> {
   const data = await generateContent(
     ai.geminiApiKey,
     ai.geminiModel,
     {
-      systemInstruction: { parts: [{ text: SYSTEM }] },
+      systemInstruction: { parts: [{ text: system }] },
       contents: [{ role: 'user', parts: [{ inlineData: { mimeType: image.mime, data: image.bytes.toString('base64') } }, { text: user }] }],
       // Room for the JSON (about 600 tokens) and the model's own thinking.
       generationConfig: { responseMimeType: 'application/json', maxOutputTokens: 8192 },
@@ -432,14 +409,14 @@ async function askGemini(ai: AiSettings, image: StoredPhoto, user: string): Prom
  * image_url data URL, JSON asked for with response_format, thinking off (a short JSON task: faster
  * and cheaper).
  */
-async function askDeepSeek(ai: AiSettings, image: StoredPhoto, user: string): Promise<Answer> {
+async function askDeepSeek(ai: AiSettings, image: StoredPhoto, user: string, system: string): Promise<Answer> {
   const data = await deepseekCall(ai.deepseekApiKey, {
     method: 'POST',
     path: '/chat/completions',
     body: JSON.stringify({
       model: ai.deepseekModel,
       messages: [
-        { role: 'system', content: SYSTEM },
+        { role: 'system', content: system },
         { role: 'user', content: [{ type: 'image_url', image_url: { url: `data:${image.mime};base64,${image.bytes.toString('base64')}` } }, { type: 'text', text: user }] },
       ],
       response_format: { type: 'json_object' },
@@ -485,8 +462,16 @@ function giftTarget(v: unknown, now: Date): GiftFestival | null {
 
 /** The gift-line facts for the prompt: the festival's name, dates and the shop's own mood for it. */
 export function giftPrompt(f: GiftFestival | null): string {
-  if (!f) return 'Gift line ("giftLine"): an everyday gift idea (a housewarming, a wedding, a new home) if it truly fits this product, otherwise an empty string.';
-  return `Gift line ("giftLine"): one line for ${f.name} (${f.start === f.end ? f.start : `${f.start} to ${f.end}`}; the shop's mood for it: "${f.mood}"), on giving it or having it at home for the festival. No discounts, no urgency, no invented facts.`;
+  return giftPromptText(f);
+}
+
+/**
+ * The prompt to use: the saved one (Settings → AI writing → Prompt), or, for "Try on a photo", the
+ * owner's unsaved one, checked exactly as a save would check it (and never saved here).
+ */
+function promptFor(body: Record<string, unknown>): { prompt: AiPromptSettings; tried: boolean } {
+  if (body.prompt === undefined) return { prompt: getSettings('aiPrompt'), tried: false };
+  return { prompt: validateAiPrompt(body.prompt, DEFAULT_AI_PROMPT), tried: true };
 }
 
 /** POST /api/admin/products/describe, after the admin check and the size-capped read. */
@@ -498,13 +483,14 @@ export async function describeProduct(body: Record<string, unknown>, actor: stri
   if (ai.provider === 'deepseek' && image.kind === 'url') throw new HttpError(400, 'With DeepSeek, use a photo uploaded to the shop (add it again from the gallery).');
   const hints = cleanHints(body.hints);
   const gift = giftTarget(body.giftFor, now);
+  const { prompt, tried } = promptFor(body);
   enforceLimit(`ai-describe:${actor}`, DESCRIBE_LIMIT.max, DESCRIBE_LIMIT.windowMs, 'That is 20 descriptions this hour. Please wait a while before the next one.');
   const weaves = getSettings('catalog').weaves;
-  const answer = await ask(ai, image, `${userText(hints, weaves)}\n${giftPrompt(gift)}`);
+  const answer = await ask(ai, image, userText(hints, weaves, prompt, giftPrompt(gift)), writingSystem(prompt));
   const suggestion = parsed(answer, ai, (t) => parseSuggestion(t, weaves));
   const model = writerModel(ai);
   const giftFor = gift?.id ?? EVERYDAY;
-  audit('product.ai_described', { by: actor, provider: ai.provider, model, photo: image.kind, ...(image.kind === 'url' ? {} : { photoBytes: image.bytes.length }), hints: Object.keys(hints), giftFor, suggested: { titleLength: suggestion.title.length, descriptionLength: suggestion.description.length, highlights: suggestion.highlights.length, colors: suggestion.colors.length, weave: suggestion.weave } });
+  audit('product.ai_described', { by: actor, provider: ai.provider, model, photo: image.kind, ...(image.kind === 'url' ? {} : { photoBytes: image.bytes.length }), hints: Object.keys(hints), giftFor, ...(tried ? { promptTried: true } : {}), suggested: { titleLength: suggestion.title.length, descriptionLength: suggestion.description.length, highlights: suggestion.highlights.length, colors: suggestion.colors.length, weave: suggestion.weave } });
   return { ...suggestion, model, provider: ai.provider, giftFor };
 }
 
@@ -555,7 +541,7 @@ ${list || '(no festival in the next weeks)'}
 
 Return exactly this JSON:
 {"giftLines": {${ids.map((id) => `"${id}": "the line"`).join(', ')}}}`;
-  const answer = await ask(ai, image, user);
+  const answer = await ask(ai, image, user, writingSystem(getSettings('aiPrompt')));
   const giftLines = parsed(answer, ai, (t) => parseGiftLines(t, ids));
   const model = writerModel(ai);
   audit('product.ai_gift_lines', { by: actor, provider: ai.provider, model, photo: image.kind, festivals: ids, written: Object.keys(giftLines) });

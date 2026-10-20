@@ -164,12 +164,15 @@ export function ProductEditor({
   catalog,
   onClose,
   onSaved,
+  onOpenSettings,
 }: {
   product: Product | null;
   catalog: CatalogSettings;
   onClose: () => void;
   /** Called with the saved product; the list reloads. */
   onSaved: (product: Product) => void;
+  /** Opens a Settings section (the pictures' setup steps link to Settings → AI pictures). */
+  onOpenSettings?: (id: string) => void;
 }) {
   const draftId = product?.id ?? 'new';
   const titleId = useId();
@@ -578,6 +581,7 @@ export function ProductEditor({
               notes={draft.stagingNotes ?? ''}
               onNotes={(v) => set('stagingNotes', v)}
               context={{ title: draft.title, motif: draft.aiMotif, colors: draft.colors.map((c) => c.name).filter(Boolean), design: draft.aiDesign || draft.shortDescription }}
+              onOpenSettings={onOpenSettings ? () => onOpenSettings('ai-pictures') : undefined}
               onAdd={(url, after) =>
                 setDraft((d) => {
                   if (d.photos.includes(url) || d.photos.length >= MAX_PHOTOS) return d;

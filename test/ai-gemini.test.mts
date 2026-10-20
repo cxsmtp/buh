@@ -404,7 +404,8 @@ test('stage-photo: input checks (fields allow-listed, presets, extra words, phot
   await settings.updateSettings('ai', { provider: 'anthropic', anthropicApiKey: ANTHROPIC, geminiApiKey: null });
   sent = [];
   await assert.rejects(stage.stagePhoto({ image: PHOTO_URL, preset: 'kids-room' }, 'nokey@s.t'), (e: { status: number; message: string }) => e.status === 409 && /aistudio\.google\.com/.test(e.message));
-  assert.deepEqual(stage.stagingStatus(), { ready: false, reason: 'no_key', model: 'gemini-3.1-flash-image', writer: 'anthropic' });
+  const st = stage.stagingStatus();
+  assert.deepEqual({ ready: st.ready, reason: st.reason, provider: st.provider, writer: st.writer }, { ready: false, reason: 'no_provider', provider: '', writer: 'anthropic' }, 'no picture service and no key: choose one');
   assert.equal(sent.length, 0);
 });
 
@@ -481,7 +482,7 @@ test('a picture Gemini sends back that is already stored (the photo sent, or a r
   const p = products.createProduct({ title: 'Real Photo Set', category: 'bedsheets', price: 300, featuredImage: real, galleryImages: [], profiles: king, defaultProfileId: 'king', stockBySize: { king: 1 } });
   answer = () => imageReply(realBytes);
   for (const body of [{ imageId: name }, { image: PHOTO_URL }]) {
-    await assert.rejects(stage.stagePhoto({ ...body, preset: 'hotel-suite' }, 'same@s.t'), (e: { status: number; message: string; details?: { code?: string } }) => e.status === 502 && e.details?.code === 'ai_same_image' && /same photo; try another style/.test(e.message));
+    await assert.rejects(stage.stagePhoto({ ...body, preset: 'hotel-suite' }, 'same@s.t'), (e: { status: number; message: string; details?: { code?: string } }) => e.status === 502 && e.details?.code === 'ai_same_image' && /same photo; try another scene/.test(e.message));
   }
   const { stagedRecords } = await import('@/lib/server/stagedPhotos');
   assert.equal(name in stagedRecords(), false, 'not recorded as styled');

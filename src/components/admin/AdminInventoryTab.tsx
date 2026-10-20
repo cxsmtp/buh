@@ -11,6 +11,7 @@ import {
   Link2,
   Copy,
   Edit3,
+  ImagePlus,
   Eye,
   EyeOff,
   History,
@@ -31,6 +32,7 @@ import { DEFAULT_LOW_STOCK, isLow, isSoldOut, newKey, shortSizeName, stockAlerts
 import { Sheet } from '@/components/common/Sheet';
 import { ProductEditor } from './inventory/ProductEditor';
 import { CollectionsSheet, ShareSelectionSheet } from './inventory/Collections';
+import { PictureStudioSheet } from './inventory/PictureStudioSheet';
 import { REASONS, useStockMoves, type StockReason } from './inventory/useStockMoves';
 
 /**
@@ -55,6 +57,8 @@ interface AdminInventoryTabProps {
   onProductUpdated?: (p: Product) => void;
   /** Open the editor for a new product straight away (the "+ Add" tab). */
   startAdding?: boolean;
+  /** Opens a Settings section (the Picture studio's setup steps link to Settings → AI pictures). */
+  onOpenSettings?: (id: string) => void;
 }
 
 const CHIP: Record<StockLevel, string> = {
@@ -69,8 +73,10 @@ const actionDanger = 'min-h-11 px-3 rounded-xl border border-danger-line bg-surf
 const actionIcon = 'min-h-11 w-11 rounded-xl border border-line-strong bg-surface text-ink inline-flex items-center justify-center disabled:opacity-40';
 const actionPrimary = 'min-h-11 px-3 rounded-xl border border-ink bg-ink text-paper text-xs font-semibold inline-flex items-center justify-center gap-1.5';
 
-export const AdminInventoryTab: React.FC<AdminInventoryTabProps> = ({ products, catalog, onChanged, onProductUpdated, startAdding = false }) => {
+export const AdminInventoryTab: React.FC<AdminInventoryTabProps> = ({ products, catalog, onChanged, onProductUpdated, startAdding = false, onOpenSettings }) => {
   const [editing, setEditing] = useState<AdminProduct | 'new' | null>(startAdding ? 'new' : null);
+  // Inventory → Make pictures: the Picture studio for one product.
+  const [studio, setStudio] = useState<AdminProduct | null>(null);
   const [query, setQuery] = useState('');
   const [filter, setFilter] = useState<Filter>('all');
   const [category, setCategory] = useState('');
@@ -365,6 +371,9 @@ export const AdminInventoryTab: React.FC<AdminInventoryTabProps> = ({ products, 
                         <button type="button" onClick={() => setEditing(p)} className={actionBtn} aria-label={`Edit ${p.title}`}>
                           <Edit3 className="w-4 h-4" aria-hidden="true" /> Edit
                         </button>
+                        <button type="button" onClick={() => setStudio(p)} className={actionBtn} aria-label={`Make pictures of ${p.title}`}>
+                          <ImagePlus className="w-4 h-4" aria-hidden="true" /> Make pictures
+                        </button>
                         <button
                           type="button"
                           onClick={() => void toggleVisible(p)}
@@ -490,11 +499,23 @@ export const AdminInventoryTab: React.FC<AdminInventoryTabProps> = ({ products, 
         />
       )}
       {links && <CollectionsSheet products={products} onClose={() => setLinks(false)} />}
+      {studio && (
+        <PictureStudioSheet
+          product={studio}
+          onClose={() => {
+            setStudio(null);
+            void onChanged();
+          }}
+          onSaved={(p) => (onProductUpdated ? onProductUpdated(p) : void onChanged())}
+          onOpenSettings={onOpenSettings ? () => onOpenSettings('ai-pictures') : undefined}
+        />
+      )}
 
       {editing && (
         <ProductEditor
           product={editing === 'new' ? null : editing}
           catalog={catalog}
+          onOpenSettings={onOpenSettings}
           onClose={() => {
             setEditing(null);
             void onChanged();

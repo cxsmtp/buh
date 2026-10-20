@@ -1,7 +1,7 @@
 'use client';
 
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Archive, Box, Copy, CreditCard, Feather, KeyRound, LayoutGrid, Laptop, Link2, Mail, MessageSquare, Palette, ShieldCheck, Smartphone, Sparkles, Store, SwatchBook, Truck } from 'lucide-react';
+import { Archive, Box, Copy, CreditCard, Feather, ImagePlus, KeyRound, LayoutGrid, Laptop, Link2, Mail, MessageSquare, Palette, ShieldCheck, Smartphone, Sparkles, Store, SwatchBook, Truck } from 'lucide-react';
 import type { AiSettings, AssistantSettings, BankTransferDetails, BrandSettings, CatalogSettings, CourierSettings, Customer, DeliverySettings, EmailSettings, Order, PaymentSettings, PhoneCheckSettings, Product, SmsGatewaySettings, StoreSettings, ThemeSettings } from '@/types';
 import { DEFAULT_AI, DEFAULT_ASSISTANT, DEFAULT_CATALOG, DEFAULT_DELIVERY, DEFAULT_EMAIL_SETTINGS, DEFAULT_STORE, DEFAULT_THEME_SETTINGS } from '@/data/catalogDefaults';
 import { INITIAL_BANK_DETAILS, INITIAL_BRAND_SETTINGS, INITIAL_COURIER_SETTINGS, INITIAL_SMS_SETTINGS } from '@/data/initialData';
@@ -31,6 +31,10 @@ import { BackupPasswordCard } from './settings/BackupPasswordCard';
 import { RestoreNotice } from './RestoreNotice';
 import { AdminLinkCard } from './settings/AdminLinkCard';
 import { AiSettingsCard } from './settings/AiSettingsCard';
+import { AiPromptCard } from './settings/AiPromptCard';
+import { AiPicturesCard } from './settings/AiPicturesCard';
+import { DEFAULT_AI_PROMPT, type AiPromptSettings } from '@/lib/aiPrompt';
+import { DEFAULT_AI_PICTURES, type AiPicturesSettings } from '@/lib/staging';
 import { AssistantSettingsCard } from './settings/AssistantSettingsCard';
 import { CatalogSettingsCard } from './settings/CatalogSettingsCard';
 import { DeliverySettingsCard } from './settings/DeliverySettingsCard';
@@ -69,6 +73,8 @@ interface AdminSettings {
   payments: AdminSetting<PaymentSettings>;
   phoneCheck: AdminSetting<PhoneCheckSettings>;
   ai: AdminSetting<AiSettings>;
+  aiPrompt: AdminSetting<AiPromptSettings>;
+  aiPictures: AdminSetting<AiPicturesSettings>;
 }
 
 const NO_PAYMENTS: PaymentSettings = { cardEnabled: false, stripePublishableKey: '', stripeSecretKey: '', stripeWebhookSecret: '', cardFeePercent: DEFAULT_CARD_FEE_PERCENT, bankTransferMode: 'default' };
@@ -161,6 +167,8 @@ export function AdminApp() {
     payments: { value: NO_PAYMENTS, secretsSet: {} },
     phoneCheck: { value: DEFAULT_PHONE_CHECK, secretsSet: {} },
     ai: { value: DEFAULT_AI, secretsSet: {} },
+    aiPrompt: { value: DEFAULT_AI_PROMPT, secretsSet: {} },
+    aiPictures: { value: DEFAULT_AI_PICTURES, secretsSet: {} },
   });
   const [adminLoadError, setAdminLoadError] = useState('');
   const [adminSettingsLoaded, setAdminSettingsLoaded] = useState(false);
@@ -227,7 +235,7 @@ export function AdminApp() {
     if (p.ok) setAdminProducts(p.data.products);
     if (st.ok) {
       if (st.data.bank) setBankDetails(st.data.bank.value);
-      setAdminSettings({ courier: st.data.courier, sms: st.data.sms, catalog: st.data.catalog, store: st.data.store, theme: st.data.theme, email: st.data.email, assistant: st.data.assistant, delivery: st.data.delivery, payments: st.data.payments ?? { value: NO_PAYMENTS, secretsSet: {} }, phoneCheck: st.data.phoneCheck ?? { value: DEFAULT_PHONE_CHECK, secretsSet: {} }, ai: st.data.ai ?? { value: DEFAULT_AI, secretsSet: {} } });
+      setAdminSettings({ courier: st.data.courier, sms: st.data.sms, catalog: st.data.catalog, store: st.data.store, theme: st.data.theme, email: st.data.email, assistant: st.data.assistant, delivery: st.data.delivery, payments: st.data.payments ?? { value: NO_PAYMENTS, secretsSet: {} }, phoneCheck: st.data.phoneCheck ?? { value: DEFAULT_PHONE_CHECK, secretsSet: {} }, ai: st.data.ai ?? { value: DEFAULT_AI, secretsSet: {} }, aiPrompt: st.data.aiPrompt ?? { value: DEFAULT_AI_PROMPT, secretsSet: {} }, aiPictures: st.data.aiPictures ?? { value: DEFAULT_AI_PICTURES, secretsSet: {} } });
       setAdminSettingsLoaded(true);
       if (st.data.phoneCheckInfo) setPhoneCheckInfo(st.data.phoneCheckInfo);
     }
@@ -274,7 +282,7 @@ export function AdminApp() {
   });
 
   /** Save one settings group on the server; resolves to an error message or null. */
-  const saveSettings = async (key: 'brand' | 'bank' | 'courier' | 'sms' | 'catalog' | 'store' | 'theme' | 'email' | 'assistant' | 'delivery' | 'payments' | 'phoneCheck' | 'ai', settings: unknown, onWarning?: (warning: string) => void): Promise<string | null> => {
+  const saveSettings = async (key: 'brand' | 'bank' | 'courier' | 'sms' | 'catalog' | 'store' | 'theme' | 'email' | 'assistant' | 'delivery' | 'payments' | 'phoneCheck' | 'ai' | 'aiPrompt' | 'aiPictures', settings: unknown, onWarning?: (warning: string) => void): Promise<string | null> => {
     const { ok, data } = await sendJson<{ message?: string; warning?: string }>('PUT', `/api/admin/settings/${key}`, { settings });
     if (!ok) return data.message || 'Could not save. Please try again.';
     if (data.warning) onWarning?.(data.warning);
@@ -287,6 +295,12 @@ export function AdminApp() {
     },
     // Only the section whose settings were restored is re-created (others may hold unsaved typing).
     onUndone: (key: string) => setUndone((u) => ({ ...u, [key]: (u[key] ?? 0) + 1 })),
+  };
+
+  /** Opens one Settings section (from a button elsewhere in the hub). */
+  const openSettings = (id: string) => {
+    setSettingsOpen((x) => ({ id, n: x.n + 1 }));
+    setAdminTab('settings');
   };
 
   const toShop = () => window.location.assign('/');
@@ -497,6 +511,7 @@ export function AdminApp() {
               catalog={adminSettings.catalog.value}
               onProductUpdated={(updated) => setAdminProducts((list) => list.map((x) => (x.id === updated.id ? { ...x, ...updated } : x)))}
               onChanged={reloadAll}
+              onOpenSettings={openSettings}
             />
           )}
 
@@ -653,15 +668,44 @@ export function AdminApp() {
                   id: 'ai',
                   label: 'AI writing',
                   icon: <Sparkles />,
-                  hint: 'Product names, descriptions and gift lines written from a photo (Claude, Gemini or DeepSeek), and styled bedroom photos (Gemini), with your own keys (off until you add one).',
+                  hint: 'Product names, descriptions and gift lines written from a photo (Claude, Gemini or DeepSeek) with your own key, and the prompt they are given: see it, edit your part, try it.',
                   content: (
-                    <AiSettingsCard
-                      key={`ai-${adminSettingsLoaded}-${settingsEpoch}-${undone['ai'] ?? 0}`}
-                      value={adminSettings.ai.value}
+                    <div className="space-y-6">
+                      <AiSettingsCard
+                        key={`ai-${adminSettingsLoaded}-${settingsEpoch}-${undone['ai'] ?? 0}`}
+                        value={adminSettings.ai.value}
+                        secretsSet={adminSettings.ai.secretsSet}
+                        secretsHint={adminSettings.ai.secretsHint}
+                        onSave={(v) => saveSettings('ai', v)}
+                        onOpenPictures={() => openSettings('ai-pictures')}
+                        auto={autoSaveHooks}
+                      />
+                      <AiPromptCard
+                        key={`ai-prompt-${adminSettingsLoaded}-${settingsEpoch}`}
+                        value={adminSettings.aiPrompt.value}
+                        weaves={adminSettings.catalog.value.weaves}
+                        products={adminProducts
+                          .filter((p) => !(p as Product & { archived?: boolean }).archived && p.featuredImage)
+                          .map((p) => ({ id: p.id, title: p.title, photo: p.featuredImage, hints: { category: p.category, colors: p.colors.map((c) => c.name).filter(Boolean), ...(p.material ? { material: p.material } : {}), ...(p.threadCount ? { threadCount: p.threadCount } : {}), ...(p.weave ? { weave: p.weave } : {}) } }))}
+                        onSave={(v) => saveSettings('aiPrompt', v)}
+                      />
+                    </div>
+                  ),
+                },
+                {
+                  id: 'ai-pictures',
+                  label: 'AI pictures',
+                  icon: <ImagePlus />,
+                  hint: 'Pictures of your products in beautiful settings, made by Google Gemini with your own key: the scenes, the look and mood, and the prompt.',
+                  content: (
+                    <AiPicturesCard
+                      key={`ai-pictures-${adminSettingsLoaded}-${settingsEpoch}`}
+                      ai={adminSettings.ai.value}
                       secretsSet={adminSettings.ai.secretsSet}
                       secretsHint={adminSettings.ai.secretsHint}
-                      onSave={(v) => saveSettings('ai', v)}
-                      auto={autoSaveHooks}
+                      value={adminSettings.aiPictures.value}
+                      onSaveAi={(v) => saveSettings('ai', v)}
+                      onSavePictures={(v) => saveSettings('aiPictures', v)}
                     />
                   ),
                 },
