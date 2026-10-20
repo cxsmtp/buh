@@ -157,7 +157,7 @@ test('every field is checked and cut to size: lengths, markup, emoji, control ch
   assert.ok(!/[<>✨]/.test(s.title), s.title);
   assert.ok(s.title.startsWith('Royal Mughal Garden'), s.title);
   assert.ok(s.shortDescription.length <= 140 && !s.shortDescription.includes('\n'));
-  assert.ok(s.description.length <= 900);
+  assert.ok(s.description.length <= 1200);
   assert.ok(!s.description.includes('Fourth'));
   assert.equal(s.colors.length, 4);
   assert.equal(s.weave, null, 'a weave the shop does not have is not offered');

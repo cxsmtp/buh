@@ -3,13 +3,15 @@
 import React, { useState } from 'react';
 import { BedDouble, Loader2, PlugZap, Sparkles } from 'lucide-react';
 import { postJson } from '@/lib/apiClient';
-import { AI_MODELS, type AiModel, type AiProvider, type AiSettings } from '@/types';
+import { AI_MODELS, deepseekReadsPhotos, type AiModel, type AiProvider, type AiSettings } from '@/types';
 import { useAutoSave, type AutoSaveHooks } from './useAutoSave';
 
 /**
  * Settings → AI writing:
- * - which AI writes "Write from photo" (product editor): Anthropic (Claude) or Google Gemini, with
- *   each one's key and model, and the switch (off until the chosen AI's key is saved);
+ * - which AI writes "Write from photo" (product editor): Anthropic (Claude), Google Gemini or
+ *   DeepSeek, with each one's key and model, and the switch (off until the chosen AI's key is saved);
+ * - DeepSeek's Test lists the models the key can use (deepseek-flash reads photos; deepseek-v4-pro
+ *   does not, so it can't write from a photo);
  * - Google Gemini also makes "Style in a bedroom" photos (Claude does not make images): its Test
  *   reads the models the key can use from Google and fills the two lists (writing, images);
  * - "Label styled photos for customers" (on by default).
@@ -26,6 +28,14 @@ const MODEL_NAMES: Record<AiModel, string> = {
   'claude-sonnet-5-5': 'Claude Sonnet 5.5 (faster, lower cost)',
   'claude-haiku-5-5': 'Claude Haiku 5.5 (fastest, lowest cost)',
 };
+
+interface DeepSeekLists {
+  all: string[];
+  vision: string[];
+  suggested: string;
+}
+
+const PROVIDER_NAMES: Record<AiProvider, string> = { anthropic: 'Anthropic', gemini: 'Gemini', deepseek: 'DeepSeek' };
 
 interface ModelLists {
   writing: string[];
@@ -54,17 +64,20 @@ export function AiSettingsCard({
   auto?: AutoSaveHooks;
 }) {
   const [d, setD] = useState<AiSettings>(value);
-  const typingKey = Boolean(d.anthropicApiKey || d.geminiApiKey);
+  const typingKey = Boolean(d.anthropicApiKey || d.geminiApiKey || d.deepseekApiKey);
   // Keys are never autosaved (a half-typed one would replace a working one): Save sends them.
-  const autosave = useAutoSave({ settingsKey: 'ai', value: { ...d, anthropicApiKey: '', geminiApiKey: '' }, enabled: Boolean(auto) && !typingKey, ...auto });
+  const autosave = useAutoSave({ settingsKey: 'ai', value: { ...d, anthropicApiKey: '', geminiApiKey: '', deepseekApiKey: '' }, enabled: Boolean(auto) && !typingKey, ...auto });
   const [saving, setSaving] = useState(false);
   const [status, setStatus] = useState<{ ok: boolean; text: string } | null>(null);
   const [testing, setTesting] = useState<AiProvider | null>(null);
   const [test, setTest] = useState<{ provider: AiProvider; ok: boolean; text: string } | null>(null);
   const [lists, setLists] = useState<ModelLists | null>(null);
+  const [dsLists, setDsLists] = useState<DeepSeekLists | null>(null);
   const anthropicSaved = Boolean(secretsSet.anthropicApiKey);
   const geminiSaved = Boolean(secretsSet.geminiApiKey);
-  const chosenKeySaved = d.provider === 'gemini' ? geminiSaved || Boolean(d.geminiApiKey) : anthropicSaved || Boolean(d.anthropicApiKey);
+  const deepseekSaved = Boolean(secretsSet.deepseekApiKey);
+  const chosenKeySaved =
+    d.provider === 'gemini' ? geminiSaved || Boolean(d.geminiApiKey) : d.provider === 'deepseek' ? deepseekSaved || Boolean(d.deepseekApiKey) : anthropicSaved || Boolean(d.anthropicApiKey);
 
   const save = async () => {
     autosave.cancel();
@@ -72,7 +85,7 @@ export function AiSettingsCard({
     setStatus(null);
     const problem = await onSave(d);
     setSaving(false);
-    if (!problem) setD((x) => ({ ...x, anthropicApiKey: '', geminiApiKey: '' }));
+    if (!problem) setD((x) => ({ ...x, anthropicApiKey: '', geminiApiKey: '', deepseekApiKey: '' }));
     setStatus(problem ? { ok: false, text: problem } : { ok: true, text: d.enabled ? 'Saved. “Write from photo” is on in the product editor.' : 'Saved. AI writing is off.' });
   };
 
@@ -83,6 +96,16 @@ export function AiSettingsCard({
       const { ok, data } = await postJson<{ message?: string }>('/api/admin/ai/test', { settings: { provider, model: d.model, ...(d.anthropicApiKey.trim() ? { anthropicApiKey: d.anthropicApiKey.trim() } : {}) } });
       setTesting(null);
       return setTest({ provider, ok, text: ok ? `Works: Anthropic answered with ${MODEL_NAMES[d.model].replace(/ \(.*\)$/, '')}.` : data.message || 'The test did not work.' });
+    }
+    if (provider === 'deepseek') {
+      const { ok, data } = await postJson<{ message?: string; models?: DeepSeekLists }>('/api/admin/ai/test', { settings: { provider, ...(d.deepseekApiKey.trim() ? { deepseekApiKey: d.deepseekApiKey.trim() } : {}) } });
+      setTesting(null);
+      if (!ok || !data.models) return setTest({ provider, ok: false, text: data.message || 'The test did not work.' });
+      const m = data.models;
+      setDsLists(m);
+      // Keep the chosen model if DeepSeek still offers it; else deepseek-flash (it reads photos).
+      setD((x) => ({ ...x, deepseekModel: m.all.includes(x.deepseekModel) ? x.deepseekModel : m.suggested }));
+      return setTest({ provider, ok: true, text: `Works: DeepSeek offers ${m.all.length} ${m.all.length === 1 ? 'model' : 'models'} to this key (${m.vision.length} can read photos). Choose one below and save.` });
     }
     const { ok, data } = await postJson<{ message?: string; models?: ModelLists }>('/api/admin/ai/test', { settings: { provider, ...(d.geminiApiKey.trim() ? { geminiApiKey: d.geminiApiKey.trim() } : {}) } });
     setTesting(null);
@@ -101,6 +124,7 @@ export function AiSettingsCard({
 
   const writingOptions = options(lists?.writing, d.geminiModel);
   const imageOptions = options(lists?.image, d.geminiImageModel);
+  const deepseekOptions = options(dsLists?.all ?? ['deepseek-flash', 'deepseek-v4-pro'], d.deepseekModel);
 
   return (
     <div className="space-y-5 text-sm" data-testid="ai-settings">
@@ -113,11 +137,12 @@ export function AiSettingsCard({
         </p>
         <fieldset className="space-y-1">
           <legend className={label}>Writing AI</legend>
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
             {(
               [
                 ['anthropic', 'Anthropic (Claude)'],
                 ['gemini', 'Google Gemini'],
+                ['deepseek', 'DeepSeek'],
               ] as const
             ).map(([id, name]) => (
               <label key={id} className={`min-h-11 px-3 rounded-xl border flex items-center gap-2 font-semibold cursor-pointer ${d.provider === id ? 'border-ink bg-sand' : 'border-line-strong bg-surface'}`}>
@@ -131,7 +156,7 @@ export function AiSettingsCard({
           <input type="checkbox" className="w-5 h-5" checked={d.enabled} onChange={(e) => setD((x) => ({ ...x, enabled: e.target.checked }))} />
           Use AI writing
         </label>
-        {!chosenKeySaved && <p className="text-xs text-ink-muted">Off until you add the {d.provider === 'gemini' ? 'Gemini' : 'Anthropic'} API key below.</p>}
+        {!chosenKeySaved && <p className="text-xs text-ink-muted">Off until you add the {PROVIDER_NAMES[d.provider]} API key below.</p>}
       </section>
 
       <section className="grid grid-cols-1 sm:grid-cols-2 gap-3 rounded-xl border border-line p-3" aria-label="Anthropic (Claude)">
@@ -241,6 +266,63 @@ export function AiSettingsCard({
             ))}
           </select>
         </div>
+      </section>
+
+      <section className="grid grid-cols-1 sm:grid-cols-2 gap-3 rounded-xl border border-line p-3" aria-label="DeepSeek" data-testid="deepseek-settings">
+        <h4 className="sm:col-span-2 font-bold text-ink">DeepSeek{d.provider === 'deepseek' ? ' · writes the text' : ''}</h4>
+        <p className="sm:col-span-2 text-xs text-ink-soft">DeepSeek writes names and descriptions (deepseek-flash also reads your photos). Bedroom styling still uses Gemini.</p>
+        <div className="sm:col-span-2">
+          <label className={label} htmlFor="ai-deepseek-key">
+            DeepSeek API key
+          </label>
+          <input
+            id="ai-deepseek-key"
+            type="password"
+            className={`${field} font-mono`}
+            placeholder={deepseekSaved ? `${secretsHint?.deepseekApiKey ?? '••••'} saved` : 'sk-…'}
+            autoComplete="off"
+            spellCheck={false}
+            value={d.deepseekApiKey}
+            maxLength={140}
+            onChange={(e) => {
+              const v = e.target.value.trim();
+              setD((x) => ({ ...x, deepseekApiKey: v, enabled: x.provider === 'deepseek' && !deepseekSaved && !x.deepseekApiKey && v ? true : x.enabled }));
+            }}
+          />
+          <p className="text-[11px] text-ink-muted mt-1">
+            <a href="https://platform.deepseek.com/api_keys" target="_blank" rel="noopener noreferrer" className="underline text-ink">
+              platform.deepseek.com → API keys
+            </a>{' '}
+            → Create new API key. Then press Test to choose the model. Leave blank to keep the saved key. Kept on the shop&rsquo;s server only, never in backups.
+          </p>
+        </div>
+        <div className="min-w-0">
+          <label className={label} htmlFor="ai-deepseek-model">
+            DeepSeek model
+          </label>
+          <select id="ai-deepseek-model" className={field} value={d.deepseekModel} onChange={(e) => setD((x) => ({ ...x, deepseekModel: e.target.value }))}>
+            {deepseekOptions.map((m) => (
+              <option key={m} value={m}>
+                {deepseekReadsPhotos(m) ? `${m} (reads photos)` : `${m} (text only: can’t read photos)`}
+              </option>
+            ))}
+          </select>
+        </div>
+        <div className="flex flex-col justify-end gap-1">
+          <button type="button" onClick={() => void runTest('deepseek')} disabled={testing !== null || (!deepseekSaved && !d.deepseekApiKey)} className={testBtn} aria-label="Test DeepSeek">
+            {testing === 'deepseek' ? <Loader2 className="w-4 h-4 animate-spin" aria-hidden="true" /> : <PlugZap className="w-4 h-4" aria-hidden="true" />} Test and list models
+          </button>
+        </div>
+        {!deepseekReadsPhotos(d.deepseekModel) && (
+          <p className="sm:col-span-2 text-xs font-semibold text-warning" data-testid="deepseek-text-only">
+            {d.deepseekModel} can&rsquo;t read photos: choose deepseek-flash to write from a photo.
+          </p>
+        )}
+        {test?.provider === 'deepseek' && (
+          <p role="status" data-testid="deepseek-test-result" className={`sm:col-span-2 text-xs font-semibold break-anywhere ${test.ok ? 'text-success' : 'text-danger'}`}>
+            {test.text}
+          </p>
+        )}
       </section>
 
       <section className="space-y-1">

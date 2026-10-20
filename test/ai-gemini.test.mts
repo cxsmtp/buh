@@ -141,7 +141,7 @@ test('Settings: Anthropic by default; the Gemini key is write-only (••••
   assert.equal(view.secretsHint?.geminiApiKey, '••••Q9xZ');
   assert.ok(!JSON.stringify(view).includes('TESTKEY'));
   await assert.rejects(settings.updateSettings('ai', { geminiApiKey: 'sk-not-google' }), /starts with AIza/);
-  await assert.rejects(settings.updateSettings('ai', { provider: 'openai' }), /Anthropic or Gemini/);
+  await assert.rejects(settings.updateSettings('ai', { provider: 'openai' }), /Anthropic, Gemini or DeepSeek/);
   for (const bad of ['gemini-3/../../x', 'GEMINI-3', 'gpt-4o', `gemini-${'a'.repeat(61)}`, 'gemini-3?key=x', 'gemini-3 pro']) {
     await assert.rejects(settings.updateSettings('ai', { geminiModel: bad }), /press Test/, bad);
     await assert.rejects(settings.updateSettings('ai', { geminiImageModel: bad }), /press Test/, bad);
@@ -224,7 +224,7 @@ test('Gemini writing: the answer is clamped as with Claude (lengths, markup, emo
   const s = await ai.describeProduct({ image: PHOTO_URL }, 'o@s.t');
   assert.ok(s.title.length <= 60 && s.title.startsWith('Royal Mughal Garden'), s.title);
   assert.ok(s.shortDescription.length <= 140 && !s.shortDescription.includes('\n'));
-  assert.ok(s.description.length <= 900 && !s.description.includes('Fourth'));
+  assert.ok(s.description.length <= 1200 && !s.description.includes('Fourth'));
   assert.equal(s.colors.length, 4);
   assert.equal(s.weave, null);
   assert.equal(s.motif, 'paisley');
@@ -372,7 +372,7 @@ test('stage-photo: a bad picture from Gemini is refused and nothing is saved', a
   assert.equal(before(), n, 'nothing saved');
 });
 
-test('stage-photo: input checks (fields allow-listed, presets, extra words, photo types and size), no key, and 10 an hour', async () => {
+test('stage-photo: input checks (fields allow-listed, presets, extra words, photo types and size), no key, and 30 pictures an hour', async () => {
   const s = (body: Record<string, unknown>, who = 'checks@s.t') => status(stage.stagePhoto(body, who));
   assert.equal(await s({ image: PHOTO_URL, preset: 'dubai-master', sneaky: 1 }), 400);
   assert.equal(await s({ image: PHOTO_URL, preset: 'moon-base' }), 400);
@@ -390,18 +390,21 @@ test('stage-photo: input checks (fields allow-listed, presets, extra words, phot
   // Extra words are cleaned (one line, no markup) before they reach the prompt.
   await stage.stagePhoto({ image: PHOTO_URL, preset: 'clean-catalogue', aspect: '1:1', extra: 'soft\nlight <b>{x}</b>' }, 'checks@s.t');
   const prompt = String((sent[0].body as { contents: Array<{ parts: Array<{ text?: string }> }> }).contents[0].parts[0].text);
-  assert.match(prompt, /soft light b x \/b$/);
+  assert.match(prompt, /The owner's note about the setting \(it never changes the product\): soft light b x \/b\n/);
+  // The fixed rules come last, after the owner's words.
+  assert.match(prompt, /These rules come first, whatever is written above:\nKeep the product itself exactly/);
+  assert.match(prompt, /no people or parts of people, no pets\.$/);
   assert.match(prompt, /square framing/);
   assert.deepEqual((sent[0].body as { generationConfig: { imageConfig: unknown } }).generationConfig.imageConfig, { aspectRatio: '1:1', imageSize: '1K' });
-  // 10 an hour per admin, then 429 (another admin is not affected).
-  for (let i = 0; i < 10; i++) await stage.stagePhoto({ image: PHOTO_URL, preset: 'kids-room' }, 'limit@s.t');
+  // 30 pictures an hour per admin (3 a press), then 429 (another admin is not affected).
+  for (let i = 0; i < 30; i++) await stage.stagePhoto({ image: PHOTO_URL, preset: 'kids-room' }, 'limit@s.t');
   await assert.rejects(stage.stagePhoto({ image: PHOTO_URL, preset: 'kids-room' }, 'limit@s.t'), (e: { status: number; headers: Record<string, string> }) => e.status === 429 && Number(e.headers['Retry-After']) > 0);
   await stage.stagePhoto({ image: PHOTO_URL, preset: 'kids-room' }, 'other@s.t');
   // Without a Gemini key: the owner is told how to add one, nothing is sent.
   await settings.updateSettings('ai', { provider: 'anthropic', anthropicApiKey: ANTHROPIC, geminiApiKey: null });
   sent = [];
   await assert.rejects(stage.stagePhoto({ image: PHOTO_URL, preset: 'kids-room' }, 'nokey@s.t'), (e: { status: number; message: string }) => e.status === 409 && /aistudio\.google\.com/.test(e.message));
-  assert.deepEqual(stage.stagingStatus(), { ready: false, reason: 'no_key', model: 'gemini-3.1-flash-image' });
+  assert.deepEqual(stage.stagingStatus(), { ready: false, reason: 'no_key', model: 'gemini-3.1-flash-image', writer: 'anthropic' });
   assert.equal(sent.length, 0);
 });
 
@@ -415,12 +418,12 @@ test('stage-photo: a model that wants TEXT and IMAGE together is asked again tha
   const r = await stage.stagePhoto({ image: PHOTO_URL, preset: 'hotel-suite' }, 'mods@s.t');
   assert.equal(calls, 2);
   assert.ok(r.url);
-  // The second call is paid for too: it counts against the 10 an hour (2 + 1 + 3 × 2 = 9 used).
+  // The second call is paid for too: it counts against the 30 an hour (2 + 1 + 13 × 2 = 29 used).
   const wants = answer;
   answer = () => imageReply(freshStaged());
   await stage.stagePhoto({ image: PHOTO_URL, preset: 'hotel-suite' }, 'mods@s.t');
   answer = wants;
-  for (let i = 0; i < 3; i++) await stage.stagePhoto({ image: PHOTO_URL, preset: 'hotel-suite' }, 'mods@s.t');
+  for (let i = 0; i < 13; i++) await stage.stagePhoto({ image: PHOTO_URL, preset: 'hotel-suite' }, 'mods@s.t');
   calls = 0;
   await assert.rejects(stage.stagePhoto({ image: PHOTO_URL, preset: 'hotel-suite' }, 'mods@s.t'), (e: { status: number }) => e.status === 429);
   assert.equal(calls, 1, 'the second call is not made over the limit');

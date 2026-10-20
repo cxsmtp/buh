@@ -46,3 +46,8 @@ Read AGENTS.md first: this is Next.js 16, check `node_modules/next/dist/docs/` b
 - **Auto update always.** Every merged release must reach the live shop by itself through the updater.
 - **Every commit reaches main.** Nothing is left on a branch: each piece of work ends with its pull request merged
   (green CI, version bump, changelog), then the branch is reset to main.
+- **AI-made content sells, honestly.** Product names, descriptions and styled pictures exist to help customers choose
+  and to increase sales. Prompts are benefit-led and specific: what it looks like, which bedrooms it suits, how it feels,
+  a clear searchable name. Pictures show the whole bed, a close-up of print and texture, and a lifestyle scene. They never
+  invent facts (thread count, fabric, origin, care, reviews) or change the product's true colours and pattern, and the owner
+  can edit everything before it is saved.

@@ -653,7 +653,7 @@ export function AdminApp() {
                   id: 'ai',
                   label: 'AI writing',
                   icon: <Sparkles />,
-                  hint: 'Product names and descriptions written from a photo (Claude or Gemini), and styled bedroom photos (Gemini), with your own keys (off until you add one).',
+                  hint: 'Product names, descriptions and gift lines written from a photo (Claude, Gemini or DeepSeek), and styled bedroom photos (Gemini), with your own keys (off until you add one).',
                   content: (
                     <AiSettingsCard
                       key={`ai-${adminSettingsLoaded}-${settingsEpoch}-${undone['ai'] ?? 0}`}

@@ -10,7 +10,7 @@ import { Sheet } from '@/components/common/Sheet';
 import { LocalPrice } from '@/lib/client/currency';
 import { PhotoCarousel } from './PhotoCarousel';
 import { measurementRows } from '@/lib/measurements';
-import { isSimple, sizeDetail } from '@/lib/productType';
+import { isSimple, sizeDetail, specLine } from '@/lib/productType';
 import { X, Check, Truck, ShieldCheck, Ruler, MessageCircle, MessagesSquare, Share2, Minus, Plus } from 'lucide-react';
 
 interface ProductDetailModalProps {
@@ -141,7 +141,7 @@ const ProductDetailContent: React.FC<ProductDetailModalProps & { product: Produc
               <LocalPrice aed={Number(unitPrice)} className="text-xs" />
             </p>
             <p className="text-xs text-ink-soft">
-              {simple ? product.material : `${product.material} · ${product.threadCount} TC · ${product.weave}`}
+              {specLine(product)}
             </p>
           </div>
 
@@ -279,7 +279,13 @@ const ProductDetailContent: React.FC<ProductDetailModalProps & { product: Produc
             {igNote && <p role="status" className="text-[11px] text-rose-deep">{igNote}</p>}
           </div>
 
-          <p className="text-sm text-ink-soft leading-relaxed">{product.description}</p>
+          {product.giftLine && (
+            <p className="text-sm font-semibold text-gold-deep break-words" data-testid="gift-line">
+              {product.giftLine}
+            </p>
+          )}
+          {/* Paragraphs and the highlights list ("• …" lines) as the owner wrote them. */}
+          <p className="text-sm text-ink-soft leading-relaxed whitespace-pre-line break-words">{product.description}</p>
 
           <ul className="text-xs text-ink-soft space-y-1.5">
             <li className="flex items-center gap-2">

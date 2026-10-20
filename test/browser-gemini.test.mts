@@ -111,7 +111,7 @@ test('the stage-photo route: hidden from strangers, sign-in required, off until 
   const off = await api('POST', route, { image: PHOTO_URL, preset: 'dubai-master' });
   assert.equal(off.status, 409);
   assert.match((await off.json()).message, /aistudio\.google\.com/);
-  assert.deepEqual(await (await api('GET', route)).json(), { ready: false, reason: 'no_key', model: 'gemini-3.1-flash-image' });
+  assert.deepEqual(await (await api('GET', route)).json(), { ready: false, reason: 'no_key', model: 'gemini-3.1-flash-image', writer: 'anthropic' });
   // Save the key (Anthropic stays the writer): shown back as ••••last4 only.
   const saved = await api('PUT', '/api/admin/settings/ai', { settings: { geminiApiKey: KEY } });
   const savedText = await saved.text();
@@ -214,7 +214,7 @@ for (const width of [375, 1280]) {
     await ctx.close();
   });
 
-  test(`product editor at ${width}px: "Style in a bedroom" shows original and styled side by side; Try again, Discard, Add to photos after the original`, { skip }, async () => {
+  test(`product editor at ${width}px: "Style in a bedroom" makes 3 pictures in a grid (1 column on a phone, 3 on a desktop); Add one, Try again one, Discard one, Add all; the note and scene edited`, { skip }, async () => {
     // A fresh editor (not the other width's draft).
     await api('DELETE', '/api/admin/products/drafts/new');
     const { ctx, page, errors } = await hub(width);
@@ -224,50 +224,71 @@ for (const width of [375, 1280]) {
     await editor.waitFor();
     const panel = editor.getByTestId('stage-in-bedroom');
     await panel.waitFor();
-    const button = panel.getByRole('button', { name: 'Style in a bedroom' });
+    const button = panel.getByRole('button', { name: 'Style in a bedroom (3 pictures, Gemini)' });
     assert.ok(await button.isDisabled(), 'needs a photo first');
     await editor.getByLabel('Choose photos from the gallery').setInputFiles([{ name: 'sheet-indigo.png', mimeType: 'image/png', buffer: PHOTO }]);
     await editor.getByAltText('Cover photo').waitFor();
-    await panel.getByLabel('Style').selectOption({ label: 'Palm villa' });
-    await panel.getByLabel('Extra words (optional)').fill('morning light');
-    // Keyboard: focus the button and press Enter; the spinner shows while Gemini works.
+    // The default set: whole bed, close-up, lifestyle.
+    for (const name of ['Whole bed (Dubai master bedroom)', 'Close-up of print and texture', 'Lifestyle moment']) assert.ok(await panel.getByRole('checkbox', { name }).isChecked(), name);
+    assert.equal(await panel.getByRole('checkbox', { name: 'Palm villa' }).isChecked(), false);
+    await panel.getByLabel('Your note (optional)').fill('morning light');
+    // The prompt, editable: each scene, with the fixed rules shown and not editable.
+    await panel.getByTestId('stage-prompt').locator('summary').click();
+    await panel.getByLabel('Scene for Lifestyle moment').fill('a tray of karak chai at the foot of the bed, soft morning light');
+    await panel.getByText('Always added after your words').waitFor();
+    // Keyboard: focus the button and press Enter; each picture shows as it arrives.
     const sentBefore = calls.length;
     await button.focus();
     await page.keyboard.press('Enter');
     await panel.getByRole('button', { name: 'Styling the photo…' }).waitFor();
-    const result = panel.getByTestId('stage-result');
-    await result.waitFor();
-    const prompt = String(((calls[sentBefore].body as { contents: Array<{ parts: Array<{ text?: string }> }> }).contents[0].parts[0].text));
-    assert.match(prompt, /Palm Jumeirah/);
-    assert.match(prompt, /morning light/);
-    await result.getByText('Check the pattern and colours match the real product before adding.').waitFor();
-    await result.getByAltText('Original photo').waitFor();
-    await result.getByAltText('Styled photo').waitFor();
-    assert.deepEqual(await overflow(page), [], 'result shown');
-    await result.scrollIntoViewIfNeeded();
-    await shot(page, `stage-result-${width}`);
-    await shot(page, `stage-result-panel-${width}`, panel);
-    const firstUrl = await result.getByAltText('Styled photo').getAttribute('src');
-    // Try again: a new picture; the first is thrown away.
-    await result.getByRole('button', { name: 'Try again' }).click();
-    await panel.getByTestId('stage-result').waitFor();
-    // Discard: the panel is cleared and the file deleted.
-    await panel.getByTestId('stage-result').getByRole('button', { name: 'Discard' }).click();
-    await panel.getByTestId('stage-result').waitFor({ state: 'detached' });
-    await button.click();
-    await panel.getByTestId('stage-result').waitFor();
-    await panel.getByTestId('stage-result').getByRole('button', { name: 'Add to photos' }).click();
+    const results = panel.getByTestId('stage-result');
+    await page.waitForFunction(() => document.querySelectorAll('[data-testid="stage-result"] img[alt^="Styled photo"]').length === 3);
+    assert.equal(await results.count(), 3);
+    const prompts = calls.slice(sentBefore).map((c) => String((c.body as { contents: Array<{ parts: Array<{ text?: string }> }> }).contents[0].parts[0].text));
+    assert.equal(prompts.length, 3);
+    assert.ok(prompts.every((p) => /morning light/.test(p) && /These rules come first/.test(p)));
+    assert.ok(prompts.some((p) => /karak chai/.test(p)));
+    assert.ok(prompts.some((p) => /close-up of the bedding/.test(p)));
+    // 1 column on a phone, 3 side by side on a desktop.
+    const boxes = await Promise.all([0, 1, 2].map((i) => results.nth(i).boundingBox()));
+    if (width < 640) assert.ok(boxes[1]!.y > boxes[0]!.y && Math.abs(boxes[1]!.x - boxes[0]!.x) < 2, 'stacked');
+    else assert.ok(Math.abs(boxes[1]!.y - boxes[0]!.y) < 2 && boxes[1]!.x > boxes[0]!.x, 'side by side');
+    assert.deepEqual(await overflow(page), [], 'results shown');
+    await panel.getByTestId('stage-results').scrollIntoViewIfNeeded();
+    if (SHOTS) await page.screenshot({ path: path.join(SHOTS, `styled-3-${width}.png`) });
+    // Add one: it goes after the original, which stays first.
+    await panel.getByRole('button', { name: 'Add to gallery: Whole bed (Dubai master bedroom)' }).click();
     await panel.getByText(/Added after the original photo/).waitFor();
-    // The real photo stays first; the styled one is photo 2.
     const photos = editor.getByRole('list', { name: 'Photos in order' }).locator('li img');
     assert.equal(await photos.count(), 2);
-    assert.match((await photos.nth(1).getAttribute('src'))!, /^\/api\/images\/[a-f0-9]{64}\.png$/);
+    // Try again one: a new picture; the first is thrown away.
+    const closeUp = panel.getByTestId('stage-result').filter({ hasText: 'Close-up of print and texture' });
+    const firstUrl = await closeUp.getByRole('img').getAttribute('src');
+    await panel.getByRole('button', { name: 'Try again: Close-up of print and texture' }).click();
+    await page.waitForFunction((old) => {
+      const img = [...document.querySelectorAll('[data-testid="stage-result"] img')].find((i) => i.getAttribute('alt') === 'Styled photo: Close-up of print and texture');
+      return img && img.getAttribute('src') !== old;
+    }, firstUrl);
+    assert.equal((await api('GET', firstUrl!)).status, 404, 'the first picture was thrown away');
+    // Discard one.
+    const lifestyle = panel.getByTestId('stage-result').filter({ hasText: 'Lifestyle moment' });
+    const lifeUrl = await lifestyle.getByRole('img').getAttribute('src');
+    await panel.getByRole('button', { name: 'Discard: Lifestyle moment' }).click();
+    await lifestyle.waitFor({ state: 'detached' });
+    await page.waitForTimeout(300);
+    assert.equal((await api('GET', lifeUrl!)).status, 404);
+    // A new press, then Add all.
+    await button.click();
+    await page.waitForFunction(() => document.querySelectorAll('[data-testid="stage-result"] img[alt^="Styled photo"]').length === 3);
+    await panel.getByRole('button', { name: 'Add all 3 to photos' }).click();
+    await panel.getByText(/3 added after the original photo/).waitFor();
+    assert.equal(await photos.count(), 5);
     assert.equal(await editor.getByAltText('Cover photo').getAttribute('src').then((s) => s!.startsWith('/api/images/')), true);
-    // Try again threw the first picture away.
-    assert.ok(firstUrl);
-    assert.equal((await api('GET', firstUrl!)).status, 404);
     assert.deepEqual(await overflow(page), []);
-    await shot(page, `stage-added-${width}`);
+    // The note is kept with the draft.
+    await page.waitForTimeout(1500);
+    const draft = await (await api('GET', '/api/admin/products/drafts/new')).json();
+    assert.equal(draft.draft.data.stagingNotes, 'morning light');
     assert.deepEqual(errors, []);
     await ctx.close();
   });

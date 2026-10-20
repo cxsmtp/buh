@@ -105,6 +105,19 @@ export function cleanDraft(input: unknown): Record<string, unknown> {
     fitted: b(d.fitted),
     isFeatured: b(d.isFeatured),
     isNewArrival: b(d.isNewArrival),
+    // Gift lines by festival (checked again on publish), the owner's styling note, and the AI's
+    // motif and design words (the styling prompt's context).
+    giftLines: d.giftLines && typeof d.giftLines === 'object' && !Array.isArray(d.giftLines)
+      ? Object.fromEntries(
+          Object.entries(d.giftLines as Record<string, unknown>)
+            .slice(0, 20)
+            .filter(([k, v]) => /^[a-z0-9][a-z0-9-]{0,39}$/.test(k) && typeof v === 'string')
+            .map(([k, v]) => [k, s(v, 200) ?? ''])
+        )
+      : undefined,
+    stagingNotes: s(d.stagingNotes, 200),
+    aiMotif: s(d.aiMotif, 80),
+    aiDesign: s(d.aiDesign, 500),
     // What the stock was when editing started (for the conflict check on publish).
     seenStock: d.seenStock && typeof d.seenStock === 'object' && !Array.isArray(d.seenStock)
       ? Object.fromEntries(Object.entries(d.seenStock as Record<string, unknown>).slice(0, 12).filter(([, v]) => n(v, 0, 100_000) !== undefined))

@@ -41,3 +41,10 @@ export function newVariantId(taken: string[]): string {
 export function blankVariant(taken: string[], name = 'One size'): BedProfileMeasurement {
   return { id: newVariantId(taken), name, badge: '', mattressSize: '', fittedSheet: '', flatSheet: '', pillowcases: '', piecesIncluded: 1, priceDelta: 0, dimensions: '' };
 }
+
+/** "Cotton · 300 TC · Sateen", leaving out what isn't filled in (never "0 TC" or a stray "·"). */
+export function specLine(p: Pick<Product, 'productType' | 'material' | 'threadCount' | 'weave'>): string {
+  const tc = Number(p.threadCount);
+  const parts = isSimple(p) ? [p.material] : [p.material, Number.isFinite(tc) && tc > 0 ? `${tc} TC` : '', p.weave];
+  return parts.map((x) => String(x ?? '').trim()).filter(Boolean).join(' · ');
+}

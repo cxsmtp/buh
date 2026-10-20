@@ -1,13 +1,14 @@
-import { testAiSettings, testGeminiSettings } from '@/lib/server/aiWriting';
+import { testAiSettings, testDeepSeekSettings, testGeminiSettings } from '@/lib/server/aiWriting';
 import { requireAdmin } from '@/lib/server/guard';
 import { handleRouteError, HttpError, json, readJsonBody } from '@/lib/server/http';
 
-const FIELDS = new Set(['provider', 'anthropicApiKey', 'model', 'enabled', 'geminiApiKey', 'geminiModel', 'geminiImageModel', 'labelStyledPhotos']);
+const FIELDS = new Set(['provider', 'anthropicApiKey', 'model', 'enabled', 'geminiApiKey', 'geminiModel', 'geminiImageModel', 'labelStyledPhotos', 'deepseekApiKey', 'deepseekModel']);
 
 /**
- * Settings → AI writing → Test: { settings: { provider?, anthropicApiKey?, model?, geminiApiKey? } }
+ * Settings → AI writing → Test: { settings: { provider?, anthropicApiKey?, model?, geminiApiKey?, deepseekApiKey? } }
  * (a blank key uses the saved one). Anthropic: a tiny call with the model. Gemini: the list of the
- * models the key can use (for the writing and image lists).
+ * models the key can use (for the writing and image lists). DeepSeek: its list of models (photo
+ * readers first).
  */
 export async function POST(req: Request) {
   try {
@@ -15,7 +16,11 @@ export async function POST(req: Request) {
     const body = await readJsonBody(req, 4 * 1024);
     const s = body.settings && typeof body.settings === 'object' && !Array.isArray(body.settings) ? (body.settings as Record<string, unknown>) : {};
     for (const k of Object.keys(s)) if (!FIELDS.has(k)) throw new HttpError(400, `Unexpected field: ${k.slice(0, 30)}.`);
-    if (s.provider !== undefined && s.provider !== 'anthropic' && s.provider !== 'gemini') throw new HttpError(400, 'Writing AI: Anthropic or Gemini.');
+    if (s.provider !== undefined && s.provider !== 'anthropic' && s.provider !== 'gemini' && s.provider !== 'deepseek') throw new HttpError(400, 'Writing AI: Anthropic, Gemini or DeepSeek.');
+    if (s.provider === 'deepseek') {
+      const result = await testDeepSeekSettings({ deepseekApiKey: s.deepseekApiKey }, session.email);
+      return json({ success: true, ...result });
+    }
     if (s.provider === 'gemini') {
       const result = await testGeminiSettings({ geminiApiKey: s.geminiApiKey }, session.email);
       return json({ success: true, ...result });
