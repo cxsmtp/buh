@@ -6,7 +6,7 @@
 - **Descriptions that help customers choose.** Product copy now has a clear, searchable name, a one-line reason to buy, a design paragraph (with which bedrooms and decor it suits), a comfort paragraph and 3–5 highlights. Nothing is invented: fabric, thread count and sizes appear only from your own notes and the product's sizes.
 - **Edit everything before it is used.** Each suggested part has its own box, with Use, Use all, Write again (one part or all) and Keep mine. Nothing changes the product until you press Save.
 - **Gift lines that follow the festival.** Each product keeps a gift line per festival (Diwali, Eid, National Day…) plus an everyday one. The shop shows the line for today's festival theme and switches by itself as festivals change. "Write gift lines for the next festivals" prepares the next three at once.
-- **Three styled pictures per press.** "Style in a bedroom" makes a whole-bed room shot, a close-up of the print and texture, and a lifestyle scene, each with Add / Again / Discard, plus Add all. Styling still uses Gemini and keeps the product's true colours. You can raise the limit to 30 pictures an hour.
+- **Three styled pictures per press.** "Style in a bedroom" makes a whole-bed room shot, a close-up of the print and texture, and a lifestyle scene, each with Add / Again / Discard, plus Add all. Styling still uses Gemini, keeps the product's true colours, and allows up to 30 pictures an hour.
 - **Status.**
   - **Benchmark:** BENCH_PLACEHOLDER
   - **Tests:** TESTS_PLACEHOLDER
