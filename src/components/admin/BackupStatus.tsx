@@ -22,6 +22,7 @@ interface Health {
   notice?: string;
   /** Nothing has left the server for 2 days (no Drive, newer backups not emailed). */
   offServerWarning?: string;
+  clockWarning?: string;
   /** Why it is failing when no backup failed: changes waiting too long, or no backup for 8 days. */
   overdueText?: string;
   /** What waits for the next backup. */
@@ -118,6 +119,8 @@ export const BackupStatus: React.FC = () => {
       ? health.lastError
         ? `Last backup failed: ${health.lastError}`
         : health.overdueText || 'Backups need attention.'
+      : health.clockWarning
+      ? health.clockWarning
       : health.lastEmailError
       ? health.lastEmailError
       : health.notice

@@ -110,6 +110,7 @@ The shop backs itself up when there is something new, and keeps every backup of 
 - **Emails** go to `BACKUP_EMAIL`: by default at most one a day (the first backup after changes, UAE days), the weekly check and **Back up now**. Other choices: every backup, only the weekly check, or never. Failures are always emailed.
 - **Restarts and updates:** what is waiting is kept in the database, so after a restart the backup is still due at the same time. The updater's own snapshot before each update holds the waiting changes too, and a version switch from the hub (Settings → Versions) backs them up first.
 - `BACKUP_INTERVAL_HOURS` (old, optional): when set, at most that many hours pass between backups while changes wait.
+- **Server clock:** with Google Drive connected, a clock more than a day out means old backups are kept (none removed) and the hub says "The server's clock looks wrong". Check it with `timedatectl`, and turn on time sync with `timedatectl set-ntp true`.
 
 Each backup contains:
 

@@ -503,7 +503,7 @@ Under **Settings → Branding & bank → Bank transfer details**. These are **ne
 The line at the top of the Admin Hub shows when the last backup ran:
 
 - **green:** recent and emailed;
-- **amber:** taken but not emailed (check the `SMTP_*` settings), emailed without a backup password, or "Your newest backups are only on the server" (no Google Drive, and none emailed for 2 days);
+- **amber:** taken but not emailed (check the `SMTP_*` settings), emailed without a backup password, "Your newest backups are only on the server" (no Google Drive, and none emailed for 2 days, counted from the shop's first backup), or "The server's clock looks wrong — backups are kept, old copies aren't removed until it's fixed" (Google Drive saw the server's clock more than a day out: set the server's time, and it clears at the next backup);
 - **red:** failed, or changes have waited more than an hour past their time (or no backup for 8 days with the weekly check on). A quiet shop with nothing new stays green.
 
 Below it: **Last backup** (when, and how many changes it held: orders, stock…), **Next** (by when, and how many changes are waiting) or "Nothing new since the last backup — none needed", and the day of the **weekly check**.

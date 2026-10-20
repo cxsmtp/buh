@@ -151,8 +151,13 @@ export function dubaiWeek(t: number): string {
   return new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate() - back)).toISOString().slice(0, 10);
 }
 
-/** More than this ahead of the newest copy, the clock is not trusted: nothing is deleted. */
-export const CLOCK_AHEAD_MS = 2 * DAY;
+/**
+ * The server's clock and Google's (the time Drive gives a copy it was just handed) more than this
+ * apart: the server's clock is not trusted, and no copy, in Drive or on the server, is removed.
+ */
+export const CLOCK_SKEW_MS = DAY;
+/** How long a wrong clock, once seen, keeps local backups from being removed (renewed each backup it is still wrong). */
+export const CLOCK_SUSPECT_MS = 7 * DAY;
 /** At most this many Drive copies are deleted in one run. */
 export const DRIVE_DELETE_PER_RUN = 10;
 /** Drive: copies kept per UAE day in the last 7 days (before the cap thins them). */
@@ -161,15 +166,30 @@ export const DRIVE_PER_DAY = 4;
 export interface DriveCopy {
   id: string;
   name: string;
+  /** When the shop recorded it (the server's clock: only for copies Google has not dated yet). */
   at: string;
+  /** When Google made it (Drive's createdTime: Google's clock). */
+  createdTime?: string;
 }
 
-const time = (c: { at: string }) => at(c.at) ?? 0;
+/** Is the server's clock more than a day from Google's? */
+export function clockSkewed(serverNow: number, googleNow: number): boolean {
+  return Math.abs(serverNow - googleNow) > CLOCK_SKEW_MS;
+}
+
+/** A wrong clock seen at `setAt` (server time): still in force at `now`? A clock put back before `setAt` (fixed) ends it. */
+export function clockSuspectActive(mark: { setAt?: string; until?: string } | null | undefined, now: number): boolean {
+  const from = at(mark?.setAt);
+  const until = at(mark?.until);
+  return from !== null && until !== null && now >= from - CLOCK_SKEW_MS && now <= until;
+}
 
 /**
- * Which tracked Drive copies to remove. Ages count from the newest copy's time when the clock is
- * ahead of it (a clock that jumped forward never makes copies look old), and when the clock is more
- * than 2 days ahead nothing is removed at all (`clockAhead`, for a warning).
+ * Which tracked Drive copies to remove. Ages are Google's: each copy's createdTime against `ref`,
+ * the createdTime Google gave the copy just made, so the server's clock never makes a copy look old
+ * (copyOnce checks the server's clock against `ref` first and removes nothing when they differ by
+ * more than a day). A copy Google has not dated yet (recorded before createdTime was kept) is never
+ * removed.
  *
  *  - the last 7 days: the newest 4 of each UAE day;
  *  - 7 to 30 days: the newest of each UAE day;
@@ -181,14 +201,12 @@ const time = (c: { at: string }) => at(c.at) ?? 0;
  * weekly copy and the newest copy (and `protect`, the one just made) are never removed for the
  * cap. At most DRIVE_DELETE_PER_RUN go in one run, oldest first.
  */
-export function driveRetention(copies: DriveCopy[], keep: number, now: number, protect = ''): { remove: DriveCopy[]; clockAhead: boolean } {
-  if (copies.length <= 1) return { remove: [], clockAhead: false };
+export function driveRetention(copies: DriveCopy[], keep: number, ref: number, protect = ''): { remove: DriveCopy[] } {
+  if (copies.length <= 1) return { remove: [] };
+  const time = (c: DriveCopy) => at(c.createdTime ?? c.at) ?? 0;
   const sorted = [...copies].sort((a, b) => time(b) - time(a)); // newest first
-  const newestAt = time(sorted[0]);
-  if (now - newestAt > CLOCK_AHEAD_MS) return { remove: [], clockAhead: true };
-  const ref = Math.min(now, newestAt);
   const newest = sorted[0].id;
-  const safe = (c: DriveCopy) => c.id === newest || c.id === protect;
+  const safe = (c: DriveCopy) => c.id === newest || c.id === protect || at(c.createdTime) === null;
   const tierOf = (c: DriveCopy) => {
     const age = ref - time(c);
     return age > 182 * DAY ? 'old' : age > 30 * DAY ? 'weekly' : age > WEEKLY_DAYS * DAY ? 'daily' : 'recent';
@@ -223,12 +241,12 @@ export function driveRetention(copies: DriveCopy[], keep: number, now: number, p
   }
   const keepIds = new Set(kept.map((c) => c.id));
   const remove = sorted.filter((c) => !keepIds.has(c.id)).sort((a, b) => time(a) - time(b));
-  return { remove: remove.slice(0, DRIVE_DELETE_PER_RUN), clockAhead: false };
+  return { remove: remove.slice(0, DRIVE_DELETE_PER_RUN) };
 }
 
 /** The copies driveRetention removes (oldest first). */
-export function driveCopiesToRemove(copies: DriveCopy[], keep: number, now: number, protect = ''): DriveCopy[] {
-  return driveRetention(copies, keep, now, protect).remove;
+export function driveCopiesToRemove(copies: DriveCopy[], keep: number, ref: number, protect = ''): DriveCopy[] {
+  return driveRetention(copies, keep, ref, protect).remove;
 }
 
 /** Local backups: never fewer than this many (the newest). */
@@ -243,17 +261,22 @@ export function localBackupTime(name: string): number | null {
   return Number.isFinite(t) ? t : null;
 }
 
+/** At most this many local backups are removed in one run. */
+export const LOCAL_DELETE_PER_RUN = 5;
+
 /**
- * Which local backups (file names) to remove. The newest 14 always stay. With room on the disk,
- * only those older than 14 days go; with the disk tight, also all but the newest of each UAE day
- * older than 24 hours. Ages count from the newest backup when the clock is ahead of it, and with
- * the clock more than 2 days ahead nothing is removed.
+ * Which local backups (file names) to remove, oldest first, at most LOCAL_DELETE_PER_RUN. The
+ * newest 14 always stay. Ages count from the 14th newest backup (or the clock, when that is
+ * earlier), never from the clock alone: a clock that jumps forward names the new backups in the
+ * future, but the older ones only start to look old once 14 backups carry the wrong time (and with
+ * Google Drive connected the wrong clock is seen at the first one, and backup.ts then removes
+ * nothing while it lasts). With room on the disk, only those more than 14 days older go; with the
+ * disk tight, also all but the newest of each UAE day more than 24 hours older.
  */
 export function localBackupsToRemove(names: string[], now: number, diskTight: boolean): string[] {
   const dated = names.map((name) => ({ name, t: localBackupTime(name) })).filter((x): x is { name: string; t: number } => x.t !== null).sort((a, b) => b.t - a.t || (a.name < b.name ? 1 : -1));
   if (dated.length <= LOCAL_KEEP_MIN) return [];
-  if (now - dated[0].t > CLOCK_AHEAD_MS) return [];
-  const ref = Math.min(now, dated[0].t);
+  const ref = Math.min(now, dated[LOCAL_KEEP_MIN - 1].t);
   const remove: string[] = [];
   const days = new Set<string>();
   dated.forEach((b, i) => {
@@ -265,5 +288,5 @@ export function localBackupsToRemove(names: string[], now: number, diskTight: bo
     if (age > LOCAL_KEEP_DAYS * DAY) remove.push(b.name);
     else if (diskTight && age > DAY && !firstOfDay) remove.push(b.name);
   });
-  return remove;
+  return remove.reverse().slice(0, LOCAL_DELETE_PER_RUN);
 }

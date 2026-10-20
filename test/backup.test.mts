@@ -135,11 +135,21 @@ test('without email set up, backups still run locally and the admin hub shows a 
   assert.equal(backup.backupHealth().level, 'warning');
 });
 
-test('only the newest 14 backups are kept', async () => {
+test('the newest 14 backups are always kept; older ones go at most 5 a run, aged from the 14th newest', async () => {
   const bdir = path.join(dir, 'backups');
-  for (let i = 0; i < 20; i++) fs.writeFileSync(path.join(bdir, `buh-backup-20200101-${String(i).padStart(4, '0')}.tar.gz`), 'x');
-  await backup.createBackup();
-  assert.equal(fs.readdirSync(bdir).filter((f) => f.startsWith('buh-backup-')).length, 14);
+  for (const f of fs.readdirSync(bdir).filter((n) => n.startsWith('buh-backup-'))) fs.rmSync(path.join(bdir, f));
+  const old = Array.from({ length: 20 }, (_, i) => `buh-backup-20200101-${String(i).padStart(4, '0')}.tar.gz`);
+  const recent = Array.from({ length: 14 }, (_, i) => `buh-backup-20200201-${String(i).padStart(4, '0')}.tar.gz`);
+  for (const f of [...old, ...recent]) fs.writeFileSync(path.join(bdir, f), 'x');
+  const list = () => fs.readdirSync(bdir).filter((f) => f.startsWith('buh-backup-'));
+  const start = Date.now();
+  await backup.createBackup(new Date(start));
+  assert.equal(list().length, 35 - 5, 'five of the oldest went');
+  assert.deepEqual(old.slice(0, 5).filter((f) => list().includes(f)), [], 'the oldest first');
+  for (let i = 1; i <= 3; i++) await backup.createBackup(new Date(start + i * 60_000));
+  assert.deepEqual(old.filter((f) => list().includes(f)), [], 'every one from January is gone');
+  for (const f of recent) assert.ok(list().includes(f), `${f} (14 days before the 14th newest) stays`);
+  assert.equal(list().length, 14 + 4);
 });
 
 test('overdue backups show as failing: changes waiting too long, or no backup for 8 days with the weekly check on; a quiet shop is fine', async () => {

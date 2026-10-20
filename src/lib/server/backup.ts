@@ -19,7 +19,7 @@ import { diskRoomProblem } from './diskRoom';
 import { kvGet, kvSet } from './kv';
 import { expenseCsvFiles } from './expenses';
 import { toCsv } from './csv';
-import { blankDriveKeyIn, copyBackupToDrive, driveStatus } from './driveBackup';
+import { blankDriveKeyIn, CLOCK_WRONG, copyBackupToDrive, driveStatus, serverClockSuspect } from './driveBackup';
 import { changeMark, describeAreas, markBackedUp, pendingChanges } from './dataChanges';
 import { catchUpEmailDue, decideBackup, localBackupsToRemove, RETRY_MS, shouldEmail, WEEKLY_OVERDUE_DAYS, type BackupReason, type BackupSettings } from './backupPolicy';
 import { backupPassphrase, currentBackupKey, describeFingerprint, MIN_PASSPHRASE_LENGTH, passphraseFingerprintSync, passphraseSource, UNREADABLE_MESSAGE } from './backupSecret';
@@ -87,10 +87,13 @@ export const BACKUP_MAGIC = 'BUHBK1\n';
 export const BACKUP_LIMITS = { totalBytes: 6 * 1024 ** 3, warnRatio: 0.8, minFreeBytes: 512 * 1024 ** 2 };
 /**
  * Local backups kept (backupPolicy.ts localBackupsToRemove): the newest 14 always; with room on
- * the disk every backup of the last 14 days; with the disk tight (no room for three more of the
- * newest's size), all from the last 24 hours and then the newest of each UAE day.
+ * the disk every backup of the 14 days before the 14th newest; with the disk tight (no room for
+ * three more of the newest's size), all from the 24 hours before it and then the newest of each UAE
+ * day; at most 5 removed a run. None at all while Google says the server's clock is wrong
+ * (driveBackup.ts serverClockSuspect).
  */
 function pruneLocalBackups(dir: string, newestSize: number, now = Date.now()): number {
+  if (serverClockSuspect()) return 0;
   const names = fs.readdirSync(dir).filter((f) => f.startsWith('buh-backup-'));
   const tight = Boolean(diskRoomProblem(dir, 3 * newestSize, BACKUP_LIMITS.minFreeBytes));
   const remove = localBackupsToRemove(names, now, tight);
@@ -124,6 +127,8 @@ export interface BackupState {
   lastEmailSkipped?: string;
   /** When a backup was last handed to Google Drive (or Drive already held the same data). */
   lastDriveHandoffAt?: string;
+  /** The shop's first successful backup (the "only on the server" warning waits 2 days from it). */
+  firstSuccessAt?: string;
 }
 
 /** BACKUP_INTERVAL_HOURS (the old fixed schedule) when set on the server: an upper bound between backups while changes wait. */
@@ -649,6 +654,8 @@ export function runBackup(reasonIn: BackupReason | 'scheduled', options: RunOpti
         lastReason: reason,
         lastChanges: { total: mark.pending.total, areas: mark.pending.areas },
         lastEmailSkipped: undefined,
+        // Shops from before this was kept count from their last backup before this one.
+        firstSuccessAt: before.firstSuccessAt ?? before.lastSuccessAt ?? new Date().toISOString(),
       };
       let emailed = false;
       if (shouldEmail(settings.email, reason, now, before.lastChangeEmailAt, options.email)) {
@@ -795,14 +802,24 @@ export function backupHealth(now = Date.now()) {
   } catch {
     driveOn = false;
   }
-  const emailedAt = state.lastEmailedAt ? Date.parse(state.lastEmailedAt) : 0;
-  const offServerWarning = !driveOn && last > 0 && emailedAt < last && now - emailedAt > 2 * 24 * 3600_000 ? ONLY_ON_SERVER : undefined;
+  // Counted from the last email, or from the shop's first backup when none was emailed since (a new
+  // shop is not warned the moment its first backup is made).
+  const emailedAt = state.lastEmailedAt ? Date.parse(state.lastEmailedAt) || 0 : 0;
+  const firstAt = state.firstSuccessAt ? Date.parse(state.firstSuccessAt) || 0 : 0;
+  const offServerWarning = !driveOn && last > 0 && emailedAt < last && now - Math.max(emailedAt, firstAt) > 2 * 24 * 3600_000 ? ONLY_ON_SERVER : undefined;
+  // Google said the server's clock is wrong: backups go on, old ones are kept (local and Drive).
+  let clockWarning: string | undefined;
+  try {
+    clockWarning = serverClockSuspect(now) ? CLOCK_WRONG : undefined;
+  } catch {
+    clockWarning = undefined;
+  }
   const level: 'ok' | 'warning' | 'failing' =
     unreadable || (state.lastError && (!last || Date.parse(state.lastAttemptAt || '') > last))
       ? 'failing'
       : overdue
       ? 'failing'
-      : state.lastEmailError || notice || offServerWarning
+      : state.lastEmailError || notice || offServerWarning || clockWarning
       ? 'warning'
       : 'ok';
   return {
@@ -810,6 +827,7 @@ export function backupHealth(now = Date.now()) {
     notice,
     overdueText,
     offServerWarning,
+    clockWarning,
     intervalHours: intervalHours(),
     emailConfigured: emailConfigured(),
     encrypted: Boolean(passphrase),

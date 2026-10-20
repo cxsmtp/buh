@@ -84,12 +84,14 @@ export interface GoogleMock {
   pageLoop: boolean;
   /** A download sends its first piece, then waits for this before the rest. */
   slowMedia: Promise<void> | null;
+  /** Google's clock (each file's createdTime): the real time unless a test sets it. */
+  clock: () => number;
   close: () => Promise<void>;
 }
 
 export async function startGoogleMock(sa: { publicKey: crypto.KeyObject; email: string }): Promise<GoogleMock> {
   const files = new Map<string, DriveFile>();
-  const sessions = new Map<string, { name: string; parents: string[]; total: number; got: Buffer[]; size: number; appProperties?: Record<string, string>; by: string }>();
+  const sessions = new Map<string, { name: string; parents: string[]; total: number; got: Buffer[]; size: number; appProperties?: Record<string, string>; by: string; fields: string }>();
   const devices = new Set<string>();
   const mock = {
     files,
@@ -110,7 +112,9 @@ export async function startGoogleMock(sa: { publicKey: crypto.KeyObject; email: 
     before: null,
     pageLoop: false,
     slowMedia: null,
+    clock: () => new Date().getTime(),
   } as unknown as GoogleMock;
+  const created = () => new Date(mock.clock()).toISOString();
   const newId = () => `1${crypto.randomBytes(16).toString('base64url')}`;
   const md5 = (b: Buffer) => crypto.createHash('md5').update(b).digest('hex');
 
@@ -191,7 +195,7 @@ export async function startGoogleMock(sa: { publicKey: crypto.KeyObject; email: 
         const meta = JSON.parse(body.toString() || '{}');
         if (!parentOk(meta.parents ?? [])) return err(404, 'notFound', `File not found: ${meta.parents?.[0]}.`);
         const id = crypto.randomBytes(8).toString('hex');
-        sessions.set(id, { name: meta.name, parents: meta.parents ?? [], total: Number(req.headers['x-upload-content-length']), got: [], size: 0, appProperties: meta.appProperties, by: who });
+        sessions.set(id, { name: meta.name, parents: meta.parents ?? [], total: Number(req.headers['x-upload-content-length']), got: [], size: 0, appProperties: meta.appProperties, by: who, fields: u.searchParams.get('fields') || 'id,name' });
         return send(200, undefined, { location: `https://www.googleapis.com/upload/drive/v3/files?uploadType=resumable&upload_id=${id}` });
       }
       if (isUploadPut) {
@@ -208,8 +212,12 @@ export async function startGoogleMock(sa: { publicKey: crypto.KeyObject; email: 
         if (s.size < s.total) return send(308, undefined, s.size ? { range: `bytes=0-${s.size - 1}` } : {});
         const id = newId();
         const data = Buffer.concat(s.got);
-        files.set(id, { id, name: s.name, parents: s.parents, data, createdTime: new Date().toISOString(), appProperties: s.appProperties, by: s.by });
-        return send(200, { id, name: s.name, size: String(mock.tamper.size ? data.length + 1 : data.length), md5Checksum: mock.tamper.md5 ? '0'.repeat(32) : md5(data) });
+        const createdTime = created();
+        files.set(id, { id, name: s.name, parents: s.parents, data, createdTime, appProperties: s.appProperties, by: s.by });
+        // Only the fields asked for (fields=…), as Drive answers.
+        const all: Record<string, string> = { id, name: s.name, size: String(mock.tamper.size ? data.length + 1 : data.length), md5Checksum: mock.tamper.md5 ? '0'.repeat(32) : md5(data), createdTime };
+        const asked = s.fields.split(',');
+        return send(200, Object.fromEntries(Object.entries(all).filter(([k]) => asked.includes(k))));
       }
       // about.get (drive.file allows it): who is connected.
       if (u.pathname === '/drive/v3/about' && req.method === 'GET') {
@@ -221,7 +229,7 @@ export async function startGoogleMock(sa: { publicKey: crypto.KeyObject; email: 
         const meta = JSON.parse(body.toString() || '{}');
         if (!parentOk(meta.parents ?? [])) return err(404, 'notFound', 'File not found.');
         const id = newId();
-        files.set(id, { id, name: meta.name, parents: meta.parents ?? ['root'], data: Buffer.alloc(0), createdTime: new Date().toISOString(), mimeType: meta.mimeType, appProperties: meta.appProperties, by: who });
+        files.set(id, { id, name: meta.name, parents: meta.parents ?? ['root'], data: Buffer.alloc(0), createdTime: created(), mimeType: meta.mimeType, appProperties: meta.appProperties, by: who });
         return send(200, { id });
       }
       const one = /^\/drive\/v3\/files\/([A-Za-z0-9_-]+)$/.exec(u.pathname);

@@ -173,12 +173,12 @@ function twelveADay(end: number, days = 60) {
 
 test('Drive: 12 backups a day for 60 days keep 4 a day for a week, one a day to 30 days, one a week beyond, within 60 copies', () => {
   const end = Date.parse('2026-10-20T10:00:00Z');
-  let kept: Array<{ id: string; name: string; at: string }> = [];
+  let kept: Array<{ id: string; name: string; at: string; createdTime?: string }> = [];
   let mostInOneRun = 0;
   for (const t of twelveADay(end)) {
     // As copyOnce does: the new copy is added, then retention runs at that moment.
     const id = `c${t}`;
-    kept.push({ id, name: `buh-backup-${t}.tar.gz.enc`, at: iso(t) });
+    kept.push({ id, name: `buh-backup-${t}.tar.gz.enc`, at: iso(t), createdTime: iso(t) });
     const remove = policy.driveCopiesToRemove(kept, 60, t, id);
     mostInOneRun = Math.max(mostInOneRun, remove.length);
     const gone = new Set(remove.map((r) => r.id));
@@ -215,7 +215,7 @@ test('Drive: 12 backups a day for 60 days keep 4 a day for a week, one a day to 
 
 test('Drive: over the cap, the newest days are thinned first and the oldest weekly copy stays', () => {
   const end = Date.parse('2026-10-20T10:00:00Z');
-  const list = twelveADay(end, 120).map((t) => ({ id: `c${t}`, name: `n${t}`, at: iso(t) }));
+  const list = twelveADay(end, 120).map((t) => ({ id: `c${t}`, name: `n${t}`, at: iso(t), createdTime: iso(t) }));
   // keep 20 and no per-run limit in the way: run retention until nothing more goes.
   let kept = list;
   for (let i = 0; i < 200; i++) {
@@ -229,42 +229,100 @@ test('Drive: over the cap, the newest days are thinned first and the oldest week
   assert.ok((end - oldest) / DAY > 110, 'the oldest weekly copy (about 4 months old) is still there');
   assert.ok(kept.some((c) => Date.parse(c.at) === end), 'and the newest');
   // Only one or two copies: the newest and the only one are never removed, however old.
-  assert.deepEqual(policy.driveCopiesToRemove([{ id: 'only', name: 'x', at: iso(end - 400 * DAY) }], 1, end), []);
-  assert.deepEqual(policy.driveCopiesToRemove([{ id: 'a', name: 'a', at: iso(end - 300 * DAY) }, { id: 'b', name: 'b', at: iso(end - 100 * DAY) }], 1, end - 100 * DAY).map((x) => x.id), ['a']);
+  assert.deepEqual(policy.driveCopiesToRemove([{ id: 'only', name: 'x', at: iso(end - 400 * DAY), createdTime: iso(end - 400 * DAY) }], 1, end), []);
+  assert.deepEqual(policy.driveCopiesToRemove([{ id: 'a', name: 'a', at: iso(end - 300 * DAY), createdTime: iso(end - 300 * DAY) }, { id: 'b', name: 'b', at: iso(end - 100 * DAY), createdTime: iso(end - 100 * DAY) }], 1, end - 100 * DAY).map((x) => x.id), ['a']);
 });
 
-test('Drive: a clock 200 days ahead deletes nothing; at most 10 go in one run', () => {
+test('Drive: ages are Google’s (createdTime), never the server’s recorded time; copies Google has not dated are never removed; at most 10 a run', () => {
   const end = Date.parse('2026-10-20T10:00:00Z');
-  const list = twelveADay(end).map((t) => ({ id: `c${t}`, name: `n${t}`, at: iso(t) }));
-  const ahead = policy.driveRetention(list, 60, end + 200 * DAY);
-  assert.equal(ahead.clockAhead, true);
-  assert.deepEqual(ahead.remove, []);
-  // A day ahead: ages still count from the newest copy, so no more go than at the right time.
-  assert.deepEqual(policy.driveCopiesToRemove(list, 60, end + DAY).map((c) => c.id), policy.driveCopiesToRemove(list, 60, end).map((c) => c.id));
+  const list = twelveADay(end).map((t) => ({ id: `c${t}`, name: `n${t}`, at: iso(t), createdTime: iso(t) }));
   assert.equal(policy.driveCopiesToRemove(list, 60, end).length, policy.DRIVE_DELETE_PER_RUN);
+  // The server recorded every copy a year ahead (its clock jumped): Google's times decide, so the same go.
+  const skewed = list.map((c) => ({ ...c, at: iso(Date.parse(c.at) + 365 * DAY) }));
+  assert.deepEqual(policy.driveCopiesToRemove(skewed, 60, end).map((c) => c.id), policy.driveCopiesToRemove(list, 60, end).map((c) => c.id));
+  // Recorded before createdTime was kept (only the server's time): none is removed, however old or over the cap.
+  const undated = list.map((c) => ({ id: c.id, name: c.name, at: iso(Date.parse(c.at) - 400 * DAY) }));
+  assert.deepEqual(policy.driveCopiesToRemove(undated, 5, end), []);
+  const mixed = [...undated.slice(0, 50), ...list.slice(-20)];
+  const gone = policy.driveCopiesToRemove(mixed, 5, end);
+  assert.ok(gone.length > 0 && gone.every((c) => 'createdTime' in c), 'only dated copies go');
 });
 
-test('local backups: 12 a day for 60 days keep every one of 14 days; with the disk tight, all of the last day then one a day; never fewer than 14', () => {
+test('the clock check: more than a day from Google’s is wrong (either way); a wrong clock holds for 7 days, and ends when the clock is put back', () => {
+  const g = Date.parse('2026-10-20T10:00:00Z');
+  assert.equal(policy.clockSkewed(g + 23 * H, g), false);
+  assert.equal(policy.clockSkewed(g + 25 * H, g), true);
+  assert.equal(policy.clockSkewed(g - 25 * H, g), true);
+  assert.equal(policy.clockSkewed(g + 365 * DAY, g), true);
+  const ahead = g + 365 * DAY;
+  const mark = { setAt: iso(ahead), until: iso(ahead + policy.CLOCK_SUSPECT_MS) };
+  assert.equal(policy.clockSuspectActive(mark, ahead + DAY), true);
+  assert.equal(policy.clockSuspectActive(mark, ahead + 8 * DAY), false, 'not renewed for 7 days: over');
+  assert.equal(policy.clockSuspectActive(mark, g), false, 'the clock was put right (back before the mark): over');
+  assert.equal(policy.clockSuspectActive({}, g), false);
+  assert.equal(policy.clockSuspectActive(null, g), false);
+});
+
+const stamp = (t: number) => `buh-backup-${iso(t).slice(0, 16).replace(/[-:]/g, '').replace('T', '-')}.tar.gz.enc`;
+
+/** Backups made at each time in `times`, pruned after each one as backup.ts does; the names kept and the most removed in one run. */
+function simulateLocal(times: number[], tight: boolean, start: string[] = []) {
+  let names = [...start];
+  let most = 0;
+  for (const t of times) {
+    names.push(stamp(t));
+    const gone = new Set(policy.localBackupsToRemove(names, t, tight));
+    most = Math.max(most, gone.size);
+    names = names.filter((n) => !gone.has(n));
+  }
+  return { names, most };
+}
+
+test('local backups: 12 a day for 60 days keep every one of 14 days; with the disk tight, all of the last day then one a day; never fewer than 14; at most 5 a run', () => {
   const end = Date.parse('2026-10-20T10:00:00Z');
-  const stamp = (t: number) => `buh-backup-${iso(t).slice(0, 16).replace(/[-:]/g, '').replace('T', '-')}.tar.gz.enc`;
-  const names = twelveADay(end).map(stamp);
-  const keptWith = (tight: boolean, now = end) => {
-    const gone = new Set(policy.localBackupsToRemove(names, now, tight));
-    return names.filter((n) => !gone.has(n)).map((n) => policy.localBackupTime(n)!);
-  };
-  const fine = keptWith(false);
-  assert.deepEqual(fine, twelveADay(end).filter((t) => end - t <= 14 * DAY), 'every backup of the last 14 days, none older');
-  assert.ok(fine.length >= 14 * 12);
-  const tight = keptWith(true);
-  const lastDay = tight.filter((t) => end - t <= DAY);
-  assert.deepEqual(lastDay, twelveADay(end).filter((t) => end - t <= DAY), 'all of the last 24 hours');
-  const older = tight.filter((t) => end - t > DAY);
+  const all = twelveADay(end);
+  const fine = simulateLocal(all, false);
+  const kept = fine.names.map((n) => policy.localBackupTime(n)!);
+  assert.ok(fine.most <= policy.LOCAL_DELETE_PER_RUN, String(fine.most));
+  // Every backup of the last 14 days; none older than 14 days before the 14th newest (26 h ago).
+  for (const t of all.filter((x) => end - x <= 14 * DAY)) assert.ok(kept.includes(t), `kept ${iso(t)}`);
+  assert.ok(kept.every((t) => end - t <= 14 * DAY + 26 * H), 'none older');
+  const tight = simulateLocal(all, true);
+  const tk = tight.names.map((n) => policy.localBackupTime(n)!);
+  assert.ok(tight.most <= policy.LOCAL_DELETE_PER_RUN);
+  for (const t of all.filter((x) => end - x <= DAY)) assert.ok(tk.includes(t), 'all of the last 24 hours');
+  const older = tk.filter((t) => end - t > 26 * H + DAY);
   assert.equal(new Set(older.map((t) => policy.dubaiDay(t))).size, older.length, 'then one a UAE day');
-  assert.ok(older.length >= 13 && tight.every((t) => end - t <= 14 * DAY), String(older.length));
-  // Never fewer than the newest 14, and nothing goes with the clock far ahead.
+  assert.ok(older.length >= 12 && tk.every((t) => end - t <= 14 * DAY + 26 * H), String(older.length));
+  // Never fewer than the newest 14, and other files are never touched.
+  const names = all.map(stamp);
   assert.deepEqual(policy.localBackupsToRemove(names.slice(-14), end + 100 * DAY, true), []);
-  assert.deepEqual(policy.localBackupsToRemove(names, end + 200 * DAY, true), []);
   assert.equal(policy.localBackupsToRemove(['pre-update-1.db', ...names.slice(-3)], end, true).length, 0, 'other files are never touched');
+  // A clock put back (behind the backups): ages count from the clock, so fewer look old, never more.
+  assert.ok(policy.localBackupsToRemove(names, end - 30 * DAY, false).length <= policy.localBackupsToRemove(names, end, false).length);
+});
+
+test('local backups: a clock a year ahead for 5 backups in a row removes nothing of the 14 days before it (with or without a tight disk)', () => {
+  const end = Date.parse('2026-10-20T10:00:00Z');
+  const before = simulateLocal(twelveADay(end, 30), false).names;
+  const real = before.map((n) => policy.localBackupTime(n)!).filter((t) => end - t <= 14 * DAY);
+  assert.ok(real.length >= 14 * 12);
+  const jumped = [1, 2, 3, 4, 5].map((i) => end + 365 * DAY + i * 2 * H);
+  for (const tight of [false, true]) {
+    const after = simulateLocal(jumped, tight, before);
+    const left = new Set(after.names.map((n) => policy.localBackupTime(n)!));
+    if (!tight) for (const t of real) assert.ok(left.has(t), `kept ${iso(t)}`);
+    else {
+      // Tight: still every one of the last day before the jump, and one of each of the 14 days.
+      for (const t of real.filter((x) => end - x <= DAY)) assert.ok(left.has(t));
+      const days = new Set(real.map((t) => policy.dubaiDay(t)));
+      for (const d of days) assert.ok([...left].some((t) => policy.dubaiDay(t) === d), d);
+    }
+    for (const t of jumped) assert.ok(left.has(t));
+  }
+  // Even a wrong clock that lasts: at most 5 go in a run (and with Google Drive connected, none: backup.ts).
+  const longer = Array.from({ length: 30 }, (_, i) => end + 365 * DAY + (i + 1) * 2 * H);
+  assert.ok(simulateLocal(longer, false, before).most <= policy.LOCAL_DELETE_PER_RUN);
 });
 
 test('settings: validated, kept in history, restorable, and in the backup', async () => {
@@ -519,6 +577,36 @@ test('health warns when the newest backups are only on the server (no Drive, not
   assert.equal(backup.backupHealth(Date.now() + 3 * DAY).offServerWarning, undefined);
   await settings.updateSettings('backups', { email: 'daily' });
   await backup.runBackup('manual', { email: false });
+});
+
+test('a new shop is not told its backups are only on the server until 2 days after its first backup', async () => {
+  const file = path.join(dir, 'backup-state.json');
+  const saved = fs.readFileSync(file, 'utf8');
+  await settings.updateSettings('backups', { email: 'never' });
+  try {
+    // As a shop's first backup leaves it: never emailed, the first success just now.
+    const now = Date.now();
+    const st = JSON.parse(saved);
+    for (const k of ['lastEmailedAt', 'lastChangeEmailAt', 'lastEmailError', 'lastError']) delete st[k];
+    fs.writeFileSync(file, JSON.stringify({ ...st, lastSuccessAt: iso(now), lastAttemptAt: iso(now), firstSuccessAt: iso(now) }));
+    assert.equal(backup.backupHealth(now + 60_000).offServerWarning, undefined, 'right after the first backup');
+    assert.equal(backup.backupHealth(now + DAY).offServerWarning, undefined, 'a day on');
+    assert.equal(backup.backupHealth(now + 2 * DAY + H).offServerWarning, backup.ONLY_ON_SERVER, 'more than 2 days on');
+    // The first backup is recorded by the run itself (kept from then on).
+    const fresh = { ...st };
+    delete fresh.lastSuccessAt;
+    delete fresh.firstSuccessAt;
+    fs.writeFileSync(file, JSON.stringify(fresh));
+    order('First of a new shop');
+    const first = await backup.runBackup('changes');
+    assert.ok(first.firstSuccessAt && Math.abs(Date.parse(first.firstSuccessAt) - Date.now()) < 60_000, String(first.firstSuccessAt));
+    assert.equal(backup.backupHealth().offServerWarning, undefined, 'not warned at its first backup');
+    const again = await backup.runBackup('manual', { email: false });
+    assert.equal(again.firstSuccessAt, first.firstSuccessAt);
+  } finally {
+    await settings.updateSettings('backups', { email: 'daily' });
+    fs.writeFileSync(file, saved);
+  }
 });
 
 test('a backup whose changes cannot be recorded is failing, and no change-driven backup runs again within the hour', async () => {

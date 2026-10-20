@@ -5,8 +5,8 @@
 - **Backups follow what happens in the shop.** A new order, payment, stock or price change, product, customer, expense or setting starts a 2-hour clock, and the shop is backed up by then; later changes don't push it back. When nothing has changed there is no backup, no email and no Drive copy. Chat messages and visits ride along with the next backup, or once a day.
 - **A weekly check** backs up even a quiet shop once a week, to prove backups still work. It is skipped if a backup already ran that week.
 - **Far fewer emails.** By default at most one backup email a day plus the weekly check. Choose every backup, once a day, weekly only or never in Settings → System & backups → When to back up; failure alerts still come at once.
-- **History kept by age.** On the server: every backup from the last 24 hours, then one a day for 14 days. On Google Drive: up to 4 a day for a week, one a day for a month, then one a week for 6 months. A wrong server clock can never delete your Drive copies.
-- **Clearer status.** The status reads, for example, "Last backup 2:10 pm after 14 changes (orders, stock)" and "Next by 4:10 pm, 3 changes waiting", or "Nothing new — none needed". A quiet shop is never shown as failing. You are warned if your newest backups exist only on the server.
+- **History kept by age.** On the server: every backup from the last 24 hours, then one a day for 14 days. On Google Drive: up to 4 a day for a week, one a day for a month, then one a week for 6 months. Ages on Drive are Google's own times, so a wrong server clock can never make copies look old; if the server's clock is more than a day out, nothing is removed anywhere and the status says so.
+- **Clearer status.** The status reads, for example, "Last backup 2:10 pm after 14 changes (orders, stock)" and "Next by 4:10 pm, 3 changes waiting", or "Nothing new — none needed". A quiet shop is never shown as failing. You are warned if your newest backups have been only on the server for 2 days (a new shop is not warned at its first backup).
 - **Status.**
   - **Benchmark:** BENCH_PLACEHOLDER
   - **Tests:** TESTS_PLACEHOLDER

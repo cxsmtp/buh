@@ -578,7 +578,17 @@ const NOW_SQL = "strftime('%Y-%m-%dT%H:%M:%fZ', 'now')";
 const bumpSql = (area: string) =>
   `UPDATE data_changes SET n = n + 1, last_at = ${NOW_SQL}, first_at = CASE WHEN n = backed OR first_at IS NULL THEN ${NOW_SQL} ELSE first_at END WHERE area = '${area}';`;
 
-/** [table, area, columns an UPDATE must touch to count (all when empty), WHEN for every event] */
+/**
+ * [table, area, columns an UPDATE must touch to count (all when empty), WHEN for every event]
+ *
+ * Changing an entry here needs a new migration: ensureChangeTriggers only makes triggers that are
+ * missing by name, it never compares or replaces a trigger's SQL. That is on purpose: during an
+ * update the old and the new version share the database, so each replacing the other's definition
+ * at start would leave whichever started last. A changed definition gets a new trigger name (made
+ * by the new migration, alongside the old one, which a later release may retire); a new table on an
+ * existing area can simply be added (its triggers are missing, so they are made at start); a new
+ * area also needs its data_changes row, in a new migration.
+ */
 const WATCHED: Array<[string, string, string[], string?]> = [
   ['orders', 'orders', []],
   ['order_events', 'orders', []],
@@ -636,7 +646,8 @@ export function changeTriggerDefs(): Array<{ name: string; table: string; sql: s
 
 /**
  * Create every change trigger that is missing (a table rebuilt by a tool loses its triggers), on
- * the tables that exist. Idempotent; returns the names it had to create.
+ * the tables that exist. Idempotent; returns the names it had to create. Checks names only, never
+ * the SQL (see WATCHED: a changed definition is a new migration with a new name).
  */
 export function ensureChangeTriggers(d: DB): string[] {
   if (!d.prepare("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'data_changes'").get()) return [];
