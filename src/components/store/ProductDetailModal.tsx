@@ -10,7 +10,7 @@ import { Sheet } from '@/components/common/Sheet';
 import { LocalPrice } from '@/lib/client/currency';
 import { PhotoCarousel } from './PhotoCarousel';
 import { measurementRows } from '@/lib/measurements';
-import { isSimple, sizeDetail } from '@/lib/productType';
+import { isSimple, sizeDetail, specLine } from '@/lib/productType';
 import { X, Check, Truck, ShieldCheck, Ruler, MessageCircle, MessagesSquare, Share2, Minus, Plus } from 'lucide-react';
 
 interface ProductDetailModalProps {
@@ -141,7 +141,7 @@ const ProductDetailContent: React.FC<ProductDetailModalProps & { product: Produc
               <LocalPrice aed={Number(unitPrice)} className="text-xs" />
             </p>
             <p className="text-xs text-ink-soft">
-              {simple ? product.material : `${product.material} · ${product.threadCount} TC · ${product.weave}`}
+              {specLine(product)}
             </p>
           </div>
 
