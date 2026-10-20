@@ -1,5 +1,18 @@
 # Changelog
 
+## BUH-02.22.00 — 2026-10-20 23:30 UTC · [#41](https://github.com/cxsmtp/buh/pull/41)
+
+- **Backups follow what happens in the shop.** A new order, payment, stock or price change, product, customer, expense or setting starts a 2-hour clock, and the shop is backed up by then; later changes don't push it back. When nothing has changed there is no backup, no email and no Drive copy. Chat messages and visits ride along with the next backup, or once a day.
+- **A weekly check** backs up even a quiet shop once a week, to prove backups still work. It is skipped if a backup already ran that week.
+- **Far fewer emails.** By default at most one backup email a day plus the weekly check. Choose every backup, once a day, weekly only or never in Settings → System & backups → When to back up; failure alerts still come at once.
+- **History kept by age.** On the server: every backup from the last 24 hours, then one a day for 14 days. On Google Drive: up to 4 a day for a week, one a day for a month, then one a week for 6 months. A wrong server clock can never delete your Drive copies.
+- **Clearer status.** The status reads, for example, "Last backup 2:10 pm after 14 changes (orders, stock)" and "Next by 4:10 pm, 3 changes waiting", or "Nothing new — none needed". A quiet shop is never shown as failing. You are warned if your newest backups exist only on the server.
+- **Status.**
+  - **Benchmark:** BENCH_PLACEHOLDER
+  - **Tests:** TESTS_PLACEHOLDER
+  - **Dependency audit:** production 0 vulnerabilities; no new packages.
+  - **Security scan:** SEC_PLACEHOLDER
+
 ## BUH-02.21.00 — 2026-10-20 23:00 UTC · [#40](https://github.com/cxsmtp/buh/pull/40)
 
 - **Festival gift pages that run themselves.** Each festival has its own page, such as /gifts/diwali, /gifts/eid-al-fitr or /gifts/uae-national-day. Each goes live about 45 days before the festival, with products that have a gift line for it first, and your home page's Google title follows the festival. After the festival the page stays at the same address with next year's dates, so it keeps its ranking.
