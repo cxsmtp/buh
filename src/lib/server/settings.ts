@@ -254,6 +254,18 @@ export async function restoreSettingsVersion(id: number, by = ''): Promise<Setti
     if (!('cardFeePercent' in old)) old.cardFeePercent = now.cardFeePercent;
     if (!('bankTransferMode' in old)) old.bankTransferMode = now.bankTransferMode;
   }
+  // An AI version from before AI pictures had their own section keeps today's picture choices.
+  if (key === 'ai') {
+    const now = getSettings('ai');
+    for (const f of ['picturesProvider', 'openaiImageModel', 'falModel'] as const) if (!(f in old)) old[f] = now[f];
+  }
+  // Style photos whose file is gone are left out, so the rest of the version still comes back.
+  if (key === 'aiPictures' && Array.isArray(old.references)) {
+    old.references = old.references.filter((u) => {
+      const name = typeof u === 'string' ? u.replace(/^\/api\/images\//, '') : '';
+      return IMAGE_NAME.test(name) && Boolean(readImage(name));
+    });
+  }
   const restored = deepMerge(DEFAULTS[key], old) as Obj;
   for (const p of SECRETS[key]) setPath(restored, p, '');
   // A restore is always kept in history (it can itself be undone), even mid-session.

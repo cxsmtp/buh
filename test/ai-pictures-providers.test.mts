@@ -429,3 +429,25 @@ test('backups carry the style photos (the files and the list); the restore scrip
     db.close();
   }
 });
+
+test('review: restoring an AI version from before AI pictures keeps today’s picture choices; a style photo whose file is gone is left out of a restore', async () => {
+  const { getDb } = await import('@/lib/server/db');
+  await settings.updateSettings('ai', { openaiApiKey: OPENAI, picturesProvider: 'openai', openaiImageModel: 'gpt-image-1', falModel: 'fal-ai/flux-2/edit' });
+  // A version saved by the release before (no picture fields).
+  const oldAi = { ...settings.getSettings('ai') } as Record<string, unknown>;
+  for (const f of ['picturesProvider', 'openaiImageModel', 'falModel', 'openaiApiKey', 'falApiKey']) delete oldAi[f];
+  const db = getDb();
+  const aiId = Number(db.prepare('INSERT INTO settings_history (key, data, saved_at) VALUES (?, ?, ?)').run('ai', JSON.stringify(oldAi), new Date().toISOString()).lastInsertRowid);
+  await settings.restoreSettingsVersion(aiId);
+  const ai = settings.getSettings('ai');
+  assert.equal(ai.picturesProvider, 'openai');
+  assert.equal(ai.openaiImageModel, 'gpt-image-1');
+  assert.equal(ai.falModel, 'fal-ai/flux-2/edit');
+
+  // A pictures version naming a style photo that is no longer stored: the rest still comes back.
+  const kept = saveImageDataUrl(PHOTO_URL);
+  const pics = { ...settings.getSettings('aiPictures'), references: [kept, '/api/images/0123456789abcdef0123456789abcdef.png'] };
+  const picId = Number(db.prepare('INSERT INTO settings_history (key, data, saved_at) VALUES (?, ?, ?)').run('aiPictures', JSON.stringify(pics), new Date().toISOString()).lastInsertRowid);
+  await settings.restoreSettingsVersion(picId);
+  assert.deepEqual(settings.getSettings('aiPictures').references, [kept]);
+});

@@ -23,7 +23,9 @@ import { DEFAULT_SCENES, DEFAULT_STAGING_SET, STAGING_EXTRA_MAX, STAGING_FIXED_R
  */
 
 /** The server waits up to 90 seconds for Gemini; a little longer here. */
-const WAIT_MS = 95_000;
+// Longer than the server can take for any picture service (fal: up to about 5 minutes with its
+// queue and download), so a picture already paid for is never thrown away because the page gave up.
+const WAIT_MS = 330_000;
 
 interface Slot {
   key: number;
@@ -211,7 +213,7 @@ export function PictureStudio({
       void call.then(({ ok, data }) => {
         if (ok && data.url) void discard(data.url);
       });
-      return update({ state: 'failed', error: 'Gemini took too long. Try again in a moment.' });
+      return update({ state: 'failed', error: `${SHORT[status?.provider ?? ''] ?? 'The picture service'} took too long. Try again in a moment.` });
     }
     const { ok, data } = answer;
     if (!ok || !data.url) {
