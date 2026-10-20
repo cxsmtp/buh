@@ -27,6 +27,7 @@ import { AccountantAccessCard } from './settings/AccountantAccessCard';
 import { VatSettingsCard } from './settings/VatSettingsCard';
 import { BackupStatus } from './BackupStatus';
 import { DriveBackupCard } from './settings/DriveBackupCard';
+import { BackupScheduleCard } from './settings/BackupScheduleCard';
 import { BackupPasswordCard } from './settings/BackupPasswordCard';
 import { RestoreNotice } from './RestoreNotice';
 import { AdminLinkCard } from './settings/AdminLinkCard';
@@ -778,6 +779,7 @@ export function AdminApp() {
                     <div className="space-y-3 text-xs text-ink-soft">
                       <SystemHealthCard />
                       <BackupStatus />
+                      <BackupScheduleCard />
                       <BackupPasswordCard />
                       <DriveBackupCard />
                       <SettingsHistoryCard onRestored={() => void reloadAll().then(() => setSettingsEpoch((n) => n + 1))} />

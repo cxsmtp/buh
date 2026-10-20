@@ -6,7 +6,7 @@
 // and nothing in it is changed. The snapshot is integrity-checked; the newest
 // KEEP_PRE_UPDATE (default 5) snapshots are kept. Prints the snapshot's path.
 //
-// Unlike the 12-hourly backups, this copy keeps the courier and SMS keys (it never
+// Unlike the automatic backups, this copy keeps the courier and SMS keys (it never
 // leaves the server's data volume, exactly like shop.db itself), so a rollback
 // restores a working shop.
 import fs from 'node:fs';

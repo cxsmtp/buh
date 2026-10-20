@@ -142,9 +142,19 @@ test('only the newest 14 backups are kept', async () => {
   assert.equal(fs.readdirSync(bdir).filter((f) => f.startsWith('buh-backup-')).length, 14);
 });
 
-test('overdue or failed backups show as failing', () => {
+test('overdue backups show as failing: changes waiting too long, or no backup for 8 days with the weekly check on; a quiet shop is fine', async () => {
   const day = 24 * 3600_000;
-  assert.equal(backup.backupHealth(Date.now() + 2 * day).level, 'failing');
+  await backup.runBackup('manual');
+  // Nothing new since: two days later the shop is not failing (only the "not emailed" warning).
+  assert.notEqual(backup.backupHealth(Date.now() + 2 * day).level, 'failing');
+  assert.equal(backup.backupHealth(Date.now() + 9 * day).level, 'failing');
+  assert.match(backup.backupHealth(Date.now() + 9 * day).overdueText ?? '', /8 days/);
+  // A change waiting past its 2 hours (plus an hour's grace) is failing.
+  order('Late Change');
+  assert.notEqual(backup.backupHealth(Date.now() + 2.5 * 3600_000).level, 'failing');
+  assert.equal(backup.backupHealth(Date.now() + 3.5 * 3600_000).level, 'failing');
+  assert.match(backup.backupHealth(Date.now() + 3.5 * 3600_000).overdueText ?? '', /orders/);
+  await backup.runBackup('manual');
 });
 
 test('restore --replace swaps the data in place, keeps the old data aside and the backups folder', async () => {

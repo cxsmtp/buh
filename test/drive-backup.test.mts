@@ -392,6 +392,36 @@ test('one-command rebuild: --from-drive latest into an empty folder brings back 
   fs.rmSync(scratch, { recursive: true, force: true });
 });
 
+test('nothing new: no backup and no Drive copy; a "Back up now" with nothing new is not copied again; a change is', async () => {
+  enable(30);
+  google.failStart = null;
+  await settings.updateSettings('store', { supportEmail: 'before@shop.test' });
+  await backup.runBackup('manual');
+  await drive.waitForDriveCopy();
+  const copies = ours().length;
+  const tried = drive.driveStatus().lastAttemptAt;
+  assert.equal(drive.driveStatus().lastFile, backup.readBackupState().lastFile, 'the backup is in Drive');
+  // Nothing changes: the schedule takes no backup, so nothing goes to Drive.
+  assert.equal(backup.backupTick(Date.now() + 3 * 3600_000), null);
+  await drive.waitForDriveCopy();
+  assert.equal(ours().length, copies);
+  assert.equal(drive.driveStatus().lastAttemptAt, tried, 'no copy tried');
+  // "Back up now" with nothing new: a backup on the server, but Drive already holds the same data.
+  const again = await backup.runBackup('manual');
+  await drive.waitForDriveCopy();
+  assert.equal(again.lastError, undefined);
+  assert.equal(ours().length, copies, 'not copied again');
+  assert.equal(drive.driveStatus().lastAttemptAt, tried, 'no copy tried');
+  assert.equal(monitor.currentProblems().find((x) => x.id === 'drive_backup'), undefined, 'and no alert for it');
+  // A change: the next backup is copied.
+  await settings.updateSettings('store', { supportEmail: 'after@shop.test' });
+  await backup.runBackup('changes');
+  await drive.waitForDriveCopy();
+  assert.notEqual(drive.driveStatus().lastAttemptAt, tried, 'copied');
+  assert.equal(drive.driveStatus().lastFile, backup.readBackupState().lastFile);
+  assert.equal(drive.driveStatus().level, 'ok');
+});
+
 test('the image ships the Drive restore next to the restore script', () => {
   const dockerfile = fs.readFileSync('Dockerfile', 'utf8');
   assert.match(dockerfile, /COPY --from=builder \/app\/scripts\/restore-backup\.mjs \.\/scripts\/restore-backup\.mjs/);

@@ -1,4 +1,6 @@
 import { audit } from '@/lib/server/audit';
+import { runBackup } from '@/lib/server/backup';
+import { pendingChanges } from '@/lib/server/dataChanges';
 import { clientIp, enforceIpLimit, requireAdmin } from '@/lib/server/guard';
 import { handleRouteError, HttpError, json, readJsonBody, str } from '@/lib/server/http';
 import { changelog, labelOf, OLDEST_ROLLBACK, pendingRequest, requestAuto, requestSwitch, updaterStatus, versionOf } from '@/lib/server/versions';
@@ -40,6 +42,9 @@ export async function POST(req: Request) {
       });
     }
     const target = str(body.target, 'Version', 20);
+    // Changes waiting for their backup go first (off the server too), at most a minute; the updater's
+    // own snapshot before the switch holds them on the server either way.
+    if (pendingChanges().total > 0) await Promise.race([runBackup('changes'), new Promise((r) => setTimeout(r, 60_000).unref())]);
     const line = requestSwitch(target);
     audit('system.version_switch_requested', { by: session.email, request: line, from: process.env.NEXT_PUBLIC_APP_VERSION, ip: clientIp(req) });
     const what = target === 'latest' ? 'Asked for the latest version.' : `Asked to switch to ${labelOf(target)}; a database snapshot is taken first.`;

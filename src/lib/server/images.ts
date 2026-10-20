@@ -5,6 +5,7 @@ import zlib from 'node:zlib';
 import { dataDir } from './dataDir';
 import { HttpError } from './http';
 import { imageDimensions, parseImageDataUrl } from './imageInput';
+import { markChanged } from './dataChanges';
 
 /** The logo is drawn into the app's icons: at most this many pixels on a side (a phone photo is ~4000). */
 export const LOGO_MAX_SIDE = 4096;
@@ -29,7 +30,10 @@ export function saveImageDataUrl(dataUrl: string, maxBytes = 3 * 1024 * 1024): s
   const { mime, bytes } = parseImageDataUrl(dataUrl, maxBytes);
   const name = `${crypto.createHash('sha256').update(bytes).digest('hex')}.${EXT[mime]}`;
   const file = path.join(imagesDir(), name);
-  if (!fs.existsSync(file)) fs.writeFileSync(file, bytes, { mode: 0o600 });
+  if (!fs.existsSync(file)) {
+    fs.writeFileSync(file, bytes, { mode: 0o600 });
+    markChanged('photos'); // a file beside the database: the next backup must take it
+  }
   return `/api/images/${name}`;
 }
 
@@ -314,6 +318,7 @@ export function saveImageBytes(bytes: Buffer, mime: string): { url: string; crea
     if ((err as NodeJS.ErrnoException).code !== 'EEXIST') throw err;
     created = false;
   }
+  if (created) markChanged('photos');
   return { url: `/api/images/${name}`, created };
 }
 
@@ -322,6 +327,7 @@ export function deleteImage(name: string): boolean {
   if (!IMAGE_NAME.test(name)) return false;
   try {
     fs.unlinkSync(path.join(imagesDir(), name));
+    markChanged('photos');
     return true;
   } catch {
     return false;

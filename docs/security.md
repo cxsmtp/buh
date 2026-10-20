@@ -393,7 +393,9 @@ Tested by `test/sw-source.test.mts` (every rule above, the 404 and reset kill sw
 
 ## Backups
 
-Every 12 hours (see the deployment guide) the shop backs itself up:
+When something changes (see the deployment guide), the shop backs itself up:
+
+- **What changed is counted by the database itself** (migration 16: triggers on the shop's tables add to `data_changes`, one row per area), so no write path is missed; files written beside it (product photos) are counted by `markChanged`. Reads, sign-ins (a passkey's counter, an accountant's last sign-in), sign-outs, the chat's "seen" marks, caches, counters and rate limits are not counted. The audit log records why each backup ran (`changes`, `weekly-check`, `manual`, `startup`) and how many changes it held per area, never what they were. A backup's mark is taken before it starts and recorded only after it succeeds, so a failure (or a change made while it runs) stays waiting.
 
 - **A consistent database snapshot**, integrity-checked before it is used.
 - **CSV flat files.** A cell starting with `= + - @` is prefixed with `'`, so Excel never runs it as a formula.

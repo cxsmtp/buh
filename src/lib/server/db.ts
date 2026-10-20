@@ -542,6 +542,84 @@ const MIGRATIONS: Array<(db: DB) => void> = [
       CREATE INDEX collections_by_created ON collections(created_at);
     `);
   },
+  // 16: what changed since the last backup (backups run when there is something new: backup.ts and
+  //     dataChanges.ts). One row per area; triggers on the shop's tables count each write, so every
+  //     path that changes data is seen, today's and tomorrow's. n counts writes ever; backed is n
+  //     when the last successful backup began; first_at is the first write not yet in a backup.
+  //     Reads, sign-ins, sessions, rate limits, caches and the chat's "seen" marks are not counted
+  //     (no trigger, or only on the columns that matter). Add-only: an older version running on this
+  //     database (an update's overlap, a rollback) keeps counting through the same triggers.
+  //     IF NOT EXISTS throughout: safe to run again on a database an older test (or tool) took back.
+  (db) => {
+    const areas: Array<[string, number]> = [
+      ['orders', 1], ['payments', 1], ['stock', 1], ['products', 1], ['photos', 1], ['collections', 1],
+      ['settings', 1], ['accounts', 1], ['expenses', 1], ['vat', 1], ['chats', 0], ['visits', 0],
+    ];
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS data_changes (
+        area      TEXT PRIMARY KEY,
+        critical  INTEGER NOT NULL,
+        n         INTEGER NOT NULL DEFAULT 0,
+        backed    INTEGER NOT NULL DEFAULT 0,
+        first_at  TEXT,
+        last_at   TEXT
+      );
+    `);
+    const seed = db.prepare('INSERT OR IGNORE INTO data_changes (area, critical) VALUES (?, ?)');
+    for (const [area, critical] of areas) seed.run(area, critical);
+    const now = "strftime('%Y-%m-%dT%H:%M:%fZ', 'now')";
+    const bump = (area: string) =>
+      `UPDATE data_changes SET n = n + 1, last_at = ${now}, first_at = CASE WHEN n = backed OR first_at IS NULL THEN ${now} ELSE first_at END WHERE area = '${area}';`;
+    // [table, area, columns an UPDATE must touch to count (all when empty), WHEN for every event]
+    const watched: Array<[string, string, string[], string?]> = [
+      ['orders', 'orders', []],
+      ['order_events', 'orders', []],
+      ['order_vat', 'vat', []],
+      ['vat_invoices', 'vat', []],
+      ['vat_credit_notes', 'vat', []],
+      ['stripe_events', 'payments', []],
+      ['card_refunds', 'payments', []],
+      // products.stock is kept in step by product_stock's own triggers: counted there, as stock.
+      ['products', 'products', ['data', 'active', 'position', 'archived', 'updated_at']],
+      ['product_drafts', 'products', []],
+      ['product_stock', 'stock', []],
+      ['stock_moves', 'stock', []],
+      ['collections', 'collections', ['slug', 'title', 'product_ids', 'expires_on', 'created_at', 'created_by', 'updated_at', 'updated_by']],
+      ['settings', 'settings', []],
+      ['expense_categories', 'expenses', []],
+      ['expenses', 'expenses', []],
+      ['expense_versions', 'expenses', []],
+      ['expense_bills', 'expenses', []],
+      ['admin_recovery_codes', 'accounts', []],
+      // A sign-in moves the passkey's counter and last use: not a change to back up.
+      ['admin_passkeys', 'accounts', ['public_key', 'transports', 'name', 'rp_id', 'device_type', 'backed_up', 'created_at']],
+      // last_sign_in_at (a sign-in) and session_gen (signing out) are sessions, not data.
+      ['staff_accounts', 'accounts', ['email', 'role', 'name', 'password_hash', 'status', 'setup_hash', 'setup_grant_hash', 'setup_expires_at', 'invited_at', 'invited_by', 'activated_at', 'revoked_at', 'revoked_by']],
+      // The chat: what was said and the conversation's state; never the "seen" marks a visit moves.
+      ['chat_messages', 'chats', []],
+      ['chat_threads', 'chats', ['status', 'customer_name', 'contact', 'handed_over_at', 'updated_at']],
+      // The few kv entries that are the owner's data (the rest are caches, counters and sign-in state).
+      ['kv', 'accounts', [], "key IN ('admin:link', 'admin:passkeys-suspended')"],
+      ['kv', 'settings', [], "key IN ('vat:settings', 'reports:settings')"],
+      ['kv', 'products', [], "key IN ('staging:photos')"],
+    ];
+    const made = new Set<string>();
+    for (const [table, area, columns, when] of watched) {
+      const exists = db.prepare("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ?").get(table);
+      if (!exists) continue;
+      for (const event of ['INSERT', 'UPDATE', 'DELETE']) {
+        let name = `data_changes_${table}_${area}_${event.toLowerCase()}`;
+        while (made.has(name)) name += '_';
+        made.add(name);
+        const row = event === 'DELETE' ? 'OLD' : 'NEW';
+        const of = event === 'UPDATE' && columns.length ? ` OF ${columns.join(', ')}` : '';
+        const cond = when ? ` WHEN ${when.replace(/\bkey\b/g, `${row}.key`)}${event === 'UPDATE' ? ` OR ${when.replace(/\bkey\b/g, 'OLD.key')}` : ''}` : '';
+        db.exec(`CREATE TRIGGER IF NOT EXISTS ${name} AFTER ${event}${of} ON ${table}${cond} BEGIN ${bump(area)} END;`);
+      }
+    }
+    // Collections' view and "added to bag" counters: visits, which ride along with the next backup.
+    if (db.prepare("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'collections'").get()) db.exec(`CREATE TRIGGER IF NOT EXISTS data_changes_collections_visits AFTER UPDATE OF views, bag_adds ON collections BEGIN ${bump('visits')} END;`);
+  },
 ];
 
 let db: DB | null = null;
