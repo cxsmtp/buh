@@ -1,7 +1,7 @@
 # Base image with Node.js LTS on Alpine for minimal footprint
 # node:24.22.0-alpine3.24 (Node 24 LTS; Node 20 is past its end of life), pinned by digest;
 # Dependabot proposes the newer digest (security fixes) as a pull request.
-FROM node:24.22.0-alpine3.24@sha256:44fce696f38ba8c987c4db89954051000bbd05ffd8d8659ba15ed4a8602e937f AS base
+FROM node:26.12.0-alpine3.24@sha256:6f08a523443ddedf52941874c203475b0ad503e859ad70cb26ab8be9a517dbd5 AS base
 
 # Step 1: Install dependencies
 FROM base AS deps
