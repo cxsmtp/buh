@@ -84,6 +84,11 @@ export const ProductCard: React.FC<ProductCardProps> = ({ product, onSelect, eag
             {sale && <span className="label-caps !text-[10px] text-rose-deep">Reduced</span>}
           </p>
           <LocalPrice aed={product.price} className="text-[11px] block" />
+          {product.giftLine && (
+            <p className="text-[12px] text-gold-deep line-clamp-2 break-words" data-testid="gift-line">
+              {product.giftLine}
+            </p>
+          )}
           {(soldOut || fewLeft) && (
             <p className={`text-[11px] tracking-[0.04em] ${soldOut ? 'text-ink-muted' : 'text-warning'}`}>
               {soldOut ? 'Sold out' : product.stockCount === 1 ? 'Only 1 left' : `Only ${product.stockCount} left`}

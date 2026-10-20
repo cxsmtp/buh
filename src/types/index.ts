@@ -69,6 +69,13 @@ export interface Product {
    * only; shoppers see the map (as { staged: true }) only while "Label styled photos" is on.
    */
   stagedPhotos?: Record<string, StagedPhoto | { staged: true }>;
+  /**
+   * Gift lines by festival id (and "everyday"), written with "Write from photo" and edited by the
+   * owner. Admin only: shoppers get `giftLine`, the one for the festival the shop is themed for now.
+   */
+  giftLines?: Record<string, string>;
+  /** Shoppers only (/api/products): today's gift line (the themed festival's, else the everyday one). */
+  giftLine?: string;
   /** Total pieces in stock across all sizes (the sum of stockBySize). */
   stockCount: number;
   /** Pieces in stock per size id. Most designs are one or two pieces, so stock is kept per size. */
@@ -281,12 +288,23 @@ export interface OrderAttention {
 export const AI_MODELS = ['claude-opus-5-5', 'claude-sonnet-5-5', 'claude-haiku-5-5'] as const;
 export type AiModel = (typeof AI_MODELS)[number];
 
-/** Who writes "Write from photo": Anthropic (Claude) or Google Gemini. Styled photos are Gemini only. */
-export const AI_PROVIDERS = ['anthropic', 'gemini'] as const;
+/** Who writes "Write from photo": Anthropic (Claude), Google Gemini or DeepSeek. Styled photos are Gemini only. */
+export const AI_PROVIDERS = ['anthropic', 'gemini', 'deepseek'] as const;
 export type AiProvider = (typeof AI_PROVIDERS)[number];
 
 /** A Gemini model id as the shop stores it (checked on the server; filled from Google's live list by Test). */
 export const GEMINI_MODEL_ID = /^gemini-[a-z0-9.\-]{1,60}$/;
+
+/** A DeepSeek model id as the shop stores it (checked on the server; DeepSeek's live list by Test). */
+export const DEEPSEEK_MODEL_ID = /^deepseek-[a-z0-9.-]{2,60}$/;
+/** DeepSeek's model that reads photos (DeepSeek-V4.1-Flash): the default. */
+export const DEEPSEEK_DEFAULT_MODEL = 'deepseek-flash';
+/**
+ * Whether a DeepSeek model reads photos: the Flash ones (deepseek-flash, and the retired
+ * deepseek-v4-flash / deepseek-v4-flash-vision-exp names) and any "vision"/"vl" model do;
+ * deepseek-v4-pro and the others are text only.
+ */
+export const deepseekReadsPhotos = (model: string): boolean => /-(?:flash|vision|vl)(?=-|\d|$)/.test(model);
 
 /** Settings → AI writing: names and descriptions written from a product photo (off until a key is saved), and styled photos. */
 export interface AiSettings {
@@ -300,6 +318,10 @@ export interface AiSettings {
   geminiApiKey: string;
   /** Gemini model for writing ('' until Test fills the list). */
   geminiModel: string;
+  /** The owner's DeepSeek API key, sk-… (secret: write-only, never sent to a browser or a backup). */
+  deepseekApiKey: string;
+  /** DeepSeek model for writing (deepseek-flash reads photos; deepseek-v4-pro does not). */
+  deepseekModel: string;
   /** Gemini model for "Style in a bedroom". */
   geminiImageModel: string;
   /** The shop shows a small "Styled image" tag on styled photos (default on). */

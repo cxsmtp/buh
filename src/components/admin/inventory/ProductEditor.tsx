@@ -67,6 +67,13 @@ interface Draft {
   seenStock: Record<string, number>;
   /** What the BUH-02.10 update took off the shop (a standard duvet cover), per size: offered back in one tap. */
   legacy: NonNullable<Product['legacyMeasurements']>;
+  /** Gift lines by festival id (and "everyday"): the shop shows the themed festival's. */
+  giftLines: Record<string, string>;
+  /** The owner's note for "Style in a bedroom" (kept with the draft). */
+  stagingNotes: string;
+  /** The AI's motif and design words: the styling prompt's context. */
+  aiMotif: string;
+  aiDesign: string;
 }
 
 function draftFrom(product: Product | null, catalog: CatalogSettings): Draft {
@@ -99,6 +106,10 @@ function draftFrom(product: Product | null, catalog: CatalogSettings): Draft {
       isNewArrival: true,
       seenStock: {},
       legacy: {},
+      giftLines: {},
+      stagingNotes: '',
+      aiMotif: '',
+      aiDesign: '',
     };
   }
   // The shop shows the styled photo first when there is one, so it stays the cover here.
@@ -130,6 +141,10 @@ function draftFrom(product: Product | null, catalog: CatalogSettings): Draft {
     isNewArrival: Boolean(product.isNewArrival),
     seenStock: { ...product.stockBySize },
     legacy: product.legacyMeasurements ?? {},
+    giftLines: { ...(product.giftLines ?? {}) },
+    stagingNotes: '',
+    aiMotif: '',
+    aiDesign: '',
   };
 }
 
@@ -382,6 +397,7 @@ export function ProductEditor({
       sku: draft.sku.trim(),
       shortDescription: draft.shortDescription.trim(),
       description: draft.description.trim(),
+      giftLines: Object.fromEntries(Object.entries(draft.giftLines ?? {}).filter(([, v]) => v.trim())),
       category: draft.category,
       material: draft.material.trim(),
       threadCount: draft.productType === 'simple' ? 0 : Number(draft.threadCount) || 0,
@@ -559,6 +575,9 @@ export function ProductEditor({
               photos={draft.photos}
               originals={originals}
               room={MAX_PHOTOS - draft.photos.length - uploading}
+              notes={draft.stagingNotes ?? ''}
+              onNotes={(v) => set('stagingNotes', v)}
+              context={{ title: draft.title, motif: draft.aiMotif, colors: draft.colors.map((c) => c.name).filter(Boolean), design: draft.aiDesign || draft.shortDescription }}
               onAdd={(url, after) =>
                 setDraft((d) => {
                   if (d.photos.includes(url) || d.photos.length >= MAX_PHOTOS) return d;

@@ -4,7 +4,7 @@
  * - the describe route: a stranger gets nothing, sign-in is required, the size cap, bad image types,
  *   "switched off" until a key is saved, and the key never in a reply or the server's log;
  * - in Chromium at 375 px and 1280 px: Settings → AI writing (key shown as ••••last4, Test), the
- *   editor's button filling empty fields, the preview with "Use these" / "Keep mine" when there is
+ *   editor's button filling empty fields, the suggestion review with "Use all" / "Keep mine" when there is
  *   text, colours and weave added only with a tap, and the Weaves editor (add, rename across
  *   products, remove refused while in use). No sideways scroll, no page errors.
  * Screenshots go to BUH_SHOTS_DIR when it is set. Skipped without a build or Playwright.
@@ -100,7 +100,9 @@ test('the describe route: hidden from strangers, sign-in required, size cap, ima
   const off = await api('POST', '/api/admin/products/describe', { image: PHOTO_URL });
   assert.equal(off.status, 409);
   assert.match((await off.json()).message, /Settings → AI writing/);
-  assert.deepEqual(await (await api('GET', '/api/admin/products/describe')).json(), { ready: false, reason: 'no_key', provider: 'anthropic', model: 'claude-opus-5-5' });
+  const st = await (await api('GET', '/api/admin/products/describe')).json();
+  assert.deepEqual({ ...st, festivals: undefined }, { ready: false, reason: 'no_key', provider: 'anthropic', model: 'claude-opus-5-5', festivals: undefined });
+  assert.ok(Array.isArray(st.festivals), 'the festivals a gift line can be written for');
   // Save the key: shown back as ••••last4 only.
   const saved = await api('PUT', '/api/admin/settings/ai', { settings: { anthropicApiKey: KEY, enabled: true, model: 'claude-sonnet-5-5' } });
   const savedText = await saved.text();
@@ -226,7 +228,7 @@ for (const width of [375, 1280]) {
     await preview.getByRole('button', { name: 'Keep mine' }).click();
     await preview.waitFor({ state: 'detached' });
     await editor.getByRole('button', { name: 'Write name & descriptions from photo' }).click();
-    await editor.getByTestId('ai-preview').getByRole('button', { name: 'Use these' }).click();
+    await editor.getByTestId('ai-preview').getByRole('button', { name: 'Use all' }).click();
     await editor.getByRole('button', { name: /^Next: Details/ }).click();
     assert.equal(await editor.getByLabel('Name', { exact: true }).inputValue(), ANSWER.title);
     assert.deepEqual(errors, []);

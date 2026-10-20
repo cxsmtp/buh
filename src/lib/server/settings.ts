@@ -12,7 +12,7 @@ import { SMTP_PORTS, assertPublicMailHost } from './mail';
 import { FIREBASE_PROJECT_ID } from './firebaseAuth';
 import { bump, changedElsewhere } from './live';
 import { envGateways } from '@/lib/otpService';
-import { AI_MODELS, AI_PROVIDERS, GEMINI_MODEL_ID } from '@/types';
+import { AI_MODELS, AI_PROVIDERS, DEEPSEEK_MODEL_ID, GEMINI_MODEL_ID } from '@/types';
 import { HttpError } from './http';
 import { acceptImageRef, LOGO_MAX_SIDE } from './images';
 import { assertPublicHttpsUrl } from './outbound';
@@ -109,11 +109,11 @@ const SECRETS: Record<SettingsKey, string[]> = {
   payments: ['stripeSecretKey', 'stripeWebhookSecret'],
   phoneCheck: [],
   look: [],
-  ai: ['anthropicApiKey', 'geminiApiKey'],
+  ai: ['anthropicApiKey', 'geminiApiKey', 'deepseekApiKey'],
 };
 
 /** Secrets the admin hub may see the last 4 characters of (to tell which key is saved). */
-const SHOW_LAST4 = new Set(['ai.anthropicApiKey', 'ai.geminiApiKey']);
+const SHOW_LAST4 = new Set(['ai.anthropicApiKey', 'ai.geminiApiKey', 'ai.deepseekApiKey']);
 
 const cache = new Map<SettingsKey, unknown>();
 
@@ -375,9 +375,11 @@ export async function updateSettings<K extends SettingsKey>(key: K, input: unkno
   // the chosen AI's key switches it off.
   if (key === 'ai') {
     const a = next as unknown as AiSettings;
-    const activeKey = a.provider === 'gemini' ? 'geminiApiKey' : 'anthropicApiKey';
+    const activeKey = a.provider === 'gemini' ? 'geminiApiKey' : a.provider === 'deepseek' ? 'deepseekApiKey' : 'anthropicApiKey';
     if (getPath(input as Obj, activeKey) === null) a.enabled = false;
-    if (a.enabled && !a[activeKey]) throw new HttpError(400, a.provider === 'gemini' ? 'Add your Gemini API key before switching AI writing on with Gemini.' : 'Add your Anthropic API key before switching AI writing on.');
+    if (a.enabled && !a[activeKey]) {
+      throw new HttpError(400, a.provider === 'gemini' ? 'Add your Gemini API key before switching AI writing on with Gemini.' : a.provider === 'deepseek' ? 'Add your DeepSeek API key before switching AI writing on with DeepSeek.' : 'Add your Anthropic API key before switching AI writing on.');
+    }
   }
   if (options.beforeSave) await options.beforeSave(next as SettingsMap[K], current);
   save(key, next as SettingsMap[K], { keepHistory: options.keepHistory, auto: options.auto, expectUpdatedAt: currentAt });
@@ -718,12 +720,15 @@ const VALIDATORS: { [K in SettingsKey]: (input: Obj, current: SettingsMap[K]) =>
     const model = input.model === undefined ? current.model : input.model;
     if (!AI_MODELS.includes(model as AiSettings['model'])) throw new HttpError(400, `Model: one of ${AI_MODELS.join(', ')}.`);
     const provider = input.provider === undefined ? current.provider : input.provider;
-    if (!AI_PROVIDERS.includes(provider as AiSettings['provider'])) throw new HttpError(400, 'Writing AI: Anthropic or Gemini.');
+    if (!AI_PROVIDERS.includes(provider as AiSettings['provider'])) throw new HttpError(400, 'Writing AI: Anthropic, Gemini or DeepSeek.');
     // Gemini model ids come from Google's own list (Test); only their shape is checked here.
     const geminiModel = input.geminiModel === undefined ? current.geminiModel : input.geminiModel;
     if (typeof geminiModel !== 'string' || (geminiModel !== '' && !GEMINI_MODEL_ID.test(geminiModel))) throw new HttpError(400, 'Gemini writing model: press Test and choose one from the list.');
     const geminiImageModel = input.geminiImageModel === undefined ? current.geminiImageModel : input.geminiImageModel;
     if (typeof geminiImageModel !== 'string' || !GEMINI_MODEL_ID.test(geminiImageModel)) throw new HttpError(400, 'Gemini image model: press Test and choose one from the list.');
+    // DeepSeek model ids come from DeepSeek's own list (Test) too; only their shape is checked here.
+    const deepseekModel = input.deepseekModel === undefined ? current.deepseekModel : input.deepseekModel;
+    if (typeof deepseekModel !== 'string' || !DEEPSEEK_MODEL_ID.test(deepseekModel)) throw new HttpError(400, 'DeepSeek model: press Test and choose one from the list.');
     // The keys are kept or replaced after this (write-only); only their shape is checked here.
     const k = input.anthropicApiKey;
     if (k !== undefined && k !== null && typeof k !== 'string') throw new HttpError(400, 'The API key must be text.');
@@ -731,6 +736,9 @@ const VALIDATORS: { [K in SettingsKey]: (input: Obj, current: SettingsMap[K]) =>
     const g = input.geminiApiKey;
     if (g !== undefined && g !== null && typeof g !== 'string') throw new HttpError(400, 'The API key must be text.');
     if (typeof g === 'string' && g.trim() && !GEMINI_KEY.test(g.trim())) throw new HttpError(400, GEMINI_KEY_HINT);
+    const ds = input.deepseekApiKey;
+    if (ds !== undefined && ds !== null && typeof ds !== 'string') throw new HttpError(400, 'The API key must be text.');
+    if (typeof ds === 'string' && ds.trim() && !DEEPSEEK_KEY.test(ds.trim())) throw new HttpError(400, DEEPSEEK_KEY_HINT);
     return {
       enabled: bool(input.enabled, current.enabled),
       provider: provider as AiSettings['provider'],
@@ -739,6 +747,8 @@ const VALIDATORS: { [K in SettingsKey]: (input: Obj, current: SettingsMap[K]) =>
       geminiApiKey: '',
       geminiModel,
       geminiImageModel,
+      deepseekApiKey: '',
+      deepseekModel,
       labelStyledPhotos: bool(input.labelStyledPhotos, current.labelStyledPhotos),
     };
   },
@@ -943,6 +953,9 @@ const ANTHROPIC_KEY = /^sk-ant-[A-Za-z0-9_-]{20,300}$/;
 export const GEMINI_KEY = /^(?:AIza[A-Za-z0-9_-]{30,60}|AQ\.[A-Za-z0-9._-]{20,250})$/;
 /** What the owner is told when a Gemini key has the wrong shape. */
 export const GEMINI_KEY_HINT = 'A Gemini API key starts with AIza or AQ. (aistudio.google.com → Get API key).';
+/** DeepSeek keys: sk- and letters or digits (today 32 hex characters; a little room either way). Never sk-ant- (Anthropic). */
+export const DEEPSEEK_KEY = /^sk-[A-Za-z0-9]{16,128}$/;
+export const DEEPSEEK_KEY_HINT = 'A DeepSeek API key starts with sk- (platform.deepseek.com → API keys).';
 
 /** A weave's name: letters and digits first, then also spaces and ' & / ( ) . + - (no markup). */
 const WEAVE_NAME = /^[\p{L}\p{N}][\p{L}\p{N} '’&\/().+-]*$/u;

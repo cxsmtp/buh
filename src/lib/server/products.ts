@@ -10,6 +10,7 @@ import { bump, changedElsewhere } from './live';
 import { getSettings } from './settings';
 import { logEvent } from './log';
 import { stagedPhotosFor } from './stagedPhotos';
+import { cleanGiftLines } from './giftLines';
 import { isDuvetProduct } from '@/lib/measurements';
 import { WEIGHT_GRAMS_MAX, WEIGHT_GRAMS_MIN } from '@/lib/shipmentWeight';
 import { auditBacklog, auditMove, insertMove, type SizeChange, type StockMove } from './stockLedger';
@@ -566,6 +567,8 @@ export function validateProduct(input: unknown): StoredProduct {
     slug: title.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '').slice(0, 80),
     description: text(p.description, 'Description', 4000),
     shortDescription: text(p.shortDescription, 'Short description', 300),
+    // Gift lines by festival: kept as saved when the browser sends none.
+    giftLines: p.giftLines === undefined ? existing?.giftLines : cleanGiftLines(p.giftLines),
     category,
     price,
     compareAtPrice: compareAt,

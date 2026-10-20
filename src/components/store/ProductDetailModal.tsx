@@ -279,7 +279,13 @@ const ProductDetailContent: React.FC<ProductDetailModalProps & { product: Produc
             {igNote && <p role="status" className="text-[11px] text-rose-deep">{igNote}</p>}
           </div>
 
-          <p className="text-sm text-ink-soft leading-relaxed">{product.description}</p>
+          {product.giftLine && (
+            <p className="text-sm font-semibold text-gold-deep break-words" data-testid="gift-line">
+              {product.giftLine}
+            </p>
+          )}
+          {/* Paragraphs and the highlights list ("• …" lines) as the owner wrote them. */}
+          <p className="text-sm text-ink-soft leading-relaxed whitespace-pre-line break-words">{product.description}</p>
 
           <ul className="text-xs text-ink-soft space-y-1.5">
             <li className="flex items-center gap-2">

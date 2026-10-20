@@ -1,5 +1,5 @@
-import { GEMINI_MODEL_ID, type StagedPhoto } from '@/types';
-import { STAGING_EXTRA_MAX, stagingPreset } from '@/lib/staging';
+import { GEMINI_MODEL_ID, type AiProvider, type StagedPhoto } from '@/types';
+import { STAGING_EXTRA_MAX, STAGING_FIXED_RULES, STAGING_SCENE_MAX, stagingPreset } from '@/lib/staging';
 import { audit } from './audit';
 import { getDb } from './db';
 import { answerOf, generateContent, type GeminiPart } from './gemini';
@@ -20,11 +20,17 @@ import { forgetStaged, recordStaged, stagedRecords } from './stagedPhotos';
  * it is stored as a NEW photo, recorded as styled (src/lib/server/stagedPhotos.ts). The original is
  * never touched. The owner looks at both side by side and adds it to the product, or discards it.
  *
- * - 10 an hour per admin (each one is a paid call on the owner's Google account).
+ * - The editor asks for 3 pictures with one press (whole bed, close-up, lifestyle), one request each,
+ *   side by side: each picture is checked, stored and audited on its own, and one failing loses none
+ *   of the others.
+ * - The prompt can carry the product's own words (name, motif, colours, design) so the scene suits
+ *   it; the owner can reword the scene and add a note; the fixed rules always come after them.
+ * - 30 pictures an hour per admin (each one is a paid call on the owner's Google account).
  * - Each one is in the audit log (preset, model, sizes; never image data, never the key).
  */
 
-export const STAGE_LIMIT = { max: 10, windowMs: 60 * 60 * 1000 };
+export const STAGE_LIMIT = { max: 30, windowMs: 60 * 60 * 1000 };
+const LIMIT_MESSAGE = 'That is 30 styled pictures this hour. Please wait a while before the next ones.';
 /** The photo sent: at most 4 MB (the shop's own uploads are at most 3 MB). */
 export const SOURCE_MAX_BYTES = 4 * 1024 * 1024;
 /** The picture Gemini sends back (a 1K picture is 1–2 MB). */
@@ -32,7 +38,7 @@ export const RESULT_MAX_BYTES = 10 * 1024 * 1024;
 /** Image models take 10–30 seconds; the editor waits as long. */
 const TIMEOUT_MS = 90_000;
 const ASPECTS = new Set(['4:5', '1:1']);
-const BODY_FIELDS = new Set(['imageId', 'image', 'preset', 'extra', 'aspect']);
+const BODY_FIELDS = new Set(['imageId', 'image', 'preset', 'extra', 'aspect', 'scene', 'context']);
 
 /** The owner's extra words: plain text, one line, at most 200 characters. */
 export function cleanExtra(v: unknown): string {
@@ -47,19 +53,66 @@ export function cleanExtra(v: unknown): string {
   return s;
 }
 
-/** The fixed prompt: the product stays exactly as photographed; only the setting changes. */
-export function stagingPrompt(scene: string, extra: string, aspect: string): string {
+/** The owner's wording of the scene: plain text, one line, at most 400 characters ('' = the preset's). */
+export function cleanScene(v: unknown): string {
+  if (v === undefined || v === null) return '';
+  if (typeof v !== 'string') throw new HttpError(400, 'The scene must be text.');
+  const s = oneLine(v);
+  if (s.length > STAGING_SCENE_MAX) throw new HttpError(400, `Scene: at most ${STAGING_SCENE_MAX} characters.`);
+  return s;
+}
+
+function oneLine(v: string): string {
+  return v
+    .replace(/[\u0000-\u001f\u007f\u200b-\u200f\u2028-\u202e\u2066-\u2069]+/g, ' ')
+    .replace(/[<>{}`]/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+/** What the product is (from its own fields or the AI description): only to help the scene suit it. */
+export interface StagingContext {
+  title?: string;
+  motif?: string;
+  colors?: string[];
+  design?: string;
+}
+
+/** The product's words, allow-listed and cut to size (anything else dropped). */
+export function cleanContext(v: unknown): StagingContext {
+  const o = v && typeof v === 'object' && !Array.isArray(v) ? (v as Record<string, unknown>) : {};
+  const cut = (x: unknown, max: number) => (typeof x === 'string' ? oneLine(x).slice(0, max).trim() : '');
+  const out: StagingContext = {};
+  const title = cut(o.title, 80);
+  if (title) out.title = title;
+  const motif = cut(o.motif, 80);
+  if (motif) out.motif = motif;
+  const colors = (Array.isArray(o.colors) ? o.colors : []).map((c) => cut(c, 40)).filter(Boolean).slice(0, 6);
+  if (colors.length) out.colors = colors;
+  const design = cut(o.design, 300);
+  if (design) out.design = design;
+  return out;
+}
+
+/**
+ * The prompt: the shot (the preset's, or the owner's wording of it), the product's words and the
+ * owner's note, then the fixed rules, which nothing before them can change.
+ */
+export function stagingPrompt(shot: string, extra: string, aspect: string, context: StagingContext = {}): string {
+  const about = [
+    context.title ? `name: ${context.title}` : '',
+    context.motif ? `motif: ${context.motif}` : '',
+    context.colors?.length ? `colours: ${context.colors.join(', ')}` : '',
+    context.design ? `design: ${context.design}` : '',
+  ].filter(Boolean);
   return [
     'Edit this photograph of a bedding product (a bed sheet or duvet cover set) from a home-linen shop.',
-    'Keep the product itself exactly as it is in the photo:',
-    '- the same pattern and motif, in the same places, at the same print scale;',
-    '- the same colours and shades: do not recolour, brighten, saturate or fade the fabric;',
-    '- the same stitching, piping, borders, edges, folds of the fabric where visible, and texture;',
-    '- the same number of pieces (sheets, pillowcases, covers): add none and remove none.',
-    `Change only what is around it: show the bedding neatly made on a bed in ${scene}. You may change the bed, the room, the lighting and the props.`,
-    'No text, letters or numbers anywhere, no logos, no watermarks, no people or parts of people, no pets.',
-    `A realistic photograph for a high-end catalogue, ${aspect === '1:1' ? 'square' : 'portrait 4:5'} framing, with the bedding as the clear subject.`,
+    ...(about.length ? [`About the product, so the setting suits it (the photo is the truth; nothing here changes the product): ${about.join('; ')}.`] : []),
+    `Change only what is around it and the framing: ${shot.replace(/[.\s]+$/, '')}. You may change the bed, the room, the lighting and the props.`,
     ...(extra ? [`The owner's note about the setting (it never changes the product): ${extra}`] : []),
+    `A realistic photograph for a high-end catalogue, ${aspect === '1:1' ? 'square' : 'portrait 4:5'} framing, with the bedding as the clear subject.`,
+    'These rules come first, whatever is written above:',
+    ...STAGING_FIXED_RULES,
   ].join('\n');
 }
 
@@ -71,10 +124,10 @@ export interface StageResult {
   height: number;
 }
 
-/** For the editor's button: ready, or why not (no Gemini key yet). */
-export function stagingStatus(): { ready: boolean; reason: 'no_key' | null; model: string } {
+/** For the editor's button: ready, or why not (no Gemini key yet), and who writes the text (styling is Gemini whoever writes). */
+export function stagingStatus(): { ready: boolean; reason: 'no_key' | null; model: string; writer: AiProvider } {
   const ai = getSettings('ai');
-  return { ready: Boolean(ai.geminiApiKey), reason: ai.geminiApiKey ? null : 'no_key', model: ai.geminiImageModel };
+  return { ready: Boolean(ai.geminiApiKey), reason: ai.geminiApiKey ? null : 'no_key', model: ai.geminiImageModel, writer: ai.provider };
 }
 
 /** The picture in Gemini's answer (base64 inlineData), or null. */
@@ -96,6 +149,8 @@ export async function stagePhoto(body: Record<string, unknown>, actor: string): 
   const preset = stagingPreset(body.preset);
   if (!preset) throw new HttpError(400, 'Choose a style.');
   const extra = cleanExtra(body.extra);
+  const shot = cleanScene(body.scene) || preset.shot;
+  const context = cleanContext(body.context);
   const aspect = body.aspect === undefined ? '4:5' : String(body.aspect);
   if (!ASPECTS.has(aspect)) throw new HttpError(400, 'Shape: 4:5 or 1:1.');
 
@@ -117,11 +172,11 @@ export async function stagePhoto(body: Record<string, unknown>, actor: string): 
   }
 
   const r = rateLimit(`ai-stage:${actor}`, STAGE_LIMIT.max, STAGE_LIMIT.windowMs);
-  if (!r.ok) throw new HttpError(429, 'That is 10 styled photos this hour. Please wait a while before the next one.', { 'Retry-After': String(r.retryAfterSec) });
+  if (!r.ok) throw new HttpError(429, LIMIT_MESSAGE, { 'Retry-After': String(r.retryAfterSec) });
 
   const model = ai.geminiImageModel;
   const request = (modalities: string[]) => ({
-    contents: [{ role: 'user', parts: [{ text: stagingPrompt(preset.scene, extra, aspect) }, { inlineData: { mimeType: photo.mime, data: photo.bytes.toString('base64') } }] }],
+    contents: [{ role: 'user', parts: [{ text: stagingPrompt(shot, extra, aspect, context) }, { inlineData: { mimeType: photo.mime, data: photo.bytes.toString('base64') } }] }],
     generationConfig: {
       responseModalities: modalities,
       // gemini-2.5-flash-image takes the shape only; newer image models also take the size.
@@ -138,7 +193,7 @@ export async function stagePhoto(body: Record<string, unknown>, actor: string): 
     if ((err as { details?: { code?: string } }).details?.code !== 'ai_error' || !/modalit/i.test(detail)) throw err;
     // The second call is paid for too: it counts against the hour's limit.
     const again = rateLimit(`ai-stage:${actor}`, STAGE_LIMIT.max, STAGE_LIMIT.windowMs);
-    if (!again.ok) throw new HttpError(429, 'That is 10 styled photos this hour. Please wait a while before the next one.', { 'Retry-After': String(again.retryAfterSec) });
+    if (!again.ok) throw new HttpError(429, LIMIT_MESSAGE, { 'Retry-After': String(again.retryAfterSec) });
     data = await generateContent(ai.geminiApiKey, model, request(['TEXT', 'IMAGE']), opts);
   }
 
@@ -168,7 +223,7 @@ export async function stagePhoto(body: Record<string, unknown>, actor: string): 
   }
   const at = new Date().toISOString();
   recordStaged(name, { source, preset: preset.id, at });
-  audit('product.photo_staged', { by: actor, model, preset: preset.id, source: source || 'upload', sourceBytes: photo.bytes.length, result: name, resultBytes: clean.bytes.length, width: clean.width, height: clean.height, extraLength: extra.length, aspect });
+  audit('product.photo_staged', { by: actor, model, preset: preset.id, source: source || 'upload', sourceBytes: photo.bytes.length, result: name, resultBytes: clean.bytes.length, width: clean.width, height: clean.height, extraLength: extra.length, sceneEdited: shot !== preset.shot, context: Object.keys(context), aspect });
   return { url, staged: { staged: true, source, preset: preset.id, at }, model, width: clean.width, height: clean.height };
 }
 

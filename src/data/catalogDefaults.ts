@@ -27,6 +27,8 @@ export const DEFAULT_AI: AiSettings = {
   geminiApiKey: '',
   geminiModel: '',
   geminiImageModel: 'gemini-3.1-flash-image',
+  deepseekApiKey: '',
+  deepseekModel: 'deepseek-flash',
   labelStyledPhotos: true,
 };
 

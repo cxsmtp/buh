@@ -1,5 +1,6 @@
 import http from 'node:http';
-import { AI_MODELS, GEMINI_MODEL_ID, type AiModel, type AiProvider, type AiSettings } from '@/types';
+import { AI_MODELS, DEEPSEEK_MODEL_ID, GEMINI_MODEL_ID, deepseekReadsPhotos, type AiModel, type AiProvider, type AiSettings } from '@/types';
+import { COPY_LIMITS, composeDescription, highlightLines } from '@/lib/productCopy';
 import { stripEmoji } from '@/lib/marquee';
 import { FABRIC_COLOURS as NAMED } from '@/data/fabricColours';
 import { audit } from './audit';
@@ -7,17 +8,21 @@ import { HttpError } from './http';
 import { parseImageDataUrl } from './imageInput';
 import { IMAGE_NAME, readImage } from './images';
 import { testStandIn } from './testStandIn';
-import { logEvent, maskGoogleKeys } from './log';
+import { logEvent, maskAiKeys } from './log';
 import { safeFetch } from './outbound';
 import { rateLimit } from './rateLimit';
 import { answerOf, generateContent, listGeminiModels, textOf, type ModelLists } from './gemini';
-import { GEMINI_KEY, GEMINI_KEY_HINT, getSettings, withStoredSecrets } from './settings';
+import { chatAnswer, deepseekCall, listDeepSeekModels, type DeepSeekModels } from './deepseek';
+import { DEEPSEEK_KEY, DEEPSEEK_KEY_HINT, GEMINI_KEY, GEMINI_KEY_HINT, getSettings, withStoredSecrets } from './settings';
+import { EVERYDAY, cleanGiftLine, defaultGiftTarget, giftFestivals, type GiftFestival } from './giftLines';
 
 /**
  * "Write from photo" (Admin Hub → Inventory → product editor): the product's photo goes to
- * Anthropic's Messages API or Google Gemini (src/lib/server/gemini.ts), as chosen in Settings → AI
- * writing, from the server only, with the owner's own key, and comes back as a suggested name,
- * short and full description, colours and weave. Both use the same rules and the same checks.
+ * Anthropic's Messages API, Google Gemini (src/lib/server/gemini.ts) or DeepSeek
+ * (src/lib/server/deepseek.ts), as chosen in Settings → AI writing, from the server only, with the
+ * owner's own key, and comes back as a suggested name, short description, design and comfort
+ * paragraphs, highlights, a gift note, the full description made of them (src/lib/productCopy.ts),
+ * colours and weave. All three use the same rules and the same checks.
  * Nothing is saved here: the editor shows the suggestions for the owner to edit or ignore.
  *
  * - One fixed address (api.anthropic.com), through safeFetch: https only, no redirects, public
@@ -38,7 +43,7 @@ const IMAGE_MAX_BYTES = Math.floor(3.5 * 1024 * 1024);
 export const DESCRIBE_LIMIT = { max: 20, windowMs: 60 * 60 * 1000 };
 const TEST_LIMIT = { max: 10, windowMs: 10 * 60 * 1000 };
 
-export const LIMITS = { title: 60, shortDescription: 140, description: 900, colors: 4, motif: 80 } as const;
+export const LIMITS = COPY_LIMITS;
 
 /** 429 with Retry-After when the limit is reached (as guard.ts's enforceLimit, without its cookie imports). */
 function enforceLimit(key: string, max: number, windowMs: number, message: string) {
@@ -105,7 +110,7 @@ const send: Transport = (body, headers) => {
 /** Anthropic API keys (and the key in hand), wherever they appear in a message. */
 function scrub(text: string, key: string): string {
   let out = key ? text.split(key).join('[redacted]') : text;
-  out = maskGoogleKeys(out.replace(/sk-ant-[A-Za-z0-9_-]+/g, 'sk-ant-[redacted]'));
+  out = maskAiKeys(out.replace(/sk-ant-[A-Za-z0-9_-]+/g, 'sk-ant-[redacted]'));
   return out.replace(/[\u0000-\u001f\u007f]+/g, ' ').trim().slice(0, 200);
 }
 
@@ -157,7 +162,17 @@ async function callAnthropic(key: string, model: AiModel, request: Record<string
 export interface Suggestion {
   title: string;
   shortDescription: string;
+  /** The full description: design, comfort, closing, highlights and gift note (src/lib/productCopy.ts). */
   description: string;
+  /** What it looks like and which bedrooms and decor it suits ('' from an older-style answer). */
+  design: string;
+  /** How it looks to feel and when it is nice to use ('' from an older-style answer). */
+  comfort: string;
+  closing: string;
+  /** 3–5 short lines a shopper scans. */
+  highlights: string[];
+  /** One line on giving it for the festival asked for (giftFor), or an everyday one, else ''. */
+  giftLine: string;
   colors: Array<{ name: string; hex: string }>;
   weave: string | null;
   motif: string;
@@ -219,7 +234,19 @@ export function parseSuggestion(text: string, weaves: string[]): Suggestion {
   if (!raw) throw new HttpError(502, 'The AI’s answer could not be read. Please try again.', {}, { code: 'ai_bad_reply' });
   const title = clamp(plain(raw.title), LIMITS.title);
   const shortDescription = clamp(plain(raw.shortDescription), LIMITS.shortDescription);
-  const description = clamp(plain(raw.description, { lines: true }).split('\n\n').slice(0, 3).join('\n\n'), LIMITS.description, { sentence: true });
+  const design = clamp(plain(raw.design), LIMITS.design, { sentence: true });
+  const comfort = clamp(plain(raw.comfort), LIMITS.comfort, { sentence: true });
+  const closing = clamp(plain(raw.closing), LIMITS.closing, { sentence: true });
+  const highlights = highlightLines((Array.isArray(raw.highlights) ? raw.highlights : []).map((h) => plain(h)))
+    .map((h) => clamp(h, LIMITS.highlight))
+    .filter(Boolean)
+    .slice(0, LIMITS.highlights);
+  const giftLine = cleanGiftLine(raw.giftLine ?? raw.giftNote);
+  // The full description from the parts; an older-style answer (one "description") still works.
+  const description =
+    design || comfort
+      ? composeDescription({ design, comfort, closing, highlights })
+      : clamp(plain(raw.description, { lines: true }).split('\n\n').slice(0, 3).join('\n\n'), LIMITS.description, { sentence: true });
   if (!title && !shortDescription && !description) throw new HttpError(502, 'The AI’s answer was empty. Please try again.', {}, { code: 'ai_bad_reply' });
   const seen = new Set<string>();
   const colors = (Array.isArray(raw.colors) ? raw.colors : [])
@@ -228,7 +255,7 @@ export function parseSuggestion(text: string, weaves: string[]): Suggestion {
     .slice(0, LIMITS.colors);
   const w = typeof raw.weave === 'string' ? raw.weave.trim().toLowerCase() : '';
   const weave = (w && weaves.find((x) => x.toLowerCase() === w)) || null;
-  return { title, shortDescription, description, colors, weave, motif: clamp(plain(raw.motif), LIMITS.motif) };
+  return { title, shortDescription, description, design, comfort, closing, highlights, giftLine, colors, weave, motif: clamp(plain(raw.motif), LIMITS.motif) };
 }
 
 // ── the request ─────────────────────────────────────────────────────────────
@@ -239,6 +266,8 @@ export interface Hints {
   threadCount?: number;
   weave?: string;
   colors?: string[];
+  /** The product's own sizes and what is in each set, as the editor has them (facts). */
+  sizes?: string[];
 }
 
 /** The owner's hints, allow-listed and cut to size (anything else is dropped). */
@@ -256,28 +285,41 @@ export function cleanHints(v: unknown): Hints {
   if (weave) out.weave = weave;
   const colors = (Array.isArray(o.colors) ? o.colors : []).map((c) => clamp(plain(c), 40)).filter(Boolean).slice(0, 12);
   if (colors.length) out.colors = colors;
+  const sizes = (Array.isArray(o.sizes) ? o.sizes : []).map((c) => clamp(plain(c), 200)).filter(Boolean).slice(0, 8);
+  if (sizes.length) out.sizes = sizes;
   return out;
 }
 
-const SYSTEM = `You write product copy for Beautiful UAE Home, a small luxury home-linen boutique in the United Arab Emirates (bed sheets, duvet covers, hand block prints).
+/**
+ * The rules every writer gets. The copy is there to help a shopper choose and buy, and it must be
+ * true: nothing that can't be seen or that the owner did not write down.
+ */
+export const SYSTEM = `You write product copy for Beautiful UAE Home, a small luxury home-linen boutique in the United Arab Emirates (bed sheets, duvet covers, hand block prints).
+The copy is there to help a shopper choose with confidence and buy: clear, specific and useful, so they can picture it in their own bedroom.
 Look closely at the photo: the pattern and motif, the colours, the texture and any sheen, and the style (for example hand block print, Mughal, floral, geometric, minimal hotel white).
-Write elegant, warm, unhurried copy in British English (colour, centre), for customers in the UAE.
+Write warm, confident, specific copy in British English (colour, centre), for customers in the UAE.
 Rules:
 - Describe only what is visible in the photo.
 - Never state a thread count, material, fibre, certification, country of origin, or washing or care instructions unless the owner's notes give them; then use them exactly as given.
-- No brand names, no awards, no superlatives you can't see (no "best", "finest in the world").
+- Feel and comfort only as they look ("looks soft and matte", "a crisp, cool look") unless the owner's notes give the fabric.
+- Sizes and what is in the set only from the owner's notes; never guess them.
+- No brand names, no awards, no reviews or ratings, no superlatives you can't see (no "best", "finest in the world"), no hype words (no "stunning", "must-have"), no fake urgency (no "hurry", "only a few left").
 - No emoji, no prices, no discounts, no hashtags, no markdown.
 Answer with one JSON object only, with no text before or after it.`;
 
-function userText(hints: Hints, weaves: string[]): string {
+export function userText(hints: Hints, weaves: string[]): string {
   const notes = Object.keys(hints).length ? JSON.stringify(hints) : 'none';
   return `The owner's notes about this product (facts you may use as given): ${notes}
 The shop's weaves: ${JSON.stringify(weaves)}
 
 Return exactly this JSON:
-{"title": "an elegant product name, at most 60 characters",
- "shortDescription": "one line for the product card, at most 140 characters",
- "description": "2 or 3 short paragraphs separated by a blank line, at most 900 characters in all",
+{"title": "clear and searchable: the motif, the style and the product type, e.g. Indigo Chevron Hand Block Print Bed Set; at most 60 characters",
+ "shortDescription": "the main reason to buy it, in one line of at most 140 characters",
+ "design": "one short paragraph: the pattern, motif and colours, the print or weave technique you can see, the mood it gives a bedroom, and which bedrooms and decor it suits (e.g. pairs with white or walnut furniture, suits a calm master bedroom or a guest room); at most 450 characters",
+ "comfort": "one short paragraph on how it looks to feel (texture, drape, sheen) and when it is nice to use, from what is visible or the owner's notes; at most 350 characters",
+ "closing": "one warm closing line, at most 140 characters",
+ "highlights": ["3 to 5 short, benefit-led lines a shopper scans, at most 70 characters each; sizes and what is in the set only from the owner's notes"],
+ "giftLine": "the gift line described below (at most 140 characters), or an empty string",
  "colors": [{"name": "a plain colour name you can see, e.g. Indigo", "hex": "#rrggbb"}],
  "weave": "one of the shop's weaves if the photo clearly shows it, otherwise null",
  "motif": "the main motif in a few words"}
@@ -312,9 +354,11 @@ export function resolveImage(body: Record<string, unknown>): ImageSource {
 }
 
 /** The chosen writer's key. */
-const writerKey = (ai: AiSettings) => (ai.provider === 'gemini' ? ai.geminiApiKey : ai.anthropicApiKey);
-/** The model "Write from photo" uses: Claude's, or the Gemini one chosen after Test. */
-const writerModel = (ai: AiSettings): string => (ai.provider === 'gemini' ? ai.geminiModel : ai.model);
+const writerKey = (ai: AiSettings) => (ai.provider === 'gemini' ? ai.geminiApiKey : ai.provider === 'deepseek' ? ai.deepseekApiKey : ai.anthropicApiKey);
+/** The model "Write from photo" uses: Claude's, or the Gemini / DeepSeek one chosen after Test. */
+const writerModel = (ai: AiSettings): string => (ai.provider === 'gemini' ? ai.geminiModel : ai.provider === 'deepseek' ? ai.deepseekModel : ai.model);
+/** DeepSeek's text-only models (deepseek-v4-pro) can't do "Write from photo". */
+export const textOnlyMessage = (model: string) => `${model} can't read photos: choose deepseek-flash in Settings → AI writing.`;
 
 /** Settings → AI writing, or a readable reason why "Write from photo" can't run yet. */
 function readySettings(): AiSettings {
@@ -322,60 +366,55 @@ function readySettings(): AiSettings {
   if (!writerKey(ai)) throw new HttpError(409, 'Add your AI key in Settings → AI writing, then switch it on.', {}, { code: 'ai_off' });
   if (!ai.enabled) throw new HttpError(409, 'AI writing is switched off. Switch it on in Settings → AI writing.', {}, { code: 'ai_off' });
   if (ai.provider === 'gemini' && !GEMINI_MODEL_ID.test(ai.geminiModel)) throw new HttpError(409, 'Choose a Gemini writing model: press Test in Settings → AI writing, pick one and save.', {}, { code: 'ai_off' });
+  if (ai.provider === 'deepseek' && !DEEPSEEK_MODEL_ID.test(ai.deepseekModel)) throw new HttpError(409, 'Choose a DeepSeek model: press Test in Settings → AI writing, pick one and save.', {}, { code: 'ai_off' });
+  if (ai.provider === 'deepseek' && !deepseekReadsPhotos(ai.deepseekModel)) throw new HttpError(409, textOnlyMessage(ai.deepseekModel), {}, { code: 'ai_text_only' });
   return ai;
 }
 
-/** For the editor's button: ready, or why not (no key, switched off, or no Gemini model chosen yet). */
-export function aiStatus(): { ready: boolean; reason: 'no_key' | 'off' | 'no_model' | null; provider: AiProvider; model: string } {
+/** For the editor's button: ready, or why not (no key, switched off, no model chosen yet, or a DeepSeek model that can't read photos). */
+export function aiStatus(): { ready: boolean; reason: 'no_key' | 'off' | 'no_model' | 'text_only' | null; provider: AiProvider; model: string } {
   const ai = getSettings('ai');
-  const reason = !writerKey(ai) ? 'no_key' : !ai.enabled ? 'off' : ai.provider === 'gemini' && !GEMINI_MODEL_ID.test(ai.geminiModel) ? 'no_model' : null;
+  const noModel = (ai.provider === 'gemini' && !GEMINI_MODEL_ID.test(ai.geminiModel)) || (ai.provider === 'deepseek' && !DEEPSEEK_MODEL_ID.test(ai.deepseekModel));
+  const reason = !writerKey(ai) ? 'no_key' : !ai.enabled ? 'off' : noModel ? 'no_model' : ai.provider === 'deepseek' && !deepseekReadsPhotos(ai.deepseekModel) ? 'text_only' : null;
   return { ready: !reason, reason, provider: ai.provider, model: writerModel(ai) };
 }
 
-const BODY_FIELDS = new Set(['image', 'imageId', 'imageUrl', 'hints']);
+const BODY_FIELDS = new Set(['image', 'imageId', 'imageUrl', 'hints', 'giftFor']);
 
-/** POST /api/admin/products/describe, after the admin check and the size-capped read. */
-export async function describeProduct(body: Record<string, unknown>, actor: string): Promise<Suggestion & { model: string; provider: AiProvider }> {
-  for (const k of Object.keys(body)) if (!BODY_FIELDS.has(k)) throw new HttpError(400, `Unexpected field: ${k.slice(0, 30)}.`);
-  const ai = readySettings();
-  const image = resolveImage(body);
-  if (ai.provider === 'gemini' && image.kind === 'url') throw new HttpError(400, 'With Gemini, use a photo uploaded to the shop (add it again from the gallery).');
-  const hints = cleanHints(body.hints);
-  enforceLimit(`ai-describe:${actor}`, DESCRIBE_LIMIT.max, DESCRIBE_LIMIT.windowMs, 'That is 20 descriptions this hour. Please wait a while before the next one.');
-  const weaves = getSettings('catalog').weaves;
-  if (ai.provider === 'gemini' && image.kind !== 'url') return describeWithGemini(ai, image, hints, weaves, actor);
+type StoredPhoto = { kind: 'upload' | 'stored'; mime: string; bytes: Buffer };
+/** The writer's text, and whether it stopped for length (so a broken answer says "cut short"). */
+interface Answer {
+  text: string;
+  cutShort: boolean;
+}
+
+/** The photo and the request text to the chosen writer; its answer's text (each writer's refusals and errors made readable). */
+async function ask(ai: AiSettings, image: ImageSource, user: string): Promise<Answer> {
+  if (ai.provider === 'gemini' && image.kind !== 'url') return askGemini(ai, image, user);
+  if (ai.provider === 'deepseek' && image.kind !== 'url') return askDeepSeek(ai, image, user);
   const source = image.kind === 'url' ? { type: 'url', url: image.url } : { type: 'base64', media_type: image.mime, data: image.bytes.toString('base64') };
   const { text, stopReason } = await callAnthropic(ai.anthropicApiKey, ai.model, {
     max_tokens: MAX_TOKENS,
     // Short copy: little thinking needed (and every thinking token counts against max_tokens).
     output_config: { effort: 'low' },
     system: SYSTEM,
-    messages: [{ role: 'user', content: [{ type: 'image', source }, { type: 'text', text: userText(hints, weaves) }] }],
+    messages: [{ role: 'user', content: [{ type: 'image', source }, { type: 'text', text: user }] }],
   });
-  let suggestion: Suggestion;
-  try {
-    suggestion = parseSuggestion(text, weaves);
-  } catch (err) {
-    logEvent('warn', 'anthropic_bad_reply', { stopReason, length: text.length });
-    if (stopReason === 'max_tokens') throw new HttpError(502, 'The AI’s answer was cut short. Please try again.', {}, { code: 'ai_bad_reply' });
-    throw err;
-  }
-  audit('product.ai_described', { by: actor, provider: 'anthropic', model: ai.model, photo: image.kind, ...(image.kind === 'url' ? {} : { photoBytes: image.bytes.length }), hints: Object.keys(hints), suggested: { titleLength: suggestion.title.length, colors: suggestion.colors.length, weave: suggestion.weave } });
-  return { ...suggestion, model: ai.model, provider: 'anthropic' };
+  return { text, cutShort: stopReason === 'max_tokens' };
 }
 
 /**
- * The same request to Gemini: the same rules (system instruction), the photo as inlineData, JSON
- * asked for with responseMimeType, and the answer through the same checks (parseSuggestion).
+ * Gemini: the same rules (system instruction), the photo as inlineData, JSON asked for with
+ * responseMimeType.
  */
-async function describeWithGemini(ai: AiSettings, image: { kind: 'upload' | 'stored'; mime: string; bytes: Buffer }, hints: Hints, weaves: string[], actor: string): Promise<Suggestion & { model: string; provider: AiProvider }> {
+async function askGemini(ai: AiSettings, image: StoredPhoto, user: string): Promise<Answer> {
   const data = await generateContent(
     ai.geminiApiKey,
     ai.geminiModel,
     {
       systemInstruction: { parts: [{ text: SYSTEM }] },
-      contents: [{ role: 'user', parts: [{ inlineData: { mimeType: image.mime, data: image.bytes.toString('base64') } }, { text: userText(hints, weaves) }] }],
-      // Room for the JSON (about 400 tokens) and the model's own thinking.
+      contents: [{ role: 'user', parts: [{ inlineData: { mimeType: image.mime, data: image.bytes.toString('base64') } }, { text: user }] }],
+      // Room for the JSON (about 600 tokens) and the model's own thinking.
       generationConfig: { responseMimeType: 'application/json', maxOutputTokens: 8192 },
     },
     { timeoutMs: TIMEOUT_MS, maxBytes: 256 * 1024 }
@@ -385,17 +424,142 @@ async function describeWithGemini(ai: AiSettings, image: { kind: 'upload' | 'sto
     logEvent('warn', 'gemini_refused', { blocked, finishReason });
     throw new HttpError(502, 'The AI would not describe this photo. Try another photo, or write the text yourself.', {}, { code: 'ai_refused' });
   }
-  const text = textOf(parts);
-  let suggestion: Suggestion;
+  return { text: textOf(parts), cutShort: finishReason === 'MAX_TOKENS' };
+}
+
+/**
+ * DeepSeek (OpenAI-style chat completions): the same rules as the system message, the photo as an
+ * image_url data URL, JSON asked for with response_format, thinking off (a short JSON task: faster
+ * and cheaper).
+ */
+async function askDeepSeek(ai: AiSettings, image: StoredPhoto, user: string): Promise<Answer> {
+  const data = await deepseekCall(ai.deepseekApiKey, {
+    method: 'POST',
+    path: '/chat/completions',
+    body: JSON.stringify({
+      model: ai.deepseekModel,
+      messages: [
+        { role: 'system', content: SYSTEM },
+        { role: 'user', content: [{ type: 'image_url', image_url: { url: `data:${image.mime};base64,${image.bytes.toString('base64')}` } }, { type: 'text', text: user }] },
+      ],
+      response_format: { type: 'json_object' },
+      thinking: { type: 'disabled' },
+      max_tokens: 2048,
+      stream: false,
+    }),
+    timeoutMs: TIMEOUT_MS,
+    maxBytes: 256 * 1024,
+  });
+  const { text, finishReason } = chatAnswer(data);
+  if (finishReason === 'content_filter') {
+    logEvent('warn', 'deepseek_refused', { finishReason });
+    throw new HttpError(502, 'The AI would not describe this photo. Try another photo, or write the text yourself.', {}, { code: 'ai_refused' });
+  }
+  // DeepSeek's JSON mode can now and then send an empty answer: worth another try.
+  if (!text.trim()) {
+    logEvent('warn', 'deepseek_empty_reply', { finishReason });
+    throw new HttpError(502, finishReason === 'length' ? 'The AI’s answer was cut short. Please try again.' : 'DeepSeek sent back an empty answer. Please try again.', {}, { code: 'ai_bad_reply' });
+  }
+  return { text, cutShort: finishReason === 'length' };
+}
+
+/** Parsed, or a readable reason: "cut short" when the writer stopped for length. */
+function parsed<T>(answer: Answer, ai: AiSettings, parse: (text: string) => T): T {
   try {
-    suggestion = parseSuggestion(text, weaves);
+    return parse(answer.text);
   } catch (err) {
-    logEvent('warn', 'gemini_bad_reply', { finishReason, length: text.length });
-    if (finishReason === 'MAX_TOKENS') throw new HttpError(502, 'The AI’s answer was cut short. Please try again.', {}, { code: 'ai_bad_reply' });
+    logEvent('warn', `${ai.provider}_bad_reply`, { cutShort: answer.cutShort, length: answer.text.length });
+    if (answer.cutShort) throw new HttpError(502, 'The AI’s answer was cut short. Please try again.', {}, { code: 'ai_bad_reply' });
     throw err;
   }
-  audit('product.ai_described', { by: actor, provider: 'gemini', model: ai.geminiModel, photo: image.kind, photoBytes: image.bytes.length, hints: Object.keys(hints), suggested: { titleLength: suggestion.title.length, colors: suggestion.colors.length, weave: suggestion.weave } });
-  return { ...suggestion, model: ai.geminiModel, provider: 'gemini' };
+}
+
+/** The festival a gift line is written for: the one asked for (it must be one the calendar offers now), else the themed or next one, else everyday. */
+function giftTarget(v: unknown, now: Date): GiftFestival | null {
+  if (v === undefined || v === null || v === '') return defaultGiftTarget(now);
+  if (v === EVERYDAY) return null;
+  const f = typeof v === 'string' ? giftFestivals(now, 8).find((x) => x.id === v) : undefined;
+  if (!f) throw new HttpError(400, 'Choose one of the festivals offered for the gift line.');
+  return f;
+}
+
+/** The gift-line facts for the prompt: the festival's name, dates and the shop's own mood for it. */
+export function giftPrompt(f: GiftFestival | null): string {
+  if (!f) return 'Gift line ("giftLine"): an everyday gift idea (a housewarming, a wedding, a new home) if it truly fits this product, otherwise an empty string.';
+  return `Gift line ("giftLine"): one line for ${f.name} (${f.start === f.end ? f.start : `${f.start} to ${f.end}`}; the shop's mood for it: "${f.mood}"), on giving it or having it at home for the festival. No discounts, no urgency, no invented facts.`;
+}
+
+/** POST /api/admin/products/describe, after the admin check and the size-capped read. */
+export async function describeProduct(body: Record<string, unknown>, actor: string, now: Date = new Date()): Promise<Suggestion & { model: string; provider: AiProvider; giftFor: string }> {
+  for (const k of Object.keys(body)) if (!BODY_FIELDS.has(k)) throw new HttpError(400, `Unexpected field: ${k.slice(0, 30)}.`);
+  const ai = readySettings();
+  const image = resolveImage(body);
+  if (ai.provider === 'gemini' && image.kind === 'url') throw new HttpError(400, 'With Gemini, use a photo uploaded to the shop (add it again from the gallery).');
+  if (ai.provider === 'deepseek' && image.kind === 'url') throw new HttpError(400, 'With DeepSeek, use a photo uploaded to the shop (add it again from the gallery).');
+  const hints = cleanHints(body.hints);
+  const gift = giftTarget(body.giftFor, now);
+  enforceLimit(`ai-describe:${actor}`, DESCRIBE_LIMIT.max, DESCRIBE_LIMIT.windowMs, 'That is 20 descriptions this hour. Please wait a while before the next one.');
+  const weaves = getSettings('catalog').weaves;
+  const answer = await ask(ai, image, `${userText(hints, weaves)}\n${giftPrompt(gift)}`);
+  const suggestion = parsed(answer, ai, (t) => parseSuggestion(t, weaves));
+  const model = writerModel(ai);
+  const giftFor = gift?.id ?? EVERYDAY;
+  audit('product.ai_described', { by: actor, provider: ai.provider, model, photo: image.kind, ...(image.kind === 'url' ? {} : { photoBytes: image.bytes.length }), hints: Object.keys(hints), giftFor, suggested: { titleLength: suggestion.title.length, descriptionLength: suggestion.description.length, highlights: suggestion.highlights.length, colors: suggestion.colors.length, weave: suggestion.weave } });
+  return { ...suggestion, model, provider: ai.provider, giftFor };
+}
+
+/** The gift lines in an answer: { giftLines: { id: line } }, festivals asked for only, each line cleaned. */
+export function parseGiftLines(text: string, ids: string[]): Record<string, string> {
+  const body = text.replace(/^\s*```(?:json)?/i, '').replace(/```\s*$/, '');
+  const start = body.indexOf('{');
+  const end = body.lastIndexOf('}');
+  let raw: unknown = null;
+  try {
+    raw = start >= 0 && end > start ? JSON.parse(body.slice(start, end + 1)) : null;
+  } catch {
+    raw = null;
+  }
+  const map = raw && typeof raw === 'object' ? ((raw as { giftLines?: unknown }).giftLines ?? raw) : null;
+  if (!map || typeof map !== 'object' || Array.isArray(map)) throw new HttpError(502, 'The AI’s answer could not be read. Please try again.', {}, { code: 'ai_bad_reply' });
+  const out: Record<string, string> = {};
+  for (const id of ids) {
+    const line = cleanGiftLine((map as Record<string, unknown>)[id]);
+    if (line) out[id] = line;
+  }
+  if (!Object.keys(out).length) throw new HttpError(502, 'The AI’s answer was empty. Please try again.', {}, { code: 'ai_bad_reply' });
+  return out;
+}
+
+const GIFT_FIELDS = new Set(['image', 'imageId', 'imageUrl', 'hints', 'title']);
+
+/**
+ * "Write gift lines for the next festivals": one call (counted as one description) for the next
+ * festivals in the calendar (up to 3, switched-off ones left out) and an everyday line, as a JSON
+ * map. Nothing is saved: the editor shows them for the owner to edit.
+ */
+export async function writeGiftLines(body: Record<string, unknown>, actor: string, now: Date = new Date()): Promise<{ giftLines: Record<string, string>; festivals: GiftFestival[]; model: string; provider: AiProvider }> {
+  for (const k of Object.keys(body)) if (!GIFT_FIELDS.has(k)) throw new HttpError(400, `Unexpected field: ${k.slice(0, 30)}.`);
+  const ai = readySettings();
+  const image = resolveImage(body);
+  if (ai.provider !== 'anthropic' && image.kind === 'url') throw new HttpError(400, 'Use a photo uploaded to the shop (add it again from the gallery).');
+  const hints = cleanHints(body.hints);
+  const title = clamp(plain(body.title), LIMITS.title);
+  const festivals = giftFestivals(now, 3);
+  enforceLimit(`ai-describe:${actor}`, DESCRIBE_LIMIT.max, DESCRIBE_LIMIT.windowMs, 'That is 20 descriptions this hour. Please wait a while before the next one.');
+  const ids = [...festivals.map((f) => f.id), EVERYDAY];
+  const list = festivals.map((f) => `- "${f.id}": ${f.name} (${f.start === f.end ? f.start : `${f.start} to ${f.end}`}; the shop's mood for it: "${f.mood}")`).join('\n');
+  const user = `The owner's notes about this product (facts you may use as given): ${Object.keys(hints).length ? JSON.stringify(hints) : 'none'}
+${title ? `Its name in the shop: ${JSON.stringify(title)}\n` : ''}Write one short gift line (at most 140 characters) for each festival below, on giving this product or having it at home for that festival, from what the photo shows. No discounts, no urgency, no invented facts.
+${list || '(no festival in the next weeks)'}
+- "${EVERYDAY}": an everyday gift idea (a housewarming, a wedding, a new home).
+
+Return exactly this JSON:
+{"giftLines": {${ids.map((id) => `"${id}": "the line"`).join(', ')}}}`;
+  const answer = await ask(ai, image, user);
+  const giftLines = parsed(answer, ai, (t) => parseGiftLines(t, ids));
+  const model = writerModel(ai);
+  audit('product.ai_gift_lines', { by: actor, provider: ai.provider, model, photo: image.kind, festivals: ids, written: Object.keys(giftLines) });
+  return { giftLines, festivals, model, provider: ai.provider };
 }
 
 /**
@@ -426,5 +590,20 @@ export async function testGeminiSettings(input: unknown, actor: string): Promise
   enforceLimit(`ai-test:${actor}`, TEST_LIMIT.max, TEST_LIMIT.windowMs, 'Too many tests. Please wait a few minutes.');
   const models = await listGeminiModels(key);
   audit('settings.ai_tested', { by: actor, provider: 'gemini', ok: true, writingModels: models.writing.length, imageModels: models.image.length });
+  return { ok: true, models };
+}
+
+/**
+ * Settings → AI writing → Test for DeepSeek: DeepSeek's list of the models the key (typed, or the
+ * saved one) can use, photo readers first. A refused key or an empty balance says so (without the key).
+ */
+export async function testDeepSeekSettings(input: unknown, actor: string): Promise<{ ok: true; models: DeepSeekModels }> {
+  const typed = withStoredSecrets('ai', input) as Partial<AiSettings>;
+  const key = typeof typed.deepseekApiKey === 'string' ? typed.deepseekApiKey.trim() : '';
+  if (!key) throw new HttpError(400, 'Type your DeepSeek API key first (platform.deepseek.com → API keys).', {}, { code: 'ai_off' });
+  if (!DEEPSEEK_KEY.test(key)) throw new HttpError(400, DEEPSEEK_KEY_HINT);
+  enforceLimit(`ai-test:${actor}`, TEST_LIMIT.max, TEST_LIMIT.windowMs, 'Too many tests. Please wait a few minutes.');
+  const models = await listDeepSeekModels(key);
+  audit('settings.ai_tested', { by: actor, provider: 'deepseek', ok: true, models: models.all.length, photoModels: models.vision.length });
   return { ok: true, models };
 }
