@@ -139,7 +139,7 @@ test('the carry-over is idempotent: again (a restart, another copy of the shop) 
 
 test('validation: measurement fields allow-listed and capped at 80, fitted only true/false, colours optional (none stays none)', () => {
   const base = { ...products.getProduct('old-sheet')!, id: undefined };
-  const made = products.createProduct({ ...base, title: 'Plain set', colors: [], fitted: 'yes', measurementsReview: 'x', profiles: [size({ flatSheet: '260 x 270 cm', evil: '<script>', otherPieces: '2 cushion covers' })], stockBySize: { king: 1 } });
+  const made = products.createProduct({ ...base, sku: undefined, title: 'Plain set', colors: [], fitted: 'yes', measurementsReview: 'x', profiles: [size({ flatSheet: '260 x 270 cm', evil: '<script>', otherPieces: '2 cushion covers' })], stockBySize: { king: 1 } });
   assert.deepEqual(made.colors, [], 'no default colour injected');
   assert.equal(made.fitted, false);
   assert.equal(made.measurementsReview, undefined);

@@ -1,5 +1,20 @@
 # Changelog
 
+## BUH-02.21.00 — 2026-10-20 23:00 UTC · [#40](https://github.com/cxsmtp/buh/pull/40)
+
+- **Festival gift pages that run themselves.** Each festival has its own page, such as /gifts/diwali, /gifts/eid-al-fitr or /gifts/uae-national-day. Each goes live about 45 days before the festival, with products that have a gift line for it first, and your home page's Google title follows the festival. After the festival the page stays at the same address with next year's dates, so it keeps its ranking.
+- **Category pages for searches.** Pages such as /shop/bedsheets are for people searching for bedsheets online in the UAE.
+- **Product pages Google understands.** Pages now carry the price in AED, whether each size is in stock, photos and SKU as structured data, with no made-up ratings. Titles, descriptions and photo alt text are written automatically, and the sitemap lists every page.
+- **Settings → Search (SEO).** See what Google sees for every page, check the festival schedule (switch a festival off, make it live now, edit its words), edit category pages, and run health checks. There is a place for your Google Search Console and Bing codes, and IndexNow, off by default. Each product can have its own SEO title and description, with a live preview.
+- **SKUs made automatically.** New products get a code like BUH-HBS-INDCHV-007 as soon as they have a name. Edit it freely or press Regenerate; codes are never reused and duplicates are refused. "Fill them in" gives the products without a code one; codes they already used on marketplaces are kept for those listings.
+- **Status.**
+  - **Benchmark:** 3 alternating rounds (branch first), 0 failed requests (main's 1,000 failures per round are the new /gifts/diwali page, which main doesn't have). Gift page 709 / 753 / 746 req/s. Two focused re-runs on a quiet machine, alternating, 4 each, 5,000 requests:
+    - **Home page:** branch 696 / 651 / 664 / 674 vs main 677 / 779 / 729 / 722 req/s, p95 about the same (110–120 vs 105–130 ms). The home page is now refreshed every 5 minutes instead of built once, so its Google title and festival banner follow the calendar. Serving it from that cache costs about 8% of throughput, with no slower tail.
+    - **/api/products:** the same (branch 770 / 773 / 738 / 746 vs main 765 / 742 / 775 / 771, p95 98–110 vs 98–117 ms).
+  - **Tests:** 1,149 passed, 0 failed (unit and end-to-end, including the new SEO, SKU and browser checks at 375 and 1280 px).
+  - **Dependency audit:** production 0 vulnerabilities; no new packages.
+  - **Security scan:** independent review found 0 high, 2 medium and 2 low issues. Fixed with tests: products without an SKU keep the marketplace code they were exported under; products that already share an SKU can still be saved, and Inventory lists the clashes; gift and category pages refresh after timer changes within a minute. Left as is: made-up page addresses only fill a capped memory cache. Not tried: real Google indexing, Search Console and IndexNow.
+
 ## BUH-02.20.00 — 2026-10-20 22:00 UTC · [#39](https://github.com/cxsmtp/buh/pull/39)
 
 - **See and edit the AI writing prompt.** Settings → AI writing → Prompt shows exactly what is sent to Claude, Gemini or DeepSeek. You can edit the shop's instructions and the guide for each part (name, design, comfort…), preview the full prompt, try it on a photo before saving, and reset to the default. The honesty rules stay fixed and are always sent.

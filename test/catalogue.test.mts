@@ -173,8 +173,12 @@ test('the Amazon / Noon CSV: one row per size or variant, stable SKUs (own or fr
   assert.equal(rows[1][h('product_type')], 'simple');
   assert.equal(rows[1][h('brand')], 'Beautiful UAE Home');
   assert.match(String(rows[1][h('main_image_url')]), /^https:\/\//);
-  // No SKU: one made from the id, the same every time, at most 40 characters.
-  assert.equal(parentSku(bare), `BUH-${bare.id.replace(/^prod-/, '').toUpperCase()}`);
+  // A product saved without an SKU gets one made by the shop (BUH-<category>-<name>-<number>).
+  assert.match(String(bare.sku), /^BUH-[A-Z0-9]{2,3}-EXPTWL-\d{3,}$/);
+  assert.equal(parentSku(bare), bare.sku);
+  // One with no SKU at all (from before SKUs were made): one made from the id, the same every time, at most 40 characters.
+  const old = { id: bare.id, sku: undefined };
+  assert.equal(parentSku(old), `BUH-${bare.id.replace(/^prod-/, '').toUpperCase()}`);
   assert.equal(variantSku(bare, 'v-bath'), variantSku(bare, 'v-bath'));
   assert.ok(variantSku({ id: 'prod-' + 'a'.repeat(60), sku: undefined }, 'super-king-with-a-very-long-id').length <= 40);
   // Bedding rows carry the mattress size.

@@ -23,6 +23,7 @@ const NAMES: Record<string, string> = {
   ai: 'AI writing',
   aiPrompt: 'AI writing prompt',
   aiPictures: 'AI pictures',
+  seo: 'Search (SEO)',
 };
 
 interface Version {

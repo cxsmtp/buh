@@ -34,6 +34,7 @@ import { ProductEditor } from './inventory/ProductEditor';
 import { CollectionsSheet, ShareSelectionSheet } from './inventory/Collections';
 import { PictureStudioSheet } from './inventory/PictureStudioSheet';
 import { REASONS, useStockMoves, type StockReason } from './inventory/useStockMoves';
+import { FillSkusNotice } from './inventory/FillSkusNotice';
 
 /**
  * Inventory, made for the owner's phone: find a product (name or SKU, filters for
@@ -231,6 +232,8 @@ export const AdminInventoryTab: React.FC<AdminInventoryTabProps> = ({ products, 
           </button>
         </div>
       )}
+
+      <FillSkusNotice products={products} onFilled={onChanged} />
 
       {/* Search and filters stay at the top while the list scrolls. */}
       <div className="sticky top-0 z-20 -mx-3 px-3 sm:mx-0 sm:px-0 py-2 bg-ivory space-y-2">

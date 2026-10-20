@@ -12,7 +12,8 @@ export function GET() {
     // Shoppers get the product as shown: not whether it is shown, nor the owner's review marks and kept-aside values.
     // Gift lines: only today's (the festival the shop is themed for, else the everyday one).
     const festival = themedFestivalId();
-    const products = listProducts().map(({ active: _active, measurementsReview: _review, legacyMeasurements: _legacy, stagedPhotos, giftLines, ...p }) => {
+    const products = listProducts().map(({ active: _active, measurementsReview: _review, legacyMeasurements: _legacy, marketplaceSku: _market, stagedPhotos, giftLines, ...p }) => {
+      void _market;
       void _active;
       void _review;
       void _legacy;

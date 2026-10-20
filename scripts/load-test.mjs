@@ -166,12 +166,21 @@ async function main() {
     100
   );
 
+  // Test 4: a festival gift page (server-rendered landing page for search engines; not on builds before the SEO pages)
+  const giftTest = await runScenario(
+    "Festival gift page (server-rendered landing page)",
+    "/gifts/diwali",
+    1000,
+    50
+  );
+
   console.log(`\n======================================================`);
   console.log(`🏆 BENCHMARK SUMMARY FOR HOSTINGER READINESS`);
   console.log(`======================================================`);
   console.log(`  Storefront Homepage:   ${homeTest.rps} RPS | p50: ${homeTest.stats.p50.toFixed(1)}ms | Success: ${homeTest.successRate}%`);
   console.log(`  Courier API Route:     ${apiTest.rps} RPS | p50: ${apiTest.stats.p50.toFixed(1)}ms | Success: ${apiTest.successRate}%`);
   console.log(`  Catalogue API:         ${catalogTest.rps} RPS | p50: ${catalogTest.stats.p50.toFixed(1)}ms | Success: ${catalogTest.successRate}%`);
+  console.log(`  Festival gift page:    ${giftTest.rps} RPS | p50: ${giftTest.stats.p50.toFixed(1)}ms | Success: ${giftTest.successRate}%`);
   console.log(`\n✅ High-concurrency performance verified for Hostinger deployment!`);
 }
 

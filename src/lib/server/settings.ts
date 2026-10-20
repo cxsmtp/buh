@@ -22,6 +22,10 @@ import { waMeLink } from '@/lib/whatsappConfirm';
 import { DEFAULT_AI_PROMPT, FIELD_GUIDE_MAX, PROMPT_INSTRUCTIONS_MAX, WRITING_FIELDS, cleanGuide, cleanInstructions, type AiPromptSettings, type WritingFieldId } from '@/lib/aiPrompt';
 import { FAL_KEY, FAL_KEY_HINT, FAL_MODEL_ID, OPENAI_IMAGE_MODEL_ID, OPENAI_KEY, OPENAI_KEY_HINT, PICTURE_PROVIDERS } from '@/lib/pictureProviders';
 import { DEFAULT_AI_PICTURES, SCENE_ID, STYLE_MAX, STYLE_REFS_MAX, STYLE_SIDE_MAX, STAGING_LOOK_MAX, STAGING_MAX_SCENES, STAGING_NAME_MAX, STAGING_SCENE_MAX, STAGING_TRIO, oneLine, type AiPicturesSettings, type StagingScene } from '@/lib/staging';
+import { DEFAULT_SEO, type SeoSettings } from '@/lib/seo/types';
+import { validateSeoSettings } from './seoSettings';
+import { refreshShopPages } from './pageCache';
+import { SKU_PREFIX_RE, CATEGORY_CODE_RE } from '@/lib/sku';
 
 /**
  * Shop settings, kept on the server so every visitor sees the same branding
@@ -52,6 +56,8 @@ export interface SettingsMap {
   aiPrompt: AiPromptSettings;
   /** Settings → AI pictures: the scenes, the default trio, the look and mood. */
   aiPictures: AiPicturesSettings;
+  /** Settings → Search (SEO): src/lib/seo/types.ts. */
+  seo: SeoSettings;
 }
 export type SettingsKey = keyof SettingsMap;
 
@@ -90,6 +96,7 @@ const DEFAULTS: SettingsMap = {
   ai: DEFAULT_AI,
   aiPrompt: DEFAULT_AI_PROMPT,
   aiPictures: DEFAULT_AI_PICTURES,
+  seo: DEFAULT_SEO,
   look: { preset: DEFAULT_LOOK_PRESET, mode: DEFAULT_LOOK_MODE, label: lookLabel(DEFAULT_LOOK_PRESET, DEFAULT_LOOK_MODE), changedAt: '', changedBy: '' },
 };
 
@@ -121,6 +128,7 @@ const SECRETS: Record<SettingsKey, string[]> = {
   ai: ['anthropicApiKey', 'geminiApiKey', 'deepseekApiKey', 'openaiApiKey', 'falApiKey'],
   aiPrompt: [],
   aiPictures: [],
+  seo: [],
 };
 
 /** Secrets the admin hub may see the last 4 characters of (to tell which key is saved). */
@@ -133,7 +141,10 @@ const SAMPLE_PICKUP_NAMES = new Set(['Beautiful UAE Home Artisan Studio', 'Beaut
 const SAMPLE_PICKUP_ADDRESSES = new Set(['Studio 08, Alserkal Avenue Creative Zone, Al Quoz 1', 'Warehouse 14, Al Quoz Industrial Area 3']);
 
 export function getSettings<K extends SettingsKey>(key: K): SettingsMap[K] {
-  if (cache.size && changedElsewhere('settings')) cache.clear();
+  if (cache.size && changedElsewhere('settings')) {
+    cache.clear();
+    refreshShopPages();
+  }
   if (cache.has(key)) return cache.get(key) as SettingsMap[K];
   const row = getDb().prepare('SELECT data FROM settings WHERE key = ?').get(key) as { data: string } | undefined;
   const stored = row ? JSON.parse(row.data) : {};
@@ -210,6 +221,8 @@ function save<K extends SettingsKey>(key: K, value: SettingsMap[K], { keepHistor
     .run(`settings:last-auto:${key}`, JSON.stringify(auto ? at : null), at);
   cache.set(key, value);
   bump('settings');
+  // The home, category and festival pages (kept for 5 minutes) are rebuilt on their next visit.
+  refreshShopPages();
 }
 
 /** The version "Undo" goes back to: the newest one kept for this group (before the current editing session). */
@@ -450,6 +463,7 @@ const SECRET_HOSTS: Record<SettingsKey, Record<string, string>> = {
   ai: {},
   aiPrompt: {},
   aiPictures: {},
+  seo: {},
 };
 
 /**
@@ -719,7 +733,10 @@ const VALIDATORS: { [K in SettingsKey]: (input: Obj, current: SettingsMap[K]) =>
       if (!label) throw new HttpError(400, `Category ${i + 1} needs a name.`);
       // What a new product in it starts as (towels, cushions…: simple); kept only when simple.
       if (o.defaultType !== undefined && o.defaultType !== null && o.defaultType !== '' && o.defaultType !== 'bedding' && o.defaultType !== 'simple') throw new HttpError(400, `Category ${i + 1}: the default type must be bed linen or other.`);
-      return { id, label, icon: text(o.icon, `Category ${i + 1} icon`, 8), ...(o.defaultType === 'simple' ? { defaultType: 'simple' as const } : {}) };
+      // Its SKU code (BUH-<CODE>-…): 2–3 capitals or digits; empty means made from the name.
+      const code = text(o.code, `Category ${i + 1} SKU code`, 10).toUpperCase();
+      if (code && !CATEGORY_CODE_RE.test(code)) throw new HttpError(400, `Category ${i + 1}: the SKU code is 2 or 3 capital letters or digits (e.g. BS).`);
+      return { id, label, icon: text(o.icon, `Category ${i + 1} icon`, 8), ...(o.defaultType === 'simple' ? { defaultType: 'simple' as const } : {}), ...(code ? { code } : {}) };
     });
     if (new Set(categories.map((c) => c.id)).size !== categories.length) throw new HttpError(400, 'Each category needs its own id.');
     const threshold = input.lowStockThreshold === undefined ? current.lowStockThreshold : Number(input.lowStockThreshold);
@@ -738,7 +755,10 @@ const VALIDATORS: { [K in SettingsKey]: (input: Obj, current: SettingsMap[K]) =>
         );
       }
     }
-    return { sizes, categories, lowStockThreshold: threshold, weaves };
+    // The start of every SKU made by the shop (BUH-…): 2–6 capitals or digits.
+    const skuPrefix = input.skuPrefix === undefined ? current.skuPrefix : text(input.skuPrefix, 'SKU prefix', 10).toUpperCase();
+    if (skuPrefix !== undefined && skuPrefix !== '' && !SKU_PREFIX_RE.test(skuPrefix)) throw new HttpError(400, 'SKU prefix: 2 to 6 capital letters or digits (e.g. BUH).');
+    return { sizes, categories, lowStockThreshold: threshold, weaves, ...(skuPrefix ? { skuPrefix } : {}) };
   },
 
   async ai(input, current) {
@@ -974,6 +994,7 @@ const VALIDATORS: { [K in SettingsKey]: (input: Obj, current: SettingsMap[K]) =>
   },
 
   look: (input, current) => validateLook(input, current),
+  seo: async (input, current) => validateSeoSettings(input, current),
 
   async theme(input, current) {
     const mode = input.mode === undefined ? current.mode : input.mode;

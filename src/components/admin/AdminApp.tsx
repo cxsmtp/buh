@@ -1,7 +1,7 @@
 'use client';
 
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Archive, Box, Copy, CreditCard, Feather, ImagePlus, KeyRound, LayoutGrid, Laptop, Link2, Mail, MessageSquare, Palette, ShieldCheck, Smartphone, Sparkles, Store, SwatchBook, Truck } from 'lucide-react';
+import { Archive, Box, Copy, CreditCard, Feather, ImagePlus, KeyRound, Laptop, LayoutGrid, Link2, Mail, MessageSquare, Palette, Search, ShieldCheck, Smartphone, Sparkles, Store, SwatchBook, Truck } from 'lucide-react';
 import type { AiSettings, AssistantSettings, BankTransferDetails, BrandSettings, CatalogSettings, CourierSettings, Customer, DeliverySettings, EmailSettings, Order, PaymentSettings, PhoneCheckSettings, Product, SmsGatewaySettings, StoreSettings, ThemeSettings } from '@/types';
 import { DEFAULT_AI, DEFAULT_ASSISTANT, DEFAULT_CATALOG, DEFAULT_DELIVERY, DEFAULT_EMAIL_SETTINGS, DEFAULT_STORE, DEFAULT_THEME_SETTINGS } from '@/data/catalogDefaults';
 import { INITIAL_BANK_DETAILS, INITIAL_BRAND_SETTINGS, INITIAL_COURIER_SETTINGS, INITIAL_SMS_SETTINGS } from '@/data/initialData';
@@ -52,6 +52,7 @@ import { SystemHealthCard } from './settings/SystemHealthCard';
 import { LookSettingsCard } from './settings/LookSettingsCard';
 import { ThemeSettingsCard } from './settings/ThemeSettingsCard';
 import { VersionsCard } from './settings/VersionsCard';
+import { SeoOverviewCard, SeoSettingsCard } from './settings/SeoSettingsCard';
 
 /** Settings as the admin hub receives them: secrets blank, with which are saved. */
 interface AdminSetting<T> {
@@ -498,6 +499,16 @@ export function AdminApp() {
           {adminLoadError && <p role="alert" className="text-xs text-danger bg-danger-soft border border-danger-line rounded-xl px-3 py-2">{adminLoadError}</p>}
 
           {adminTab === 'overview' && <HubOverview orders={orders} products={adminProducts} lowStockThreshold={adminSettings.catalog.value.lowStockThreshold} onGo={setAdminTab} />}
+          {adminTab === 'overview' && (
+            <div className="max-w-4xl">
+              <SeoOverviewCard
+                onOpen={() => {
+                  setSettingsOpen((x) => ({ id: 'seo', n: x.n + 1 }));
+                  setAdminTab('settings');
+                }}
+              />
+            </div>
+          )}
 
           {adminTab === 'orders' && phone && <TodayTodos orders={orders} products={adminProducts} lowStockThreshold={adminSettings.catalog.value.lowStockThreshold} onGo={setAdminTab} />}
 
@@ -574,6 +585,13 @@ export function AdminApp() {
                   icon: <Feather />,
                   hint: 'Eid, Diwali, Christmas, Lunar New Year and 30 more: picked automatically, or chosen by you.',
                   content: <ThemeSettingsCard key={`theme-${adminSettingsLoaded}-${settingsEpoch}`} value={adminSettings.theme.value} onSave={(v) => saveSettings('theme', v)} />,
+                },
+                {
+                  id: 'seo',
+                  label: 'Search (SEO)',
+                  icon: <Search />,
+                  hint: 'What Google sees: category and festival gift pages that switch on by themselves, titles, descriptions and Search Console.',
+                  content: <SeoSettingsCard key={`seo-${settingsEpoch}`} />,
                 },
                 {
                   id: 'sms',

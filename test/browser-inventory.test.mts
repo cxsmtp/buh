@@ -294,7 +294,8 @@ for (const width of [375, 1280]) {
     await editor.getByLabel('Name', { exact: true }).fill(`Wizard Set ${width}`);
     await editor.getByLabel('Price (AED)').fill('333');
     await editor.getByText(/More details/).click();
-    await editor.getByLabel('SKU (your stock code)').fill(`WZ-${width}`);
+    // The SKU sits by the name (made by the shop); typing one makes it the owner's.
+    await editor.getByLabel('SKU', { exact: true }).fill(`WZ-${width}`);
     assert.deepEqual(await overflow(page), [], 'details step');
     await editor.getByRole('button', { name: /^Next: Sizes/ }).click();
     await editor.getByRole('button', { name: /^Add size Queen/ }).click();

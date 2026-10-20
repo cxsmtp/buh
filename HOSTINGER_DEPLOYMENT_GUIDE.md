@@ -43,7 +43,7 @@ Everything the shop stores lives in one Docker volume and is backed up every 12 
    ```bash
    cp .env.production.example .env.production && nano .env.production
    ```
-   - Fill in `DOMAIN`, `ACME_EMAIL`, `NEXT_PUBLIC_APP_URL` and `NEXT_PUBLIC_SUPPORT_EMAIL`. `NEXT_PUBLIC_APP_URL` must be the `https://` address you open the shop at: Admin Hub passkeys only work there.
+   - Fill in `DOMAIN`, `ACME_EMAIL`, `NEXT_PUBLIC_APP_URL` and `NEXT_PUBLIC_SUPPORT_EMAIL`. `NEXT_PUBLIC_APP_URL` must be the `https://` address you open the shop at: Admin Hub passkeys only work there, and Google is given that address (sitemap, page addresses, IndexNow). Once the shop is live, connect Google Search Console once: Admin Hub → Settings → Search (SEO) has the steps ([user guide](docs/user-guide.md#search-seo-google-bing-and-the-festival-gift-pages)).
    - **Fill in the backup email (`SMTP_*`, `BACKUP_EMAIL`).**
    - The backup password is set in the Admin Hub (Settings → System & backups → **Protect backups with a password**: **Make one for me**, then save it in your password manager). `BACKUP_PASSPHRASE` here is optional: if set (at least 12 characters), it wins over the hub's. Without either, customer data is emailed unencrypted.
 6. **Start** (pulls the ready-made image `ghcr.io/cxsmtp/buh:latest`):

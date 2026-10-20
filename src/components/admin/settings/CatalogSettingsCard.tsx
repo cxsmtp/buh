@@ -6,6 +6,7 @@ import { useAutoSave, type AutoSaveHooks } from './useAutoSave';
 import type { BedProfileMeasurement, CatalogSettings } from '@/types';
 import { DEFAULT_WEAVES } from '@/data/catalogDefaults';
 import { WeavesEditor } from './WeavesEditor';
+import { SkuSettings } from './SkuSettings';
 
 /**
  * Settings → Catalogue: the size presets offered when adding a product (name,
@@ -156,7 +157,7 @@ export function CatalogSettingsCard({ value, onSave, auto }: { value: CatalogSet
               value={c.defaultType === 'simple' ? 'simple' : 'bedding'}
               aria-label={`New products in ${c.label || `category ${i + 1}`} are`}
               title="What a new product in this category starts as"
-              onChange={(e) => setDraft((d) => ({ ...d, categories: d.categories.map((x, j) => (j === i ? (e.target.value === 'simple' ? { ...x, defaultType: 'simple' as const } : { id: x.id, label: x.label, icon: x.icon }) : x)) }))}
+              onChange={(e) => setDraft((d) => ({ ...d, categories: d.categories.map((x, j) => (j === i ? (e.target.value === 'simple' ? { ...x, defaultType: 'simple' as const } : { id: x.id, label: x.label, icon: x.icon, ...(x.code ? { code: x.code } : {}) }) : x)) }))}
             >
               <option value="bedding">Bed linen</option>
               <option value="simple">Other</option>
@@ -170,6 +171,8 @@ export function CatalogSettingsCard({ value, onSave, auto }: { value: CatalogSet
         <p className="text-ink-muted">A category with no products is not shown to customers. Deleting one keeps it on the products that use it until you change them.</p>
         <p className="text-ink-muted">&ldquo;Bed linen&rdquo; or &ldquo;Other&rdquo;: what a new product in the category starts as. Other (towels, cushions, throws, curtains, decor) has plain variants such as &ldquo;50 × 50 cm&rdquo; instead of bed sizes. You can still change it on each product.</p>
       </section>
+
+      <SkuSettings draft={draft} onChange={(patch) => setDraft((d) => ({ ...d, ...patch }))} />
 
       <section className="space-y-2" aria-labelledby="marketplace-export-title">
         <h3 id="marketplace-export-title" className="font-bold text-sm text-ink">Export for Amazon / Noon</h3>

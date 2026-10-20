@@ -18,6 +18,9 @@ const nextConfig: NextConfig = {
     unoptimized: true,
   },
   poweredByHeader: false,
+  // Pages kept for a while (the home, category and festival pages) stay in memory: the image's
+  // files are read-only, and each copy of the shop rebuilds its own (src/lib/server/pageCache.ts).
+  experimental: { isrFlushToDisk: false },
   async headers() {
     return [
       {

@@ -45,6 +45,15 @@ export interface Product {
   slug: string;
   /** The owner's own stock code (optional), searchable in the Admin Hub. */
   sku?: string;
+  /**
+   * The code the product was exported under to Amazon / Noon before it had an SKU (BUH-<id>),
+   * kept when the shop gives it one so listings already made keep matching. Set by the server only.
+   */
+  marketplaceSku?: string;
+  /** The owner's own title for Google (empty: "<title> | <shop>", made by the shop). */
+  seoTitle?: string;
+  /** The owner's own description for Google (empty: from the short description). */
+  seoDescription?: string;
   description: string;
   shortDescription: string;
   /** Bedding (bed sizes) or simple (plain variants). Absent: bedding. */
@@ -191,6 +200,8 @@ export interface Order {
     dimensions?: string;
     /** 'simple' for a towel, cushion or other simple product (its profileName is a variant, not a bed size). */
     productType?: 'simple';
+    /** The size's SKU when the order was placed (BUH-BS-JAIPUR-007-KING). */
+    sku?: string;
   }[];
   subtotal: number;
   deliveryFee: number;
@@ -482,7 +493,10 @@ export interface CourierSettings {
 export interface CatalogSettings {
   sizes: BedProfileMeasurement[];
   /** defaultType: what a new product in this category starts as (absent: bedding). */
-  categories: Array<{ id: string; label: string; icon: string; defaultType?: ProductType }>;
+  /** code: its 2–3 character SKU code (BUH-<code>-…); absent: made from the label (src/lib/sku.ts). */
+  categories: Array<{ id: string; label: string; icon: string; defaultType?: ProductType; code?: string }>;
+  /** The start of SKUs the shop makes (2–6 capitals or digits); absent: BUH. */
+  skuPrefix?: string;
   /** Show "Only 1 left" when a size's stock is at or below this. */
   lowStockThreshold: number;
   /** The weaves a product may have, in the order the editor offers them (1–30, each 1–30 characters). */
