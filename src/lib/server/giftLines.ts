@@ -4,6 +4,7 @@ import { stripEmoji } from '@/lib/marquee';
 import type { Product } from '@/types';
 import { currentFestivalTheme, FESTIVAL_IDS } from './festivalDates';
 import { HttpError } from './http';
+import { logEvent } from './log';
 import { storefrontTheme } from './theme';
 import { getSettings } from './settings';
 
@@ -109,7 +110,11 @@ export function cleanGiftLines(v: unknown): Record<string, string> | undefined {
   if (typeof v !== 'object' || Array.isArray(v)) throw new HttpError(400, 'Gift lines must be a list by festival.');
   const out: Record<string, string> = {};
   for (const [k, raw] of Object.entries(v as Record<string, unknown>)) {
-    if (k !== EVERYDAY && !FESTIVAL_IDS.includes(k)) throw new HttpError(400, `Gift line: unknown festival ${k.slice(0, 30)}.`);
+    // A festival a later (or earlier) release renamed or removed: dropped, so the product still saves.
+    if (k !== EVERYDAY && !FESTIVAL_IDS.includes(k)) {
+      logEvent('warn', 'gift_line_unknown_festival', { festival: k.slice(0, 40) });
+      continue;
+    }
     if (raw !== undefined && raw !== null && typeof raw !== 'string') throw new HttpError(400, 'A gift line must be text.');
     if (typeof raw === 'string' && raw.trim().length > GIFT_LINE_MAX + 40) throw new HttpError(400, `A gift line: at most ${GIFT_LINE_MAX} characters.`);
     const line = cleanGiftLine(raw);

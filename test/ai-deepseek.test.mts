@@ -369,7 +369,9 @@ test('gift lines on a product: checked on save, kept when not sent; the shop sho
   const img = saveImageDataUrl(PHOTO_URL);
   const king = settings.getSettings('catalog').sizes.filter((s) => s.id === 'king');
   const base = { title: 'Gift Set', category: 'bedsheets', price: 300, featuredImage: img, galleryImages: [], profiles: king, defaultProfileId: 'king', stockBySize: { king: 1 } };
-  assert.throws(() => products.createProduct({ ...base, giftLines: { 'not-a-festival': 'x' } }), /unknown festival/);
+  // A festival id this release doesn't know (renamed, removed, or from a newer backup) is dropped, never blocking the save.
+  assert.equal(products.createProduct({ ...base, giftLines: { 'not-a-festival': 'x' } }).giftLines, undefined);
+  assert.deepEqual(products.createProduct({ ...base, giftLines: { 'not-a-festival': 'x', everyday: 'A housewarming gift.' } }).giftLines, { everyday: 'A housewarming gift.' });
   assert.throws(() => products.createProduct({ ...base, giftLines: ['x'] }), /by festival/);
   const p = products.createProduct({ ...base, giftLines: { diwali: '  A Diwali gift <b>for</b> a new home. ', everyday: 'A housewarming gift.', christmas: '' } });
   assert.deepEqual(p.giftLines, { diwali: 'A Diwali gift for a new home.', everyday: 'A housewarming gift.' });

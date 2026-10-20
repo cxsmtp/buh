@@ -7,11 +7,12 @@
 - **Edit everything before it is used.** Each suggested part has its own box, with Use, Use all, Write again (one part or all) and Keep mine. Nothing changes the product until you press Save.
 - **Gift lines that follow the festival.** Each product keeps a gift line per festival (Diwali, Eid, National Day…) plus an everyday one. The shop shows the line for today's festival theme and switches by itself as festivals change. "Write gift lines for the next festivals" prepares the next three at once.
 - **Three styled pictures per press.** "Style in a bedroom" makes a whole-bed room shot, a close-up of the print and texture, and a lifestyle scene, each with Add / Again / Discard, plus Add all. Styling still uses Gemini, keeps the product's true colours, and allows up to 30 pictures an hour.
+- **No more "0 TC".** A product page leaves out an empty material or thread count instead of showing "0 TC".
 - **Status.**
-  - **Benchmark:** BENCH_PLACEHOLDER
-  - **Tests:** TESTS_PLACEHOLDER
+  - **Benchmark:** 3 alternating rounds (branch first), 0 failed requests. Storefront branch 890 / 957 / 933 req/s vs main 911 / 894 / 931 (p95 100 / 126 / 118 vs 83 / 90 / 103 ms); catalogue API branch 820 / 840 / 827 vs main 871 / 726 / 843; serviceability API branch 711 / 763 / 770 vs main 729 / 696 / 757. The storefront's p95 is 15–35 ms higher, at the same or higher throughput: each product now carries today's gift line, worked out once per request.
+  - **Tests:** the build's full run gave 1,081 of 1,082 passed. The one failure was a look-switch browser check whose 30-second wait timed out; it passes on its own. The final code's own tests pass (DeepSeek, gift lines and styled pictures: 13 unit and 6 browser checks, plus the spec-line check). The full suite on the final code was still running at merge, and GitHub's checks passed on it.
   - **Dependency audit:** production 0 vulnerabilities; no new packages.
-  - **Security scan:** SEC_PLACEHOLDER
+  - **Security scan:** independent review found 0 high, 0 medium and 2 low issues. Fixed: a gift line for a festival a later release renames no longer blocks saving the product. Documented in docs/status.md: going back to an older version while DeepSeek is chosen. DeepSeek and Gemini picture making haven't been tried with real keys yet.
 
 ## BUH-02.18.01 — 2026-10-20 14:45 UTC · [#37](https://github.com/cxsmtp/buh/pull/37)
 
