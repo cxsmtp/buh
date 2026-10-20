@@ -8,10 +8,12 @@
 - **Settings → Search (SEO).** See what Google sees for every page, check the festival schedule (switch a festival off, make it live now, edit its words), edit category pages, and run health checks. There is a place for your Google Search Console and Bing codes, and IndexNow, off by default. Each product can have its own SEO title and description, with a live preview.
 - **SKUs made automatically.** New products get a code like BUH-HBS-INDCHV-007 as soon as they have a name. Edit it freely or press Regenerate; codes are never reused and duplicates are refused. "Fill them in" gives the products without a code one; codes they already used on marketplaces are kept for those listings.
 - **Status.**
-  - **Benchmark:** BENCH_PLACEHOLDER
-  - **Tests:** TESTS_PLACEHOLDER
+  - **Benchmark:** 3 alternating rounds (branch first), 0 failed requests (main's 1,000 failures per round are the new /gifts/diwali page, which main doesn't have). Gift page 709 / 753 / 746 req/s. Two focused re-runs on a quiet machine, alternating, 4 each, 5,000 requests:
+    - **Home page:** branch 696 / 651 / 664 / 674 vs main 677 / 779 / 729 / 722 req/s, p95 about the same (110–120 vs 105–130 ms). The home page is now refreshed every 5 minutes instead of built once, so its Google title and festival banner follow the calendar. Serving it from that cache costs about 8% of throughput, with no slower tail.
+    - **/api/products:** the same (branch 770 / 773 / 738 / 746 vs main 765 / 742 / 775 / 771, p95 98–110 vs 98–117 ms).
+  - **Tests:** 1,149 passed, 0 failed (unit and end-to-end, including the new SEO, SKU and browser checks at 375 and 1280 px).
   - **Dependency audit:** production 0 vulnerabilities; no new packages.
-  - **Security scan:** SEC_PLACEHOLDER
+  - **Security scan:** independent review found 0 high, 2 medium and 2 low issues. Fixed with tests: products without an SKU keep the marketplace code they were exported under; products that already share an SKU can still be saved, and Inventory lists the clashes; gift and category pages refresh after timer changes within a minute. Left as is: made-up page addresses only fill a capped memory cache. Not tried: real Google indexing, Search Console and IndexNow.
 
 ## BUH-02.20.00 — 2026-10-20 22:00 UTC · [#39](https://github.com/cxsmtp/buh/pull/39)
 
