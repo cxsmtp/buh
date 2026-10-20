@@ -263,6 +263,24 @@ async function overflow(page: import('playwright').Page): Promise<string[]> {
     return out;
   });
 }
+// Reported on an iPhone: the dispatch dialog's boxes spilled out of their squares, and tapping one
+// zoomed the page. iPhone Safari zooms into any box with text under 16px, and its date box will not
+// shrink below its text (about 150px at 16px).
+async function phoneFit(page: import('playwright').Page): Promise<string[]> {
+  return page.evaluate(() => {
+    const out: string[] = [];
+    const dialog = document.querySelector('[role="dialog"]')!.getBoundingClientRect();
+    for (const el of Array.from(document.querySelectorAll<HTMLElement>('[role="dialog"] input, [role="dialog"] select, [role="dialog"] textarea'))) {
+      const r = el.getBoundingClientRect();
+      if (!r.width || ['checkbox', 'radio', 'file'].includes((el as HTMLInputElement).type)) continue;
+      const name = el.id || (el as HTMLInputElement).type;
+      if (parseFloat(getComputedStyle(el).fontSize) < 16) out.push(`${name}: text ${getComputedStyle(el).fontSize}`);
+      if (r.right > dialog.right + 1 || r.left < dialog.left - 1) out.push(`${name}: outside the dialog`);
+      if ((el as HTMLInputElement).type === 'date' && r.width < 150) out.push(`${name}: only ${Math.round(r.width)}px wide`);
+    }
+    return out;
+  });
+}
 const shot = async (page: import('playwright').Page, name: string) => {
   if (SHOTS) await page.screenshot({ path: path.join(SHOTS, `${name}.png`), fullPage: false });
 };
@@ -319,6 +337,7 @@ for (const width of [375, 1280]) {
       await dispatch.getByTestId('weight-breakdown').getByText(`1 × ${sizeName} 1.2 kg + packaging 0.2 kg = 1.4 kg → 2 kg for Jeebly`).waitFor();
       assert.equal(await dispatch.getByLabel('Weight (kg)').inputValue(), '1.4');
       assert.deepEqual(await overflow(page), [], 'dispatch dialog: no sideways scroll');
+      if (width < 768) assert.deepEqual(await phoneFit(page), [], 'dispatch dialog on a phone: every box fits, none zooms');
       await dispatch.getByTestId('booking-mode').scrollIntoViewIfNeeded();
       await shot(page, `dispatch-test-mode-weight-${width}`);
       await dispatch.getByRole('button', { name: /Make a TEST booking \(not sent to Jeebly\)/ }).click();

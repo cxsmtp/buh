@@ -476,6 +476,16 @@ test('chat on a phone: the assistant answers sizes; "Talk to a person" reaches t
   const panel = shopper.getByRole('dialog', { name: 'Chat with the shop' });
   // Keyboard: typing goes straight into the chat; Escape closes it and returns to the Help button.
   await shopper.waitForFunction(() => document.activeElement?.id === 'chat-input');
+  // Reported on an iPhone: tapping the box zoomed the page, the close button off to the side.
+  // iPhone Safari zooms into any box with text under 16px; the panel and its close button fit.
+  const fit = await shopper.evaluate(() => {
+    const box = document.getElementById('chat-input')!;
+    const close = document.querySelector('[aria-label="Close chat"]')!.getBoundingClientRect();
+    return { font: parseFloat(getComputedStyle(box).fontSize), closeRight: close.right, width: document.documentElement.clientWidth, scroll: document.documentElement.scrollWidth };
+  });
+  assert.ok(fit.font >= 16, `chat box text ${fit.font}px: an iPhone zooms the page`);
+  assert.ok(fit.closeRight <= fit.width, 'the close button is on screen');
+  assert.ok(fit.scroll <= fit.width, 'no sideways scroll');
   await shopper.keyboard.press('Escape');
   await shopper.waitForFunction(() => document.activeElement?.getAttribute('aria-label') === 'Help and chat');
   await shopper.keyboard.press('Enter');

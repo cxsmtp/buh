@@ -1,5 +1,15 @@
 # Changelog
 
+## BUH-02.18.01 — 2026-10-20 14:45 UTC · [#37](https://github.com/cxsmtp/buh/pull/37)
+
+- **No more zooming on iPhones.** Tapping a text box (the chat, checkout, the admin hub) no longer zooms the page and leaves it scrolling sideways. Every text box is now 16px on phones, the size below which iPhone Safari zooms in, so the chat fits the screen with its close button in view.
+- **"Book the courier" fits a phone.** Pickup Date has its own row and Weight and Parcels sit side by side, so nothing spills out of its box.
+- **Status.**
+  - **Benchmark:** 3 alternating rounds (main first), 0 failed requests. Storefront branch 873 / 893 / 920 req/s vs main 902 / 927 / 945 (p95 108 / 102 / 119 vs 153 / 106 / 86 ms); catalogue API branch 825 / 850 / 781 vs main 830 / 803 / 845; serviceability API branch 707 / 695 / 798 vs main 659 / 705 / 738. One CSS rule and one dialog's layout changed, nothing on the server, so these differences are noise.
+  - **Tests:** 1,064 passed, 0 failed (unit and end-to-end, including the 2 new phone checks).
+  - **Dependency audit:** production 0 vulnerabilities; no new packages.
+  - **Security scan:** no server, route or data change. Two new browser checks fail before the fix and pass after: the chat box text was 14px, and the date box was 98px wide. Real iPhone Safari wasn't available; the checks test the 16px rule and box widths behind the zoom.
+
 ## BUH-02.18.00 — 2026-10-19 21:40 UTC · [#36](https://github.com/cxsmtp/buh/pull/36)
 
 - **Backup password, set in the hub.** Settings → System & backups → "Protect backups with a password". Press "Make one for me" (six words and two digits), copy or download it, tick "I saved it", or type your own. No server settings needed.

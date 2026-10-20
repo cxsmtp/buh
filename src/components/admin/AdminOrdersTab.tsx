@@ -904,20 +904,22 @@ export const AdminOrdersTab: React.FC<AdminOrdersTabProps> = ({
             })()}
 
             {/* Shipment Dispatch Parameters */}
-            <div className="grid grid-cols-3 gap-2 text-xs">
-              <div>
-                <label className="block text-ink-soft font-semibold mb-1">
+            {/* A phone: the date on its own row (iPhone's date box will not shrink below its text), weight and parcels side by side. */}
+            <div className="grid grid-cols-2 sm:grid-cols-3 gap-2 text-xs">
+              <div className="col-span-2 sm:col-span-1 min-w-0">
+                <label htmlFor="dispatch-pickup-date" className="block text-ink-soft font-semibold mb-1">
                   Pickup Date
                 </label>
                 <input
+                  id="dispatch-pickup-date"
                   type="date"
                   value={pickupDate}
                   onChange={(e) => setPickupDate(e.target.value)}
-                  className="w-full px-2.5 py-1.5 rounded-xl border border-line-strong text-xs"
+                  className="block w-full min-w-0 appearance-none px-2.5 py-1.5 rounded-xl border border-line-strong bg-surface text-xs"
                 />
               </div>
 
-              <div>
+              <div className="min-w-0">
                 <label htmlFor="dispatch-weight" className="block text-ink-soft font-semibold mb-1">
                   Weight (kg)
                 </label>
@@ -935,11 +937,12 @@ export const AdminOrdersTab: React.FC<AdminOrdersTabProps> = ({
                 />
               </div>
 
-              <div>
-                <label className="block text-ink-soft font-semibold mb-1">
+              <div className="min-w-0">
+                <label htmlFor="dispatch-parcels" className="block text-ink-soft font-semibold mb-1">
                   Parcels
                 </label>
                 <input
+                  id="dispatch-parcels"
                   type="number"
                   value={pieces}
                   onChange={(e) => setPieces(Number(e.target.value))}
@@ -951,14 +954,14 @@ export const AdminOrdersTab: React.FC<AdminOrdersTabProps> = ({
                 const w = shipmentWeight(selectedOrderForConfirm, courierSettings.packagingGrams ?? DEFAULT_PACKAGING_GRAMS);
                 const typed = Number(weightKg);
                 return (
-                  <p id="dispatch-weight-breakdown" data-testid="weight-breakdown" className={`col-span-3 text-[11px] ${w.missing.length ? 'text-warning font-semibold' : 'text-ink-soft'}`}>
+                  <p id="dispatch-weight-breakdown" data-testid="weight-breakdown" className={`col-span-2 sm:col-span-3 text-[11px] ${w.missing.length ? 'text-warning font-semibold' : 'text-ink-soft'}`}>
                     {w.missing.length ? `${w.breakdown}. Enter the weight above for now.` : w.breakdown}
                     {weightKg.trim() !== '' && typed > 0 && (w.kg === null || Math.abs(typed - w.kg) > 0.001) ? ` · Booking with ${typed} kg → ${Math.max(1, Math.ceil(typed))} kg for Jeebly.` : ''}
                   </p>
                 );
               })()}
 
-              <div className="col-span-3">
+              <div className="col-span-2 sm:col-span-3">
                 <label className="block text-ink-soft font-semibold mb-1">
                   Driver Instructions & Notes
                 </label>

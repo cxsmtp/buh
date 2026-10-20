@@ -128,6 +128,19 @@ body {
   --color-paper: #ffffff;
 }
 
+/*
+ * Phones: every text box at least 16px. iPhone Safari zooms the whole page into a box with smaller
+ * text when it is tapped, and stays zoomed, so the page scrolls sideways (the chat's close button
+ * off screen). Unlayered, so it wins over the text-xs / text-sm utilities.
+ */
+@media (max-width: 767px) {
+  input:not([type="checkbox"]):not([type="radio"]):not([type="range"]):not([type="color"]):not([type="file"]),
+  textarea,
+  select {
+    font-size: 16px;
+  }
+}
+
 /* Headings in the serif: lighter weights, a little air, and the serif's small x-height evened out. */
 .font-serif {
   font-weight: 500;
