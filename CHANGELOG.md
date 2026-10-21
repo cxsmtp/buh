@@ -1,5 +1,16 @@
 # Changelog
 
+## BUH-02.23.01 — 2026-10-21 06:00 UTC · [#43](https://github.com/cxsmtp/buh/pull/43)
+
+- **A clear message when Gemini needs billing.** Google offers its picture models only on paid accounts, so a key on the free tier was refused every time. The shop said "limit reached, wait a minute", which never helped. It now says the key's project needs billing switched on, where to do it (aistudio.google.com → API keys → your project → Set up billing) and the rough cost: about 4 US cents a picture.
+- **Gemini pictures one at a time, with an automatic retry.** With Gemini, the studio makes the pictures one after another instead of all at once. If Google says its per-minute limit is reached, the studio waits as long as Google asks (shown on the picture) and tries once more by itself. New paid accounts have low per-minute limits.
+- **See what the picture service said.** When a picture isn't made, the studio shows the service's own reason under the shop's message, with the key always removed. You can then tell apart billing, a per-minute limit, or a key from the wrong project.
+- **Status.**
+  - **Benchmark:** 3 alternating rounds (main first), 0 failed requests. Storefront branch 751 / 721 / 776 req/s vs main 748 / 710 / 756; catalogue API branch 685 / 694 / 717 vs main 649 / 678 / 736; serviceability API branch 578 / 651 / 565 vs main 553 / 604 / 610; gift page branch 620 / 665 / 590 vs main 600 / 606 / 617. Only the studio and Gemini's error handling changed.
+  - **Tests:** 1,170 of 1,179 on the full run. The 9 failures were all in the two AI screen files, and the first was the admin hub not loading at all within 30 s, before any picture code ran. Both files pass on their own against the same build (18 of 18). The new tests pass: a billing-needed message for free-tier keys, and Google's wait time passed on for the automatic retry.
+  - **Dependency audit:** production 0 vulnerabilities; no new packages.
+  - **Security scan:** one message changed. Google's own error text stays in the scrubbed `detail`, as before (the key is never included).
+
 ## BUH-02.23.00 — 2026-10-21 09:00 UTC · [#42](https://github.com/cxsmtp/buh/pull/42)
 
 - **Empty category pages kept out of Google.** Category pages with no products are left out of the sitemap and marked not to be indexed until they have products.

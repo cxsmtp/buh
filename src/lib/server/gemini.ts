@@ -98,7 +98,7 @@ export function scrubGemini(text: string, key: string): string {
 }
 
 interface ErrorReply {
-  error?: { code?: number; message?: string; status?: string; details?: Array<{ reason?: string }> };
+  error?: { code?: number; message?: string; status?: string; details?: Array<{ reason?: string; retryDelay?: string }> };
 }
 
 /** One call to Gemini; Google's answer, or a readable reason (never the key). */
@@ -125,7 +125,22 @@ export async function geminiCall(key: string, req: Omit<GeminiRequest, 'headers'
     throw new HttpError(502, `Google did not accept the Gemini API key. Check it in ${place}.`, {}, { code: 'ai_key_refused', detail: said });
   }
   if (reply.status === 404) throw new HttpError(502, `Google does not offer that Gemini model to this key. Press Test in ${place} and choose another.`, {}, { code: 'ai_model_missing', detail: said });
-  if (reply.status === 429) throw new HttpError(502, 'Google’s limit for your Gemini key was reached (or it needs billing switched on). Wait a minute and try again.', {}, { code: 'ai_busy', detail: said });
+  // Google's free tier has no quota at all for some models (picture models have none): the reply
+  // names a free-tier quota with "limit: 0". Waiting never helps; switching on billing does.
+  if (reply.status === 429 && /free[_ ]tier/i.test(`${said} ${reason}`) && /limit:\s*0\b/i.test(said)) {
+    throw new HttpError(
+      402,
+      'Your Gemini key is on Google’s free tier, and Google doesn’t offer this model on the free tier (picture models need billing). Switch on billing for the key’s project: aistudio.google.com → API keys → your project → Set up billing. Pictures then cost about 4 US cents each. Then press Again.',
+      {},
+      { code: 'ai_needs_billing', detail: said }
+    );
+  }
+  if (reply.status === 429) {
+    // Google says how long to wait (RetryInfo "37s"); the picture studio waits that long and tries once more.
+    const delay = (e.details ?? []).map((d) => /^(\d+(?:\.\d+)?)s$/.exec(String(d?.retryDelay ?? ''))?.[1]).find(Boolean);
+    const retryAfterSec = Math.min(90, Math.max(5, Math.ceil(Number(delay ?? 30))));
+    throw new HttpError(502, 'Google’s per-minute limit for your Gemini key was reached. Wait a minute and try again (if it keeps happening, check the key’s Rate Limit page at aistudio.google.com).', {}, { code: 'ai_busy', detail: said, retryAfterSec });
+  }
   if (reply.status >= 500) throw new HttpError(502, 'Gemini is busy right now. Please try again in a moment.', {}, { code: 'ai_busy', detail: said });
   throw new HttpError(502, `Gemini said: ${said || `error ${reply.status}`}`, {}, { code: 'ai_error', detail: said });
 }

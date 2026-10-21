@@ -33,6 +33,10 @@ interface Slot {
   state: 'busy' | 'done' | 'failed';
   url?: string;
   error?: string;
+  /** The picture service's own words (the key always removed on the server), to tell billing, quota and project apart. */
+  said?: string;
+  /** Waiting before trying again (the service's per-minute limit). */
+  waiting?: string;
 }
 
 export interface StudioStatus {
@@ -194,10 +198,10 @@ export function PictureStudio({
   };
 
   /** One picture for one slot (its own request: each one is checked, stored and counted on its own). */
-  const make = async (key: number, preset: string, field: Record<string, string>) => {
+  const make = async (key: number, preset: string, field: Record<string, string>, attempt = 0): Promise<void> => {
     const scene = (scenes[preset] ?? '').trim();
     const ctx = Object.fromEntries(Object.entries(context).filter(([, v]) => (Array.isArray(v) ? v.length : typeof v === 'string' && v.trim())));
-    const call = postJson<{ url?: string; message?: string; code?: string; reason?: string }>('/api/admin/products/stage-photo', {
+    const call = postJson<{ url?: string; message?: string; code?: string; reason?: string; detail?: string; retryAfterSec?: number }>('/api/admin/products/stage-photo', {
       ...field,
       preset,
       ...(notes.trim() ? { extra: notes.trim() } : {}),
@@ -216,9 +220,18 @@ export function PictureStudio({
       return update({ state: 'failed', error: `${SHORT[status?.provider ?? ''] ?? 'The picture service'} took too long. Try again in a moment.` });
     }
     const { ok, data } = answer;
+    // Google's per-minute limit: wait as long as it asks (shown on the picture), then try once more.
+    if (!ok && data.code === 'ai_busy' && attempt === 0 && live.current.has(key)) {
+      const wait = Math.min(90, Math.max(5, Number(data.retryAfterSec) || 30));
+      update({ waiting: `Google asked to wait: trying again in ${wait} s…` });
+      await new Promise((resolve) => setTimeout(resolve, wait * 1000));
+      if (!live.current.has(key)) return;
+      update({ waiting: undefined });
+      return make(key, preset, field, 1);
+    }
     if (!ok || !data.url) {
       if (data.code === 'staging_off') setStatus((st) => ({ ...(st ?? {}), ready: false, reason: data.reason || 'no_key' }));
-      return update({ state: 'failed', error: data.message || 'Could not make the picture. Please try again.' });
+      return update({ state: 'failed', error: data.message || 'Could not make the picture. Please try again.', said: typeof data.detail === 'string' ? data.detail.slice(0, 300) : undefined });
     }
     // Discarded (or tried again) while it was being made: thrown away.
     if (!live.current.has(key)) return void discard(data.url);
@@ -238,7 +251,12 @@ export function PictureStudio({
     const fresh = set.map((preset) => ({ key: ++counter.current, preset, state: 'busy' as const }));
     live.current = new Set(fresh.map((s) => s.key));
     setSlots(fresh);
-    await Promise.allSettled(fresh.map((s) => make(s.key, s.preset, field)));
+    // Gemini: one at a time, so a new account's per-minute limit isn't hit by three at once.
+    if (status?.provider === 'gemini') {
+      for (const s of fresh) await make(s.key, s.preset, field).catch(() => undefined);
+    } else {
+      await Promise.allSettled(fresh.map((s) => make(s.key, s.preset, field)));
+    }
   };
 
   const retry = async (slot: Slot) => {
@@ -425,12 +443,17 @@ export function PictureStudio({
                 {s.state === 'busy' && (
                   <div className="w-full aspect-[4/5] rounded-xl border border-dashed border-line-strong flex flex-col items-center justify-center gap-1 text-ink-soft">
                     <Loader2 className="w-5 h-5 animate-spin" aria-hidden="true" />
-                    <span className="text-[11px]">Making…</span>
+                    <span className="text-[11px] text-center px-2" role="status">{s.waiting ?? 'Making…'}</span>
                   </div>
                 )}
                 {s.state === 'failed' && (
                   <p role="alert" className="text-xs font-semibold text-danger break-words" data-testid="stage-failed">
                     Not made: {s.error}
+                  </p>
+                )}
+                {s.state === 'failed' && s.said && (
+                  <p className="text-[11px] text-ink-soft break-words" data-testid="stage-said">
+                    {SHORT[status?.provider ?? ''] ?? 'The service'} said: {s.said}
                   </p>
                 )}
                 {s.state === 'done' && s.url && (
