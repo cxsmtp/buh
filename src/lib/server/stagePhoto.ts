@@ -122,6 +122,8 @@ export interface StagingStatus {
   angles: Array<{ n: number; name: string }>;
   /** Where AI pictures go among the product's photos. */
   photoOrder: 'styled-first' | 'photo-first';
+  /** Angles: the first picture is sent with the next ones (off by default). */
+  sameRoom: boolean;
 }
 
 /** For the studio and the editor: ready, or why not, who makes pictures, and the scenes to offer. */
@@ -144,6 +146,7 @@ export function stagingStatus(): StagingStatus {
     useReferences: pictures.useReferences !== false,
     angles: anglesOf(pictures).map((a, i) => ({ n: i + 1, name: angleName(a, i) })),
     photoOrder: pictures.photoOrder ?? 'styled-first',
+    sameRoom: pictures.sameRoom === true,
   };
 }
 
@@ -194,7 +197,10 @@ export async function stagePhoto(body: Record<string, unknown>, actor: string): 
   const context = cleanContext(body.context);
   const aspect = body.aspect === undefined ? '4:5' : String(body.aspect);
   if (!ASPECTS.has(aspect)) throw new HttpError(400, 'Shape: 4:5 or 1:1.');
+  // Only when the owner wants the same room in every angle (Settings → AI pictures): the model
+  // tends to copy that picture, so the angles come out looking alike.
   const sameRoom = body.sameRoom === undefined || body.sameRoom === null || body.sameRoom === '' ? '' : stagedName(body.sameRoom);
+  const roomWanted = settings.sameRoom === true ? sameRoom : '';
 
   // The photo: one of the product's stored photos, or one just taken (a data URL).
   let source = '';
@@ -212,7 +218,7 @@ export async function stagePhoto(body: Record<string, unknown>, actor: string): 
   } else {
     throw new HttpError(400, 'Choose a photo first (PNG, JPEG or WebP).');
   }
-  return makePicture({ photo, source, preset, shot, angle, extra, context, aspect: aspect as '4:5' | '1:1', useReferences: body.useReferences as boolean | undefined, sameRoom }, actor);
+  return makePicture({ photo, source, preset, shot, angle, extra, context, aspect: aspect as '4:5' | '1:1', useReferences: body.useReferences as boolean | undefined, sameRoom: roomWanted }, actor);
 }
 
 /**

@@ -3,7 +3,9 @@
  * a stand-in:
  * - the owner's prompt with "1. … 2. … 3. …" becomes three requests, one after another, each asking
  *   for ONE photograph from its angle (the list is never sent: the service drew all three in one
- *   collage); the rest of the prompt goes with every one; the first picture goes with the next ones;
+ *   collage); each is a NEW photograph from its own camera position (asked to "edit" the photo, the
+ *   model kept its camera and the angles looked alike); the rest of the prompt goes with every one;
+ *   the first picture goes with the next ones only when the owner asks for the same room;
  * - AI pictures go first and the owner's photo last (or after it, when the owner chooses);
  * - Quick add: the product is saved at once (hidden), then written, pictured and published in the
  *   background; Google's "wait" is waited out without the owner; a restart keeps the pictures
@@ -94,7 +96,7 @@ test('the owner’s prompt: three numbered angles become three pictures; the roo
   assert.deepEqual(stage.stagingStatus().angles.map((a) => a.n), [1, 2, 3]);
 });
 
-test('the studio: one request per angle, ONE photograph each, never the list; the first picture goes with the next so the room stays the same', async () => {
+test('the studio: one request per angle, a NEW photograph from its own camera position each (reported: the 3 pictures came out almost the same), never the list; the same room only when the owner asks', async () => {
   const { url } = photo();
   const imageId = url.replace('/api/images/', '');
   const first = await stage.stagePhoto({ imageId, angle: 1 }, OWNER);
@@ -103,18 +105,29 @@ test('the studio: one request per angle, ONE photograph each, never the list; th
   assert.equal(calls.length, 2);
   for (const c of calls) {
     const p = promptOf(c);
-    assert.match(p, /ONE photograph from this one camera angle only/);
+    // Asked to "edit" the photo, the model kept its camera: every angle looked the same.
+    assert.match(p, /^Make a NEW photograph of the bedding product in image 1/);
+    assert.doesNotMatch(p, /Edit this photograph|Edit the first photograph/);
+    assert.match(p, /NOT image 1's camera position, angle, framing or crop/);
+    assert.match(p, /clearly different from image 1/);
     assert.match(p, /never a collage, grid, split screen/);
     assert.doesNotMatch(p, /1\. Straight-on|2\. 45-degree|exactly three/, 'the numbered list is never sent');
     assert.match(p, /Identical Setting/);
   }
-  assert.match(promptOf(calls[0]), /Straight-on eye-level view/);
+  assert.match(promptOf(calls[0]), /The camera: Straight-on eye-level view/);
   assert.doesNotMatch(promptOf(calls[0]), /45-degree/);
-  assert.match(promptOf(calls[1]), /45-degree three-quarter view/);
+  assert.match(promptOf(calls[1]), /The camera: 45-degree three-quarter view/);
+  // By default the first picture is not sent with the next (the model copied it).
   assert.equal(imagesOf(calls[0]), 1, 'the product photo only');
-  assert.equal(imagesOf(calls[1]), 2, 'the product photo and the first picture');
-  assert.match(promptOf(calls[1]), /same room, bed frame, headboard/);
+  assert.equal(imagesOf(calls[1]), 1, 'not the first picture, by default');
   assert.notEqual(first.url, second.url);
+  // The owner can ask for exactly the same room: then it is sent, the camera still moves.
+  await settings.updateSettings('aiPictures', { sameRoom: true });
+  sent = [];
+  await stage.stagePhoto({ imageId, angle: 3, sameRoom: first.url }, OWNER);
+  assert.equal(imagesOf(pictureCalls()[0]), 2);
+  assert.match(promptOf(pictureCalls()[0]), /keep that room .* but NOT image 2's camera position: the camera moves/);
+  await settings.updateSettings('aiPictures', { sameRoom: false });
   // Only angles that are in the prompt, and only pictures this feature made as "same room".
   await assert.rejects(stage.stagePhoto({ imageId, angle: 4 }, OWNER), /not in your prompt/);
   // A "same room" picture that is not one this feature made (or was discarded) is not sent.
@@ -168,7 +181,7 @@ test('Quick add: saved at once (hidden), then written, pictured angle by angle, 
   for (const u of photos.slice(0, 3)) assert.ok(p.stagedPhotos?.[u], `${u} is marked as an AI picture`);
   const calls = pictureCalls();
   assert.equal(calls.length, 3, 'one request per angle');
-  assert.deepEqual(calls.map(imagesOf), [1, 2, 2], 'the first picture goes with the next two');
+  assert.deepEqual(calls.map(imagesOf), [1, 1, 1], 'each angle from the product photo alone (by default)');
   assert.match(promptOf(calls[2]), /High diagonal angle/);
   const job = auto.listJobs().find((j) => j.productId === p.id)!;
   assert.equal(job.state, 'done');
@@ -203,7 +216,7 @@ test('Quick add: Google’s “wait a minute” is waited out and tried again by
   sent = [];
   await auto.kick();
   assert.equal(pictureCalls().length, 2, 'the picture already paid for is not made again');
-  assert.equal(imagesOf(pictureCalls()[0]), 2, 'and it is still sent with the next ones');
+
   const p2 = products.getProduct(p0.id)!;
   assert.equal(p2.active, true);
   assert.equal(p2.featuredImage, one.url);
@@ -358,7 +371,7 @@ test('angles: a room described before the list is kept; numbered rules are not a
   await stage.stagePhoto({ imageId: photo().url.replace('/api/images/', ''), angle: 3 }, OWNER);
   const p = promptOf(pictureCalls()[0]);
   assert.doesNotMatch(p, /1\. Front view/);
-  assert.match(p, /ONE photograph from this one camera angle only: Top view/);
+  assert.match(p, /The camera: Top view/);
   await settings.updateSettings('aiPictures', { look: PROMPT });
 });
 

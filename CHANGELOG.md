@@ -1,5 +1,15 @@
 # Changelog
 
+## BUH-02.24.02 — 2026-10-21 16:10 UTC · [#47](https://github.com/cxsmtp/buh/pull/47)
+
+- **Each angle is really a new picture.** The 3 AI pictures of a product came out almost the same, because each one was asked to "edit" your photo, which kept your camera position. Each angle in your prompt is now a new photograph from its own camera position. Your photo is used only for the bedding's true pattern and colours, so the bed is seen from three clearly different sides.
+- **Same room: your choice.** The shop no longer sends the first AI picture along with the next ones, because the AI copied it. Your prompt's "identical setting" keeps the room consistent. If you want exactly the same room even if the pictures look closer, switch on **Keep exactly the same room in every angle** in Settings → AI pictures.
+- **Status.**
+  - **Benchmark:** 3 alternating rounds (branch first), 0 failed requests. Catalogue API branch 701 / 765 / 724 req/s vs main 696 / 754 / 716; gift page branch 694 / 720 / 709 vs main 698 / 720 / 703. In this run the storefront and serviceability API were slower on the branch in some rounds (storefront p95 150–160 ms vs 89–98 ms). Only the picture prompt changed, and nothing on those pages uses it, so the home page was rerun on its own as a 4-round A/B, taking turns: branch 661 / 696 / 745 / 706 vs main 699 / 700 / 702 / 679, p95 99–123 ms vs 103–115 ms. That is within noise; the earlier slow rounds were the first build of each pair.
+  - **Tests:** 1,197 of 1,197. The studio test now requires each angle to be asked for as a new photograph from its own camera position, sent with the product photo alone by default. It fails on main, where every angle was an "edit" of the photo and came back with the first picture.
+  - **Dependency audit:** production 0 vulnerabilities; no new packages.
+  - **Security scan:** prompt wording and one new on/off setting (allow-listed, a boolean); no new route.
+
 ## BUH-02.24.01 — 2026-10-21 11:00 UTC · [#46](https://github.com/cxsmtp/buh/pull/46)
 
 - **Finished products leave "Being made by AI".** A product the AI has finished is in the shop, and now leaves the list at the top of Inventory by itself. The list keeps only products still being made and ones that need you. The product list also refreshes on its own, so the new product shows as in the shop.
