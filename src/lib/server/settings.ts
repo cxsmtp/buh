@@ -1301,11 +1301,12 @@ export function validateAiPrompt(v: unknown, current: AiPromptSettings): AiPromp
 
 /**
  * Settings → AI pictures: 1 to 16 scenes (an id, a name of at most 60 characters, a scene of at most
- * 400, one line each, ids unique), the default trio (1 to 3 of those ids), and the look and mood (at
- * most 1,000, '' = the shop's default). The fixed rules are not settings.
+ * 400, one line each, ids unique), the default trio (1 to 3 of those ids), the look and mood (at
+ * most 3,000, '' = the shop's default), automatic AI for new products (on) and where AI pictures go
+ * (first). The fixed rules are not settings.
  */
 export function validateAiPictures(input: Obj, current: AiPicturesSettings): AiPicturesSettings {
-  for (const k of Object.keys(input)) if (!['look', 'scenes', 'defaultSet', 'references', 'useReferences'].includes(k)) throw new HttpError(400, `Unexpected field: ${k.slice(0, 30)}.`);
+  for (const k of Object.keys(input)) if (!['look', 'scenes', 'defaultSet', 'references', 'useReferences', 'autoCreate', 'photoOrder'].includes(k)) throw new HttpError(400, `Unexpected field: ${k.slice(0, 30)}.`);
   let look = current.look ?? '';
   if (input.look !== undefined) {
     if (typeof input.look !== 'string') throw new HttpError(400, 'The look and mood must be text.');
@@ -1342,7 +1343,10 @@ export function validateAiPictures(input: Obj, current: AiPicturesSettings): AiP
   if (defaultSet.length > STAGING_TRIO) throw new HttpError(400, `Choose at most ${STAGING_TRIO} scenes to make with one press.`);
   if (!defaultSet.length) defaultSet = scenes.slice(0, STAGING_TRIO).map((s) => s.id);
   const references = input.references === undefined ? current.references ?? [] : cleanReferences(input.references);
-  return { look, scenes, defaultSet, references, useReferences: bool(input.useReferences, current.useReferences ?? true) };
+  const photoOrder = input.photoOrder === undefined ? (current.photoOrder ?? 'styled-first') : input.photoOrder;
+  if (input.autoCreate !== undefined && typeof input.autoCreate !== 'boolean') throw new HttpError(400, 'New products written and pictured by AI: on or off.');
+  if (photoOrder !== 'styled-first' && photoOrder !== 'photo-first') throw new HttpError(400, 'Picture order: AI pictures first, or your photo first.');
+  return { look, scenes, defaultSet, references, useReferences: bool(input.useReferences, current.useReferences ?? true), autoCreate: bool(input.autoCreate, current.autoCreate ?? true), photoOrder };
 }
 
 /**

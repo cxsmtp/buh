@@ -13,6 +13,7 @@ import { startCardSweep } from './payments';
 import { auditStaffRestoreOnce } from './staffAuth';
 import { startFestivalRefresh } from './theme';
 import { startSeoWatch } from './seoWatch';
+import { startAutoAdd } from './autoAdd';
 import { logEvent } from './log';
 import { liveGateways } from '@/lib/otpService';
 
@@ -43,6 +44,8 @@ export async function onStartup() {
   // A festival's gift page going live: told to IndexNow once (only when the owner switched IndexNow on).
   step('seo_watch', startSeoWatch);
   step('monitor', startMonitor);
+  // Quick add: products an update or a restart interrupted are written and pictured where they stopped.
+  step('auto_add', startAutoAdd);
   step('chat', startChat);
   // Card orders not paid within 10 minutes: stopped at Stripe, cancelled, pieces back on sale.
   step('card_sweep', startCardSweep);

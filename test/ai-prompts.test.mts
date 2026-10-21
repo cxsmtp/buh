@@ -236,7 +236,7 @@ const SCENES = [
   { id: 'whole-bed', name: 'Whole bed', scene: 'show the whole set on a bed at eye level' },
 ];
 
-test('Settings → AI pictures: scenes (1 to 16, names ≤ 60, scenes ≤ 400, unique ids), the trio (≤ 3, among the scenes), the look (≤ 1,000); removing a scene takes it out of the trio', async () => {
+test('Settings → AI pictures: scenes (1 to 16, names ≤ 60, scenes ≤ 400, unique ids), the trio (≤ 3, among the scenes), the look (≤ 3,000, room for a whole prompt with its angles); removing a scene takes it out of the trio', async () => {
   const s = (v: unknown) => status(settings.updateSettings('aiPictures', v));
   const many = Array.from({ length: 17 }, (_, i) => ({ id: `s-${i}`, name: `Scene ${i}`, scene: 'a bedroom' }));
   assert.equal(await s({ scenes: many }), 400);
@@ -251,7 +251,10 @@ test('Settings → AI pictures: scenes (1 to 16, names ≤ 60, scenes ≤ 400, u
   assert.equal(await s({ scenes: SCENES, defaultSet: ['majlis-guest', 'whole-bed', 'x'] }), 400);
   assert.equal(await s({ scenes: [...SCENES, { id: 'c', name: 'C', scene: 'c' }, { id: 'd', name: 'D', scene: 'd' }], defaultSet: ['majlis-guest', 'whole-bed', 'c', 'd'] }), 400);
   assert.equal(await s({ defaultSet: ['nowhere'] }), 400);
-  assert.equal(await s({ look: 'x'.repeat(1001) }), 400);
+  assert.equal(await s({ look: 'x'.repeat(3001) }), 400);
+  assert.equal(await s({ look: 'x'.repeat(3000) }), 200);
+  assert.equal(await s({ photoOrder: 'random' }), 400);
+  assert.equal(await s({ autoCreate: 'yes' }), 400);
   assert.equal(await s({ rules: [] }), 400);
   assert.equal(await s({ scenes: SCENES, defaultSet: ['majlis-guest', 'whole-bed'], look: 'Golden hour light,\nfresh jasmine <b>{x}</b>' }), 200);
   const saved = settings.getSettings('aiPictures');
@@ -318,7 +321,8 @@ test('status: "no_key" without a Gemini key, "no_model" with a key but no usable
   await assert.rejects(stage.stagePhoto({ image: PHOTO_URL, preset: 'whole-bed' }, 'owner@s.t'), /did not accept the Gemini API key\. Check it in Settings → AI pictures/);
 });
 
-test('Picture studio → Add to gallery: after the photo it was made from, once (safe to send twice), only styled photos, at most 8; audited', async () => {
+test('Picture studio → Add to gallery: after the photo it was made from (when the owner chooses that order), once (safe to send twice), only styled photos, at most 8; audited', async () => {
+  await settings.updateSettings('aiPictures', { photoOrder: 'photo-first' });
   const real = saveImageDataUrl(PHOTO_URL);
   const other = saveImageDataUrl(`data:image/png;base64,${makePng(80, 100, () => [200, 10, 10]).toString('base64')}`);
   const king = settings.getSettings('catalog').sizes.filter((s) => s.id === 'king');
@@ -351,6 +355,7 @@ test('Picture studio → Add to gallery: after the photo it was made from, once 
   assert.equal(1 + products.getProduct(p.id)!.galleryImages.length, 8);
   // An added photo can't be discarded (it is in use).
   assert.equal(await status(() => stage.discardStagedPhoto({ url: a.url }, 'owner@s.t')), 409);
+  await settings.updateSettings('aiPictures', { photoOrder: 'styled-first' });
 });
 
 test('backups carry the custom prompt and scenes (and their history); the restore script restores them; keys never', async () => {

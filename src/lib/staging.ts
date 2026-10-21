@@ -96,8 +96,10 @@ export const STAGING_SCENE_MAX = 400;
 export const STAGING_NAME_MAX = 60;
 /** At most this many scenes in Settings → AI pictures. */
 export const STAGING_MAX_SCENES = 16;
-/** The look and mood instructions. */
-export const STAGING_LOOK_MAX = 1000;
+/** The look and mood instructions (room for a whole prompt with its numbered angles). */
+export const STAGING_LOOK_MAX = 3000;
+/** Numbered angles in the look: at most this many pictures, one request each. */
+export const STAGING_MAX_ANGLES = 4;
 /** A scene's id: lower-case letters, digits and dashes. */
 export const SCENE_ID = /^[a-z0-9][a-z0-9-]{0,39}$/;
 
@@ -124,6 +126,7 @@ export const STAGING_FIXED_RULES = [
   '- the same number of pieces (sheets, pillowcases, covers): add none and remove none.',
   'The colours and pattern must stay true to the photo: shoppers buy from this picture and return what does not match it.',
   'No text, letters or numbers anywhere, no logos, no watermarks, no people or parts of people, no pets.',
+  'One single photograph that fills the whole frame, from one camera angle: never a collage, grid, split screen, border or several views in one picture.',
 ] as const;
 
 export interface StagingScene {
@@ -147,11 +150,18 @@ export interface AiPicturesSettings {
   references: string[];
   /** Send the style photos (when there are any). On by default. */
   useReferences: boolean;
+  /**
+   * Quick add: a new product's name, descriptions and pictures are made by AI in the background
+   * and it is published when they are ready. On by default; off: the owner writes them.
+   */
+  autoCreate: boolean;
+  /** Where AI pictures go among a product's photos: first (the owner's photo last, the default) or after the owner's photo. */
+  photoOrder: 'styled-first' | 'photo-first';
 }
 
 export const DEFAULT_SCENES: StagingScene[] = STAGING_PRESETS.map((p) => ({ id: p.id, name: p.name, scene: p.shot }));
 
-export const DEFAULT_AI_PICTURES: AiPicturesSettings = { look: '', scenes: DEFAULT_SCENES, defaultSet: DEFAULT_STAGING_SET, references: [], useReferences: true };
+export const DEFAULT_AI_PICTURES: AiPicturesSettings = { look: '', scenes: DEFAULT_SCENES, defaultSet: DEFAULT_STAGING_SET, references: [], useReferences: true, autoCreate: true, photoOrder: 'styled-first' };
 
 /** Whether a picture of this scene gets the style photos: on, some uploaded, and the scene not set to its description only. */
 export function usesReferences(p: Pick<AiPicturesSettings, 'references' | 'useReferences'>, scene: Pick<StagingScene, 'style'> | undefined, batch?: boolean): boolean {
@@ -171,6 +181,62 @@ export function oneLine(v: string): string {
     .trim();
 }
 
+/**
+ * The owner's prompt may ask for several pictures from numbered angles ("1. Straight-on eye-level
+ * view…; 2. 45-degree three-quarter view…; 3. High diagonal angle…"). A picture service answers
+ * one request with ONE picture, so it squeezed all the angles into a collage. The angles are taken
+ * out here and each becomes its own request; the rest of the prompt (the room, the styling, the
+ * requirements) goes with every one. The sentence that introduces the list ("Output exactly three
+ * separate images from three angles:") is dropped: each request asks for one picture.
+ * Fewer than two numbered items: no angles (the prompt is used as it is).
+ */
+export function splitAngles(text: string): { shared: string; angles: string[] } {
+  const t = oneLine(text ?? '');
+  // "1." or "1)" at the start or after a space, then 2., 3., 4. in order.
+  const marks: Array<{ n: number; at: number; len: number }> = [];
+  let from = 0;
+  for (let n = 1; n <= STAGING_MAX_ANGLES; n++) {
+    const re = new RegExp(`(?:^|[\\s:;,(])(${n}[.)])\\s+(?=\\S)`, 'g');
+    re.lastIndex = from;
+    const m = re.exec(t);
+    if (!m) break;
+    const at = m.index + m[0].indexOf(m[1]);
+    marks.push({ n, at, len: m[0].length - (at - m.index) });
+    from = at + m[0].length - (at - m.index);
+  }
+  if (marks.length < 2) return { shared: t, angles: [] };
+  const angles: string[] = [];
+  let end = t.length;
+  for (let i = 0; i < marks.length; i++) {
+    const start = marks[i].at + marks[i].len;
+    let stop = i + 1 < marks.length ? marks[i + 1].at : t.length;
+    if (i + 1 === marks.length) {
+      // The last angle ends at its sentence: the first ". " or "; " (the rest is shared).
+      const rest = t.slice(start);
+      const m = /[.;](?:\s|$)/.exec(rest);
+      stop = m ? start + m.index : t.length;
+      end = m ? start + m.index + 1 : t.length;
+    }
+    const a = t.slice(start, stop).replace(/[\s.;,]+$/, '').trim();
+    if (a) angles.push(a.slice(0, STAGING_SCENE_MAX));
+  }
+  if (angles.length < 2) return { shared: t, angles: [] };
+  // The lead-in: the sentence just before "1.", dropped when it asks for images, angles or views.
+  let before = t.slice(0, marks[0].at);
+  const sentenceStart = Math.max(before.lastIndexOf('. '), before.lastIndexOf('! '), before.lastIndexOf('? '));
+  const lead = before.slice(sentenceStart + 1);
+  if (/\b(images?|pictures?|photos?|photographs?|angles?|views?|shots?)\b/i.test(lead)) before = before.slice(0, sentenceStart + 1);
+  else before = before.replace(/[:\s]+$/, '.');
+  const shared = `${before.trim()} ${t.slice(end).trim()}`.replace(/\s+/g, ' ').trim();
+  return { shared, angles };
+}
+
+/** A short name for an angle (its first words), for the studio and the activity list. */
+export function angleName(angle: string, i: number): string {
+  const words = angle.split(/[,;:–—(]/)[0].trim();
+  return `Angle ${i + 1}: ${words.length > 48 ? `${words.slice(0, 47).replace(/\s+\S*$/, '')}…` : words}`;
+}
+
 export function stagingPreset(id: unknown): StagingPreset | undefined {
   return STAGING_PRESETS.find((p) => p.id === id);
 }
@@ -188,7 +254,7 @@ export interface StagingContext {
  * mood, the product's words and the owner's note, then the fixed rules, which nothing before them
  * can change.
  */
-export function stagingPrompt(shot: string, extra: string, aspect: string, context: StagingContext = {}, look: string = DEFAULT_PICTURE_LOOK, references = 0): string {
+export function stagingPrompt(shot: string, extra: string, aspect: string, context: StagingContext = {}, look: string = DEFAULT_PICTURE_LOOK, references = 0, { angle = '', sameRoom = false }: { angle?: string; sameRoom?: boolean } = {}): string {
   const about = [
     context.title ? `name: ${context.title}` : '',
     context.motif ? `motif: ${context.motif}` : '',
@@ -199,11 +265,15 @@ export function stagingPrompt(shot: string, extra: string, aspect: string, conte
     references > 0 ? 'Edit the first photograph (image 1), of a bedding product (a bed sheet or duvet cover set) from a home-linen shop.' : 'Edit this photograph of a bedding product (a bed sheet or duvet cover set) from a home-linen shop.',
     ...(references > 0
       ? [
-          `Image 1 is the product: copy its bedding exactly. ${references === 1 ? 'Image 2 is a style reference' : `Images 2–${references + 1} are style references`}: match their lighting, colour grading, camera angle, room style and mood, but do not copy their bedding, people, text or logos.`,
+          sameRoom
+            ? `Image 1 is the product: copy its bedding exactly. Image 2 is a picture already made of this product in its room, from another angle: keep the same room, bed frame, headboard, walls, floor, bedside tables, lighting and styling, and show it from the new angle below.${references > 1 ? ` ${references === 2 ? 'Image 3 is a style reference' : `Images 3–${references + 1} are style references`}: match their lighting, colour grading and mood, but do not copy their bedding, people, text or logos.` : ''}`
+            : `Image 1 is the product: copy its bedding exactly. ${references === 1 ? 'Image 2 is a style reference' : `Images 2–${references + 1} are style references`}: match their lighting, colour grading, camera angle, room style and mood, but do not copy their bedding, people, text or logos.`,
         ]
       : []),
     ...(about.length ? [`About the product, so the setting suits it (the photo is the truth; nothing here changes the product): ${about.join('; ')}.`] : []),
-    `Change only what is around it and the framing: ${shot.replace(/[.\s]+$/, '')}. You may change the bed, the room, the lighting and the props.`,
+    angle
+      ? `Change only what is around it. The setting is described below; this picture is ONE photograph from this one camera angle only: ${angle.replace(/[.\s]+$/, '')}.`
+      : `Change only what is around it and the framing: ${shot.replace(/[.\s]+$/, '')}. You may change the bed, the room, the lighting and the props.`,
     `The look and mood: ${oneLine(look).replace(/[.\s]+$/, '')}.`,
     ...(extra ? [`The owner's note about the setting (it never changes the product): ${extra}`] : []),
     `A realistic photograph for a high-end catalogue, ${aspect === '1:1' ? 'square' : 'portrait 4:5'} framing, with the bedding as the clear subject.`,

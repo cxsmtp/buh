@@ -18,6 +18,8 @@ import {
   STAGING_TRIO,
   STYLE_REFS_MAX,
   STYLE_UPLOAD_SIDE,
+  angleName,
+  splitAngles,
   stagingPrompt,
   usesReferences,
   type AiPicturesSettings,
@@ -91,6 +93,8 @@ export function AiPicturesCard({
   const [look, setLook] = useState(value.look?.trim() ? value.look : DEFAULT_PICTURE_LOOK);
   const [references, setReferences] = useState<string[]>(value.references ?? []);
   const [useRefs, setUseRefs] = useState(value.useReferences !== false);
+  const [autoCreate, setAutoCreate] = useState(value.autoCreate !== false);
+  const [photoOrder, setPhotoOrder] = useState<AiPicturesSettings['photoOrder']>(value.photoOrder ?? 'styled-first');
   const [uploading, setUploading] = useState(0);
   const [refStatus, setRefStatus] = useState<{ ok: boolean; text: string } | null>(null);
   const [preview, setPreview] = useState(false);
@@ -133,7 +137,7 @@ export function AiPicturesCard({
     setKeyStatus(problem ? { ok: false, text: problem } : { ok: true, text: `Saved: ${SHORT[p]} makes your pictures. Make them in Inventory → a product → Make pictures.` });
   };
 
-  const settings: AiPicturesSettings = { look: look.trim() === DEFAULT_PICTURE_LOOK ? '' : look.trim(), scenes, defaultSet: trio.filter((t) => scenes.some((s) => s.id === t)), references, useReferences: useRefs };
+  const settings: AiPicturesSettings = { look: look.trim() === DEFAULT_PICTURE_LOOK ? '' : look.trim(), scenes, defaultSet: trio.filter((t) => scenes.some((s) => s.id === t)), references, useReferences: useRefs, autoCreate, photoOrder };
 
   const saveScenes = async () => {
     setSavingScenes(true);
@@ -189,9 +193,14 @@ export function AiPicturesCard({
 
   const firstScene = scenes.find((s) => trio.includes(s.id)) ?? scenes[0];
   const refsInPreview = usesReferences({ references, useReferences: useRefs }, firstScene) ? Math.min(references.length, p ? (p === 'fal' ? falModel(model).maxImages : 6) - 1 : references.length) : 0;
+  // Numbered angles in the prompt: one picture each, one request each (the list never goes in a request).
+  const split = useMemo(() => splitAngles(look.trim() || DEFAULT_PICTURE_LOOK), [look]);
   const assembled = useMemo(
-    () => stagingPrompt(firstScene?.scene || '(the scene)', '', '4:5', { title: 'Indigo Chevron Hand Block Print Bed Set', colors: ['Indigo', 'Ivory'] }, look.trim() || DEFAULT_PICTURE_LOOK, refsInPreview),
-    [firstScene?.scene, look, refsInPreview]
+    () =>
+      split.angles.length
+        ? stagingPrompt(split.angles[0], '', '4:5', { title: 'Indigo Chevron Hand Block Print Bed Set', colors: ['Indigo', 'Ivory'] }, split.shared || DEFAULT_PICTURE_LOOK, refsInPreview, { angle: split.angles[0] })
+        : stagingPrompt(firstScene?.scene || '(the scene)', '', '4:5', { title: 'Indigo Chevron Hand Block Print Bed Set', colors: ['Indigo', 'Ivory'] }, split.shared || DEFAULT_PICTURE_LOOK, refsInPreview),
+    [firstScene?.scene, split, refsInPreview]
   );
   const copy = async () => {
     try {
@@ -426,6 +435,31 @@ export function AiPicturesCard({
         </button>
       </section>
 
+      <section className="space-y-3 rounded-xl border border-line p-3" aria-labelledby="pictures-new-h" data-testid="pictures-new-products">
+        <h3 id="pictures-new-h" className="font-bold text-ink">
+          New products
+        </h3>
+        <label className="flex items-start gap-3 min-h-11">
+          <input type="checkbox" className="mt-1 w-5 h-5 shrink-0" checked={autoCreate} onChange={(e) => setAutoCreate(e.target.checked)} />
+          <span className="text-sm text-ink">
+            <span className="font-semibold">Write and make pictures for new products by themselves</span>
+            <span className="block text-xs text-ink-soft">Add a product with just its photo, price and stock: the name, descriptions and AI pictures are made in the background and it goes in the shop when ready. Edit anything later.</span>
+          </span>
+        </label>
+        <fieldset>
+          <legend className="text-xs font-semibold text-ink-soft mb-1">Where AI pictures go</legend>
+          <div className="flex flex-col gap-1">
+            <label className="flex items-center gap-3 min-h-11 text-sm text-ink">
+              <input type="radio" name="photo-order" className="w-5 h-5" checked={photoOrder === 'styled-first'} onChange={() => setPhotoOrder('styled-first')} /> First, with your own photo last
+            </label>
+            <label className="flex items-center gap-3 min-h-11 text-sm text-ink">
+              <input type="radio" name="photo-order" className="w-5 h-5" checked={photoOrder === 'photo-first'} onChange={() => setPhotoOrder('photo-first')} /> After your own photo (it stays the cover)
+            </label>
+          </div>
+        </fieldset>
+        <p className="text-[11px] text-ink-muted">Saved with &ldquo;Save scenes and prompt&rdquo; below.</p>
+      </section>
+
       <section className="space-y-3 rounded-xl border border-line p-3" aria-labelledby="pictures-look-h" data-testid="pictures-look">
         <h3 id="pictures-look-h" className="font-bold text-ink">
           The picture prompt
@@ -443,6 +477,19 @@ export function AiPicturesCard({
           <p className="text-[11px] text-ink-muted mt-1">
             {look.length} / {STAGING_LOOK_MAX.toLocaleString('en-GB')} characters. The default asks for real-looking photographs: window daylight, real creases, true scale, a 35–50 mm lens.
           </p>
+          {split.angles.length > 0 && (
+            <div className="mt-2 rounded-xl border border-success-line bg-success-soft p-3 text-xs text-ink" data-testid="pictures-angles">
+              <p className="font-bold">
+                {split.angles.length} angles found: {split.angles.length} pictures, one request each, one after another
+              </p>
+              <ol className="list-decimal pl-5 mt-1 space-y-0.5">
+                {split.angles.map((a, i) => (
+                  <li key={i}>{angleName(a, i).replace(/^Angle \d+: /, '')}</li>
+                ))}
+              </ol>
+              <p className="mt-1 text-ink-soft">The rest of the prompt goes with every picture, and the first picture is sent with the next ones so the room stays the same. One press in the studio (and every new product) makes these instead of the scenes.</p>
+            </div>
+          )}
         </div>
         <div className="space-y-1 rounded-xl border border-line bg-sand p-3" data-testid="pictures-fixed">
           <p className="text-xs font-bold text-ink flex items-center gap-1.5">
@@ -472,7 +519,7 @@ export function AiPicturesCard({
           <div id="pictures-preview" className="space-y-2" data-testid="pictures-preview">
             <div className="flex flex-wrap items-center gap-2">
               <p className="text-xs text-ink-soft flex-1 min-w-0">
-                The whole prompt for &ldquo;{firstScene?.name || 'the first scene'}&rdquo; and a sample product, sent with the product&rsquo;s photo{refsInPreview ? ` and ${refsInPreview} style ${refsInPreview === 1 ? 'photo' : 'photos'}` : ''}. Read-only.
+                The whole prompt for &ldquo;{split.angles.length ? angleName(split.angles[0], 0) : firstScene?.name || 'the first scene'}&rdquo; and a sample product, sent with the product&rsquo;s photo{refsInPreview ? ` and ${refsInPreview} style ${refsInPreview === 1 ? 'photo' : 'photos'}` : ''}. Read-only.
               </p>
               <button type="button" onClick={() => void copy()} className={small}>
                 <Copy className="w-3.5 h-3.5" aria-hidden="true" /> {copied ? 'Copied' : 'Copy'}

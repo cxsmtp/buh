@@ -48,7 +48,7 @@ export function PictureStudioSheet({ product, onClose, onSaved, onOpenSettings }
         <PictureStudio
           testId="picture-studio"
           title="Make pictures"
-          intro="New pictures of this product in beautiful settings, to help shoppers fall for it. Pick a photo and the scenes; the ones you add go straight to the product's photos, after the original."
+          intro="New pictures of this product in beautiful settings, to help shoppers fall for it. Pick a photo and the scenes; the ones you add go straight to the product's photos (AI pictures first and your photo last, unless Settings → AI pictures says otherwise)."
           photos={photos}
           room={MAX_PHOTOS - photos.length}
           allowUpload

@@ -48,6 +48,9 @@ export interface StudioStatus {
   defaultSet?: string[];
   references?: string[];
   useReferences?: boolean;
+  /** The numbered angles in the owner's prompt: one picture each, made one after another. */
+  angles?: Array<{ n: number; name: string }>;
+  photoOrder?: 'styled-first' | 'photo-first';
 }
 
 const input = 'w-full px-3 py-2 rounded-xl border border-line-strong bg-surface text-ink text-base sm:text-sm focus:outline-none focus:ring-2 focus:ring-gold';
@@ -135,8 +138,8 @@ export function PictureStudio({
   onNotes?: (v: string) => void;
   /** The product's own words, so the setting suits it (never changes the product). */
   context: { title?: string; motif?: string; colors?: string[]; design?: string };
-  /** Add the styled photos (in order) after the one they were made from; what was added, or why not. */
-  onAdd: (urls: string[], source: string) => Promise<{ added: string[]; message?: string }>;
+  /** Add the styled photos (in order) where Settings → AI pictures puts them; what was added, or why not. */
+  onAdd: (urls: string[], source: string, order: 'styled-first' | 'photo-first') => Promise<{ added: string[]; message?: string }>;
   /** Opens Settings → AI pictures (shown with the setup steps). */
   onOpenSettings?: () => void;
   /** Offer "Upload a photo" as the source too. */
@@ -165,6 +168,8 @@ export function PictureStudio({
   const counter = useRef(0);
   /** Slots still on screen: a picture that arrives for one discarded meanwhile is thrown away. */
   const live = useRef(new Set<number>());
+  /** This set's first angle picture: sent with the next angles so the room stays the same. */
+  const firstAngle = useRef('');
 
   useEffect(() => {
     let on = true;
@@ -176,10 +181,13 @@ export function PictureStudio({
     };
   }, []);
 
-  const allScenes = status?.scenes?.length ? status.scenes : DEFAULT_SCENES;
+  // The angles in the owner's prompt come first (and are the one-press set), then the scenes.
+  const angleChoices: StagingScene[] = (status?.angles ?? []).map((a) => ({ id: `angle:${a.n}`, name: a.name, scene: '' }));
+  const allScenes = [...angleChoices, ...(status?.scenes?.length ? status.scenes : DEFAULT_SCENES)];
   const sceneOf = (sid: string) => allScenes.find((s) => s.id === sid);
   const nameOf = (sid: string) => sceneOf(sid)?.name ?? sid;
-  const set = (chosenSet ?? (status?.defaultSet?.length ? status.defaultSet : DEFAULT_STAGING_SET)).filter((sid) => sceneOf(sid));
+  const isAngle = (sid: string) => sid.startsWith('angle:');
+  const set = (chosenSet ?? (angleChoices.length ? angleChoices.map((a) => a.id) : status?.defaultSet?.length ? status.defaultSet : DEFAULT_STAGING_SET)).filter((sid) => sceneOf(sid));
   const at = Math.min(pick, Math.max(0, sources.length - 1));
   const chosen = sources[at];
   const busy = slots.some((s) => s.state === 'busy');
@@ -203,9 +211,10 @@ export function PictureStudio({
     const ctx = Object.fromEntries(Object.entries(context).filter(([, v]) => (Array.isArray(v) ? v.length : typeof v === 'string' && v.trim())));
     const call = postJson<{ url?: string; message?: string; code?: string; reason?: string; detail?: string; retryAfterSec?: number }>('/api/admin/products/stage-photo', {
       ...field,
-      preset,
+      // One of the angles in the owner's prompt (with the set's first picture, so the room matches), or a scene.
+      ...(isAngle(preset) ? { angle: Number(preset.slice(6)), ...(firstAngle.current ? { sameRoom: firstAngle.current } : {}) } : { preset }),
       ...(notes.trim() ? { extra: notes.trim() } : {}),
-      ...(scene && scene !== sceneOf(preset)?.scene ? { scene } : {}),
+      ...(!isAngle(preset) && scene && scene !== sceneOf(preset)?.scene ? { scene } : {}),
       ...(Object.keys(ctx).length ? { context: ctx } : {}),
       ...(refCount ? { useReferences: refsOn } : {}),
     });
@@ -235,6 +244,7 @@ export function PictureStudio({
     }
     // Discarded (or tried again) while it was being made: thrown away.
     if (!live.current.has(key)) return void discard(data.url);
+    if (isAngle(preset) && !firstAngle.current) firstAngle.current = data.url;
     update({ state: 'done', url: data.url });
   };
 
@@ -250,9 +260,11 @@ export function PictureStudio({
     setSource(chosen);
     const fresh = set.map((preset) => ({ key: ++counter.current, preset, state: 'busy' as const }));
     live.current = new Set(fresh.map((s) => s.key));
+    firstAngle.current = '';
     setSlots(fresh);
-    // Gemini: one at a time, so a new account's per-minute limit isn't hit by three at once.
-    if (status?.provider === 'gemini') {
+    // One at a time with Gemini (a new account's per-minute limit isn't hit by three at once) and
+    // for angles (each one after the first is sent with it, so the room stays the same).
+    if (status?.provider === 'gemini' || fresh.some((s) => isAngle(s.preset))) {
       for (const s of fresh) await make(s.key, s.preset, field).catch(() => undefined);
     } else {
       await Promise.allSettled(fresh.map((s) => make(s.key, s.preset, field)));
@@ -284,7 +296,8 @@ export function PictureStudio({
     setAdding(true);
     const { added, message } = await onAdd(
       taking.map((s) => s.url!),
-      source
+      source,
+      status?.photoOrder ?? 'styled-first'
     );
     setAdding(false);
     const done = taking.filter((t) => added.includes(t.url!));
@@ -292,7 +305,7 @@ export function PictureStudio({
     setSlots((all) => all.filter((s) => !done.some((t) => t.key === s.key)));
     if (message) setError(message);
     else setError(taking.length < ready.length ? `Only ${room} more ${room === 1 ? 'photo fits' : 'photos fit'}: remove one to add the rest.` : '');
-    if (done.length) setNote(`${done.length === 1 ? 'Added' : `${done.length} added`} after the original photo. Shoppers see a small “Styled image” tag on ${done.length === 1 ? 'it' : 'them'}.`);
+    if (done.length) setNote(`${done.length === 1 ? 'Added' : `${done.length} added`} to the photos (where Settings → AI pictures puts them). Shoppers see a small “Styled image” tag on ${done.length === 1 ? 'it' : 'them'}.`);
   };
 
   const toggle = (preset: string) => setChosenSet(set.includes(preset) ? set.filter((p) => p !== preset) : set.length >= STAGING_MAX_SET ? set : [...set, preset]);
@@ -349,7 +362,7 @@ export function PictureStudio({
             </fieldset>
           )}
           <fieldset className="space-y-1">
-            <legend className="text-sm font-semibold text-ink mb-1">Scenes to make (1 to {STAGING_MAX_SET})</legend>
+            <legend className="text-sm font-semibold text-ink mb-1">{angleChoices.length ? 'Angles from your prompt, or scenes' : 'Scenes to make'} (1 to {STAGING_MAX_SET})</legend>
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-1">
               {allScenes.map((p) => (
                 <label key={p.id} className="min-h-11 flex items-center gap-2 text-sm rounded-xl border border-line px-2">
@@ -384,7 +397,8 @@ export function PictureStudio({
           <details className="rounded-xl border border-line px-3 py-2" data-testid="stage-prompt">
             <summary className="min-h-11 flex items-center font-semibold cursor-pointer text-sm">What Gemini is asked (edit the scenes for these pictures)</summary>
             <div className="space-y-2 pb-2">
-              {set.map((preset) => (
+              {set.filter((preset) => isAngle(preset)).length > 0 && <p className="text-xs text-ink-soft">The angles come from your picture prompt in Settings → AI pictures: one picture each, made one after another.</p>}
+              {set.filter((preset) => !isAngle(preset)).map((preset) => (
                 <label key={preset} className="block text-sm">
                   <span className="block font-semibold text-ink mb-1">{nameOf(preset)}: scene</span>
                   <textarea rows={3} maxLength={STAGING_SCENE_MAX} value={scenes[preset] ?? sceneOf(preset)?.scene ?? ''} onChange={(e) => setScenes((s) => ({ ...s, [preset]: e.target.value }))} className={input} aria-label={`Scene for ${nameOf(preset)}`} />
