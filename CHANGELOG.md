@@ -1,5 +1,15 @@
 # Changelog
 
+## BUH-02.24.01 — 2026-10-21 11:00 UTC · [#46](https://github.com/cxsmtp/buh/pull/46)
+
+- **Finished products leave "Being made by AI".** A product the AI has finished is in the shop, and now leaves the list at the top of Inventory by itself. The list keeps only products still being made and ones that need you. The product list also refreshes on its own, so the new product shows as in the shop.
+- **Add never makes you wait.** Press Add and the form is ready for the next item at once, even while the photo is still uploading. The upload and the saving carry on in the background. If one fails, it says so under "Being made" with **Try again**, and it is never added twice.
+- **Status.**
+  - **Benchmark:** see the status row.
+  - **Tests:** see the status row.
+  - **Dependency audit:** production 0 vulnerabilities; no new packages.
+  - **Security scan:** only admin screens changed; no new route, nothing new stored.
+
 ## BUH-02.24.00 — 2026-10-21 10:00 UTC · [#45](https://github.com/cxsmtp/buh/pull/45)
 
 - **One picture per angle.** A prompt that lists numbered angles ("1. Straight-on… 2. 45-degree… 3. High diagonal…") gave one picture with all three squeezed in, because a picture service makes one picture per request. The shop now finds the angles and makes one picture per angle, one request after another, with the rest of your prompt in each. The first picture goes along with the next ones so the room, bed and lighting stay the same. Settings → AI pictures shows the angles it found.
