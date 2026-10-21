@@ -1,5 +1,14 @@
 # Changelog
 
+## BUH-02.23.02 — 2026-10-21 08:45 UTC · [#44](https://github.com/cxsmtp/buh/pull/44)
+
+- **Google can read the sitemap again.** Search Console refused /sitemap.xml with "Parsing error, line 150": picture links with an `&` in them (the sample products' photos) made the file invalid. Links in the sitemap are now written the way XML needs, so Google can read every page and picture in it.
+- **Status.**
+  - **Benchmark:** 3 alternating rounds, 0 failed requests. Catalogue API branch 761 / 681 / 691 req/s vs main 774 / 660 / 684; serviceability API branch 684 / 642 / 669 vs main 686 / 657 / 673. The home page was rerun on its own as a 4-round A/B, taking turns: branch 732 / 729 / 750 / 700 vs main 740 / 763 / 722 / 715, within noise. Only the sitemap changed.
+  - **Tests:** 1,177 of 1,180 on the full run. The 3 failures all came from the new version having no changelog entry yet, and they pass with it. The new test renders the sitemap with Next.js itself and fails without the fix.
+  - **Dependency audit:** production 0 vulnerabilities.
+  - **Security scan:** no new route or stored data; the sitemap only escapes text. A Checkmarx scan of this branch was also run, and its findings are being triaged separately.
+
 ## BUH-02.23.01 — 2026-10-21 06:00 UTC · [#43](https://github.com/cxsmtp/buh/pull/43)
 
 - **A clear message when Gemini needs billing.** Google offers its picture models only on paid accounts, so a key on the free tier was refused every time. The shop said "limit reached, wait a minute", which never helped. It now says the key's project needs billing switched on, where to do it (aistudio.google.com → API keys → your project → Set up billing) and the rough cost: about 4 US cents a picture.

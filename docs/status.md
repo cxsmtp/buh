@@ -4,6 +4,7 @@ One row per release. Benchmarks run `npm run test:load` on the same 4 vCPU host,
 
 | Version | Date | Storefront req/s (p50 / p95 ms) | Serviceability API req/s (p50 / p95 ms) | Failed requests | Tests | Audit (production) | Security scan |
 | --- | --- | --- | --- | --- | --- | --- | --- |
+| BUH-02.23.02 | 2026-10-21 | home page A/B: branch 732 / 729 / 750 / 700; main 740 / 763 / 722 / 715 | branch 684 / 642 / 669; main 686 / 657 / 673 | 0 | 1,177/1,180 (3: changelog entry not yet written; pass with it) | 0 vulnerabilities | Sitemap escaping only; Checkmarx scan run, findings triaged separately |
 | BUH-02.23.01 | 2026-10-21 | branch 751 / 721 / 776; main 748 / 710 / 756 | branch 578 / 651 / 565; main 553 / 604 / 610 | 0 | 1,170/1,179 (9 in two AI screen files: hub load timed out under the full run; both files 18/18 alone) | 0 vulnerabilities | Messages and studio behaviour only; Google error text stays scrubbed of the key |
 | BUH-02.23.00 | 2026-10-21 | branch 848 / 870 / 857; main 819 / 853 / 857 | branch 703 / 668 / 694; main 698 / 664 / 662 | 0 | 1,178/1,179 (palette rule; fixed, rechecked 29/29) | 0 vulnerabilities | No new route or stored data; email escapes product names, no private links or phones |
 | BUH-02.22.00 | 2026-10-20 | branch 930 / 893 / 857; main 880 / 849 / 849 (p95 137 / 125 / 100 vs 145 / 156 / 124 ms) | branch 751 / 742 / 776; main 744 / 709 / 639 | 0 | 1,177 passed | 0 vulnerabilities | Two independent reviews: 2 high, 3 medium, 4 low; all fixed with tests (1 documented); real Drive deletions not tried |
