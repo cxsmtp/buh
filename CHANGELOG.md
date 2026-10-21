@@ -1,5 +1,17 @@
 # Changelog
 
+## BUH-02.23.00 — 2026-10-21 09:00 UTC · [#42](https://github.com/cxsmtp/buh/pull/42)
+
+- **A daily summary you can scan.** The 8:00 email now has four sections, one line per item: **Action needed** first (orders to confirm, transfers to check, chats waiting, restocks, problems), then **Sales**, **Inventory** and **System**.
+- **More useful sales.** Yesterday's sales now come with the average order, best sellers and the last 7 days compared with the 7 before.
+- **Stock by product.** Each sold-out or low product gets its own line with the sizes left (e.g. "Low: Jaipur Jaal Floral — King 2, Super King 1 left"), instead of one long list.
+- **A clear subject.** For example "Daily summary 2026-10-20: 3 orders, AED 1,250 · 2 things to do". The email is formatted for phones, with a plain-text copy for mail apps that don't show formatting.
+- **Status.**
+  - **Benchmark:** BENCH_PLACEHOLDER
+  - **Tests:** TESTS_PLACEHOLDER
+  - **Dependency audit:** production 0 vulnerabilities; no new packages.
+  - **Security scan:** no new route or stored data. The email is built on the server from the shop's own data; product names are escaped in the HTML. No secrets or private links are in it.
+
 ## BUH-02.22.00 — 2026-10-20 23:30 UTC · [#41](https://github.com/cxsmtp/buh/pull/41)
 
 - **Backups follow what happens in the shop.** A new order, payment, stock or price change, product, customer, expense or setting starts a 2-hour clock, and the shop is backed up by then; later changes don't push it back. When nothing has changed there is no backup, no email and no Drive copy. Chat messages and visits ride along with the next backup, or once a day.

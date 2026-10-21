@@ -1,4 +1,5 @@
 import fs from 'node:fs';
+import type { Order } from '@/types';
 import { audit } from './audit';
 import { BACKUP_LIMITS, backupDataSize, backupHealth } from './backup';
 import { emailConfigured, ownerEmail, sender, transport } from './mail';
@@ -120,10 +121,10 @@ export function currentProblems(now = Date.now()): Problem[] {
   return problems;
 }
 
-async function sendOwner(subject: string, text: string): Promise<boolean> {
+async function sendOwner(subject: string, text: string, html?: string): Promise<boolean> {
   if (!emailConfigured()) return false;
   try {
-    await (await transport()).sendMail({ from: sender(), to: ownerEmail(), subject: `[Beautiful UAE Home] ${subject}`, text });
+    await (await transport()).sendMail({ from: sender(), to: ownerEmail(), subject: `[Beautiful UAE Home] ${subject}`, text, ...(html ? { html } : {}) });
     return true;
   } catch (err) {
     logEvent('warn', 'owner_email_failed', { error: err instanceof Error ? err.message : String(err) });
@@ -156,41 +157,170 @@ export async function checkAndAlert(now = Date.now()): Promise<Problem[]> {
   return problems;
 }
 
-/** Yesterday in the UAE: orders, sales, what is low or sold out, and open problems. */
-export function dailySummary(now = new Date()): { subject: string; text: string } {
-  const day = new Date(now.getTime() + 4 * 3600_000 - 24 * 3600_000).toISOString().slice(0, 10); // yesterday, Asia/Dubai
-  const from = new Date(`${day}T00:00:00+04:00`).toISOString();
-  const to = new Date(`${day}T24:00:00+04:00`).toISOString();
-  const rows = getDb().prepare("SELECT status, total_fils FROM orders WHERE created_at >= ? AND created_at < ?").all(from, to) as Array<{ status: string; total_fils: number }>;
+export interface SummarySection {
+  title: string;
+  /** One line each; `tone` colours it in the HTML email. */
+  items: Array<{ text: string; tone?: 'action' | 'warn' | 'ok' }>;
+}
+
+const aed = (fils: number) => `AED ${(fils / 100).toLocaleString('en-AE', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+const plural = (n: number, one: string, many = `${one}s`) => `${n} ${n === 1 ? one : many}`;
+
+function ordersBetween(from: string, to: string) {
+  return getDb().prepare('SELECT status, total_fils, data FROM orders WHERE created_at >= ? AND created_at < ?').all(from, to) as Array<{ status: string; total_fils: number; data: string }>;
+}
+
+/** The UAE day `daysAgo` before today, as [from, to) ISO times and its date. */
+function dubaiDay(now: Date, daysAgo: number) {
+  const day = new Date(now.getTime() + 4 * 3600_000 - daysAgo * 24 * 3600_000).toISOString().slice(0, 10);
+  return { day, from: new Date(`${day}T00:00:00+04:00`).toISOString(), to: new Date(`${day}T24:00:00+04:00`).toISOString() };
+}
+
+/**
+ * Yesterday in the UAE, in sections the owner can scan: what needs them first, then sales,
+ * inventory and the system. Each line is short; the HTML email shows the same sections as
+ * small tables (plain text for mail apps that don't show HTML).
+ */
+export function dailySummary(now = new Date()): { subject: string; text: string; html: string; sections: SummarySection[] } {
+  const { day, from, to } = dubaiDay(now, 1);
+  const rows = ordersBetween(from, to);
   const kept = rows.filter((r) => r.status !== 'cancelled');
-  const sales = kept.reduce((n, r) => n + r.total_fils, 0) / 100;
+  const salesFils = kept.reduce((n, r) => n + r.total_fils, 0);
+  // The 7 days to yesterday, and the 7 before, for a simple trend.
+  const week = ordersBetween(dubaiDay(now, 7).from, to).filter((r) => r.status !== 'cancelled');
+  const prevWeek = ordersBetween(dubaiDay(now, 14).from, dubaiDay(now, 7).from).filter((r) => r.status !== 'cancelled');
+  const weekFils = week.reduce((n, r) => n + r.total_fils, 0);
+  const prevFils = prevWeek.reduce((n, r) => n + r.total_fils, 0);
+  // What sold yesterday, most pieces first.
+  const sold = new Map<string, number>();
+  for (const r of kept) {
+    try {
+      for (const it of (JSON.parse(r.data) as Order).items ?? []) sold.set(it.title, (sold.get(it.title) ?? 0) + (Number(it.quantity) || 0));
+    } catch {
+      // an unreadable order is still counted in the totals
+    }
+  }
+  const top = [...sold.entries()].sort((a, b) => b[1] - a[1]).slice(0, 3);
+
   const pending = (getDb().prepare("SELECT COUNT(*) AS n FROM orders WHERE status = 'pending_confirmation'").get() as { n: number }).n;
   const awaitingWhatsApp = awaitingWhatsAppCount();
   const transfersToCheck = transfersToCheckCount();
   const transfersAwaited = transfersAwaitedCount();
-  // Card takings: what Stripe confirmed paid yesterday (and what went back to cards).
+  let chats = 0;
+  try {
+    chats = (getDb().prepare("SELECT COUNT(*) AS n FROM chat_threads WHERE status = 'waiting'").get() as { n: number }).n;
+  } catch {
+    chats = 0;
+  }
   const card = cardTakings(from, to);
   const threshold = getSettings('catalog').lowStockThreshold;
   const products = listProducts();
   const soldOut = products.filter((p) => p.stockCount === 0).map((p) => p.title);
-  const low = products.flatMap((p) => p.profiles.filter((s) => (p.stockBySize[s.id] ?? 0) > 0 && (p.stockBySize[s.id] ?? 0) <= threshold).map((s) => `${p.title} (${s.name}: ${p.stockBySize[s.id]})`));
+  // The name before " • " (the shop's titles often add a long subtitle), and a size's short name.
+  const short = (t: string) => t.split(' • ')[0].trim();
+  const sizeShort = (n: string) => n.replace(/\s*\(.*\)\s*/g, '').replace(/ Size Bed| Bed$/g, '').trim();
+  const lowByProduct = products
+    .map((p) => ({ title: short(p.title), sizes: p.profiles.filter((s) => (p.stockBySize[s.id] ?? 0) > 0 && (p.stockBySize[s.id] ?? 0) <= threshold).map((s) => `${sizeShort(s.name)} ${p.stockBySize[s.id]}`) }))
+    .filter((x) => x.sizes.length);
+  const low = lowByProduct.flatMap((x) => x.sizes);
   const problems = currentProblems(now.getTime());
-  const lines = [
-    `Yesterday (${day}): ${kept.length} order${kept.length === 1 ? '' : 's'}, AED ${sales.toFixed(2)}${rows.length - kept.length ? ` (${rows.length - kept.length} cancelled)` : ''}.`,
-    `Waiting for your confirmation: ${pending}.`,
-    ...(awaitingWhatsApp ? [`Waiting for the customer's WhatsApp message: ${awaitingWhatsApp}.`] : []),
-    ...(transfersToCheck ? [`Bank transfers to check (screenshot received): ${transfersToCheck}. Open Orders → Transfer to check.`] : []),
-    ...(transfersAwaited ? [`Bank transfers not received yet: ${transfersAwaited}.`] : []),
-    ...(card.paid || card.refunded
-      ? [`Paid by card (Stripe): ${card.paid}, AED ${(card.paidFils / 100).toFixed(2)}${card.refunded ? `; refunded to cards: ${card.refunded}, AED ${(card.refundedFils / 100).toFixed(2)}` : ''}.`]
-      : []),
-    '',
-    soldOut.length ? `Sold out (${soldOut.length}): ${soldOut.slice(0, 20).join('; ')}` : 'Nothing is sold out.',
-    low.length ? `Low (${low.length}): ${low.slice(0, 30).join('; ')}` : 'Nothing is running low.',
-    '',
-    problems.length ? `Needs attention:\n${problems.map((p) => `- ${p.text}`).join('\n')}` : 'Everything is running normally.',
+  let vat: ReturnType<typeof vatStatus> | null = null;
+  try {
+    vat = vatStatus(now.getTime());
+  } catch {
+    vat = null;
+  }
+
+  const action: SummarySection['items'] = [
+    ...(pending ? [{ text: `Waiting for your confirmation: ${pending}. Open Orders.`, tone: 'action' as const }] : []),
+    ...(transfersToCheck ? [{ text: `Bank transfers to check (screenshot received): ${transfersToCheck}. Open Orders → Transfer to check.`, tone: 'action' as const }] : []),
+    ...(chats ? [{ text: `Chats waiting for a reply: ${chats}. Open Chats.`, tone: 'action' as const }] : []),
+    ...(soldOut.length ? [{ text: `Restock: ${plural(soldOut.length, 'product')} sold out, ${plural(low.length, 'size')} running low (see Inventory below).`, tone: 'action' as const }] : []),
+    ...problems.map((p) => ({ text: p.text, tone: p.level === 'failing' ? ('action' as const) : ('warn' as const) })),
+    ...(vat && !vat.registered && vat.level !== 'ok' ? [{ text: vat.text, tone: 'action' as const }] : []),
   ];
-  return { subject: `Daily summary ${day}: ${kept.length} orders, AED ${sales.toFixed(0)}`, text: lines.join('\n') };
+  const trend = prevFils ? ` (${weekFils >= prevFils ? '+' : '−'}${Math.round((Math.abs(weekFils - prevFils) / prevFils) * 100)}% on the 7 days before)` : '';
+  const sections: SummarySection[] = [
+    { title: 'Action needed', items: action.length ? action : [{ text: 'Nothing needs you today.', tone: 'ok' }] },
+    {
+      title: `Sales — ${day}`,
+      items: [
+        { text: `Orders: ${kept.length}${rows.length - kept.length ? ` (${rows.length - kept.length} cancelled)` : ''}` },
+        { text: `Sales: ${aed(salesFils)}${kept.length ? ` · average order ${aed(Math.round(salesFils / kept.length))}` : ''}` },
+        ...(card.paid || card.refunded
+          ? [{ text: `Paid by card (Stripe): ${card.paid}, AED ${(card.paidFils / 100).toFixed(2)}${card.refunded ? `; refunded to cards: ${card.refunded}, AED ${(card.refundedFils / 100).toFixed(2)}` : ''}.` }]
+          : []),
+        ...(transfersAwaited ? [{ text: `Bank transfers not received yet: ${transfersAwaited}.` }] : []),
+        ...(awaitingWhatsApp ? [{ text: `Waiting for the customer's WhatsApp message: ${awaitingWhatsApp}.` }] : []),
+        ...(top.length ? [{ text: `Best sellers: ${top.map(([t, n]) => `${t} × ${n}`).join('; ')}` }] : []),
+        { text: `Last 7 days: ${plural(week.length, 'order')}, ${aed(weekFils)}${trend}` },
+        ...(vat && (vat.registered || vat.level === 'ok') ? [{ text: vat.text }] : []),
+      ],
+    },
+    {
+      title: 'Inventory',
+      items: [
+        // One line per product: easy to scan on a phone.
+        ...(soldOut.length
+          ? [
+              ...soldOut.slice(0, 10).map((t) => ({ text: `Sold out: ${short(t)}`, tone: 'warn' as const })),
+              ...(soldOut.length > 10 ? [{ text: `…and ${soldOut.length - 10} more sold out (Inventory → Sold out).`, tone: 'warn' as const }] : []),
+            ]
+          : [{ text: 'Nothing is sold out.', tone: 'ok' as const }]),
+        ...(lowByProduct.length
+          ? [
+              ...lowByProduct.slice(0, 10).map((x) => ({ text: `Low: ${x.title} — ${x.sizes.join(', ')} left`, tone: 'warn' as const })),
+              ...(lowByProduct.length > 10 ? [{ text: `…and ${lowByProduct.length - 10} more running low (Inventory → Low).`, tone: 'warn' as const }] : []),
+            ]
+          : [{ text: 'Nothing is running low.', tone: 'ok' as const }]),
+        { text: `On sale: ${plural(products.length, 'product')}.` },
+      ],
+    },
+    {
+      title: 'System',
+      items: problems.length
+        ? [{ text: `Needs attention: ${plural(problems.length, 'item')} (listed under Action needed).`, tone: 'warn' }]
+        : [{ text: 'Everything is running normally (backups, disk, database).', tone: 'ok' }],
+    },
+  ];
+
+  const text = [
+    `Beautiful UAE Home: your summary for ${day}`,
+    '',
+    ...sections.flatMap((sec) => [sec.title.toUpperCase(), ...sec.items.map((i) => `  • ${i.text}`), '']),
+    'Open the Admin Hub for details.',
+  ].join('\n');
+  const actions = action.length;
+  return {
+    subject: `Daily summary ${day}: ${kept.length} orders, AED ${(salesFils / 100).toFixed(0)}${actions ? ` · ${plural(actions, 'thing')} to do` : ''}`,
+    text,
+    html: summaryHtml(day, sections),
+    sections,
+  };
+}
+
+const esc = (s: string) => s.replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]!);
+
+/** The summary as a simple email: one small table per section, inline styles only (mail apps drop the rest). */
+function summaryHtml(day: string, sections: SummarySection[]): string {
+  const colour = { action: '#9a3412', warn: '#854d0e', ok: '#166534' } as const;
+  const mark = { action: '●', warn: '▲', ok: '✓' } as const;
+  const blocks = sections
+    .map(
+      (sec) => `<h2 style="font:600 15px/1.3 Arial,sans-serif;color:#2b2026;margin:22px 0 8px;border-bottom:1px solid #e6d5b0;padding-bottom:4px">${esc(sec.title)}</h2>
+<table role="presentation" cellpadding="0" cellspacing="0" style="width:100%;border-collapse:collapse">${sec.items
+        .map(
+          (i) => `<tr><td style="width:18px;vertical-align:top;padding:3px 0;font:13px/1.5 Arial,sans-serif;color:${i.tone ? colour[i.tone] : '#82612c'}">${i.tone ? mark[i.tone] : '•'}</td><td style="padding:3px 0;font:14px/1.5 Arial,sans-serif;color:#2b2026">${esc(i.text)}</td></tr>`
+        )
+        .join('')}</table>`
+    )
+    .join('\n');
+  return `<!doctype html><html><body style="margin:0;background:#faf7f2"><div style="max-width:560px;margin:0 auto;padding:20px 16px;background:#ffffff">
+<p style="font:600 18px/1.3 Georgia,serif;color:#2b2026;margin:0">Beautiful UAE Home</p>
+<p style="font:13px/1.4 Arial,sans-serif;color:#6a5c62;margin:4px 0 0">Your summary for ${esc(day)}</p>
+${blocks}
+<p style="font:12px/1.5 Arial,sans-serif;color:#6a5c62;margin:24px 0 0">Open the Admin Hub for details.</p>
+</div></body></html>`;
 }
 
 let timer: NodeJS.Timeout | null = null;
@@ -207,8 +337,8 @@ export function startMonitor() {
       const lastSent = kvGet<string>('monitor:summary')?.data;
       if (dubaiHour >= 8 && lastSent !== today && process.env.DAILY_SUMMARY !== 'false') {
         kvSet('monitor:summary', today); // one copy only, even with two copies of the shop running
-        const { subject, text } = dailySummary(now);
-        await sendOwner(subject, text);
+        const { subject, text, html } = dailySummary(now);
+        await sendOwner(subject, text, html);
       }
     } catch (err) {
       logEvent('warn', 'monitor_failed', { error: err instanceof Error ? err.message : String(err) });

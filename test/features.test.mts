@@ -222,6 +222,25 @@ test('daily summary: yesterday’s orders and sales, sold-out and low pieces', a
   assert.match(s.text, /Needs attention|Everything is running normally/);
 });
 
+test('daily summary (owner report): itemised sections in order — action needed, sales, inventory, system — as plain text and HTML', async () => {
+  const { dailySummary } = await import('@/lib/server/monitor');
+  const now = new Date();
+  getDb().prepare('UPDATE orders SET created_at = ?').run(new Date(now.getTime() - 24 * 3600_000).toISOString());
+  const s = dailySummary(now);
+  assert.deepEqual(s.sections.map((x) => x.title.replace(/ — .*/, '')), ['Action needed', 'Sales', 'Inventory', 'System']);
+  for (const sec of s.sections) assert.ok(sec.items.length >= 1, `${sec.title} has items`);
+  // Plain text: a heading per section, one bullet per line; no long run-on paragraph.
+  const heads = ['ACTION NEEDED', 'SALES', 'INVENTORY', 'SYSTEM'].map((h) => s.text.indexOf(h));
+  assert.ok(heads.every((i) => i >= 0) && heads.every((i, n) => n === 0 || i > heads[n - 1]), 'headings in order');
+  for (const line of s.text.split('\n').filter((l) => l.startsWith('  • '))) assert.ok(line.length < 400, line.slice(0, 60));
+  assert.match(s.text, /Orders: \d+/);
+  assert.match(s.text, /Last 7 days: \d+ orders?, AED/);
+  // HTML: the same sections, escaped (a product title can hold < or &).
+  assert.match(s.html, /<h2[^>]*>Action needed<\/h2>/);
+  assert.match(s.html, /<h2[^>]*>Inventory<\/h2>/);
+  assert.ok(!/<script/i.test(s.html));
+});
+
 test('upgrading a shop from version 1.2: existing stock moves to each product’s default size', () => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'buh-upgrade-'));
   const old = new Database(path.join(dir, 'shop.db'));
