@@ -382,6 +382,8 @@ for (const shape of SHAPES) {
         await fit(a, problems, at('inventory: history'));
         await a.keyboard.press('Escape');
         await a.getByRole('button', { name: 'Add product' }).first().click();
+        // Add product opens quick add; these steps are the full editor's.
+        await a.getByRole('button', { name: /Use the full editor/ }).click();
         const wizard = a.getByRole('dialog', { name: 'Add a product' });
         await wizard.waitFor();
         await fit(a, problems, at('editor: Photos'));

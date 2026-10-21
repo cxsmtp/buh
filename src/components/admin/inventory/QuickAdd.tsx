@@ -235,7 +235,7 @@ export function QuickAdd({
       <div className="px-4 pt-4 pb-2 flex items-start gap-2 border-b border-line">
         <div className="min-w-0 flex-1">
           <h3 id={titleId} className="font-serif font-bold text-base text-ink">
-            Add a product
+            Quick add
           </h3>
           <p className="text-xs text-ink-soft">
             {status?.writer || status?.pictures

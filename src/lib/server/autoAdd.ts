@@ -1,27 +1,19 @@
-import crypto from "node:crypto";
-import type { BedProfileMeasurement, Product } from "@/types";
-import { sizeFromPreset } from "@/lib/measurements";
-import { blankVariant, defaultTypeFor } from "@/lib/productType";
-import { DEFAULT_STAGING_SET } from "@/lib/staging";
-import { aiStatus, describeProduct } from "./aiWriting";
-import { audit, auditOrThrow } from "./audit";
-import { HttpError } from "./http";
-import { IMAGE_NAME, readImage } from "./images";
-import { getDb } from "./db";
-import { kvGet, kvSet } from "./kv";
-import { logEvent } from "./log";
-import { createProduct, getProduct, updateProduct } from "./products";
-import { getSettings } from "./settings";
-import { suggestSku } from "./sku";
-import {
-  PRODUCT_MAX_PHOTOS,
-  SOURCE_MAX_BYTES,
-  anglesOf,
-  makePicture,
-  saveStyledPhotos,
-  sceneById,
-  stagingStatus,
-} from "./stagePhoto";
+import crypto from 'node:crypto';
+import type { BedProfileMeasurement, Product } from '@/types';
+import { sizeFromPreset } from '@/lib/measurements';
+import { blankVariant, defaultTypeFor } from '@/lib/productType';
+import { DEFAULT_STAGING_SET } from '@/lib/staging';
+import { aiStatus, describeProduct } from './aiWriting';
+import { audit, auditOrThrow } from './audit';
+import { HttpError } from './http';
+import { IMAGE_NAME, readImage } from './images';
+import { getDb } from './db';
+import { kvGet, kvSet } from './kv';
+import { logEvent } from './log';
+import { createProduct, getProduct, updateProduct } from './products';
+import { getSettings } from './settings';
+import { suggestSku } from './sku';
+import { PRODUCT_MAX_PHOTOS, SOURCE_MAX_BYTES, anglesOf, saveStyledPhotos, sceneById, stagePhoto, stagingStatus } from './stagePhoto';
 
 /**
  * Quick add (Inventory → Add product): the owner gives only the basics (photos, price, category,
@@ -47,22 +39,16 @@ import {
  * then types the name and the product is saved as they choose.
  */
 
-export const JOBS_KEY = "autoai:jobs";
+export const JOBS_KEY = 'autoai:jobs';
 /** Jobs kept for the list (newest first); finished ones beyond this are forgotten (the products stay). */
 const KEEP = 40;
 /** A service that says "wait": waited out, at most this many times for one step. */
 const MAX_WAITS = 6;
 /** The longest single wait (the shop's own hourly picture limit can ask for up to an hour). */
 const MAX_WAIT_MS = 60 * 60 * 1000;
-export const PLACEHOLDER_TITLE = "New design (AI is writing it)";
+export const PLACEHOLDER_TITLE = 'New design (AI is writing it)';
 
-export type JobState =
-  | "queued"
-  | "writing"
-  | "pictures"
-  | "waiting"
-  | "done"
-  | "needs_you";
+export type JobState = 'queued' | 'writing' | 'pictures' | 'waiting' | 'done' | 'needs_you';
 
 export interface AutoJob {
   id: string;
@@ -109,11 +95,7 @@ function saveJob(job: AutoJob): void {
       let finished = 0;
       kvSet(
         JOBS_KEY,
-        jobs.filter(
-          (j) =>
-            !(j.state === "done" || j.state === "needs_you") ||
-            ++finished <= KEEP,
-        ),
+        jobs.filter((j) => !(j.state === 'done' || j.state === 'needs_you') || ++finished <= KEEP)
       );
     })
     .immediate();
@@ -127,18 +109,18 @@ export function autoStatus(): {
   angles: string[];
   why: string;
 } {
-  const on = getSettings("aiPictures").autoCreate !== false;
+  const on = getSettings('aiPictures').autoCreate !== false;
   const writer = aiStatus().ready;
   const pictures = stagingStatus().ready;
   const why = !on
-    ? "Switched off in Settings → AI pictures."
+    ? 'Switched off in Settings → AI pictures.'
     : !writer && !pictures
-      ? "Set up AI writing and AI pictures in Settings to have new products written and pictured for you."
+      ? 'Set up AI writing and AI pictures in Settings to have new products written and pictured for you.'
       : !writer
-        ? "AI writing is not set up (Settings → AI writing): type the name yourself."
+        ? 'AI writing is not set up (Settings → AI writing): type the name yourself.'
         : !pictures
-          ? "AI pictures are not set up (Settings → AI pictures): products are written but keep your photo only."
-          : "";
+          ? 'AI pictures are not set up (Settings → AI pictures): products are written but keep your photo only.'
+          : '';
   return {
     on,
     writer: on && writer,
@@ -148,104 +130,58 @@ export function autoStatus(): {
   };
 }
 
-const FIELDS = new Set([
-  "key",
-  "photos",
-  "price",
-  "compareAtPrice",
-  "category",
-  "sizes",
-  "title",
-  "publish",
-]);
+const FIELDS = new Set(['key', 'photos', 'price', 'compareAtPrice', 'category', 'sizes', 'title', 'publish']);
 
 /**
  * POST /api/admin/products/quick: { key, photos: ["/api/images/<name>", …], price, compareAtPrice?,
  * category, sizes: [{ id, stock }], title?, publish? }. Saves the product (hidden while the AI
  * works) and queues the job; answers at once.
  */
-export function quickAdd(
-  body: Record<string, unknown>,
-  actor: string,
-): { product: Product; job: AutoJob | null; replayed: boolean } {
-  for (const k of Object.keys(body))
-    if (!FIELDS.has(k))
-      throw new HttpError(400, `Unexpected field: ${k.slice(0, 30)}.`);
-  const key =
-    typeof body.key === "string" && /^[A-Za-z0-9_-]{8,64}$/.test(body.key)
-      ? body.key
-      : "";
-  if (!key) throw new HttpError(400, "Missing request key.");
+export function quickAdd(body: Record<string, unknown>, actor: string): { product: Product; job: AutoJob | null; replayed: boolean } {
+  for (const k of Object.keys(body)) if (!FIELDS.has(k)) throw new HttpError(400, `Unexpected field: ${k.slice(0, 30)}.`);
+  const key = typeof body.key === 'string' && /^[A-Za-z0-9_-]{8,64}$/.test(body.key) ? body.key : '';
+  if (!key) throw new HttpError(400, 'Missing request key.');
   const done = listJobs().find((j) => j.key === key);
   if (done) {
     const p = getProduct(done.productId);
     if (p) return { product: p, job: done, replayed: true };
   }
-  const added = kvGet<Record<string, string>>("autoai:keys")?.data ?? {};
-  if (added[key] && getProduct(added[key]))
-    return { product: getProduct(added[key])!, job: null, replayed: true };
+  const added = kvGet<Record<string, string>>('autoai:keys')?.data ?? {};
+  if (added[key] && getProduct(added[key])) return { product: getProduct(added[key])!, job: null, replayed: true };
 
-  if (!Array.isArray(body.photos) || body.photos.length < 1)
-    throw new HttpError(400, "Add at least one photo.");
-  if (body.photos.length > PRODUCT_MAX_PHOTOS)
-    throw new HttpError(400, `At most ${PRODUCT_MAX_PHOTOS} photos.`);
+  if (!Array.isArray(body.photos) || body.photos.length < 1) throw new HttpError(400, 'Add at least one photo.');
+  if (body.photos.length > PRODUCT_MAX_PHOTOS) throw new HttpError(400, `At most ${PRODUCT_MAX_PHOTOS} photos.`);
   const photos = body.photos.map((u) => {
-    const name = typeof u === "string" ? u.replace(/^\/api\/images\//, "") : "";
-    if (!IMAGE_NAME.test(name) || !readImage(name))
-      throw new HttpError(400, "A photo is no longer stored: add it again.");
+    const name = typeof u === 'string' ? u.replace(/^\/api\/images\//, '') : '';
+    if (!IMAGE_NAME.test(name) || !readImage(name)) throw new HttpError(400, 'A photo is no longer stored: add it again.');
     return `/api/images/${name}`;
   });
-  const catalog = getSettings("catalog");
-  const category =
-    typeof body.category === "string" &&
-    catalog.categories.some((c) => c.id === body.category)
-      ? body.category
-      : (catalog.categories[0]?.id ?? "");
+  const catalog = getSettings('catalog');
+  const category = typeof body.category === 'string' && catalog.categories.some((c) => c.id === body.category) ? body.category : (catalog.categories[0]?.id ?? '');
   const productType = defaultTypeFor(catalog, category);
-  if (
-    !Array.isArray(body.sizes) ||
-    body.sizes.length < 1 ||
-    body.sizes.length > 12
-  )
-    throw new HttpError(
-      400,
-      productType === "simple" ? "Add the stock." : "Choose at least one size.",
-    );
+  if (!Array.isArray(body.sizes) || body.sizes.length < 1 || body.sizes.length > 12) throw new HttpError(400, productType === 'simple' ? 'Add the stock.' : 'Choose at least one size.');
   const profiles: BedProfileMeasurement[] = [];
   const stockBySize: Record<string, number> = {};
   for (const s of body.sizes) {
-    const o = (
-      s && typeof s === "object" && !Array.isArray(s) ? s : {}
-    ) as Record<string, unknown>;
+    const o = (s && typeof s === 'object' && !Array.isArray(s) ? s : {}) as Record<string, unknown>;
     const stock = Number(o.stock ?? 0);
-    if (!Number.isInteger(stock) || stock < 0 || stock > 100_000)
-      throw new HttpError(400, "Stock: a whole number, 0 or more.");
-    if (productType === "simple") {
-      if (profiles.length)
-        throw new HttpError(
-          400,
-          "One stock figure for this category (add variants later in the editor).",
-        );
+    if (!Number.isInteger(stock) || stock < 0 || stock > 100_000) throw new HttpError(400, 'Stock: a whole number, 0 or more.');
+    if (productType === 'simple') {
+      if (profiles.length) throw new HttpError(400, 'One stock figure for this category (add variants later in the editor).');
       const v = blankVariant([]);
       profiles.push(v);
       stockBySize[v.id] = stock;
       continue;
     }
     const preset = catalog.sizes.find((x) => x.id === o.id);
-    if (!preset)
-      throw new HttpError(
-        400,
-        "Unknown size: choose one from Settings → Catalogue.",
-      );
-    if (stockBySize[preset.id] !== undefined)
-      throw new HttpError(400, "Each size once.");
+    if (!preset) throw new HttpError(400, 'Unknown size: choose one from Settings → Catalogue.');
+    if (stockBySize[preset.id] !== undefined) throw new HttpError(400, 'Each size once.');
     profiles.push(sizeFromPreset(preset));
     stockBySize[preset.id] = stock;
   }
   const status = autoStatus();
-  const typed = typeof body.title === "string" ? body.title.trim() : "";
-  if (!typed && !status.writer)
-    throw new HttpError(400, `Give it a name. ${status.why}`.trim());
+  const typed = typeof body.title === 'string' ? body.title.trim() : '';
+  if (!typed && !status.writer) throw new HttpError(400, `Give it a name. ${status.why}`.trim());
   const publish = body.publish !== false;
   const runs = status.writer || status.pictures;
   const product = createProduct(
@@ -255,7 +191,7 @@ export function quickAdd(
       category,
       price: body.price,
       compareAtPrice: body.compareAtPrice ?? null,
-      material: "",
+      material: '',
       threadCount: 0,
       colors: [],
       featuredImage: photos[0],
@@ -269,16 +205,10 @@ export function quickAdd(
       isNewArrival: true,
       measurementsReview: false,
     },
-    actor,
+    actor
   );
-  kvSet(
-    "autoai:keys",
-    Object.fromEntries([
-      ...Object.entries(added).slice(-200),
-      [key, product.id],
-    ]),
-  );
-  audit("product.quick_added", {
+  kvSet('autoai:keys', Object.fromEntries([...Object.entries(added).slice(-200), [key, product.id]]));
+  audit('product.quick_added', {
     by: actor,
     productId: product.id,
     photos: photos.length,
@@ -294,13 +224,13 @@ export function quickAdd(
     key,
     productId: product.id,
     by: actor,
-    state: "queued",
+    state: 'queued',
     publish,
     named: Boolean(typed),
     written: !status.writer,
     plan,
     made: [],
-    note: "",
+    note: '',
     createdAt: now(),
     updatedAt: now(),
   };
@@ -311,12 +241,10 @@ export function quickAdd(
 
 /** The pictures to make: one per numbered angle in the owner's prompt, else the one-press scenes. */
 export function picturePlan(): string[] {
-  const settings = getSettings("aiPictures");
+  const settings = getSettings('aiPictures');
   const angles = anglesOf(settings);
   if (angles.length) return angles.map((_, i) => `angle:${i + 1}`);
-  const set = (
-    settings.defaultSet?.length ? settings.defaultSet : DEFAULT_STAGING_SET
-  ).filter((id) => sceneById(id));
+  const set = (settings.defaultSet?.length ? settings.defaultSet : DEFAULT_STAGING_SET).filter((id) => sceneById(id));
   return set;
 }
 
@@ -351,7 +279,7 @@ export function startAutoAdd(): void {
 
 /** This running copy of the shop (two run side by side for a minute during an update). */
 const INSTANCE = crypto.randomUUID();
-const LEASE_KEY = "autoai:lease";
+const LEASE_KEY = 'autoai:lease';
 /** A worker holds the lease while it works and renews it with every step; one that stopped loses it after this. */
 const LEASE_MS = 3 * 60 * 1000;
 
@@ -373,7 +301,7 @@ export function takeLease(instance: string = INSTANCE, at = Date.now()): boolean
 
 function dropLease(): void {
   const held = kvGet<{ by: string; until: number }>(LEASE_KEY)?.data;
-  if (held?.by === INSTANCE) kvSet(LEASE_KEY, { by: "", until: 0 });
+  if (held?.by === INSTANCE) kvSet(LEASE_KEY, { by: '', until: 0 });
 }
 
 async function work(): Promise<void> {
@@ -388,26 +316,17 @@ async function workHeld(): Promise<void> {
   for (;;) {
     if (!takeLease()) return;
     const next = listJobs()
-      .filter(
-        (j) =>
-          j.state !== "done" &&
-          j.state !== "needs_you" &&
-          (!j.until || j.until <= now()),
-      )
+      .filter((j) => j.state !== 'done' && j.state !== 'needs_you' && (!j.until || j.until <= now()))
       .sort((a, b) => a.createdAt.localeCompare(b.createdAt))[0];
     if (!next) return;
     try {
       await runJob(next);
     } catch (err) {
       // Never stops the worker: the job says why, and the next one runs.
-      logEvent("error", "autoadd_job_failed", {
+      logEvent('error', 'autoadd_job_failed', {
         error: err instanceof Error ? err.message : String(err),
       });
-      finish(
-        next,
-        "needs_you",
-        "Something went wrong while writing this product. Open it to finish it, or add it again.",
-      );
+      finish(next, 'needs_you', 'Something went wrong while writing this product. Open it to finish it, or add it again.');
     }
   }
 }
@@ -415,23 +334,14 @@ async function workHeld(): Promise<void> {
 /** How long a "wait" error asks for (the service's own time, else a minute), or null for any other error. */
 function waitFor(err: unknown): number | null {
   if (!(err instanceof HttpError)) return null;
-  const busy = err.details?.code === "ai_busy" || err.status === 429;
+  const busy = err.details?.code === 'ai_busy' || err.status === 429;
   if (!busy) return null;
-  const sec = Number(
-    err.details?.retryAfterSec ?? err.headers?.["Retry-After"] ?? 60,
-  );
-  return Math.min(
-    MAX_WAIT_MS,
-    Math.max(5_000, (Number.isFinite(sec) ? sec : 60) * 1000 + 2_000),
-  );
+  const sec = Number(err.details?.retryAfterSec ?? err.headers?.['Retry-After'] ?? 60);
+  return Math.min(MAX_WAIT_MS, Math.max(5_000, (Number.isFinite(sec) ? sec : 60) * 1000 + 2_000));
 }
 
 /** Runs fn; when the service asks to wait, waits (shown on the job) and tries again. */
-async function patiently<T>(
-  job: AutoJob,
-  state: JobState,
-  fn: () => Promise<T>,
-): Promise<T> {
+async function patiently<T>(job: AutoJob, state: JobState, fn: () => Promise<T>): Promise<T> {
   // A long wait keeps the lease (renewed every minute), so the other copy never starts the same picture.
   for (let i = 0; ; i++) {
     try {
@@ -442,9 +352,9 @@ async function patiently<T>(
     } catch (err) {
       const ms = waitFor(err);
       if (ms === null || i >= MAX_WAITS) throw err;
-      job.state = "waiting";
+      job.state = 'waiting';
       job.until = new Date(Date.now() + ms).toISOString();
-      job.note = err instanceof Error ? err.message : "";
+      job.note = err instanceof Error ? err.message : '';
       saveJob(job);
       for (let left = ms; left > 0; left -= 60_000) {
         await sleep(Math.min(60_000, left));
@@ -454,39 +364,22 @@ async function patiently<T>(
   }
 }
 
-function finish(job: AutoJob, state: "done" | "needs_you", note: string): void {
+function finish(job: AutoJob, state: 'done' | 'needs_you', note: string): void {
   job.state = state;
   job.note = note;
   delete job.until;
   saveJob(job);
 }
 
-const said = (err: unknown) =>
-  err instanceof Error ? err.message : "It did not work.";
+const said = (err: unknown) => (err instanceof Error ? err.message : 'It did not work.');
 
 async function runJob(job: AutoJob): Promise<void> {
   const product = getProduct(job.productId);
-  if (!product)
-    return finish(
-      job,
-      "needs_you",
-      "The product was removed before it was finished.",
-    );
-  const cover =
-    product.featuredImage &&
-    !(product.stagedPhotos ?? {})[product.featuredImage]
-      ? product.featuredImage
-      : [product.featuredImage, ...product.galleryImages].find(
-          (u) => u && !(product.stagedPhotos ?? {})[u],
-        );
-  const coverName = (cover ?? "").replace(/^\/api\/images\//, "");
+  if (!product) return finish(job, 'needs_you', 'The product was removed before it was finished.');
+  const cover = product.featuredImage && !(product.stagedPhotos ?? {})[product.featuredImage] ? product.featuredImage : [product.featuredImage, ...product.galleryImages].find((u) => u && !(product.stagedPhotos ?? {})[u]);
+  const coverName = (cover ?? '').replace(/^\/api\/images\//, '');
   const img = coverName ? readImage(coverName) : undefined;
-  if (!img)
-    return finish(
-      job,
-      "needs_you",
-      "Its photo is no longer stored: add a photo in the editor.",
-    );
+  if (!img) return finish(job, 'needs_you', 'Its photo is no longer stored: add a photo in the editor.');
   let context: {
     title?: string;
     motif?: string;
@@ -495,12 +388,12 @@ async function runJob(job: AutoJob): Promise<void> {
   } = {
     title: product.title === PLACEHOLDER_TITLE ? undefined : product.title,
   };
-  let writeProblem = "";
+  let writeProblem = '';
 
   // 1. The words.
   if (!job.written) {
     try {
-      const s = await patiently(job, "writing", () =>
+      const s = await patiently(job, 'writing', () =>
         describeProduct(
           {
             imageId: coverName,
@@ -509,31 +402,17 @@ async function runJob(job: AutoJob): Promise<void> {
               sizes: product.profiles.map((p) => p.name),
             },
           },
-          job.by,
-        ),
+          job.by
+        )
       );
       const fresh = getProduct(job.productId);
-      if (!fresh)
-        return finish(
-          job,
-          "needs_you",
-          "The product was removed before it was finished.",
-        );
-      const title =
-        job.named || fresh.title !== PLACEHOLDER_TITLE ? fresh.title : s.title;
+      if (!fresh) return finish(job, 'needs_you', 'The product was removed before it was finished.');
+      const title = job.named || fresh.title !== PLACEHOLDER_TITLE ? fresh.title : s.title;
       const patch: Record<string, unknown> = {
-        ...(title !== fresh.title
-          ? { title, sku: suggestSku(title, fresh.category, fresh.id) }
-          : {}),
-        ...(!fresh.shortDescription && s.shortDescription
-          ? { shortDescription: s.shortDescription }
-          : {}),
-        ...(!fresh.description && s.description
-          ? { description: s.description }
-          : {}),
-        ...(!fresh.colors.length && s.colors.length
-          ? { colors: s.colors }
-          : {}),
+        ...(title !== fresh.title ? { title, sku: suggestSku(title, fresh.category, fresh.id) } : {}),
+        ...(!fresh.shortDescription && s.shortDescription ? { shortDescription: s.shortDescription } : {}),
+        ...(!fresh.description && s.description ? { description: s.description } : {}),
+        ...(!fresh.colors.length && s.colors.length ? { colors: s.colors } : {}),
         ...(s.weave ? { weave: s.weave } : {}),
         ...(s.giftLine
           ? {
@@ -544,8 +423,7 @@ async function runJob(job: AutoJob): Promise<void> {
             }
           : {}),
       };
-      if (Object.keys(patch).length)
-        updateProduct(job.productId, patch, job.by);
+      if (Object.keys(patch).length) updateProduct(job.productId, patch, job.by);
       context = {
         title,
         motif: s.motif || undefined,
@@ -556,7 +434,7 @@ async function runJob(job: AutoJob): Promise<void> {
       saveJob(job);
     } catch (err) {
       writeProblem = said(err);
-      logEvent("warn", "autoadd_write_failed", {
+      logEvent('warn', 'autoadd_write_failed', {
         productId: job.productId,
         error: writeProblem,
       });
@@ -573,28 +451,25 @@ async function runJob(job: AutoJob): Promise<void> {
   const failures: string[] = [];
   for (let i = job.made.length; i < job.plan.length; i++) {
     const step = job.plan[i];
-    const angle = step.startsWith("angle:") ? Number(step.slice(6)) : 0;
-    const first = job.made.find(Boolean) ?? "";
+    const angle = step.startsWith('angle:') ? Number(step.slice(6)) : 0;
+    const first = job.made.find(Boolean) ?? '';
     try {
       const body: Record<string, unknown> = {
         imageId: coverName,
         context,
-        aspect: "4:5",
+        aspect: '4:5',
         ...(angle ? { angle } : { preset: step }),
         ...(first && angle ? { sameRoom: first } : {}),
       };
-      if (img.bytes.length > SOURCE_MAX_BYTES)
-        throw new HttpError(413, "The photo is too large (at most 4 MB).");
-      const r = await patiently(job, "pictures", () =>
-        pictureFrom(body, job.by),
-      );
+      if (img.bytes.length > SOURCE_MAX_BYTES) throw new HttpError(413, 'The photo is too large (at most 4 MB).');
+      const r = await patiently(job, 'pictures', () => stagePhoto(body, job.by));
       job.made.push(r.url);
     } catch (err) {
       failures.push(said(err));
-      job.made.push("");
+      job.made.push('');
       // A setup problem (no key, wrong model) fails every picture alike: stop here.
-      if (err instanceof HttpError && err.details?.code === "staging_off") {
-        while (job.made.length < job.plan.length) job.made.push("");
+      if (err instanceof HttpError && err.details?.code === 'staging_off') {
+        while (job.made.length < job.plan.length) job.made.push('');
       }
     }
     saveJob(job);
@@ -610,25 +485,12 @@ async function runJob(job: AutoJob): Promise<void> {
 
   // 3. Published (unless kept hidden, or it still has no name).
   const now2 = getProduct(job.productId);
-  if (!now2)
-    return finish(
-      job,
-      "needs_you",
-      "The product was removed before it was finished.",
-    );
+  if (!now2) return finish(job, 'needs_you', 'The product was removed before it was finished.');
   const noName = now2.title === PLACEHOLDER_TITLE;
-  if (job.publish && !noName && now2.active === false)
-    updateProduct(job.productId, { active: true }, job.by);
-  const pics = job.plan.length
-    ? ` ${made.length} of ${job.plan.length} AI pictures made${failures.length ? ` (${failures[0]})` : ""}.`
-    : "";
-  if (noName)
-    return finish(
-      job,
-      "needs_you",
-      `Give it a name to publish it. ${writeProblem ? `The words were not written: ${writeProblem}` : ""}${pics}`.trim(),
-    );
-  auditOrThrow("product.quick_finished", {
+  if (job.publish && !noName && now2.active === false) updateProduct(job.productId, { active: true }, job.by);
+  const pics = job.plan.length ? ` ${made.length} of ${job.plan.length} AI pictures made${failures.length ? ` (${failures[0]})` : ''}.` : '';
+  if (noName) return finish(job, 'needs_you', `Give it a name to publish it. ${writeProblem ? `The words were not written: ${writeProblem}` : ''}${pics}`.trim());
+  auditOrThrow('product.quick_finished', {
     by: job.by,
     productId: job.productId,
     written: !writeProblem,
@@ -636,34 +498,21 @@ async function runJob(job: AutoJob): Promise<void> {
     planned: job.plan.length,
     published: job.publish,
   });
-  finish(
-    job,
-    failures.length || writeProblem ? "needs_you" : "done",
-    `${job.publish ? "In the shop." : "Ready (kept hidden)."}${writeProblem ? ` The words were not written: ${writeProblem}` : ""}${pics}`.trim(),
-  );
-}
-
-/** One picture through the same checks as the studio (stagePhoto's body rules). */
-async function pictureFrom(body: Record<string, unknown>, actor: string) {
-  const { stagePhoto } = await import("./stagePhoto");
-  return stagePhoto(body, actor);
+  finish(job, failures.length || writeProblem ? 'needs_you' : 'done', `${job.publish ? 'In the shop.' : 'Ready (kept hidden).'}${writeProblem ? ` The words were not written: ${writeProblem}` : ''}${pics}`.trim());
 }
 
 /** "Needs you" on the list: dismissed once the owner has seen it (the product stays). */
 export function dismissJob(id: unknown): void {
-  if (typeof id !== "string") throw new HttpError(400, "Which one?");
+  if (typeof id !== 'string') throw new HttpError(400, 'Which one?');
   const job = listJobs().find((j) => j.id === id);
   if (!job) return;
-  if (job.state !== "done" && job.state !== "needs_you")
-    throw new HttpError(409, "Still working on it.");
+  if (job.state !== 'done' && job.state !== 'needs_you') throw new HttpError(409, 'Still working on it.');
   getDb()
     .transaction(() =>
       kvSet(
         JOBS_KEY,
-        listJobs().filter((j) => j.id !== id),
-      ),
+        listJobs().filter((j) => j.id !== id)
+      )
     )
     .immediate();
 }
-
-void makePicture;

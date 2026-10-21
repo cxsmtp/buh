@@ -33,7 +33,6 @@ const OWNER = 'owner@shop.test';
 const PROMPT =
   'A professional, high-resolution (2k, ultra-sharp detail) e-commerce product photograph of the attached bedsheet set dressed on a king-size bed in an elegant, luxury bedroom. Output exactly three individual, separate full-frame images (not a collage or split screen) from three different angles: 1. Straight-on eye-level view centered on the made bed; 2. 45-degree three-quarter view showing the mattress depth and side drape; 3. High diagonal angle from the foot of the bed looking across the surface. Requirements across all images: * Complementary Styling: The bedroom wall colors, headboard fabric, flooring, and minimalist nightstands must be automatically chosen in tones that perfectly complement and enhance the primary and secondary colors of the uploaded bedsheet. * Identical Setting: The room setup, bed frame, headboard, lighting, and nightstands must remain identical across all views. * Clean Setup: Exactly two matching pillows propped neatly against the headboard; nothing extra on the bed, no throws or decorative cushions.';
 
-const PHOTO = makePng(96, 120, (x, y) => ((x + y) % 24 < 12 ? [47, 63, 122] : [246, 244, 238]));
 let made = 0;
 const fresh = () => {
   const phys = Buffer.alloc(9);

@@ -185,6 +185,8 @@ for (const width of [375, 1280]) {
     await openAdminSection(page, /^Inventory/);
     await page.getByRole('heading', { name: 'Inventory' }).waitFor();
     await page.getByRole('button', { name: 'Add product' }).first().click();
+    // Add product opens quick add; these steps are the full editor's.
+    await page.getByRole('button', { name: /Use the full editor/ }).click();
     const editor = page.getByRole('dialog', { name: 'Add a product' });
     await editor.waitFor();
     await editor.getByLabel('Choose photos from the gallery').setInputFiles([{ name: 'towel.png', mimeType: 'image/png', buffer: fs.readFileSync('test/fixtures/sheet-indigo.png') }]);

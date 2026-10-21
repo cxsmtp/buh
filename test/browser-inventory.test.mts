@@ -258,6 +258,8 @@ for (const width of [375, 1280]) {
   test(`product editor at ${width}px: photos from the gallery, reorder and cover, details, sizes, publish; the draft saves itself`, { skip }, async () => {
     const { ctx, page, errors } = await adminInventory(width);
     await page.getByRole('button', { name: 'Add product' }).first().click();
+    // Add product opens quick add; these steps are the full editor's.
+    await page.getByRole('button', { name: /Use the full editor/ }).click();
     const editor = page.getByRole('dialog', { name: 'Add a product' });
     await editor.waitFor();
     const camera = editor.getByLabel('Take a photo with the camera');

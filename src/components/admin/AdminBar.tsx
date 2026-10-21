@@ -79,7 +79,7 @@ export function AdminBar({
             {(
               [
                 ['overview', 'Overview', 'Today’s to-dos and money highlights', LayoutDashboard],
-                ['add-product', 'Add product', 'Photos, price, sizes and stock, step by step', Camera],
+                ['add-product', 'Add product', 'Photo, price and stock: the AI does the rest', Camera],
                 ['crm', 'Customers', 'Everyone who ordered, with totals', Users],
                 ['money', 'Money', 'Expenses with photos of bills, reports for your accountant, audit log', Wallet],
                 ['settings', 'Settings', 'Store, catalogue, delivery, couriers, backups…', Settings],
