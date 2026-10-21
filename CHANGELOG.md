@@ -1,5 +1,14 @@
 # Changelog
 
+## BUH-02.23.01 — 2026-10-21 06:00 UTC · [#43](https://github.com/cxsmtp/buh/pull/43)
+
+- **A clear message when Gemini needs billing.** Google offers its picture models only on paid accounts, so a key on the free tier was refused every time. The shop said "limit reached, wait a minute", which never helped. It now says the key's project needs billing switched on, where to do it (aistudio.google.com → API keys → your project → Set up billing) and the rough cost: about 4 US cents a picture.
+- **Status.**
+  - **Benchmark:** BENCH_PLACEHOLDER
+  - **Tests:** TESTS_PLACEHOLDER
+  - **Dependency audit:** production 0 vulnerabilities; no new packages.
+  - **Security scan:** one message changed. Google's own error text stays in the scrubbed `detail`, as before (the key is never included).
+
 ## BUH-02.23.00 — 2026-10-21 09:00 UTC · [#42](https://github.com/cxsmtp/buh/pull/42)
 
 - **Empty category pages kept out of Google.** Category pages with no products are left out of the sitemap and marked not to be indexed until they have products.

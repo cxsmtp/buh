@@ -239,6 +239,18 @@ test('Gemini writing errors are readable and never carry the key (reply or logs)
   assert.ok(!(JSON.stringify({ m: e.message, d: e.details }) + logs).includes('TESTKEY'));
   answer = () => ({ status: 429, data: { error: { code: 429, message: 'Resource has been exhausted', status: 'RESOURCE_EXHAUSTED' } } });
   await assert.rejects(ai.describeProduct({ image: PHOTO_URL }, 'o@s.t'), /limit for your Gemini key/);
+  // Reported by the owner: a real key, "limit reached" on every picture. Google's free tier has no
+  // quota for picture models (limit: 0): the shop says billing is needed, not "wait a minute".
+  answer = () => ({
+    status: 429,
+    data: { error: { code: 429, status: 'RESOURCE_EXHAUSTED', message: 'You exceeded your current quota, please check your plan and billing details. Quota exceeded for metric: generativelanguage.googleapis.com/generate_content_free_tier_requests, limit: 0, model: gemini-2.5-flash-image' } },
+  });
+  await assert.rejects(ai.describeProduct({ image: PHOTO_URL }, 'o@s.t'), (err: Error & { status?: number; details?: { code?: string } }) => {
+    assert.equal(err.details?.code, 'ai_needs_billing');
+    assert.match(err.message, /free tier.*Set up billing/s);
+    assert.ok(!/Wait a minute/.test(err.message));
+    return true;
+  });
   answer = () => ({ status: 400, data: { error: { code: 400, message: `Unsupported MIME type ${KEY}`, status: 'INVALID_ARGUMENT' } } });
   const r = await logsOf(() => ai.describeProduct({ image: PHOTO_URL }, 'o@s.t'));
   assert.match((r.result as Error).message, /^Gemini said: Unsupported MIME type/);
