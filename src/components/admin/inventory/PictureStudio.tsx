@@ -33,6 +33,8 @@ interface Slot {
   state: 'busy' | 'done' | 'failed';
   url?: string;
   error?: string;
+  /** The picture service's own words (the key always removed on the server), to tell billing, quota and project apart. */
+  said?: string;
 }
 
 export interface StudioStatus {
@@ -197,7 +199,7 @@ export function PictureStudio({
   const make = async (key: number, preset: string, field: Record<string, string>) => {
     const scene = (scenes[preset] ?? '').trim();
     const ctx = Object.fromEntries(Object.entries(context).filter(([, v]) => (Array.isArray(v) ? v.length : typeof v === 'string' && v.trim())));
-    const call = postJson<{ url?: string; message?: string; code?: string; reason?: string }>('/api/admin/products/stage-photo', {
+    const call = postJson<{ url?: string; message?: string; code?: string; reason?: string; detail?: string }>('/api/admin/products/stage-photo', {
       ...field,
       preset,
       ...(notes.trim() ? { extra: notes.trim() } : {}),
@@ -218,7 +220,7 @@ export function PictureStudio({
     const { ok, data } = answer;
     if (!ok || !data.url) {
       if (data.code === 'staging_off') setStatus((st) => ({ ...(st ?? {}), ready: false, reason: data.reason || 'no_key' }));
-      return update({ state: 'failed', error: data.message || 'Could not make the picture. Please try again.' });
+      return update({ state: 'failed', error: data.message || 'Could not make the picture. Please try again.', said: typeof data.detail === 'string' ? data.detail.slice(0, 300) : undefined });
     }
     // Discarded (or tried again) while it was being made: thrown away.
     if (!live.current.has(key)) return void discard(data.url);
@@ -431,6 +433,11 @@ export function PictureStudio({
                 {s.state === 'failed' && (
                   <p role="alert" className="text-xs font-semibold text-danger break-words" data-testid="stage-failed">
                     Not made: {s.error}
+                  </p>
+                )}
+                {s.state === 'failed' && s.said && (
+                  <p className="text-[11px] text-ink-soft break-words" data-testid="stage-said">
+                    {SHORT[status?.provider ?? ''] ?? 'The service'} said: {s.said}
                   </p>
                 )}
                 {s.state === 'done' && s.url && (
