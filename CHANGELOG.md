@@ -3,6 +3,7 @@
 ## BUH-02.23.00 — 2026-10-21 09:00 UTC · [#42](https://github.com/cxsmtp/buh/pull/42)
 
 - **A daily summary you can scan.** The 8:00 email now has four sections, one line per item: **Action needed** first (orders to confirm, transfers to check, chats waiting, restocks, problems), then **Sales**, **Inventory** and **System**.
+- **Everything in the email itself.** Each order to confirm, transfer to check, flagged order and waiting chat has its own line: order number, customer's first name and initial, amount, payment and how long ago. You can see what needs doing without opening the hub. Full names and phone numbers stay out of the email.
 - **More useful sales.** Yesterday's sales now come with the average order, best sellers and the last 7 days compared with the 7 before.
 - **Stock by product.** Each sold-out or low product gets its own line with the sizes left (e.g. "Low: Jaipur Jaal Floral — King 2, Super King 1 left"), instead of one long list.
 - **A clear subject.** For example "Daily summary 2026-10-20: 3 orders, AED 1,250 · 2 things to do". The email is formatted for phones, with a plain-text copy for mail apps that don't show formatting.

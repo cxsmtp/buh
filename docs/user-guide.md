@@ -460,7 +460,7 @@ Settings → Catalogue → **Export for Amazon / Noon** → **Download CSV**: th
 
 Every morning at 8:00 (UAE) an email to the backup address gives you yesterday in four short sections, one line per item:
 
-- **Action needed:** orders to confirm, bank transfers to check, chats waiting, products to restock, and any problem (backups, disk, VAT threshold). "Nothing needs you today" when all is well.
+- **Action needed:** each order to confirm, bank transfer to check and chat waiting, one line each with the order number, the customer's first name, amount, payment and how long ago (never the full name or phone), plus products to restock and any problem (backups, disk, VAT threshold). "Nothing needs you today" when all is well.
 - **Sales:** orders and sales, average order, card takings, best sellers, and the last 7 days compared with the 7 before.
 - **Inventory:** each sold-out product and each product running low, with the sizes left.
 - **System:** whether backups, disk and the database are all right.

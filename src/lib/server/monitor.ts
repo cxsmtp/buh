@@ -8,7 +8,7 @@ import { driveProblem } from './driveBackup';
 import { getDb } from './db';
 import { kvGet, kvSet } from './kv';
 import { logEvent } from './log';
-import { awaitingWhatsAppCount, cardTakings, ordersNeedingAttention, receiptsNoRoom, transfersAwaitedCount, transfersToCheckCount, unconfirmedPressure } from './orders';
+import { awaitingWhatsAppCount, cardTakings, ordersNeedingAttention, receiptsNoRoom, summaryOrderRows, transfersAwaitedCount, transfersToCheckCount, unconfirmedPressure } from './orders';
 import { listProducts } from './products';
 import { vatStatus } from './reports';
 import { getSettings, phoneCheckMode } from './settings';
@@ -166,6 +166,45 @@ export interface SummarySection {
 const aed = (fils: number) => `AED ${(fils / 100).toLocaleString('en-AE', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 const plural = (n: number, one: string, many = `${one}s`) => `${n} ${n === 1 ? one : many}`;
 
+const PAYMENT_NAMES: Record<string, string> = { cod: 'cash on delivery', bank_transfer: 'bank transfer', online_card: 'card' };
+
+/** "3 h ago", "2 days ago". */
+function ago(iso: string, now: Date): string {
+  const h = Math.max(0, Math.round((now.getTime() - Date.parse(iso)) / 3600_000));
+  return h < 1 ? 'just now' : h < 48 ? `${h} h ago` : `${Math.round(h / 24)} days ago`;
+}
+
+/** A first name and an initial: enough to recognise the order, without the full name in an email. */
+function shortName(full: string): string {
+  const parts = String(full || '').trim().split(/\s+/).filter(Boolean);
+  if (!parts.length) return 'a customer';
+  return parts.length > 1 ? `${parts[0]} ${parts[parts.length - 1][0].toUpperCase()}.` : parts[0];
+}
+
+/** One line per order: number, customer, amount, payment, when (and what is wrong, for flagged ones). */
+function orderLines(kind: 'confirm' | 'transfer' | 'attention', label: string, total: number, now: Date): SummarySection['items'] {
+  if (!total) return [];
+  const rows = summaryOrderRows(kind, 10);
+  const lines = rows.map((r) => {
+    let name = 'a customer';
+    try {
+      name = shortName((JSON.parse(r.data) as Order).customer?.fullName);
+    } catch {
+      // the totals still count it
+    }
+    let why = '';
+    if (kind === 'attention' && r.needs_attention) {
+      try {
+        why = ` — ${String((JSON.parse(r.needs_attention) as { text?: string }).text ?? '').slice(0, 140)}`;
+      } catch {
+        why = '';
+      }
+    }
+    return { text: `${label}: ${r.id} · ${name} · ${aed(r.total_fils)} · ${PAYMENT_NAMES[r.payment_method] ?? r.payment_method} · ${ago(r.created_at, now)}${why}`, tone: 'action' as const };
+  });
+  return total > rows.length ? [...lines, { text: `…and ${total - rows.length} more (${label.toLowerCase()}).`, tone: 'action' as const }] : lines;
+}
+
 function ordersBetween(from: string, to: string) {
   return getDb().prepare('SELECT status, total_fils, data FROM orders WHERE created_at >= ? AND created_at < ?').all(from, to) as Array<{ status: string; total_fils: number; data: string }>;
 }
@@ -207,11 +246,14 @@ export function dailySummary(now = new Date()): { subject: string; text: string;
   const transfersToCheck = transfersToCheckCount();
   const transfersAwaited = transfersAwaitedCount();
   let chats = 0;
+  let chatRows: Array<{ customer_name: string; updated_at: string }> = [];
   try {
     chats = (getDb().prepare("SELECT COUNT(*) AS n FROM chat_threads WHERE status = 'waiting'").get() as { n: number }).n;
+    chatRows = getDb().prepare("SELECT customer_name, updated_at FROM chat_threads WHERE status = 'waiting' ORDER BY updated_at ASC LIMIT 10").all() as typeof chatRows;
   } catch {
     chats = 0;
   }
+  const flagged = ordersNeedingAttention();
   const card = cardTakings(from, to);
   const threshold = getSettings('catalog').lowStockThreshold;
   const products = listProducts();
@@ -232,9 +274,18 @@ export function dailySummary(now = new Date()): { subject: string; text: string;
   }
 
   const action: SummarySection['items'] = [
-    ...(pending ? [{ text: `Waiting for your confirmation: ${pending}. Open Orders.`, tone: 'action' as const }] : []),
-    ...(transfersToCheck ? [{ text: `Bank transfers to check (screenshot received): ${transfersToCheck}. Open Orders → Transfer to check.`, tone: 'action' as const }] : []),
-    ...(chats ? [{ text: `Chats waiting for a reply: ${chats}. Open Chats.`, tone: 'action' as const }] : []),
+    // Every order, transfer and chat that needs you, one line each, so the email is enough on its own.
+    ...(pending ? [{ text: `Waiting for your confirmation: ${pending}.`, tone: 'action' as const }, ...orderLines('confirm', 'Confirm', pending, now)] : []),
+    ...(transfersToCheck
+      ? [{ text: `Bank transfers to check (screenshot received): ${transfersToCheck}. Compare each with your bank statement before you confirm.`, tone: 'action' as const }, ...orderLines('transfer', 'Check transfer', transfersToCheck, now)]
+      : []),
+    ...(flagged ? orderLines('attention', 'Look at', flagged, now) : []),
+    ...(chats
+      ? [
+          { text: `Chats waiting for a reply: ${chats}.`, tone: 'action' as const },
+          ...chatRows.map((c) => ({ text: `Reply to: ${shortName(c.customer_name) === 'a customer' ? 'a visitor' : shortName(c.customer_name)} · waiting since ${ago(c.updated_at, now)}`, tone: 'action' as const })),
+        ]
+      : []),
     ...(soldOut.length ? [{ text: `Restock: ${plural(soldOut.length, 'product')} sold out, ${plural(low.length, 'size')} running low (see Inventory below).`, tone: 'action' as const }] : []),
     ...problems.map((p) => ({ text: p.text, tone: p.level === 'failing' ? ('action' as const) : ('warn' as const) })),
     ...(vat && !vat.registered && vat.level !== 'ok' ? [{ text: vat.text, tone: 'action' as const }] : []),
@@ -288,7 +339,7 @@ export function dailySummary(now = new Date()): { subject: string; text: string;
     `Beautiful UAE Home: your summary for ${day}`,
     '',
     ...sections.flatMap((sec) => [sec.title.toUpperCase(), ...sec.items.map((i) => `  • ${i.text}`), '']),
-    'Open the Admin Hub for details.',
+    'Every item above is in the Admin Hub too; nothing else needs your attention.',
   ].join('\n');
   const actions = action.length;
   return {
@@ -319,7 +370,7 @@ function summaryHtml(day: string, sections: SummarySection[]): string {
 <p style="font:600 18px/1.3 Georgia,serif;color:#2b2026;margin:0">Beautiful UAE Home</p>
 <p style="font:13px/1.4 Arial,sans-serif;color:#6a5c62;margin:4px 0 0">Your summary for ${esc(day)}</p>
 ${blocks}
-<p style="font:12px/1.5 Arial,sans-serif;color:#6a5c62;margin:24px 0 0">Open the Admin Hub for details.</p>
+<p style="font:12px/1.5 Arial,sans-serif;color:#6a5c62;margin:24px 0 0">Every item above is in the Admin Hub too; nothing else needs your attention.</p>
 </div></body></html>`;
 }
 

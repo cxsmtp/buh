@@ -241,6 +241,21 @@ test('daily summary (owner report): itemised sections in order — action needed
   assert.ok(!/<script/i.test(s.html));
 });
 
+test('daily summary (owner report): self-sufficient — each order to confirm is listed with its number, customer, amount and payment, never the full name or phone', async () => {
+  const { dailySummary } = await import('@/lib/server/monitor');
+  const row = getDb().prepare("SELECT id, data FROM orders LIMIT 1").get() as { id: string; data: string };
+  getDb().prepare("UPDATE orders SET status = 'pending_confirmation' WHERE id = ?").run(row.id);
+  const o = JSON.parse(row.data) as { customer: { fullName: string; phone: string } };
+  const s = dailySummary(new Date());
+  const line = s.text.split('\n').find((l) => l.includes(`Confirm: ${row.id}`));
+  assert.ok(line, 'the order has its own line');
+  assert.match(line!, /AED [\d,.]+ · (cash on delivery|bank transfer|card) · /);
+  const parts = o.customer.fullName.trim().split(/\s+/);
+  if (parts.length > 1) assert.ok(!line!.includes(o.customer.fullName), 'not the full name');
+  assert.ok(!s.text.includes(o.customer.phone) && !s.html.includes(o.customer.phone), 'never the phone');
+  assert.ok(!/Open the Admin Hub for details/.test(s.text));
+});
+
 test('upgrading a shop from version 1.2: existing stock moves to each product’s default size', () => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'buh-upgrade-'));
   const old = new Database(path.join(dir, 'shop.db'));
