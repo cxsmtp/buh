@@ -261,3 +261,17 @@ test('the daily summary lists new products the AI could not finish, under Action
   const action = monitor.dailySummary(new Date()).sections.find((s) => s.title === 'Action needed')!;
   assert.ok(action.items.some((i) => /New products that need you: 1 \(Inventory → Being made by AI\)/.test(i.text)));
 });
+
+test('a product the AI finished leaves "Being made by AI" in Inventory (reported: it stayed after it was in the shop); the form keeps a tick for a few minutes', async () => {
+  const { visibleJobs, DONE_SHOWN_MS } = await import('@/lib/client/autoJobs');
+  const now = Date.parse('2026-10-21T10:00:00Z');
+  const at = (msAgo: number) => new Date(now - msAgo).toISOString();
+  const jobs = [
+    { id: 'done', state: 'done', updatedAt: at(60_000) },
+    { id: 'old-done', state: 'done', updatedAt: at(DONE_SHOWN_MS + 1) },
+    { id: 'making', state: 'pictures', updatedAt: at(1000) },
+    { id: 'needs', state: 'needs_you', updatedAt: at(3 * 86_400_000) },
+  ];
+  assert.deepEqual(visibleJobs(jobs, 'inventory', now).map((j) => j.id), ['making', 'needs']);
+  assert.deepEqual(visibleJobs(jobs, 'form', now).map((j) => j.id), ['done', 'making', 'needs']);
+});

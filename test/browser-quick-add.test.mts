@@ -78,7 +78,7 @@ function png(seed: number): Buffer {
 }
 
 for (const width of [375, 1280]) {
-  test(`quick add at ${width} px: the basics only, a name asked for without AI writing, ready for the next one; the full editor one tap away`, { skip }, async () => {
+  test(`quick add at ${width} px: the basics only, a name asked for without AI writing, ready for the next one at once (no waiting for the upload); the full editor one tap away`, { skip }, async () => {
     const { ctx, page, errors } = await adminPage(width);
     await openAdminSection(page, /^Inventory/);
     await page.getByRole('button', { name: 'Add product' }).first().click();
@@ -93,19 +93,28 @@ for (const width of [375, 1280]) {
     await sheet.getByRole('alert').filter({ hasText: /Give it a name/ }).waitFor();
     const title = `Quick Rose Percale ${width}`;
     await sheet.getByLabel(/^Name/).fill(title);
+    // Add at once, without waiting for anything: the form is ready for the next one straight away
+    // (photos and name cleared, the price kept), and the item is sent in the background.
     await sheet.getByTestId('quick-add-save').click();
-    await sheet.getByRole('status').filter({ hasText: /Added/ }).waitFor();
-    // Ready for the next one: photos and name cleared, the price kept.
+    await sheet.getByRole('status').filter({ hasText: /add the next one/ }).waitFor();
     assert.equal(await sheet.getByTestId('quick-photos').count(), 0);
     assert.equal(await sheet.getByLabel(/^Name/).inputValue(), '');
     assert.equal(await sheet.getByLabel('Price (AED)').inputValue(), '245');
-    const products = (await (await api('GET', '/api/admin/products')).json()).products as Array<{ title: string; active: boolean; price: number; stockBySize: Record<string, number>; material: string }>;
-    const p = products.find((x) => x.title === title)!;
-    assert.ok(p, 'saved');
+    // The next one can be started while the first is still on its way.
+    await sheet.getByLabel('Choose photos from the gallery').setInputFiles({ name: 'next.png', mimeType: 'image/png', buffer: png(width + 1) });
+    await sheet.getByAltText(/Photo 1/).waitFor();
+    type Row = { title: string; active: boolean; price: number; stockBySize: Record<string, number>; material: string };
+    let p: Row | undefined;
+    for (let i = 0; i < 50 && !p; i++) {
+      p = ((await (await api('GET', '/api/admin/products')).json()).products as Row[]).find((x) => x.title === title);
+      if (!p) await page.waitForTimeout(200);
+    }
+    assert.ok(p, 'saved in the background');
     assert.equal(p.active, true, 'in the shop at once (nothing left for the AI to do)');
     assert.equal(p.price, 245);
     assert.equal(Object.values(p.stockBySize).reduce((a, b) => a + b, 0), 1);
     assert.equal(p.material, '', 'no fabric invented');
+    await sheet.getByTestId('quick-sending').waitFor({ state: 'detached' });
     assert.equal(await overflow(page), 0);
     // The full editor is one tap away.
     await sheet.getByRole('button', { name: /Use the full editor/ }).click();
