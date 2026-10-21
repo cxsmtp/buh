@@ -1,5 +1,15 @@
 # Changelog
 
+## BUH-02.24.02 — 2026-10-21 16:10 UTC · [#47](https://github.com/cxsmtp/buh/pull/47)
+
+- **Each angle is really a new picture.** The 3 AI pictures of a product came out almost the same, because each one was asked to "edit" your photo, which kept your camera position. Each angle in your prompt is now a new photograph from its own camera position. Your photo is used only for the bedding's true pattern and colours, so the bed is seen from three clearly different sides.
+- **Same room: your choice.** The shop no longer sends the first AI picture along with the next ones, because the AI copied it. Your prompt's "identical setting" keeps the room consistent. If you want exactly the same room even if the pictures look closer, switch on **Keep exactly the same room in every angle** in Settings → AI pictures.
+- **Status.**
+  - **Benchmark:** see the status row.
+  - **Tests:** see the status row.
+  - **Dependency audit:** production 0 vulnerabilities; no new packages.
+  - **Security scan:** prompt wording and one new on/off setting (allow-listed, a boolean); no new route.
+
 ## BUH-02.24.01 — 2026-10-21 11:00 UTC · [#46](https://github.com/cxsmtp/buh/pull/46)
 
 - **Finished products leave "Being made by AI".** A product the AI has finished is in the shop, and now leaves the list at the top of Inventory by itself. The list keeps only products still being made and ones that need you. The product list also refreshes on its own, so the new product shows as in the shop.
