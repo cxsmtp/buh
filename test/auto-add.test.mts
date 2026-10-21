@@ -117,7 +117,11 @@ test('the studio: one request per angle, ONE photograph each, never the list; th
   assert.notEqual(first.url, second.url);
   // Only angles that are in the prompt, and only pictures this feature made as "same room".
   await assert.rejects(stage.stagePhoto({ imageId, angle: 4 }, OWNER), /not in your prompt/);
-  await assert.rejects(stage.stagePhoto({ imageId, angle: 2, sameRoom: url }, OWNER), /no longer stored/);
+  // A "same room" picture that is not one this feature made (or was discarded) is not sent.
+  sent = [];
+  await stage.stagePhoto({ imageId, angle: 2, sameRoom: url }, OWNER);
+  assert.equal(imagesOf(pictureCalls()[0]), 1);
+  await assert.rejects(stage.stagePhoto({ imageId, angle: 2, sameRoom: '../shop.db' }, OWNER), /same room/);
 });
 
 test('AI pictures first and the owner’s photo last (the default), or after the owner’s photo', () => {
@@ -260,4 +264,111 @@ test('the daily summary lists new products the AI could not finish, under Action
   await auto.kick();
   const action = monitor.dailySummary(new Date()).sections.find((s) => s.title === 'Action needed')!;
   assert.ok(action.items.some((i) => /New products that need you: 1 \(Inventory → Being made by AI\)/.test(i.text)));
+});
+
+test('a product the AI finished leaves "Being made by AI" in Inventory (reported: it stayed after it was in the shop); the form keeps a tick for a few minutes', async () => {
+  const { visibleJobs, DONE_SHOWN_MS } = await import('@/lib/client/autoJobs');
+  const now = Date.parse('2026-10-21T10:00:00Z');
+  const at = (msAgo: number) => new Date(now - msAgo).toISOString();
+  const jobs = [
+    { id: 'done', state: 'done', updatedAt: at(60_000) },
+    { id: 'old-done', state: 'done', updatedAt: at(DONE_SHOWN_MS + 1) },
+    { id: 'making', state: 'pictures', updatedAt: at(1000) },
+    { id: 'needs', state: 'needs_you', updatedAt: at(3 * 86_400_000) },
+  ];
+  assert.deepEqual(visibleJobs(jobs, 'inventory', now).map((j) => j.id), ['making', 'needs']);
+  assert.deepEqual(visibleJobs(jobs, 'form', now).map((j) => j.id), ['done', 'making', 'needs']);
+});
+
+// ── review fixes (BUH-02.24.01) ─────────────────────────────────────────────
+
+const kingSize = () => [{ id: (settings.getSettings('catalog').sizes.find((s) => s.id === 'king') ?? settings.getSettings('catalog').sizes[0]).id, stock: 1 }];
+/** A job as a stopped worker leaves it (still working), without running it. */
+function pendingJob(productId: string, extra: Record<string, unknown> = {}) {
+  const at = new Date().toISOString();
+  kvSet(auto.JOBS_KEY, [{ id: `job-${productId}`, key: `q-${productId}`, productId, by: OWNER, state: 'pictures', publish: true, named: false, written: false, plan: ['angle:1', 'angle:2', 'angle:3'], made: [], note: '', createdAt: at, updatedAt: at, ...extra }]);
+}
+
+test('an editor save while the AI is still making the product is refused (it would put the placeholder over the AI’s work); show/hide is kept for when it is done', async () => {
+  const p = products.createProduct({ title: auto.PLACEHOLDER_TITLE, category: settings.getSettings('catalog').categories[0].id, price: 150, featuredImage: photo().url, galleryImages: [], profiles: [settings.getSettings('catalog').sizes[0]], defaultProfileId: settings.getSettings('catalog').sizes[0].id, stockBySize: { [settings.getSettings('catalog').sizes[0].id]: 1 }, active: false, colors: [], isFeatured: false }, OWNER);
+  pendingJob(p.id);
+  assert.throws(() => auto.editWhileWorking(p.id, { title: auto.PLACEHOLDER_TITLE, price: 160, active: false }), (e: { status: number; details: { code: string } }) => e.status === 409 && e.details.code === 'ai_working');
+  // Hide: taken now and remembered (kept hidden when it is done).
+  assert.equal(auto.editWhileWorking(p.id, { active: false }), 'apply');
+  assert.equal(auto.listJobs()[0].publish, false);
+  // Show: remembered, published only once the AI has named it (never with its placeholder).
+  assert.equal(auto.editWhileWorking(p.id, { active: true }), 'kept');
+  assert.equal(auto.listJobs()[0].publish, true);
+  assert.equal(products.getProduct(p.id)!.active, false);
+  await auto.kick();
+  const done = products.getProduct(p.id)!;
+  assert.equal(done.title, SUGGESTION.title);
+  assert.equal(done.active, true);
+  // Done: a normal save again.
+  assert.equal(auto.editWhileWorking(p.id, { price: 170 }), 'none');
+
+  // Hidden by the owner meanwhile: kept hidden when it is done.
+  const q = auto.quickAdd({ key: 'q-test-0101abcd', photos: [photo().url], price: 99, sizes: kingSize() }, OWNER);
+  auto.editWhileWorking(q.product.id, { active: false });
+  await auto.kick();
+  assert.equal(products.getProduct(q.product.id)!.active, false, 'the owner hid it: not published');
+  assert.match(auto.listJobs().find((j) => j.productId === q.product.id)!.note, /kept hidden/);
+});
+
+test('a product removed while the AI works is left alone: no more paid pictures, never published (reported by review)', async () => {
+  const p = products.createProduct({ title: auto.PLACEHOLDER_TITLE, category: settings.getSettings('catalog').categories[0].id, price: 150, featuredImage: photo().url, galleryImages: [], profiles: [settings.getSettings('catalog').sizes[0]], defaultProfileId: settings.getSettings('catalog').sizes[0].id, stockBySize: { [settings.getSettings('catalog').sizes[0].id]: 1 }, active: false, colors: [], isFeatured: false }, OWNER);
+  pendingJob(p.id);
+  products.setArchived(p.id, true);
+  sent = [];
+  await auto.kick();
+  assert.equal(sent.length, 0, 'nothing paid for');
+  const after = products.getProduct(p.id)!;
+  assert.equal(after.active, false);
+  assert.equal(after.archived, true);
+  assert.match(auto.listJobs()[0].note, /removed/);
+});
+
+test('a refused key stops the set after one picture; the same photo twice is one photo; a discarded first angle is not sent', async () => {
+  sent = [];
+  answer = (req) => (req.path.includes('image') ? { status: 400, data: { error: { code: 400, message: 'API key not valid. Please pass a valid API key.', status: 'INVALID_ARGUMENT', details: [{ reason: 'API_KEY_INVALID' }] } } } : text());
+  const one = photo().url;
+  const r = auto.quickAdd({ key: 'q-test-0102abcd', photos: [one, one], price: 99, sizes: kingSize() }, OWNER);
+  assert.equal(r.product.galleryImages.length, 0, 'the same picture twice is one photo');
+  await auto.kick();
+  assert.equal(pictureCalls().length, 1, 'not tried three times with a refused key');
+
+  answer = (req) => (req.path.includes('image') ? picture() : text());
+  const own = photo().url.replace('/api/images/', '');
+  const first = await stage.stagePhoto({ imageId: own, angle: 1 }, OWNER);
+  stage.discardStagedPhoto({ url: first.url }, OWNER);
+  sent = [];
+  const second = await stage.stagePhoto({ imageId: own, angle: 2, sameRoom: first.url }, OWNER);
+  assert.ok(second.url);
+  assert.equal(imagesOf(pictureCalls()[0]), 1, 'the discarded picture is not sent');
+});
+
+test('angles: a room described before the list is kept; numbered rules are not angles; the last angle is not cut at "e.g."; the list is never sent as one', async () => {
+  const room = staging.splitAngles('A bright Dubai bedroom with white walls and oak floors, photographed from three angles: 1. Front view; 2. Side view; 3. Top view, e.g. from above. Soft light.');
+  assert.deepEqual(room.angles, ['Front view', 'Side view', 'Top view, e.g. from above']);
+  assert.equal(room.shared, 'A bright Dubai bedroom with white walls and oak floors. Soft light.');
+  assert.deepEqual(staging.splitAngles('Requirements: 1. Keep colours true. 2. No people. 3. Soft light.').angles, []);
+  // Only a request for pictures before the list: nothing is left of the lead-in, and the shop's look is used (never the list).
+  await settings.updateSettings('aiPictures', { look: 'Make three separate photos from three angles: 1. Front view; 2. Side view; 3. Top view.' });
+  sent = [];
+  await stage.stagePhoto({ imageId: photo().url.replace('/api/images/', ''), angle: 3 }, OWNER);
+  const p = promptOf(pictureCalls()[0]);
+  assert.doesNotMatch(p, /1\. Front view/);
+  assert.match(p, /ONE photograph from this one camera angle only: Top view/);
+  await settings.updateSettings('aiPictures', { look: PROMPT });
+});
+
+test('the daily summary stops listing a product once the owner has named and published it', async () => {
+  const monitor = await import('@/lib/server/monitor');
+  answer = (req) => (req.path.includes('image') ? picture() : { status: 400, data: { error: { code: 400, message: 'API key not valid.' } } });
+  const r = auto.quickAdd({ key: 'q-test-0103abcd', photos: [photo().url], price: 120, sizes: kingSize() }, OWNER);
+  await auto.kick();
+  const listed = () => monitor.dailySummary(new Date()).sections.find((s) => s.title === 'Action needed')!.items.some((i) => /New products that need you/.test(i.text));
+  assert.equal(listed(), true);
+  products.updateProduct(r.product.id, { title: 'Blue Paisley Set', active: true }, OWNER);
+  assert.equal(listed(), false);
 });

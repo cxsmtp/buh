@@ -46,6 +46,8 @@ const KEEP = 40;
 const MAX_WAITS = 6;
 /** The longest single wait (the shop's own hourly picture limit can ask for up to an hour). */
 const MAX_WAIT_MS = 60 * 60 * 1000;
+/** Errors that fail every picture alike (the next ones are not tried). */
+const STOP_CODES = new Set(['staging_off', 'ai_key_refused', 'ai_no_balance', 'ai_needs_billing', 'ai_model_missing', 'ai_no_model']);
 export const PLACEHOLDER_TITLE = 'New design (AI is writing it)';
 
 export type JobState = 'queued' | 'writing' | 'pictures' | 'waiting' | 'done' | 'needs_you';
@@ -67,6 +69,8 @@ export interface AutoJob {
   plan: string[];
   /** Pictures made so far, in plan order (addresses); "" for one that failed. */
   made: string[];
+  /** The owner showed (true) or hid (false) the product while the AI worked: wins over `publish`. */
+  ownerPublish?: boolean;
   /** Plain words for the owner when something did not work. */
   note: string;
   /** While waiting for a service: when it tries again. */
@@ -89,7 +93,14 @@ function saveJob(job: AutoJob): void {
   // overlap) or the owner's dismiss never loses a write.
   getDb()
     .transaction(() => {
-      const jobs = listJobs().filter((j) => j.id !== job.id);
+      const before = listJobs();
+      // The owner's show/hide (set by the hub while the worker holds its own copy of the job) wins.
+      const stored = before.find((j) => j.id === job.id);
+      if (stored?.ownerPublish !== undefined) {
+        job.ownerPublish = stored.ownerPublish;
+        job.publish = stored.ownerPublish;
+      }
+      const jobs = before.filter((j) => j.id !== job.id);
       jobs.unshift(job);
       // Unfinished jobs are always kept; finished ones only the newest.
       let finished = 0;
@@ -151,11 +162,16 @@ export function quickAdd(body: Record<string, unknown>, actor: string): { produc
 
   if (!Array.isArray(body.photos) || body.photos.length < 1) throw new HttpError(400, 'Add at least one photo.');
   if (body.photos.length > PRODUCT_MAX_PHOTOS) throw new HttpError(400, `At most ${PRODUCT_MAX_PHOTOS} photos.`);
-  const photos = body.photos.map((u) => {
-    const name = typeof u === 'string' ? u.replace(/^\/api\/images\//, '') : '';
-    if (!IMAGE_NAME.test(name) || !readImage(name)) throw new HttpError(400, 'A photo is no longer stored: add it again.');
-    return `/api/images/${name}`;
-  });
+  // The same picture twice (stored by its content) is one photo.
+  const photos = [
+    ...new Set(
+      body.photos.map((u) => {
+        const name = typeof u === 'string' ? u.replace(/^\/api\/images\//, '') : '';
+        if (!IMAGE_NAME.test(name) || !readImage(name)) throw new HttpError(400, 'A photo is no longer stored: add it again.');
+        return `/api/images/${name}`;
+      })
+    ),
+  ];
   const catalog = getSettings('catalog');
   const category = typeof body.category === 'string' && catalog.categories.some((c) => c.id === body.category) ? body.category : (catalog.categories[0]?.id ?? '');
   const productType = defaultTypeFor(catalog, category);
@@ -384,8 +400,14 @@ function finish(job: AutoJob, state: 'done' | 'needs_you', note: string): void {
 
 const said = (err: unknown) => (err instanceof Error ? err.message : 'It did not work.');
 
+/** The product, unless it was removed (archived) meanwhile: then it is left alone, never paid for or published. */
+function liveProduct(id: string) {
+  const p = getProduct(id);
+  return p && !p.archived ? p : undefined;
+}
+
 async function runJob(job: AutoJob): Promise<void> {
-  const product = getProduct(job.productId);
+  const product = liveProduct(job.productId);
   if (!product) return finish(job, 'needs_you', 'The product was removed before it was finished.');
   const cover = product.featuredImage && !(product.stagedPhotos ?? {})[product.featuredImage] ? product.featuredImage : [product.featuredImage, ...product.galleryImages].find((u) => u && !(product.stagedPhotos ?? {})[u]);
   const coverName = (cover ?? '').replace(/^\/api\/images\//, '');
@@ -416,7 +438,7 @@ async function runJob(job: AutoJob): Promise<void> {
           job.by
         )
       );
-      const fresh = getProduct(job.productId);
+      const fresh = liveProduct(job.productId);
       if (!fresh) return finish(job, 'needs_you', 'The product was removed before it was finished.');
       const title = job.named || fresh.title !== PLACEHOLDER_TITLE ? fresh.title : s.title;
       const patch: Record<string, unknown> = {
@@ -461,6 +483,8 @@ async function runJob(job: AutoJob): Promise<void> {
   // 2. The pictures, one request each, one after another.
   const failures: string[] = [];
   for (let i = job.made.length; i < job.plan.length; i++) {
+    // Removed meanwhile: no more paid pictures for it.
+    if (!liveProduct(job.productId)) return finish(job, 'needs_you', 'The product was removed before it was finished.');
     const step = job.plan[i];
     const angle = step.startsWith('angle:') ? Number(step.slice(6)) : 0;
     const first = job.made.find(Boolean) ?? '';
@@ -478,9 +502,12 @@ async function runJob(job: AutoJob): Promise<void> {
     } catch (err) {
       failures.push(said(err));
       job.made.push('');
-      // A setup problem (no key, wrong model) fails every picture alike: stop here.
-      if (err instanceof HttpError && err.details?.code === 'staging_off') {
+      // A setup or account problem (no key, a refused key, no balance or billing, a model that is
+      // gone) fails every picture alike: stop here, without paying for the others.
+      if (err instanceof HttpError && STOP_CODES.has(String(err.details?.code ?? ''))) {
         while (job.made.length < job.plan.length) job.made.push('');
+        saveJob(job);
+        break;
       }
     }
     saveJob(job);
@@ -495,10 +522,13 @@ async function runJob(job: AutoJob): Promise<void> {
   }
 
   // 3. Published (unless kept hidden, or it still has no name).
-  const now2 = getProduct(job.productId);
+  const now2 = liveProduct(job.productId);
   if (!now2) return finish(job, 'needs_you', 'The product was removed before it was finished.');
   const noName = now2.title === PLACEHOLDER_TITLE;
+  const owner = listJobs().find((j) => j.id === job.id)?.ownerPublish;
+  if (owner !== undefined) job.publish = owner;
   if (job.publish && !noName && now2.active === false) updateProduct(job.productId, { active: true }, job.by);
+  else if (!job.publish && now2.active !== false) updateProduct(job.productId, { active: false }, job.by);
   const pics = job.plan.length ? ` ${made.length} of ${job.plan.length} AI pictures made${failures.length ? ` (${failures[0]})` : ''}.` : '';
   if (noName) return finish(job, 'needs_you', `Give it a name to publish it. ${writeProblem ? `The words were not written: ${writeProblem}` : ''}${pics}`.trim());
   auditOrThrow('product.quick_finished', {
@@ -510,6 +540,35 @@ async function runJob(job: AutoJob): Promise<void> {
     published: job.publish,
   });
   finish(job, failures.length || writeProblem ? 'needs_you' : 'done', `${job.publish ? 'In the shop.' : 'Ready (kept hidden).'}${writeProblem ? ` The words were not written: ${writeProblem}` : ''}${pics}`.trim());
+}
+
+/** The job still working on this product, if any. */
+export function workingJob(productId: string): AutoJob | undefined {
+  return listJobs().find((j) => j.productId === productId && j.state !== 'done' && j.state !== 'needs_you');
+}
+
+/**
+ * An edit of a product the AI is still writing and picturing (PATCH /api/admin/products/<id>). A
+ * save from the editor would put back what it loaded (the placeholder name, no AI pictures) over
+ * the AI's work: refused until it is done (409). Show or hide is the one change taken: it decides
+ * what happens when the AI is done. Returns 'apply' (go on and save), 'kept' (recorded, nothing
+ * to save now: shown once the AI has finished, never with its placeholder name), or 'none' (no
+ * job: a normal save).
+ */
+export function editWhileWorking(productId: string, change: unknown): 'none' | 'apply' | 'kept' {
+  const job = workingJob(productId);
+  if (!job) return 'none';
+  const c = change && typeof change === 'object' && !Array.isArray(change) ? (change as Record<string, unknown>) : {};
+  const keys = Object.keys(c);
+  if (keys.length !== 1 || keys[0] !== 'active' || typeof c.active !== 'boolean') {
+    throw new HttpError(409, 'The AI is still making this product (its name, description and pictures). Wait a minute until it is done, then edit it.', {}, { code: 'ai_working' });
+  }
+  job.publish = c.active;
+  job.ownerPublish = c.active;
+  getDb()
+    .transaction(() => kvSet(JOBS_KEY, listJobs().map((j) => (j.id === job.id ? { ...j, publish: c.active as boolean, ownerPublish: c.active as boolean } : j))))
+    .immediate();
+  return c.active ? 'kept' : 'apply';
 }
 
 /** "Needs you" on the list: dismissed once the owner has seen it (the product stays). */

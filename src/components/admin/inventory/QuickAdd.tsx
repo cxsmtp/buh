@@ -7,6 +7,7 @@ import { getJson, postJson, sendJson } from '@/lib/apiClient';
 import { newKey, shortSizeName } from '@/lib/client/stock';
 import { shrinkPhoto } from '@/lib/shrinkPhoto';
 import { defaultTypeFor } from '@/lib/productType';
+import { visibleJobs } from '@/lib/client/autoJobs';
 import { Sheet } from '@/components/common/Sheet';
 
 /**
@@ -19,6 +20,36 @@ import { Sheet } from '@/components/common/Sheet';
  */
 
 const MAX_PHOTOS = 8;
+
+/** A photo picked for the item being added: its local preview and its upload (the stored address). */
+interface Pic {
+  id: string;
+  file: File;
+  preview: string;
+  upload: Promise<string>;
+}
+
+/** Shrink the photo on the phone and store it (PNG, JPEG or WebP through the shop's checks): its address. */
+function uploadPhoto(file: File): Promise<string> {
+  const upload = (async () => {
+    const res = await postJson<{ url?: string; message?: string }>('/api/admin/images', { image: await shrinkPhoto(file) });
+    if (!res.ok || !res.data.url) throw new Error(res.data.message || 'The photo could not be uploaded.');
+    return res.data.url;
+  })();
+  // Failures are reported where the photo is used (in the item's row), never unhandled.
+  upload.catch(() => undefined);
+  return upload;
+}
+
+/** An item added here that is still on its way to the server (or failed: Try again, same key). */
+interface Sending {
+  key: string;
+  label: string;
+  preview: string;
+  photos: Pic[];
+  body: Record<string, unknown>;
+  failed?: string;
+}
 const REMEMBER = 'buh:quick-add';
 
 export interface AutoJobView {
@@ -32,6 +63,7 @@ export interface AutoJobView {
   note: string;
   until: string | null;
   active: boolean;
+  updatedAt?: string;
 }
 
 export interface AutoStatusView {
@@ -65,12 +97,22 @@ export function jobLine(j: AutoJobView): string {
 }
 
 /** The products being made (or just made), with their progress; refreshed while any is still working. */
-export function useAutoJobs(open: boolean) {
+export function useAutoJobs(open: boolean, onSettled?: () => void) {
   const [status, setStatus] = useState<AutoStatusView | null>(null);
+  /** Each job's last state seen: one that has just finished reloads the product list (it is in the shop now). */
+  const seen = useRef(new Map<string, string>());
+  const settled = useRef(onSettled);
+  useEffect(() => {
+    settled.current = onSettled;
+  }, [onSettled]);
   const load = useCallback(async () => {
     const { ok, data } = await getJson<AutoStatusView>('/api/admin/products/quick');
-    if (ok) setStatus(data);
-    return ok ? data : null;
+    if (!ok) return null;
+    const finished = data.jobs.some((j) => (j.state === 'done' || j.state === 'needs_you') && seen.current.has(j.id) && seen.current.get(j.id) !== j.state);
+    seen.current = new Map(data.jobs.map((j) => [j.id, j.state]));
+    setStatus(data);
+    if (finished) settled.current?.();
+    return data;
   }, []);
   useEffect(() => {
     if (!open) return;
@@ -116,9 +158,12 @@ export function AutoJobsList({ jobs, onOpen, onDismiss }: { jobs: AutoJobView[];
                 <span>{jobLine(j)}</span>
               </p>
             </div>
-            <button type="button" onClick={() => onOpen(j.productId)} className="min-h-11 px-3 rounded-xl border border-line-strong bg-surface text-xs font-semibold shrink-0">
-              {j.state === 'needs_you' ? 'Finish' : 'Edit'}
-            </button>
+            {/* Editing while the AI works would put the editor's copy over the AI's (the server refuses it too). */}
+            {!working && (
+              <button type="button" onClick={() => onOpen(j.productId)} className="min-h-11 px-3 rounded-xl border border-line-strong bg-surface text-xs font-semibold shrink-0">
+                {j.state === 'needs_you' ? 'Finish' : 'Edit'}
+              </button>
+            )}
             {!working && (
               <button type="button" onClick={() => onDismiss(j.id)} className="w-11 h-11 rounded-xl border border-line-strong bg-surface flex items-center justify-center shrink-0" aria-label={`Clear from the list: ${j.title || 'new product'}`}>
                 <X className="w-4 h-4" aria-hidden="true" />
@@ -137,6 +182,7 @@ export function QuickAdd({
   onAdded,
   onFullEditor,
   onOpenProduct,
+  onSettled,
 }: {
   catalog: CatalogSettings;
   onClose: () => void;
@@ -146,6 +192,8 @@ export function QuickAdd({
   onFullEditor: () => void;
   /** Open a product in the editor (from the list). */
   onOpenProduct: (productId: string) => void;
+  /** A product the AI was making is finished (reload the list: it is in the shop now). */
+  onSettled?: () => void;
 }) {
   const titleId = useId();
   const [memory] = useState(remembered);
@@ -160,78 +208,103 @@ export function QuickAdd({
   };
   const [sizes, setSizes] = useState<Record<string, number>>(startSizes);
   const [oneStock, setOneStock] = useState(1);
-  const [photos, setPhotos] = useState<string[]>([]);
-  const [uploading, setUploading] = useState(0);
+  /** The photos for this item: shown at once (a local preview) while each one uploads. */
+  const [photos, setPhotos] = useState<Pic[]>([]);
   const [price, setPrice] = useState('');
   const [title, setTitle] = useState('');
   const [publish, setPublish] = useState(true);
-  const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
   const [done, setDone] = useState('');
+  /** Items already added here, still uploading their photos or being sent (or that failed: Try again). */
+  const [sending, setSending] = useState<Sending[]>([]);
   const key = useRef(newKey('q'));
-  const { status, reload, dismiss } = useAutoJobs(true);
+  const { status, reload, dismiss } = useAutoJobs(true, onSettled);
   const needsName = status ? !status.writer : false;
 
-  const addPhotos = async (files: FileList | null) => {
+  const addPhotos = (files: FileList | null) => {
     if (!files?.length) return;
     setError('');
-    const list = Array.from(files).slice(0, Math.max(0, MAX_PHOTOS - photos.length - uploading));
-    setUploading((n) => n + list.length);
-    for (const file of list) {
-      try {
-        const res = await postJson<{ url?: string; message?: string }>('/api/admin/images', { image: await shrinkPhoto(file) });
-        if (!res.ok || !res.data.url) throw new Error(res.data.message || 'The photo could not be uploaded.');
-        const url = res.data.url;
-        setPhotos((p) => (p.includes(url) ? p : [...p, url].slice(0, MAX_PHOTOS)));
-      } catch (err) {
-        setError(err instanceof Error ? err.message : 'Could not read the photo.');
-      } finally {
-        setUploading((n) => n - 1);
-      }
-    }
+    const list = Array.from(files).slice(0, Math.max(0, MAX_PHOTOS - photos.length));
+    // Each photo uploads on its own straight away; Add does not wait for it.
+    const fresh = list.map((file): Pic => ({ id: newKey('p'), file, preview: URL.createObjectURL(file), upload: uploadPhoto(file) }));
+    setPhotos((p) => [...p, ...fresh].slice(0, MAX_PHOTOS));
   };
 
   const toggleSize = (id: string) => setSizes((s) => (id in s ? Object.fromEntries(Object.entries(s).filter(([k]) => k !== id)) : { ...s, [id]: 1 }));
   const setQty = (id: string, q: number) => setSizes((s) => ({ ...s, [id]: Math.max(0, Math.min(100000, q)) }));
 
-  const add = async () => {
+  /** One item: its photos finish uploading, then it is sent (safe to send again: same key). */
+  const send = async (item: Sending) => {
+    setSending((all) => all.map((x) => (x.key === item.key ? { ...x, failed: undefined } : x)));
+    const fail = (message: string) => setSending((all) => all.map((x) => (x.key === item.key ? { ...x, failed: message } : x)));
+    let urls: string[];
+    try {
+      // A photo whose upload failed (a weak connection) is uploaded again on Try again.
+      urls = await Promise.all(
+        item.photos.map((p) =>
+          p.upload.catch(() => {
+            p.upload = uploadPhoto(p.file);
+            return p.upload;
+          })
+        )
+      );
+    } catch (err) {
+      return fail(err instanceof Error ? err.message : 'A photo could not be uploaded.');
+    }
+    const res = await postJson<{ product?: Product; message?: string }>('/api/admin/products/quick', { ...item.body, key: item.key, photos: urls });
+    if (!res.ok || !res.data.product) return fail(res.data.message || 'Could not add it. Please try again.');
+    setSending((all) => all.filter((x) => x.key !== item.key));
+    for (const p of item.photos) URL.revokeObjectURL(p.preview);
+    onAdded(res.data.product);
+    void reload();
+  };
+
+  /** A failed item taken off the list (it was not added). */
+  const drop = (item: Sending) => {
+    setSending((all) => all.filter((x) => x.key !== item.key));
+    for (const p of item.photos) URL.revokeObjectURL(p.preview);
+  };
+
+  const add = () => {
     setError('');
     setDone('');
+    // Whether a name is needed depends on the AI being set up: known in a moment.
+    if (!status) return setError('One moment: checking the AI setup.');
     if (!photos.length) return setError('Add a photo first.');
-    if (uploading) return setError('Wait for the photos to finish uploading.');
     if (!(Number(price) > 0)) return setError('Enter the price in AED.');
     if (needsName && !title.trim()) return setError('Give it a name (AI writing is not set up).');
     const chosen = simple ? [{ stock: oneStock }] : catalog.sizes.filter((s) => s.id in sizes).map((s) => ({ id: s.id, stock: sizes[s.id] }));
     if (!chosen.length) return setError('Choose at least one size.');
-    setSaving(true);
-    const res = await postJson<{ product?: Product; message?: string }>('/api/admin/products/quick', {
+    const item: Sending = {
       key: key.current,
+      label: title.trim(),
+      preview: photos[0].preview,
       photos,
-      price: Number(price),
-      category,
-      sizes: chosen,
-      ...(title.trim() ? { title: title.trim() } : {}),
-      publish,
-    });
-    setSaving(false);
-    if (!res.ok || !res.data.product) return setError(res.data.message || 'Could not add the product. Please try again.');
+      body: { price: Number(price), category, sizes: chosen, ...(title.trim() ? { title: title.trim() } : {}), publish },
+    };
     try {
       localStorage.setItem(REMEMBER, JSON.stringify({ sizes, category }));
     } catch {
       // Remembering is a convenience only.
     }
-    // Ready for the next one: a new key, no photos or name; the price, sizes and stock stay.
+    // Ready for the next one at once: a new key, no photos or name; the price, sizes and stock stay.
+    // The photos finish uploading and the item is sent in the background.
     key.current = newKey('q');
     setPhotos([]);
     setTitle('');
-    setDone(status?.writer || status?.pictures ? 'Added. The AI is finishing it in the background: add the next one.' : `Added${publish ? ' to the shop' : ' (hidden)'}.`);
-    onAdded(res.data.product);
-    void reload();
+    setSending((all) => [...all, item]);
+    setDone(status?.writer || status?.pictures ? 'Added: add the next one. The AI writes it, makes its pictures and puts it in the shop by itself.' : `Added${publish ? ' to the shop' : ' (hidden)'}: add the next one.`);
+    void send(item);
   };
 
-  const busy = saving || uploading > 0;
+  // Items still uploading their photos would be lost: asked once before closing.
+  const close = () => {
+    if (sending.length && !window.confirm(sending.some((x) => !x.failed) ? 'Some items are still uploading their photos. Close anyway? They may not be added.' : 'Some items were not added (see Being made). Close anyway and lose them?')) return;
+    onClose();
+  };
+
   return (
-    <Sheet labelledBy={titleId} onClose={onClose} variant="full" wide>
+    <Sheet labelledBy={titleId} onClose={close} variant="full" wide>
       <div className="px-4 pt-4 pb-2 flex items-start gap-2 border-b border-line">
         <div className="min-w-0 flex-1">
           <h3 id={titleId} className="font-serif font-bold text-base text-ink">
@@ -244,36 +317,31 @@ export function QuickAdd({
             {status?.why ? ` ${status.why}` : ''}
           </p>
         </div>
-        <button type="button" onClick={onClose} className="w-11 h-11 rounded-xl border border-line-strong flex items-center justify-center shrink-0" aria-label="Close">
+        <button type="button" onClick={close} className="w-11 h-11 rounded-xl border border-line-strong flex items-center justify-center shrink-0" aria-label="Close">
           <X className="w-5 h-5" aria-hidden="true" />
         </button>
       </div>
       <div className="flex-1 overflow-y-auto px-4 py-3 space-y-4" data-testid="quick-add">
         <section className="space-y-2" aria-label="Photos">
           <div className="grid grid-cols-2 gap-2">
-            <label className={`min-h-12 rounded-xl bg-ink text-paper font-bold flex items-center justify-center gap-2 cursor-pointer focus-within:ring-2 focus-within:ring-gold ${photos.length + uploading >= MAX_PHOTOS ? 'opacity-50' : ''}`}>
+            <label className={`min-h-12 rounded-xl bg-ink text-paper font-bold flex items-center justify-center gap-2 cursor-pointer focus-within:ring-2 focus-within:ring-gold ${photos.length >= MAX_PHOTOS ? 'opacity-50' : ''}`}>
               <Camera className="w-5 h-5" aria-hidden="true" /> Camera
-              <input type="file" accept="image/*" capture="environment" className="sr-only" aria-label="Take a photo with the camera" onChange={(e) => { void addPhotos(e.target.files); e.target.value = ''; }} disabled={photos.length + uploading >= MAX_PHOTOS} />
+              <input type="file" accept="image/*" capture="environment" className="sr-only" aria-label="Take a photo with the camera" onChange={(e) => { addPhotos(e.target.files); e.target.value = ''; }} disabled={photos.length >= MAX_PHOTOS} />
             </label>
-            <label className={`min-h-12 rounded-xl border border-ink bg-surface text-ink font-bold flex items-center justify-center gap-2 cursor-pointer focus-within:ring-2 focus-within:ring-gold ${photos.length + uploading >= MAX_PHOTOS ? 'opacity-50' : ''}`}>
+            <label className={`min-h-12 rounded-xl border border-ink bg-surface text-ink font-bold flex items-center justify-center gap-2 cursor-pointer focus-within:ring-2 focus-within:ring-gold ${photos.length >= MAX_PHOTOS ? 'opacity-50' : ''}`}>
               <ImagePlus className="w-5 h-5" aria-hidden="true" /> Gallery
-              <input type="file" accept="image/*" multiple className="sr-only" aria-label="Choose photos from the gallery" onChange={(e) => { void addPhotos(e.target.files); e.target.value = ''; }} disabled={photos.length + uploading >= MAX_PHOTOS} />
+              <input type="file" accept="image/*" multiple className="sr-only" aria-label="Choose photos from the gallery" onChange={(e) => { addPhotos(e.target.files); e.target.value = ''; }} disabled={photos.length >= MAX_PHOTOS} />
             </label>
           </div>
-          {(photos.length > 0 || uploading > 0) && (
+          {photos.length > 0 && (
             <ul className="flex flex-wrap gap-2" data-testid="quick-photos">
-              {photos.map((u, i) => (
-                <li key={u} className="relative w-20 shrink-0">
+              {photos.map((p, i) => (
+                <li key={p.id} className="relative w-20 shrink-0">
                   {/* eslint-disable-next-line @next/next/no-img-element */}
-                  <img src={u} alt={i === 0 ? 'Photo 1 (the AI works from this one)' : `Photo ${i + 1}`} className="w-20 aspect-[4/5] object-cover rounded-xl border border-line" />
-                  <button type="button" onClick={() => setPhotos((p) => p.filter((x) => x !== u))} className="absolute -top-2 -right-2 w-8 h-8 rounded-full bg-surface border border-line-strong flex items-center justify-center" aria-label={`Remove photo ${i + 1}`}>
+                  <img src={p.preview} alt={i === 0 ? 'Photo 1 (the AI works from this one)' : `Photo ${i + 1}`} className="w-20 aspect-[4/5] object-cover rounded-xl border border-line" />
+                  <button type="button" onClick={() => setPhotos((all) => all.filter((x) => x.id !== p.id))} className="absolute -top-2 -right-2 w-8 h-8 rounded-full bg-surface border border-line-strong flex items-center justify-center" aria-label={`Remove photo ${i + 1}`}>
                     <X className="w-4 h-4" aria-hidden="true" />
                   </button>
-                </li>
-              ))}
-              {Array.from({ length: uploading }, (_, i) => (
-                <li key={`up-${i}`} className="w-20 aspect-[4/5] rounded-xl border border-dashed border-line-strong flex items-center justify-center">
-                  <Loader2 className="w-5 h-5 animate-spin text-ink-soft" aria-label="Uploading" />
                 </li>
               ))}
             </ul>
@@ -366,10 +434,37 @@ export function QuickAdd({
           </p>
         )}
 
-        {status && status.jobs.length > 0 && (
+        {(sending.length > 0 || (status && visibleJobs(status.jobs, 'form').length > 0)) && (
           <section className="space-y-2" aria-label="Being made">
             <h4 className="text-sm font-bold text-ink">Being made</h4>
-            <AutoJobsList jobs={status.jobs} onOpen={onOpenProduct} onDismiss={(id) => void dismiss(id)} />
+            {sending.length > 0 && (
+              <ul className="space-y-2" data-testid="quick-sending">
+                {sending.map((x) => (
+                  <li key={x.key} className={`flex items-center gap-2 rounded-xl border p-2 min-w-0 ${x.failed ? 'border-danger-line bg-danger-soft' : 'border-line bg-surface'}`}>
+                    {/* eslint-disable-next-line @next/next/no-img-element */}
+                    <img src={x.preview} alt="" className="w-12 aspect-[4/5] object-cover rounded-lg border border-line shrink-0" />
+                    <div className="min-w-0 flex-1">
+                      <p className="text-sm font-semibold text-ink break-words">{x.label || 'New product'}</p>
+                      <p className="text-xs text-ink-soft break-words flex items-start gap-1" role={x.failed ? 'alert' : 'status'}>
+                        {!x.failed && <Loader2 className="w-3.5 h-3.5 animate-spin shrink-0 mt-0.5" aria-hidden="true" />}
+                        <span>{x.failed ? `Not added yet: ${x.failed}` : 'Uploading the photo and sending it…'}</span>
+                      </p>
+                    </div>
+                    {x.failed && (
+                      <>
+                        <button type="button" onClick={() => void send(x)} className="min-h-11 px-3 rounded-xl border border-line-strong bg-surface text-xs font-semibold shrink-0">
+                          Try again
+                        </button>
+                        <button type="button" onClick={() => drop(x)} className="w-11 h-11 rounded-xl border border-line-strong bg-surface flex items-center justify-center shrink-0" aria-label={`Remove: ${x.label || 'new product'} (not added)`}>
+                          <X className="w-4 h-4" aria-hidden="true" />
+                        </button>
+                      </>
+                    )}
+                  </li>
+                ))}
+              </ul>
+            )}
+            {status && <AutoJobsList jobs={visibleJobs(status.jobs, 'form')} onOpen={onOpenProduct} onDismiss={(id) => void dismiss(id)} />}
           </section>
         )}
         <button type="button" onClick={onFullEditor} className="text-sm font-semibold underline min-h-11">
@@ -377,8 +472,8 @@ export function QuickAdd({
         </button>
       </div>
       <div className="px-4 py-3 border-t border-line">
-        <button type="button" onClick={() => void add()} disabled={busy} className="w-full min-h-12 rounded-xl bg-ink text-paper font-bold flex items-center justify-center gap-2 disabled:opacity-50" data-testid="quick-add-save">
-          {saving ? <Loader2 className="w-5 h-5 animate-spin" aria-hidden="true" /> : <Sparkles className="w-5 h-5 text-gold" aria-hidden="true" />}
+        <button type="button" onClick={add} className="w-full min-h-12 rounded-xl bg-ink text-paper font-bold flex items-center justify-center gap-2 disabled:opacity-50" data-testid="quick-add-save">
+          <Sparkles className="w-5 h-5 text-gold" aria-hidden="true" />
           {status?.writer || status?.pictures ? 'Add, AI does the rest' : 'Add product'}
         </button>
       </div>

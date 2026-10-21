@@ -1,5 +1,23 @@
 # Changelog
 
+## BUH-02.24.01 — 2026-10-21 11:00 UTC · [#46](https://github.com/cxsmtp/buh/pull/46)
+
+- **Finished products leave "Being made by AI".** A product the AI has finished is in the shop, and now leaves the list at the top of Inventory by itself. The list keeps only products still being made and ones that need you. The product list also refreshes on its own, so the new product shows as in the shop.
+- **Add never makes you wait.** Press Add and the form is ready for the next item at once, even while the photo is still uploading. The upload and the saving carry on in the background. If one fails, it says so under "Being made" with **Try again**, and it is never added twice.
+- **Safe while the AI works.** A review found and fixed these:
+  - Saving in the editor while the AI is still making a product is refused, so it can't put the placeholder name back over the AI's work; hiding or showing it is still taken.
+  - A product you remove is left alone: no more paid pictures, and it is never put back in the shop.
+  - A refused key stops after the first picture.
+  - The same photo picked twice counts once.
+  - **Try again** uploads a failed photo afresh, and a failed item can be removed.
+  - A room you describe before the numbered angles is kept; numbered rules are not mistaken for angles.
+  - The daily email stops listing a product once you have named it and it is in the shop.
+- **Status.**
+  - **Benchmark:** 3 alternating rounds (main first), 0 failed requests. Storefront branch 750 / 740 / 819 req/s vs main 777 / 770 / 797, and branch p95 is lower in every round (99–102 ms vs 93–133 ms); catalogue API branch 731 / 685 / 723 vs main 719 / 768 / 680; serviceability API branch 614 / 597 / 635 vs main 635 / 605 / 666; gift page branch 704 / 638 / 663 vs main 577 / 709 / 599. Within noise: only admin screens and the background worker changed.
+  - **Tests:** 1,197 of 1,197. A new test for each fix, including the reported one: a finished product left the list. One of them caught a bug in the first version of the fix: the worker's own copy of the job overwrote your show/hide choice. That is fixed and tested.
+  - **Dependency audit:** production 0 vulnerabilities; no new packages.
+  - **Security scan:** no new route. The product save checks on the server whether the AI is still working (409, nothing saved), and the job keeps the owner's show/hide choice. No secrets in notes or logs.
+
 ## BUH-02.24.00 — 2026-10-21 10:00 UTC · [#45](https://github.com/cxsmtp/buh/pull/45)
 
 - **One picture per angle.** A prompt that lists numbered angles ("1. Straight-on… 2. 45-degree… 3. High diagonal…") gave one picture with all three squeezed in, because a picture service makes one picture per request. The shop now finds the angles and makes one picture per angle, one request after another, with the rest of your prompt in each. The first picture goes along with the next ones so the room, bed and lighting stay the same. Settings → AI pictures shows the angles it found.
