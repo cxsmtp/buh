@@ -1306,7 +1306,7 @@ export function validateAiPrompt(v: unknown, current: AiPromptSettings): AiPromp
  * (first). The fixed rules are not settings.
  */
 export function validateAiPictures(input: Obj, current: AiPicturesSettings): AiPicturesSettings {
-  for (const k of Object.keys(input)) if (!['look', 'scenes', 'defaultSet', 'references', 'useReferences', 'autoCreate', 'photoOrder'].includes(k)) throw new HttpError(400, `Unexpected field: ${k.slice(0, 30)}.`);
+  for (const k of Object.keys(input)) if (!['look', 'scenes', 'defaultSet', 'references', 'useReferences', 'autoCreate', 'photoOrder', 'sameRoom'].includes(k)) throw new HttpError(400, `Unexpected field: ${k.slice(0, 30)}.`);
   let look = current.look ?? '';
   if (input.look !== undefined) {
     if (typeof input.look !== 'string') throw new HttpError(400, 'The look and mood must be text.');
@@ -1344,9 +1344,10 @@ export function validateAiPictures(input: Obj, current: AiPicturesSettings): AiP
   if (!defaultSet.length) defaultSet = scenes.slice(0, STAGING_TRIO).map((s) => s.id);
   const references = input.references === undefined ? current.references ?? [] : cleanReferences(input.references);
   const photoOrder = input.photoOrder === undefined ? (current.photoOrder ?? 'styled-first') : input.photoOrder;
+  if (input.sameRoom !== undefined && typeof input.sameRoom !== 'boolean') throw new HttpError(400, 'Same room in every angle: on or off.');
   if (input.autoCreate !== undefined && typeof input.autoCreate !== 'boolean') throw new HttpError(400, 'New products written and pictured by AI: on or off.');
   if (photoOrder !== 'styled-first' && photoOrder !== 'photo-first') throw new HttpError(400, 'Picture order: AI pictures first, or your photo first.');
-  return { look, scenes, defaultSet, references, useReferences: bool(input.useReferences, current.useReferences ?? true), autoCreate: bool(input.autoCreate, current.autoCreate ?? true), photoOrder };
+  return { look, scenes, defaultSet, references, useReferences: bool(input.useReferences, current.useReferences ?? true), autoCreate: bool(input.autoCreate, current.autoCreate ?? true), photoOrder, sameRoom: bool(input.sameRoom, current.sameRoom ?? false) };
 }
 
 /**

@@ -95,6 +95,7 @@ export function AiPicturesCard({
   const [useRefs, setUseRefs] = useState(value.useReferences !== false);
   const [autoCreate, setAutoCreate] = useState(value.autoCreate !== false);
   const [photoOrder, setPhotoOrder] = useState<AiPicturesSettings['photoOrder']>(value.photoOrder ?? 'styled-first');
+  const [sameRoom, setSameRoom] = useState(value.sameRoom === true);
   const [uploading, setUploading] = useState(0);
   const [refStatus, setRefStatus] = useState<{ ok: boolean; text: string } | null>(null);
   const [preview, setPreview] = useState(false);
@@ -137,7 +138,7 @@ export function AiPicturesCard({
     setKeyStatus(problem ? { ok: false, text: problem } : { ok: true, text: `Saved: ${SHORT[p]} makes your pictures. Make them in Inventory → a product → Make pictures.` });
   };
 
-  const settings: AiPicturesSettings = { look: look.trim() === DEFAULT_PICTURE_LOOK ? '' : look.trim(), scenes, defaultSet: trio.filter((t) => scenes.some((s) => s.id === t)), references, useReferences: useRefs, autoCreate, photoOrder };
+  const settings: AiPicturesSettings = { look: look.trim() === DEFAULT_PICTURE_LOOK ? '' : look.trim(), scenes, defaultSet: trio.filter((t) => scenes.some((s) => s.id === t)), references, useReferences: useRefs, autoCreate, photoOrder, sameRoom };
 
   const saveScenes = async () => {
     setSavingScenes(true);
@@ -487,7 +488,14 @@ export function AiPicturesCard({
                   <li key={i}>{angleName(a, i).replace(/^Angle \d+: /, '')}</li>
                 ))}
               </ol>
-              <p className="mt-1 text-ink-soft">The rest of the prompt goes with every picture, and the first picture is sent with the next ones so the room stays the same. One press in the studio (and every new product) makes these instead of the scenes.</p>
+              <p className="mt-1 text-ink-soft">The rest of the prompt goes with every picture; each one is a new photograph from its own camera position (your photo is used for the bedding only). One press in the studio (and every new product) makes these instead of the scenes.</p>
+              <label className="mt-2 flex items-start gap-3 min-h-11">
+                <input type="checkbox" className="mt-1 w-5 h-5 shrink-0" checked={sameRoom} onChange={(e) => setSameRoom(e.target.checked)} />
+                <span>
+                  <span className="font-semibold">Keep exactly the same room in every angle</span>
+                  <span className="block text-ink-soft">Sends the first picture with the next ones. Off by default: the AI then tends to copy it, and the angles look alike.</span>
+                </span>
+              </label>
             </div>
           )}
         </div>

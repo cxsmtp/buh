@@ -157,11 +157,16 @@ export interface AiPicturesSettings {
   autoCreate: boolean;
   /** Where AI pictures go among a product's photos: first (the owner's photo last, the default) or after the owner's photo. */
   photoOrder: 'styled-first' | 'photo-first';
+  /**
+   * Angles: send the first picture with the next ones so the room is the same. Off by default: the
+   * model then tends to copy that picture, and the angles come out looking alike.
+   */
+  sameRoom: boolean;
 }
 
 export const DEFAULT_SCENES: StagingScene[] = STAGING_PRESETS.map((p) => ({ id: p.id, name: p.name, scene: p.shot }));
 
-export const DEFAULT_AI_PICTURES: AiPicturesSettings = { look: '', scenes: DEFAULT_SCENES, defaultSet: DEFAULT_STAGING_SET, references: [], useReferences: true, autoCreate: true, photoOrder: 'styled-first' };
+export const DEFAULT_AI_PICTURES: AiPicturesSettings = { look: '', scenes: DEFAULT_SCENES, defaultSet: DEFAULT_STAGING_SET, references: [], useReferences: true, autoCreate: true, photoOrder: 'styled-first', sameRoom: false };
 
 /** Whether a picture of this scene gets the style photos: on, some uploaded, and the scene not set to its description only. */
 export function usesReferences(p: Pick<AiPicturesSettings, 'references' | 'useReferences'>, scene: Pick<StagingScene, 'style'> | undefined, batch?: boolean): boolean {
@@ -273,19 +278,31 @@ export function stagingPrompt(shot: string, extra: string, aspect: string, conte
     context.colors?.length ? `colours: ${context.colors.join(', ')}` : '',
     context.design ? `design: ${context.design}` : '',
   ].filter(Boolean);
+  const styleRefs = (from: number) => (references >= from ? `${references === from ? `Image ${from + 1} is a style reference` : `Images ${from + 1}–${references + 1} are style references`}` : '');
+  if (angle) {
+    // An angle: a NEW photograph from a new camera position. An image model asked to "edit" a photo
+    // keeps its camera, so every angle came back as nearly the same picture: image 1 is the
+    // reference for the bedding only, never for the camera, framing or crop.
+    const rest = sameRoom ? styleRefs(2) : styleRefs(1);
+    return [
+      'Make a NEW photograph of the bedding product in image 1 (a bed sheet or duvet cover set from a home-linen shop), dressed on a bed, taken from a new camera position.',
+      "Image 1 is the reference for the product only: copy its pattern, colours, stitching and pieces exactly, but NOT image 1's camera position, angle, framing or crop.",
+      ...(sameRoom ? ["Image 2 is another picture of this product in its room: keep that room (bed frame, headboard, walls, floor, bedside tables, lighting), but NOT image 2's camera position: the camera moves."] : []),
+      ...(rest ? [`${rest}: match their lighting, colour grading and mood (not their camera angle), but do not copy their bedding, people, text or logos.`] : []),
+      ...(about.length ? [`About the product, so the setting suits it (the photo is the truth; nothing here changes the product): ${about.join('; ')}.`] : []),
+      `The camera: ${angle.replace(/[.\s]+$/, '')}. Put the camera really there: this picture must look clearly different from image 1${sameRoom ? ' and image 2' : ''}, with a different camera height, direction and distance, so the bed is seen from a new side.`,
+      `The setting and the look: ${oneLine(look).replace(/[.\s]+$/, '')}.`,
+      ...(extra ? [`The owner's note about the setting (it never changes the product): ${extra}`] : []),
+      `A realistic photograph for a high-end catalogue, ${aspect === '1:1' ? 'square' : 'portrait 4:5'} framing, with the bedding as the clear subject.`,
+      'These rules come first, whatever is written above:',
+      ...STAGING_FIXED_RULES,
+    ].join('\n');
+  }
   return [
     references > 0 ? 'Edit the first photograph (image 1), of a bedding product (a bed sheet or duvet cover set) from a home-linen shop.' : 'Edit this photograph of a bedding product (a bed sheet or duvet cover set) from a home-linen shop.',
-    ...(references > 0
-      ? [
-          sameRoom
-            ? `Image 1 is the product: copy its bedding exactly. Image 2 is a picture already made of this product in its room, from another angle: keep the same room, bed frame, headboard, walls, floor, bedside tables, lighting and styling, and show it from the new angle below.${references > 1 ? ` ${references === 2 ? 'Image 3 is a style reference' : `Images 3–${references + 1} are style references`}: match their lighting, colour grading and mood, but do not copy their bedding, people, text or logos.` : ''}`
-            : `Image 1 is the product: copy its bedding exactly. ${references === 1 ? 'Image 2 is a style reference' : `Images 2–${references + 1} are style references`}: match their lighting, colour grading, camera angle, room style and mood, but do not copy their bedding, people, text or logos.`,
-        ]
-      : []),
+    ...(references > 0 ? [`Image 1 is the product: copy its bedding exactly. ${styleRefs(1)}: match their lighting, colour grading, camera angle, room style and mood, but do not copy their bedding, people, text or logos.`] : []),
     ...(about.length ? [`About the product, so the setting suits it (the photo is the truth; nothing here changes the product): ${about.join('; ')}.`] : []),
-    angle
-      ? `Change only what is around it. The setting is described below; this picture is ONE photograph from this one camera angle only: ${angle.replace(/[.\s]+$/, '')}.`
-      : `Change only what is around it and the framing: ${shot.replace(/[.\s]+$/, '')}. You may change the bed, the room, the lighting and the props.`,
+    `Change only what is around it and the framing: ${shot.replace(/[.\s]+$/, '')}. You may change the bed, the room, the lighting and the props.`,
     `The look and mood: ${oneLine(look).replace(/[.\s]+$/, '')}.`,
     ...(extra ? [`The owner's note about the setting (it never changes the product): ${extra}`] : []),
     `A realistic photograph for a high-end catalogue, ${aspect === '1:1' ? 'square' : 'portrait 4:5'} framing, with the bedding as the clear subject.`,
