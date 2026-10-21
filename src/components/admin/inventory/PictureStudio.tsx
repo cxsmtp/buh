@@ -271,9 +271,16 @@ export function PictureStudio({
     }
   };
 
+  /** The set's first angle picture goes (redone or removed): the next angles use another one made, or none. */
+  const forgetFirst = (slot: Slot) => {
+    if (!slot.url || slot.url !== firstAngle.current) return;
+    firstAngle.current = slots.find((s) => s.key !== slot.key && s.state === 'done' && s.url && isAngle(s.preset))?.url ?? '';
+  };
+
   const retry = async (slot: Slot) => {
     const field = imageField(source);
     if (!field) return setError('This photo is not stored in the shop: add it again from the gallery, then make pictures.');
+    forgetFirst(slot);
     void discard(slot.url);
     const key = ++counter.current;
     live.current.delete(slot.key);
@@ -283,6 +290,7 @@ export function PictureStudio({
   };
 
   const remove = (slot: Slot) => {
+    forgetFirst(slot);
     live.current.delete(slot.key);
     void discard(slot.url);
     setSlots((all) => all.filter((s) => s.key !== slot.key));

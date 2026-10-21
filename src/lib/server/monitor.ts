@@ -11,6 +11,7 @@ import { kvGet, kvSet } from './kv';
 import { logEvent } from './log';
 import { awaitingWhatsAppCount, cardTakings, ordersNeedingAttention, receiptsNoRoom, summaryOrderRows, transfersAwaitedCount, transfersToCheckCount, unconfirmedPressure } from './orders';
 import { getProduct, listProducts } from './products';
+import { PLACEHOLDER_TITLE } from './autoAdd';
 import { vatStatus } from './reports';
 import { getSettings, phoneCheckMode } from './settings';
 
@@ -274,7 +275,12 @@ export function dailySummary(now = new Date()): { subject: string; text: string;
     vat = null;
   }
 
-  const stuck = (kvGet<Array<{ state: string; productId: string }>>('autoai:jobs')?.data ?? []).filter((j) => j.state === 'needs_you').map((j) => getProduct(j.productId)?.title ?? 'a removed product');
+  // Quick add: products the AI could not finish, until the owner has (named it, or put it in the shop) or removed it.
+  const stuck = (kvGet<Array<{ state: string; productId: string }>>('autoai:jobs')?.data ?? [])
+    .filter((j) => j.state === 'needs_you')
+    .map((j) => getProduct(j.productId))
+    .filter((p): p is NonNullable<typeof p> => Boolean(p) && !p!.archived && (p!.title === PLACEHOLDER_TITLE || p!.active === false))
+    .map((p) => (p.title === PLACEHOLDER_TITLE ? 'a new product with no name yet' : p.title));
   const action: SummarySection['items'] = [
     // Every order, transfer and chat that needs you, one line each, so the email is enough on its own.
     ...(pending ? [{ text: `Waiting for your confirmation: ${pending}.`, tone: 'action' as const }, ...orderLines('confirm', 'Confirm', pending, now)] : []),

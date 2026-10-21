@@ -24,8 +24,21 @@ const MAX_PHOTOS = 8;
 /** A photo picked for the item being added: its local preview and its upload (the stored address). */
 interface Pic {
   id: string;
+  file: File;
   preview: string;
   upload: Promise<string>;
+}
+
+/** Shrink the photo on the phone and store it (PNG, JPEG or WebP through the shop's checks): its address. */
+function uploadPhoto(file: File): Promise<string> {
+  const upload = (async () => {
+    const res = await postJson<{ url?: string; message?: string }>('/api/admin/images', { image: await shrinkPhoto(file) });
+    if (!res.ok || !res.data.url) throw new Error(res.data.message || 'The photo could not be uploaded.');
+    return res.data.url;
+  })();
+  // Failures are reported where the photo is used (in the item's row), never unhandled.
+  upload.catch(() => undefined);
+  return upload;
 }
 
 /** An item added here that is still on its way to the server (or failed: Try again, same key). */
@@ -145,9 +158,12 @@ export function AutoJobsList({ jobs, onOpen, onDismiss }: { jobs: AutoJobView[];
                 <span>{jobLine(j)}</span>
               </p>
             </div>
-            <button type="button" onClick={() => onOpen(j.productId)} className="min-h-11 px-3 rounded-xl border border-line-strong bg-surface text-xs font-semibold shrink-0">
-              {j.state === 'needs_you' ? 'Finish' : 'Edit'}
-            </button>
+            {/* Editing while the AI works would put the editor's copy over the AI's (the server refuses it too). */}
+            {!working && (
+              <button type="button" onClick={() => onOpen(j.productId)} className="min-h-11 px-3 rounded-xl border border-line-strong bg-surface text-xs font-semibold shrink-0">
+                {j.state === 'needs_you' ? 'Finish' : 'Edit'}
+              </button>
+            )}
             {!working && (
               <button type="button" onClick={() => onDismiss(j.id)} className="w-11 h-11 rounded-xl border border-line-strong bg-surface flex items-center justify-center shrink-0" aria-label={`Clear from the list: ${j.title || 'new product'}`}>
                 <X className="w-4 h-4" aria-hidden="true" />
@@ -210,16 +226,7 @@ export function QuickAdd({
     setError('');
     const list = Array.from(files).slice(0, Math.max(0, MAX_PHOTOS - photos.length));
     // Each photo uploads on its own straight away; Add does not wait for it.
-    const fresh = list.map((file): Pic => {
-      const upload = (async () => {
-        const res = await postJson<{ url?: string; message?: string }>('/api/admin/images', { image: await shrinkPhoto(file) });
-        if (!res.ok || !res.data.url) throw new Error(res.data.message || 'The photo could not be uploaded.');
-        return res.data.url;
-      })();
-      // Failures are reported where the photo is used (in the item's row), never unhandled.
-      upload.catch(() => undefined);
-      return { id: newKey('p'), preview: URL.createObjectURL(file), upload };
-    });
+    const fresh = list.map((file): Pic => ({ id: newKey('p'), file, preview: URL.createObjectURL(file), upload: uploadPhoto(file) }));
     setPhotos((p) => [...p, ...fresh].slice(0, MAX_PHOTOS));
   };
 
@@ -232,7 +239,15 @@ export function QuickAdd({
     const fail = (message: string) => setSending((all) => all.map((x) => (x.key === item.key ? { ...x, failed: message } : x)));
     let urls: string[];
     try {
-      urls = await Promise.all(item.photos.map((p) => p.upload));
+      // A photo whose upload failed (a weak connection) is uploaded again on Try again.
+      urls = await Promise.all(
+        item.photos.map((p) =>
+          p.upload.catch(() => {
+            p.upload = uploadPhoto(p.file);
+            return p.upload;
+          })
+        )
+      );
     } catch (err) {
       return fail(err instanceof Error ? err.message : 'A photo could not be uploaded.');
     }
@@ -244,9 +259,17 @@ export function QuickAdd({
     void reload();
   };
 
+  /** A failed item taken off the list (it was not added). */
+  const drop = (item: Sending) => {
+    setSending((all) => all.filter((x) => x.key !== item.key));
+    for (const p of item.photos) URL.revokeObjectURL(p.preview);
+  };
+
   const add = () => {
     setError('');
     setDone('');
+    // Whether a name is needed depends on the AI being set up: known in a moment.
+    if (!status) return setError('One moment: checking the AI setup.');
     if (!photos.length) return setError('Add a photo first.');
     if (!(Number(price) > 0)) return setError('Enter the price in AED.');
     if (needsName && !title.trim()) return setError('Give it a name (AI writing is not set up).');
@@ -276,7 +299,7 @@ export function QuickAdd({
 
   // Items still uploading their photos would be lost: asked once before closing.
   const close = () => {
-    if (sending.some((x) => !x.failed) && !window.confirm('Some items are still uploading their photos. Close anyway? They may not be added.')) return;
+    if (sending.length && !window.confirm(sending.some((x) => !x.failed) ? 'Some items are still uploading their photos. Close anyway? They may not be added.' : 'Some items were not added (see Being made). Close anyway and lose them?')) return;
     onClose();
   };
 
@@ -428,9 +451,14 @@ export function QuickAdd({
                       </p>
                     </div>
                     {x.failed && (
-                      <button type="button" onClick={() => void send(x)} className="min-h-11 px-3 rounded-xl border border-line-strong bg-surface text-xs font-semibold shrink-0">
-                        Try again
-                      </button>
+                      <>
+                        <button type="button" onClick={() => void send(x)} className="min-h-11 px-3 rounded-xl border border-line-strong bg-surface text-xs font-semibold shrink-0">
+                          Try again
+                        </button>
+                        <button type="button" onClick={() => drop(x)} className="w-11 h-11 rounded-xl border border-line-strong bg-surface flex items-center justify-center shrink-0" aria-label={`Remove: ${x.label || 'new product'} (not added)`}>
+                          <X className="w-4 h-4" aria-hidden="true" />
+                        </button>
+                      </>
                     )}
                   </li>
                 ))}

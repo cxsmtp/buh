@@ -192,8 +192,8 @@ export function oneLine(v: string): string {
  */
 export function splitAngles(text: string): { shared: string; angles: string[] } {
   const t = oneLine(text ?? '');
-  // "1." or "1)" at the start or after a space, then 2., 3., 4. in order.
-  const marks: Array<{ n: number; at: number; len: number }> = [];
+  // "1." or "1)" at the start or after a space, then 2., 3., 4. in order ("2k", "1.5" and "100%" are not markers).
+  const marks: Array<{ at: number; len: number }> = [];
   let from = 0;
   for (let n = 1; n <= STAGING_MAX_ANGLES; n++) {
     const re = new RegExp(`(?:^|[\\s:;,(])(${n}[.)])\\s+(?=\\S)`, 'g');
@@ -201,8 +201,9 @@ export function splitAngles(text: string): { shared: string; angles: string[] } 
     const m = re.exec(t);
     if (!m) break;
     const at = m.index + m[0].indexOf(m[1]);
-    marks.push({ n, at, len: m[0].length - (at - m.index) });
-    from = at + m[0].length - (at - m.index);
+    const len = m[0].length - (at - m.index);
+    marks.push({ at, len });
+    from = at + len;
   }
   if (marks.length < 2) return { shared: t, angles: [] };
   const angles: string[] = [];
@@ -211,9 +212,9 @@ export function splitAngles(text: string): { shared: string; angles: string[] } 
     const start = marks[i].at + marks[i].len;
     let stop = i + 1 < marks.length ? marks[i + 1].at : t.length;
     if (i + 1 === marks.length) {
-      // The last angle ends at its sentence: the first ". " or "; " (the rest is shared).
-      const rest = t.slice(start);
-      const m = /[.;](?:\s|$)/.exec(rest);
+      // The last angle ends with its sentence: a full stop (or ;) followed by a capital or a bullet
+      // ("e.g. from above" stays in the angle); the rest is shared.
+      const m = /[.;!?]\s+(?=[A-Z*•–-])/.exec(t.slice(start));
       stop = m ? start + m.index : t.length;
       end = m ? start + m.index + 1 : t.length;
     }
@@ -221,15 +222,26 @@ export function splitAngles(text: string): { shared: string; angles: string[] } 
     if (a) angles.push(a.slice(0, STAGING_SCENE_MAX));
   }
   if (angles.length < 2) return { shared: t, angles: [] };
-  // The lead-in: the sentence just before "1.", dropped when it asks for images, angles or views.
-  let before = t.slice(0, marks[0].at);
-  const sentenceStart = Math.max(before.lastIndexOf('. '), before.lastIndexOf('! '), before.lastIndexOf('? '));
-  const lead = before.slice(sentenceStart + 1);
-  if (/\b(images?|pictures?|photos?|photographs?|angles?|views?|shots?)\b/i.test(lead)) before = before.slice(0, sentenceStart + 1);
-  else before = before.replace(/[:\s]+$/, '.');
-  const shared = `${before.trim()} ${t.slice(end).trim()}`.replace(/\s+/g, ' ').trim();
+  const lead = t.slice(0, marks[0].at);
+  // Numbered rules ("1. Keep colours true. 2. No people.") are not angles: the list counts only when
+  // its lead-in or most of its items are about the camera.
+  const camera = (x: string) => ANGLE_WORDS.test(x);
+  if (!camera(lead.slice(Math.max(lead.lastIndexOf('. '), 0))) && angles.filter(camera).length * 2 < angles.length) return { shared: t, angles: [] };
+  // The lead-in's request for several pictures ("…, photographed from three angles:", "Output
+  // exactly three separate images from three angles:") is dropped; the room it describes is kept.
+  const sentenceAt = Math.max(lead.lastIndexOf('. '), lead.lastIndexOf('! '), lead.lastIndexOf('? '));
+  const kept = lead.slice(0, sentenceAt + 1);
+  const clauses = lead.slice(sentenceAt + 1).replace(/[:\s]+$/, '').split(/,\s+|\s+[–—]\s+/);
+  while (clauses.length && REQUEST_WORDS.test(clauses[clauses.length - 1])) clauses.pop();
+  const leadKept = clauses.join(', ').trim();
+  const shared = `${kept.trim()} ${leadKept ? `${leadKept.replace(/[.\s]+$/, '')}.` : ''} ${t.slice(end).trim()}`.replace(/\s+/g, ' ').trim();
   return { shared, angles };
 }
+
+/** Words that make a numbered list a list of camera angles. */
+const ANGLE_WORDS = /\b(angles?|views?|shots?|camera|perspective|degrees?|close-?up|overhead|top-?down|eye-?level|bird'?s-?eye|diagonal|three-quarter|straight-on|from (?:above|below|the (?:side|foot|front|corner)))\b/i;
+/** Words of a request for several pictures (dropped from the lead-in: each request asks for one). */
+const REQUEST_WORDS = /\b(images?|pictures?|photos?|photographs?|photographed|shots?|angles?|views?|output|exactly|separate|individual|different|collage|split screen|two|three|four|\d+)\b/i;
 
 /** A short name for an angle (its first words), for the studio and the activity list. */
 export function angleName(angle: string, i: number): string {

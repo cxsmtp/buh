@@ -82,8 +82,10 @@ export const AdminInventoryTab: React.FC<AdminInventoryTabProps> = ({ products, 
   const [quick, setQuick] = useState(startAdding);
   // Products the AI is still writing or picturing: shown at the top while there are any.
   const auto = useAutoJobs(!quick && !editing, () => void onChanged());
-  const openProduct = (id: string) => {
-    const p = products.find((x) => x.id === id);
+  // Opened as the server has it now (the AI may have just written it), never a copy from before.
+  const openProduct = async (id: string) => {
+    const { ok, data } = await getJson<{ products: AdminProduct[] }>('/api/admin/products');
+    const p = (ok ? data.products : products).find((x) => x.id === id);
     if (p) {
       setQuick(false);
       setEditing(p);
@@ -219,7 +221,7 @@ export const AdminInventoryTab: React.FC<AdminInventoryTabProps> = ({ products, 
       {auto.status && visibleJobs(auto.status.jobs, 'inventory').length > 0 && (
         <section className="space-y-2 rounded-2xl border border-line bg-sand p-3" aria-label="Being made by AI">
           <h3 className="text-sm font-bold text-ink">Being made by AI</h3>
-          <AutoJobsList jobs={visibleJobs(auto.status.jobs, 'inventory').slice(0, 6)} onOpen={openProduct} onDismiss={(id) => void auto.dismiss(id).then(() => onChanged())} />
+          <AutoJobsList jobs={visibleJobs(auto.status.jobs, 'inventory').slice(0, 6)} onOpen={(id) => void openProduct(id)} onDismiss={(id) => void auto.dismiss(id).then(() => onChanged())} />
         </section>
       )}
       <div className="flex flex-wrap gap-2">
@@ -545,7 +547,7 @@ export const AdminInventoryTab: React.FC<AdminInventoryTabProps> = ({ products, 
             setQuick(false);
             setEditing('new');
           }}
-          onOpenProduct={openProduct}
+          onOpenProduct={(id) => void openProduct(id)}
           onSettled={() => void onChanged()}
         />
       )}

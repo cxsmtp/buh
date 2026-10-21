@@ -199,8 +199,8 @@ export function AiPicturesCard({
     () =>
       split.angles.length
         ? stagingPrompt(split.angles[0], '', '4:5', { title: 'Indigo Chevron Hand Block Print Bed Set', colors: ['Indigo', 'Ivory'] }, split.shared || DEFAULT_PICTURE_LOOK, refsInPreview, { angle: split.angles[0] })
-        : stagingPrompt(firstScene?.scene || '(the scene)', '', '4:5', { title: 'Indigo Chevron Hand Block Print Bed Set', colors: ['Indigo', 'Ivory'] }, split.shared || DEFAULT_PICTURE_LOOK, refsInPreview),
-    [firstScene?.scene, split, refsInPreview]
+        : stagingPrompt(firstScene?.scene || '(the scene)', '', '4:5', { title: 'Indigo Chevron Hand Block Print Bed Set', colors: ['Indigo', 'Ivory'] }, look.trim() || DEFAULT_PICTURE_LOOK, refsInPreview),
+    [firstScene?.scene, split, look, refsInPreview]
   );
   const copy = async () => {
     try {

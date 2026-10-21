@@ -1,6 +1,6 @@
 import { type AiProvider, type StagedPhoto } from '@/types';
 import { FAL_KEY, FAL_KEY_HINT, OPENAI_KEY, OPENAI_KEY_HINT, PROVIDER_INFO, type PictureProvider } from '@/lib/pictureProviders';
-import { STAGING_EXTRA_MAX, STAGING_SCENE_MAX, STYLE_MAX, STYLE_SIDE_MAX, angleName, lookOf, oneLine, splitAngles, stagingPrompt, usesReferences, type StagingContext, type StagingScene } from '@/lib/staging';
+import { DEFAULT_PICTURE_LOOK, STAGING_EXTRA_MAX, STAGING_SCENE_MAX, STYLE_MAX, STYLE_SIDE_MAX, angleName, lookOf, oneLine, splitAngles, stagingPrompt, usesReferences, type StagingContext, type StagingScene } from '@/lib/staging';
 import { audit } from './audit';
 import { getDb } from './db';
 import { PICTURE_MODULES, modelOk, pictureKey, pictureModel, picturesProviderOf, providerName } from './pictures';
@@ -215,11 +215,14 @@ export async function stagePhoto(body: Record<string, unknown>, actor: string): 
   return makePicture({ photo, source, preset, shot, angle, extra, context, aspect: aspect as '4:5' | '1:1', useReferences: body.useReferences as boolean | undefined, sameRoom }, actor);
 }
 
-/** A styled photo this feature made (for "same room as"), by its address; anything else is refused. */
+/**
+ * A styled photo this feature made (for "same room as"), by its address. One discarded meanwhile
+ * (the owner redid or removed it) is simply not sent; anything that is not an address is refused.
+ */
 function stagedName(v: unknown): string {
   const name = typeof v === 'string' ? v.replace(/^\/api\/images\//, '') : '';
-  if (!IMAGE_NAME.test(name) || !(name in stagedRecords())) throw new HttpError(400, 'The first picture of this set is no longer stored: make the set again.');
-  return name;
+  if (!IMAGE_NAME.test(name)) throw new HttpError(400, 'Which picture is the same room?');
+  return name in stagedRecords() && readImage(name) ? name : '';
 }
 
 export interface PictureJob {
@@ -255,7 +258,8 @@ export async function makePicture(job: PictureJob, actor: string): Promise<Stage
   const { photo, source, preset, shot, angle, extra, context, aspect } = job;
   // Numbered angles never go in a request as a list (the service would put them all in one
   // picture): the rest of the owner's prompt (the room, the styling) goes with every picture.
-  const look = splitAngles(lookOf(settings)).shared || lookOf(settings);
+  const split = splitAngles(lookOf(settings));
+  const look = split.angles.length ? split.shared || DEFAULT_PICTURE_LOOK : lookOf(settings);
   const maker = PICTURE_MODULES[provider];
   const room = job.sameRoom ? readImage(job.sameRoom) : null;
   const roomImage = room ? cleanImage(room.bytes, RESULT_MAX_BYTES) : null;
