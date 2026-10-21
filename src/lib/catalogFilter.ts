@@ -1,5 +1,4 @@
 import type { Product } from '@/types';
-import { fromPrice } from '@/lib/money';
 
 /**
  * Browsing the shop: search, filters and sort, kept in the address bar so a filtered view can be
@@ -188,9 +187,8 @@ export function matches(p: Product, f: Filters, categories: Category[] = [], exc
     if (!f.colors.some((c) => fams.has(c))) return false;
   }
   if (except !== 'price') {
-    const price = fromPrice(p).fils / 100; // what a customer pays (the cheapest size on sale)
-    if (f.min !== null && price < f.min) return false;
-    if (f.max !== null && price >= f.max) return false;
+    if (f.min !== null && p.price < f.min) return false;
+    if (f.max !== null && p.price >= f.max) return false;
   }
   if (except !== 'sale' && f.sale && !isOnSale(p)) return false;
   if (except !== 'new' && f.newIn && !p.isNewArrival) return false;
@@ -209,9 +207,8 @@ export function matches(p: Product, f: Filters, categories: Category[] = [], exc
 function sortProducts(products: Product[], sort: SortKey): Product[] {
   const out = [...products];
   if (sort === 'new') out.sort((a, b) => (b.createdAt || '').localeCompare(a.createdAt || ''));
-  // By the price a customer can pay (the cheapest size on sale), as the cards show it.
-  else if (sort === 'price-asc') out.sort((a, b) => fromPrice(a).fils - fromPrice(b).fils);
-  else if (sort === 'price-desc') out.sort((a, b) => fromPrice(b).fils - fromPrice(a).fils);
+  else if (sort === 'price-asc') out.sort((a, b) => a.price - b.price);
+  else if (sort === 'price-desc') out.sort((a, b) => b.price - a.price);
   return out; // Array.prototype.sort is stable: equal items keep the shop's own order
 }
 
@@ -324,13 +321,13 @@ export function computeFacets(products: Product[], f: Filters, categories: Categ
   }));
 
   const priceBase = without('price');
-  const bands = priceBands(products.map((p) => fromPrice(p).fils / 100));
+  const bands = priceBands(products.map((p) => p.price));
   // A range chosen from a link that isn't one of today's bands still shows (so it can be cleared).
   if ((f.min !== null || f.max !== null) && !bands.some((b) => b.min === f.min && b.max === f.max)) bands.push({ min: f.min, max: f.max });
   const prices: PriceBand[] = bands.map((b) => ({
     ...b,
     label: priceLabel(b.min, b.max),
-    count: priceBase.filter((p) => { const price = fromPrice(p).fils / 100; return (b.min === null || price >= b.min) && (b.max === null || price < b.max); }).length,
+    count: priceBase.filter((p) => (b.min === null || p.price >= b.min) && (b.max === null || p.price < b.max)).length,
     selected: b.min === f.min && b.max === f.max,
   }));
 

@@ -616,8 +616,6 @@ export function validateProduct(input: unknown): StoredProduct {
   if (!Array.isArray(p.profiles) || p.profiles.length === 0 || p.profiles.length > 12) throw new HttpError(400, simple ? 'Add 1 to 12 variants.' : 'Add 1 to 12 sizes.');
   const profiles = p.profiles.map((x, i) => validateProfile(x, i, simple));
   if (new Set(profiles.map((x) => x.id)).size !== profiles.length) throw new HttpError(400, simple ? 'Each variant may appear once.' : 'Each bed size may appear once.');
-  // One size: the price is what customers pay (a surcharge from the size presets doesn't apply).
-  if (profiles.length === 1) profiles[0].priceDelta = 0;
   for (const pr of profiles) if (price + pr.priceDelta <= 0) throw new HttpError(400, `${pr.name} would cost nothing or less.`);
   const defaultProfileId = text(p.defaultProfileId, 'Default size', 30) || profiles[0].id;
   if (!profiles.some((x) => x.id === defaultProfileId)) throw new HttpError(400, 'The default size must be one of the sizes.');

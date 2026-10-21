@@ -1,8 +1,7 @@
 # Changelog
 
-## BUH-02.23.00 — 2026-10-21 11:00 UTC · [#42](https://github.com/cxsmtp/buh/pull/42)
+## BUH-02.23.00 — 2026-10-21 09:00 UTC · [#42](https://github.com/cxsmtp/buh/pull/42)
 
-- **Prices are what you set.** A product with one size now costs exactly the price you typed. Before, a size surcharge copied from the size presets was added on the product page and at checkout, so "AED 105" became AED 215. With several sizes, cards show "From AED …", the cheapest size a customer can buy, and the editor shows what customers pay for each size.
 - **Empty category pages kept out of Google.** Category pages with no products are left out of the sitemap and marked not to be indexed until they have products.
 - **A daily summary you can scan.** The 8:00 email now has four sections, one line per item: **Action needed** first (orders to confirm, transfers to check, chats waiting, restocks, problems), then **Sales**, **Inventory** and **System**.
 - **Everything in the email itself.** Each order to confirm, transfer to check, flagged order and waiting chat has its own line: order number, customer's first name and initial, amount, payment and how long ago. You can see what needs doing without opening the hub. Full names and phone numbers stay out of the email.

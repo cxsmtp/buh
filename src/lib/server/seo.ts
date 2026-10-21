@@ -1,4 +1,3 @@
-import { sizePriceFils } from '@/lib/money';
 import { getFestival, type Festival } from '@/lib/festivals/catalog';
 import { addDays, dubaiDate } from '@/lib/festivals/dates';
 import { productPhoto } from '@/lib/catalogFilter';
@@ -319,7 +318,7 @@ export function productJsonLd(p: Product, base: string) {
     name: s.name,
     url,
     priceCurrency: 'AED',
-    price: aedText(sizePriceFils(p, s)),
+    price: aedText(toFils(p.price) + toFils(s.priceDelta || 0)),
     availability: (p.stockBySize?.[s.id] ?? 0) > 0 ? 'https://schema.org/InStock' : 'https://schema.org/OutOfStock',
     itemCondition: 'https://schema.org/NewCondition',
     seller: { '@type': 'Organization', name: shop },

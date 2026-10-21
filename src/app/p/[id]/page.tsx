@@ -1,4 +1,3 @@
-import { priceLabel } from '@/lib/money';
 import type { Metadata } from 'next';
 import { ShopApp } from '@/components/ShopApp';
 import { getProduct } from '@/lib/server/products';
@@ -28,7 +27,7 @@ export async function generateMetadata({ params }: Props): Promise<Metadata> {
   if (!product) return { title: shopName(), robots: { index: false, follow: true } };
   const base = await siteUrl();
   const image = productImages(product, base)[0];
-  const share = `${product.title} · ${priceLabel(product)}`;
+  const share = `${product.title} · AED ${product.price}`;
   const description = productDescription(product);
   const url = `${base}/p/${encodeURIComponent(product.id)}`;
   return {

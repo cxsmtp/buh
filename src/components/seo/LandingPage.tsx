@@ -2,7 +2,6 @@ import Link from 'next/link';
 import { photoSources } from '@/lib/client/photos';
 import { isOnSale, productPhoto } from '@/lib/catalogFilter';
 import type { Product } from '@/types';
-import { priceLabel, wasLabel } from '@/lib/money';
 
 /**
  * A landing page for search engines and shoppers alike (/shop/<category>, /gifts/<festival>):
@@ -109,8 +108,8 @@ export function LandingPage(props: {
                     <div className="pt-2.5 space-y-1">
                       <h2 className="font-serif text-base leading-snug text-ink line-clamp-2 group-hover:text-gold-deep">{p.title}</h2>
                       <p className="text-sm text-ink">
-                        {priceLabel(p)}
-                        {isOnSale(p) && <span className="ml-2 text-xs text-ink-muted line-through">{wasLabel(p)}</span>}
+                        AED {p.price}
+                        {isOnSale(p) && <span className="ml-2 text-xs text-ink-muted line-through">AED {p.compareAtPrice}</span>}
                       </p>
                       {giftLine && <p className="text-[12px] text-gold-deep line-clamp-3 break-words" data-testid="landing-gift-line">{giftLine}</p>}
                       {soldOut && <p className="text-[11px] text-ink-muted">Sold out</p>}
