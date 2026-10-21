@@ -458,7 +458,14 @@ Settings → Catalogue → **Export for Amazon / Noon** → **Download CSV**: th
 
 ### Daily summary and alerts
 
-Every morning at 8:00 (UAE) an email to the backup address lists yesterday's orders and sales, orders waiting for you (and for the customer's WhatsApp message), what is sold out or low, and anything needing attention. A problem (low disk space, a database or backup failure, no SMS gateway) is emailed when it starts, daily while it lasts, and when it is resolved.
+Every morning at 8:00 (UAE) an email to the backup address gives you yesterday in four short sections, one line per item:
+
+- **Action needed:** each order to confirm, bank transfer to check and chat waiting, one line each with the order number, the customer's first name, amount, payment and how long ago (never the full name or phone), plus products to restock and any problem (backups, disk, VAT threshold). "Nothing needs you today" when all is well.
+- **Sales:** orders and sales, average order, card takings, best sellers, and the last 7 days compared with the 7 before.
+- **Inventory:** each sold-out product and each product running low, with the sizes left.
+- **System:** whether backups, disk and the database are all right.
+
+The subject says how many things need you. A problem (low disk space, a database or backup failure, no SMS gateway) is emailed when it starts, daily while it lasts, and when it is resolved.
 
 ### Card payments, Apple Pay and Google Pay (Stripe)
 

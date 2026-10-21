@@ -461,6 +461,8 @@ export function sitemapEntries(base: string, now: Date = new Date()): SitemapEnt
   const out: SitemapEntry[] = [{ url: `${base}/`, changeFrequency: 'daily', priority: 1, ...(latest ? { lastModified: latest } : {}) }];
   for (const c of categoryPages()) {
     const inIt = products.filter((p) => p.category === c.id);
+    // An empty category page is thin content to Google: left out until it has products.
+    if (!inIt.length) continue;
     const last = inIt.map((p) => dates.get(p.id) ?? '').filter(Boolean).sort().pop();
     out.push({ url: `${base}${c.path}`, changeFrequency: 'weekly', priority: 0.8, ...(last ? { lastModified: last } : {}) });
   }

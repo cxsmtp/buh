@@ -1,5 +1,19 @@
 # Changelog
 
+## BUH-02.23.00 — 2026-10-21 09:00 UTC · [#42](https://github.com/cxsmtp/buh/pull/42)
+
+- **Empty category pages kept out of Google.** Category pages with no products are left out of the sitemap and marked not to be indexed until they have products.
+- **A daily summary you can scan.** The 8:00 email now has four sections, one line per item: **Action needed** first (orders to confirm, transfers to check, chats waiting, restocks, problems), then **Sales**, **Inventory** and **System**.
+- **Everything in the email itself.** Each order to confirm, transfer to check, flagged order and waiting chat has its own line: order number, customer's first name and initial, amount, payment and how long ago. You can see what needs doing without opening the hub. Full names and phone numbers stay out of the email.
+- **More useful sales.** Yesterday's sales now come with the average order, best sellers and the last 7 days compared with the 7 before.
+- **Stock by product.** Each sold-out or low product gets its own line with the sizes left (e.g. "Low: Jaipur Jaal Floral — King 2, Super King 1 left"), instead of one long list.
+- **A clear subject.** For example "Daily summary 2026-10-20: 3 orders, AED 1,250 · 2 things to do". The email is formatted for phones, with a plain-text copy for mail apps that don't show formatting.
+- **Status.**
+  - **Benchmark:** 3 alternating rounds (main first), 0 failed requests. Storefront branch 848 / 870 / 857 req/s vs main 819 / 853 / 857; catalogue API branch 771 / 772 / 801 vs main 778 / 780 / 787; serviceability API branch 703 / 668 / 694 vs main 698 / 664 / 662; gift page branch 647 / 718 / 699 vs main 703 / 705 / 660. The summary is built once a day; nothing on a shopper's path changed apart from the sitemap check.
+  - **Tests:** 1,178 of 1,179 on the full run. The one failure was the palette rule: the email used colours outside the shop's palette. It now uses the palette, and that check and the summary tests pass (29 of 29).
+  - **Dependency audit:** production 0 vulnerabilities; no new packages.
+  - **Security scan:** no new route or stored data. The email is built on the server from the shop's own data; product names are escaped in the HTML. No secrets or private links are in it.
+
 ## BUH-02.22.00 — 2026-10-20 23:30 UTC · [#41](https://github.com/cxsmtp/buh/pull/41)
 
 - **Backups follow what happens in the shop.** A new order, payment, stock or price change, product, customer, expense or setting starts a 2-hour clock, and the shop is backed up by then; later changes don't push it back. When nothing has changed there is no backup, no email and no Drive copy. Chat messages and visits ride along with the next backup, or once a day.

@@ -38,6 +38,8 @@ export async function generateMetadata({ params }: Props): Promise<Metadata> {
   return {
     title: { absolute: t.title },
     description: t.description,
+    // No products yet: reachable, but not offered to search engines (an empty page ranks badly).
+    ...(list.length ? {} : { robots: { index: false, follow: true } }),
     ...(base ? { alternates: { canonical: url } } : {}),
     openGraph: { type: 'website', siteName: shopName(), title: t.title, description: t.description, ...(base ? { url } : {}), images: image ? [{ url: image.startsWith('http') ? image : `${base}${image}`, alt: list[0].title }] : undefined },
     twitter: { card: 'summary_large_image', title: t.title, description: t.description },

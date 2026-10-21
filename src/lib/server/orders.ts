@@ -954,6 +954,13 @@ export function transfersToCheckCount(): number {
   return getDb().prepare(`SELECT COUNT(*) FROM orders WHERE bank_state = 'uploaded' AND ${OPEN_TRANSFER}`).pluck().get() as number;
 }
 
+/** The open orders the daily summary lists one by one (newest first, at most `limit`). */
+export function summaryOrderRows(kind: 'confirm' | 'transfer' | 'attention', limit = 10): Array<{ id: string; created_at: string; total_fils: number; payment_method: string; data: string; needs_attention: string | null }> {
+  const where =
+    kind === 'confirm' ? "status = 'pending_confirmation'" : kind === 'transfer' ? `bank_state = 'uploaded' AND ${OPEN_TRANSFER}` : 'needs_attention IS NOT NULL';
+  return getDb().prepare(`SELECT id, created_at, total_fils, payment_method, data, needs_attention FROM orders WHERE ${where} ORDER BY created_at DESC LIMIT ?`).all(limit) as never;
+}
+
 /** Bank transfers still waiting for the customer (no screenshot yet, or not received). */
 export function transfersAwaitedCount(): number {
   return getDb().prepare(`SELECT COUNT(*) FROM orders WHERE bank_state IN ('awaiting', 'not_received') AND ${OPEN_TRANSFER}`).pluck().get() as number;
