@@ -1,5 +1,18 @@
 # Changelog
 
+## BUH-02.24.00 — 2026-10-21 10:00 UTC · [#45](https://github.com/cxsmtp/buh/pull/45)
+
+- **One picture per angle.** A prompt that lists numbered angles ("1. Straight-on… 2. 45-degree… 3. High diagonal…") gave one picture with all three squeezed in, because a picture service makes one picture per request. The shop now finds the angles and makes one picture per angle, one request after another, with the rest of your prompt in each. The first picture goes along with the next ones so the room, bed and lighting stay the same. Settings → AI pictures shows the angles it found.
+- **Your whole prompt is used.** The picture prompt now holds up to 3,000 characters (it was cut at 1,000), and a fixed rule now always asks for one single photograph, never a collage.
+- **AI pictures first, your photo last.** New AI pictures go to the front of a product's photos and your own photo to the end, in the studio, the editor and quick add. You can switch back to "after your photo" in Settings → AI pictures.
+- **Add product: just the basics, the AI does the rest.** Give a photo, the price, the sizes and stock (and a name only if you want) and press Add. The form is ready for the next one at once. In the background the shop writes the name and description, makes the pictures and puts the product in the shop. "Being made by AI" in Inventory shows how each one is going.
+- **Hands-off and safe.** If Google asks to wait, the shop waits and tries again by itself. A restart or an update in the middle loses nothing, and pictures already made are never paid for twice. A product the AI could not finish says why under "Needs you" and in the daily summary. Switch it all off in Settings → AI pictures → New products.
+- **Status.**
+  - **Benchmark:** see the status row.
+  - **Tests:** see the status row.
+  - **Dependency audit:** production 0 vulnerabilities; no new packages.
+  - **Security scan:** see the status row.
+
 ## BUH-02.23.02 — 2026-10-21 08:45 UTC · [#44](https://github.com/cxsmtp/buh/pull/44)
 
 - **Google can read the sitemap again.** Search Console refused /sitemap.xml with "Parsing error, line 150": picture links with an `&` in them (the sample products' photos) made the file invalid. Links in the sitemap are now written the way XML needs, so Google can read every page and picture in it.
