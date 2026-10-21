@@ -1,5 +1,6 @@
 import fs from 'node:fs';
 import type { Order } from '@/types';
+import { PALETTE } from '@/lib/design/tokens';
 import { audit } from './audit';
 import { BACKUP_LIMITS, backupDataSize, backupHealth } from './backup';
 import { emailConfigured, ownerEmail, sender, transport } from './mail';
@@ -354,23 +355,24 @@ const esc = (s: string) => s.replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&
 
 /** The summary as a simple email: one small table per section, inline styles only (mail apps drop the rest). */
 function summaryHtml(day: string, sections: SummarySection[]): string {
-  const colour = { action: '#9a3412', warn: '#854d0e', ok: '#166534' } as const;
+  const P = PALETTE;
+  const colour = { action: P.danger, warn: P.warning, ok: P.success } as const;
   const mark = { action: '●', warn: '▲', ok: '✓' } as const;
   const blocks = sections
     .map(
-      (sec) => `<h2 style="font:600 15px/1.3 Arial,sans-serif;color:#2b2026;margin:22px 0 8px;border-bottom:1px solid #e6d5b0;padding-bottom:4px">${esc(sec.title)}</h2>
+      (sec) => `<h2 style="font:600 15px/1.3 Arial,sans-serif;color:${P.ink};margin:22px 0 8px;border-bottom:1px solid ${P["gold-light"]};padding-bottom:4px">${esc(sec.title)}</h2>
 <table role="presentation" cellpadding="0" cellspacing="0" style="width:100%;border-collapse:collapse">${sec.items
         .map(
-          (i) => `<tr><td style="width:18px;vertical-align:top;padding:3px 0;font:13px/1.5 Arial,sans-serif;color:${i.tone ? colour[i.tone] : '#82612c'}">${i.tone ? mark[i.tone] : '•'}</td><td style="padding:3px 0;font:14px/1.5 Arial,sans-serif;color:#2b2026">${esc(i.text)}</td></tr>`
+          (i) => `<tr><td style="width:18px;vertical-align:top;padding:3px 0;font:13px/1.5 Arial,sans-serif;color:${i.tone ? colour[i.tone] : '${P["gold-deep"]}'}">${i.tone ? mark[i.tone] : '•'}</td><td style="padding:3px 0;font:14px/1.5 Arial,sans-serif;color:${P.ink}">${esc(i.text)}</td></tr>`
         )
         .join('')}</table>`
     )
     .join('\n');
-  return `<!doctype html><html><body style="margin:0;background:#faf7f2"><div style="max-width:560px;margin:0 auto;padding:20px 16px;background:#ffffff">
-<p style="font:600 18px/1.3 Georgia,serif;color:#2b2026;margin:0">Beautiful UAE Home</p>
-<p style="font:13px/1.4 Arial,sans-serif;color:#6a5c62;margin:4px 0 0">Your summary for ${esc(day)}</p>
+  return `<!doctype html><html><body style="margin:0;background:${P.ivory}"><div style="max-width:560px;margin:0 auto;padding:20px 16px;background:${P.paper}">
+<p style="font:600 18px/1.3 Georgia,serif;color:${P.ink};margin:0">Beautiful UAE Home</p>
+<p style="font:13px/1.4 Arial,sans-serif;color:${P["ink-muted"]};margin:4px 0 0">Your summary for ${esc(day)}</p>
 ${blocks}
-<p style="font:12px/1.5 Arial,sans-serif;color:#6a5c62;margin:24px 0 0">Every item above is in the Admin Hub too; nothing else needs your attention.</p>
+<p style="font:12px/1.5 Arial,sans-serif;color:${P["ink-muted"]};margin:24px 0 0">Every item above is in the Admin Hub too; nothing else needs your attention.</p>
 </div></body></html>`;
 }
 

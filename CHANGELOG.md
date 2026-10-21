@@ -9,8 +9,8 @@
 - **Stock by product.** Each sold-out or low product gets its own line with the sizes left (e.g. "Low: Jaipur Jaal Floral — King 2, Super King 1 left"), instead of one long list.
 - **A clear subject.** For example "Daily summary 2026-10-20: 3 orders, AED 1,250 · 2 things to do". The email is formatted for phones, with a plain-text copy for mail apps that don't show formatting.
 - **Status.**
-  - **Benchmark:** BENCH_PLACEHOLDER
-  - **Tests:** TESTS_PLACEHOLDER
+  - **Benchmark:** 3 alternating rounds (main first), 0 failed requests. Storefront branch 848 / 870 / 857 req/s vs main 819 / 853 / 857; catalogue API branch 771 / 772 / 801 vs main 778 / 780 / 787; serviceability API branch 703 / 668 / 694 vs main 698 / 664 / 662; gift page branch 647 / 718 / 699 vs main 703 / 705 / 660. The summary is built once a day; nothing on a shopper's path changed apart from the sitemap check.
+  - **Tests:** 1,178 of 1,179 on the full run. The one failure was the palette rule: the email used colours outside the shop's palette. It now uses the palette, and that check and the summary tests pass (29 of 29).
   - **Dependency audit:** production 0 vulnerabilities; no new packages.
   - **Security scan:** no new route or stored data. The email is built on the server from the shop's own data; product names are escaped in the HTML. No secrets or private links are in it.
 
