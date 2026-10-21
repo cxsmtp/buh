@@ -2,6 +2,7 @@
 
 import React from 'react';
 import { Product } from '@/types';
+import { fromPrice, priceLabel, wasLabel } from '@/lib/money';
 import { useShop } from '@/lib/client/shop';
 import { LocalPrice } from '@/lib/client/currency';
 import { isOnSale, productPhoto } from '@/lib/catalogFilter';
@@ -74,16 +75,16 @@ export const ProductCard: React.FC<ProductCardProps> = ({ product, onSelect, eag
             {product.title}
           </h3>
           <p className={`flex items-baseline flex-wrap gap-x-2 ${one ? 'text-[15px] sm:text-sm' : 'text-sm'}`}>
-            <span className="text-ink tracking-[0.02em]">{`AED ${product.price}`}</span>
+            <span className="text-ink tracking-[0.02em]">{priceLabel(product)}</span>
             {sale && (
               <span className="text-xs text-ink-muted line-through decoration-ink-muted/60">
                 <span className="sr-only">was </span>
-                {`AED ${product.compareAtPrice}`}
+                {wasLabel(product)}
               </span>
             )}
             {sale && <span className="label-caps !text-[10px] text-rose-deep">Reduced</span>}
           </p>
-          <LocalPrice aed={product.price} className="text-[11px] block" />
+          <LocalPrice aed={fromPrice(product).fils / 100} className="text-[11px] block" />
           {product.giftLine && (
             <p className="text-[12px] text-gold-deep line-clamp-2 break-words" data-testid="gift-line">
               {product.giftLine}

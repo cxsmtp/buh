@@ -1,4 +1,4 @@
-import type { CartItem } from '@/types';
+import type { CartItem, Product } from '@/types';
 
 /**
  * Money in the browser, done like the server does it: in whole fils (1/100 AED),
@@ -9,7 +9,42 @@ export const toFils = (aed: number) => Math.round(aed * 100);
 /** "490" or "299.97". */
 export const formatAed = (fils: number) => (fils % 100 === 0 ? String(fils / 100) : (fils / 100).toFixed(2));
 
-export const unitFils = (item: CartItem) => toFils(item.product.price) + toFils(item.selectedProfile.priceDelta || 0);
+/**
+ * A size's surcharge counts only when the product has more than one size (bigger sizes cost more).
+ * With one size, the product's price is what the customer pays: a surcharge copied from the
+ * shop's size presets must not turn AED 105 into AED 215.
+ */
+export const sizeDeltaFils = (product: Pick<Product, 'profiles'>, profile: { priceDelta?: number }) =>
+  (product.profiles?.length ?? 0) > 1 ? toFils(profile.priceDelta || 0) : 0;
+
+/** What one piece of this size costs, in fils. */
+export const sizePriceFils = (product: Pick<Product, 'price' | 'profiles'>, profile: { priceDelta?: number }) => toFils(product.price) + sizeDeltaFils(product, profile);
+
+/**
+ * The price to show on a card: the cheapest size that can be bought (in stock), else the
+ * cheapest of all; `varies` when the sizes cost different amounts ("From AED …").
+ */
+export function fromPrice(product: Pick<Product, 'price' | 'profiles' | 'stockBySize'>): { fils: number; varies: boolean } {
+  const all = product.profiles?.length ? product.profiles : [{ id: '', priceDelta: 0 }];
+  const prices = all.map((s) => ({ fils: sizePriceFils(product, s), inStock: (product.stockBySize?.[s.id] ?? 0) > 0 }));
+  const pool = prices.some((x) => x.inStock) ? prices.filter((x) => x.inStock) : prices;
+  const fils = Math.min(...pool.map((x) => x.fils));
+  return { fils, varies: new Set(prices.map((x) => x.fils)).size > 1 };
+}
+
+/** "AED 105", or "From AED 170" when the sizes cost different amounts. */
+export function priceLabel(product: Pick<Product, 'price' | 'profiles' | 'stockBySize'>): string {
+  const { fils, varies } = fromPrice(product);
+  return `${varies ? 'From ' : ''}AED ${formatAed(fils)}`;
+}
+
+/** The was-price for the same size as `priceLabel` (a sale's compare-at price plus that size's surcharge). */
+export function wasLabel(product: Pick<Product, 'price' | 'compareAtPrice' | 'profiles' | 'stockBySize'>): string {
+  const extra = fromPrice(product).fils - toFils(product.price);
+  return `AED ${formatAed(toFils(product.compareAtPrice ?? 0) + extra)}`;
+}
+
+export const unitFils = (item: CartItem) => sizePriceFils(item.product, item.selectedProfile);
 
 export const lineFils = (item: CartItem) => unitFils(item) * item.quantity;
 

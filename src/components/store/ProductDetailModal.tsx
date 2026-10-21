@@ -2,7 +2,7 @@
 
 import React, { useState } from 'react';
 import { Product, BedProfileMeasurement } from '@/types';
-import { formatAed, toFils } from '@/lib/money';
+import { formatAed, sizeDeltaFils, sizePriceFils, toFils } from '@/lib/money';
 import { askWhatsAppLink, instagramLink, openChat, piecesLeft, useShop } from '@/lib/client/shop';
 import { isOnSale, shortSize } from '@/lib/catalogFilter';
 import { InstagramIcon } from '@/components/common/InstagramIcon';
@@ -48,14 +48,14 @@ const ProductDetailContent: React.FC<ProductDetailModalProps & { product: Produc
   const images = [product.aiTransformedImage || product.featuredImage, ...(product.galleryImages || [])].filter((x, i, all): x is string => Boolean(x) && all.indexOf(x) === i);
 
   // The price for the chosen size (sizes can cost more), in fils like the server.
-  const unitFils = toFils(product.price) + toFils(selectedProfile.priceDelta || 0);
+  const unitFils = sizePriceFils(product, selectedProfile);
   const unitPrice = formatAed(unitFils);
   const left = piecesLeft(product, selectedProfile.id);
   const soldOut = left === 0;
   const qty = Math.min(quantity, Math.max(1, left));
   const totalPrice = formatAed(unitFils * qty);
   const sale = isOnSale(product);
-  const wasFils = sale ? toFils(product.compareAtPrice!) + toFils(selectedProfile.priceDelta || 0) : 0;
+  const wasFils = sale ? toFils(product.compareAtPrice!) + sizeDeltaFils(product, selectedProfile) : 0;
   const sizeShort = shortSize(selectedProfile.name);
   // Only what the owner filled in on this product for this size.
   const measurements = measurementRows(product, selectedProfile);
@@ -175,7 +175,7 @@ const ProductDetailContent: React.FC<ProductDetailModalProps & { product: Produc
                     </span>
                     <span className={`block text-[11px] leading-tight truncate text-ink-soft`}>
                       {pieces === 0 ? 'Sold out' : pieces <= lowStockThreshold ? `Only ${pieces} left` : sizeDetail(product, profile).split('(')[0].trim()}
-                      {profile.priceDelta > 0 && pieces > 0 ? ` · +AED ${profile.priceDelta}` : ''}
+                      {sizeDeltaFils(product, profile) > 0 && pieces > 0 ? ` · +AED ${profile.priceDelta}` : ''}
                     </span>
                   </button>
                 );

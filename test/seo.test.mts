@@ -151,7 +151,12 @@ test('sitemap: home, categories, festival pages by season, products on sale; nev
   const entries = seo.sitemapEntries(BASE, day);
   const urls = entries.map((e) => e.url);
   assert.ok(urls.includes(`${BASE}/`));
-  for (const c of settings.getSettings('catalog').categories) assert.ok(urls.includes(`${BASE}/shop/${c.id}`), c.id);
+  const onSale = products.listProducts();
+  for (const c of settings.getSettings('catalog').categories) {
+    // Found live: empty category pages were offered to Google. Only categories with products are listed.
+    const has = onSale.some((p) => p.category === c.id);
+    assert.equal(urls.includes(`${BASE}/shop/${c.id}`), has, c.id);
+  }
   assert.ok(urls.includes(`${BASE}/gifts/diwali`));
   assert.ok(!urls.includes(`${BASE}/gifts/christmas`), 'switched off');
   assert.ok(!urls.includes(`${BASE}/gifts/commemoration-day`));

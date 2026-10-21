@@ -1,5 +1,6 @@
 'use client';
 
+import { priceLabel } from '@/lib/money';
 import React, { useEffect, useId, useMemo, useRef, useState } from 'react';
 import {
   Archive,
@@ -316,7 +317,7 @@ export const AdminInventoryTab: React.FC<AdminInventoryTabProps> = ({ products, 
                     <ChevronDown className={`w-4 h-4 shrink-0 text-ink-muted transition-transform ${isOpen ? 'rotate-180' : ''}`} aria-hidden="true" />
                   </span>
                   <span className="block text-[11px] text-ink-soft truncate">
-                    AED {p.price} · {categoryLabel(p.category)}
+                    {priceLabel(p)} · {categoryLabel(p.category)}
                     {p.sku && <> · {p.sku}</>}
                     {p.active === false && !p.archived && <strong className="ml-1 text-ink">· hidden</strong>}
                     {!p.archived && isSoldOut(p) && <strong className="ml-1 text-danger">· sold out</strong>}

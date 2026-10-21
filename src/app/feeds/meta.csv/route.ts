@@ -1,3 +1,4 @@
+import { sizePriceFils } from '@/lib/money';
 import { toCsv } from '@/lib/server/backup';
 import { handleRouteError } from '@/lib/server/http';
 import { listProducts } from '@/lib/server/products';
@@ -20,7 +21,7 @@ export async function GET() {
     const rows = listProducts().flatMap((p) =>
       p.profiles.map((s) => {
         const qty = p.stockBySize[s.id] ?? 0;
-        const price = (Math.round((p.price + s.priceDelta) * 100) / 100).toFixed(2);
+        const price = (sizePriceFils(p, s) / 100).toFixed(2);
         return [
           `${p.id}-${s.id}`,
           `${p.title} (${s.name})`.slice(0, 150),

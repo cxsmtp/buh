@@ -1,3 +1,4 @@
+import { sizePriceFils } from '@/lib/money';
 import { getFestival, type Festival } from '@/lib/festivals/catalog';
 import { addDays, dubaiDate } from '@/lib/festivals/dates';
 import { productPhoto } from '@/lib/catalogFilter';
@@ -318,7 +319,7 @@ export function productJsonLd(p: Product, base: string) {
     name: s.name,
     url,
     priceCurrency: 'AED',
-    price: aedText(toFils(p.price) + toFils(s.priceDelta || 0)),
+    price: aedText(sizePriceFils(p, s)),
     availability: (p.stockBySize?.[s.id] ?? 0) > 0 ? 'https://schema.org/InStock' : 'https://schema.org/OutOfStock',
     itemCondition: 'https://schema.org/NewCondition',
     seller: { '@type': 'Organization', name: shop },
@@ -461,6 +462,8 @@ export function sitemapEntries(base: string, now: Date = new Date()): SitemapEnt
   const out: SitemapEntry[] = [{ url: `${base}/`, changeFrequency: 'daily', priority: 1, ...(latest ? { lastModified: latest } : {}) }];
   for (const c of categoryPages()) {
     const inIt = products.filter((p) => p.category === c.id);
+    // An empty category page is thin content to Google: left out until it has products.
+    if (!inIt.length) continue;
     const last = inIt.map((p) => dates.get(p.id) ?? '').filter(Boolean).sort().pop();
     out.push({ url: `${base}${c.path}`, changeFrequency: 'weekly', priority: 0.8, ...(last ? { lastModified: last } : {}) });
   }

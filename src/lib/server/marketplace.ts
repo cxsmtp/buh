@@ -1,3 +1,4 @@
+import { sizeDeltaFils, sizePriceFils, toFils } from '@/lib/money';
 import crypto from 'node:crypto';
 import type { CatalogSettings, Product } from '@/types';
 import { toCsv } from './csv';
@@ -86,8 +87,8 @@ export function marketplaceRows(products: Product[], opts: { base: string; brand
       `${p.title} (${s.name})`.slice(0, 200),
       (p.description || p.shortDescription || p.title).slice(0, 2000),
       opts.brand,
-      money(p.price + (s.priceDelta || 0)),
-      p.compareAtPrice && p.compareAtPrice > p.price ? money(p.compareAtPrice + (s.priceDelta || 0)) : '',
+      money(sizePriceFils(p, s) / 100),
+      p.compareAtPrice && p.compareAtPrice > p.price ? money((toFils(p.compareAtPrice) + sizeDeltaFils(p, s)) / 100) : '',
       Math.max(0, p.stockBySize[s.id] ?? 0),
       main,
       others,

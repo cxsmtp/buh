@@ -3,6 +3,7 @@
 import React, { useMemo, useRef, useState } from 'react';
 import { Search, X } from 'lucide-react';
 import type { Product } from '@/types';
+import { priceLabel } from '@/lib/money';
 import { Sheet } from '@/components/common/Sheet';
 import { matchesSearch, productPhoto, type Category } from '@/lib/catalogFilter';
 import { photoSources } from '@/lib/client/photos';
@@ -76,7 +77,7 @@ export function SearchSheet({ products, categories, initial, onSubmit, onOpenPro
                     </span>
                     <span className="min-w-0 flex-1">
                       <span className="block text-sm text-ink line-clamp-2">{p.title}</span>
-                      <span className="block text-xs font-semibold text-ink">{`AED ${p.price}`}</span>
+                      <span className="block text-xs font-semibold text-ink">{priceLabel(p)}</span>
                     </span>
                   </button>
                 </li>

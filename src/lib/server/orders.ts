@@ -1,3 +1,4 @@
+import { sizeDeltaFils } from '@/lib/money';
 import { shopVariantSku } from './marketplace';
 import crypto from 'node:crypto';
 import { markChanged } from './dataChanges';
@@ -580,7 +581,7 @@ export function placeOrder(input: unknown, context: PlaceOrderContext = {}): Pla
           const left = (getDb().prepare('SELECT qty FROM product_stock WHERE product_id = ? AND size_id = ?').get(product.id, profile.id) as { qty: number } | undefined)?.qty ?? 0;
           throw new HttpError(409, left > 0 ? `${product.title} (${profile.name}): only ${left} left.` : `${product.title} (${profile.name}) has just sold out.`);
         }
-        const unitFils = fils(product.price) + fils(profile.priceDelta || 0);
+        const unitFils = fils(product.price) + sizeDeltaFils(product, profile);
         items.push({
           productId: product.id,
           title: product.title,

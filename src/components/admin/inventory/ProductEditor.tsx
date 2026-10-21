@@ -812,10 +812,7 @@ export function ProductEditor({
                         <span className="text-ink-soft">Dimensions (optional)</span>
                         <input className={field} value={s.dimensions ?? ''} maxLength={80} placeholder="e.g. 70 × 140 cm" onChange={(e) => updateSize(s.id, { dimensions: e.target.value })} />
                       </label>
-                      <label className="block">
-                        <span className="text-ink-soft">Price difference (AED, + or −)</span>
-                        <input className={field} type="number" step="0.01" value={s.priceDelta} onChange={(e) => updateSize(s.id, { priceDelta: Number(e.target.value) || 0 })} />
-                      </label>
+                      <SizePrice price={draft.price} delta={s.priceDelta} only={draft.sizes.length === 1} onDelta={(v) => updateSize(s.id, { priceDelta: v })} />
                       <label className="block">
                         <span className="text-ink-soft">Weight (g)</span>
                         <input
@@ -954,10 +951,7 @@ export function ProductEditor({
                             </label>
                           );
                         })}
-                        <label className="block">
-                          <span className="text-ink-soft">Price difference (AED, + or −)</span>
-                          <input className={field} type="number" step="0.01" value={s.priceDelta} onChange={(e) => updateSize(s.id, { priceDelta: Number(e.target.value) || 0 })} />
-                        </label>
+                        <SizePrice price={draft.price} delta={s.priceDelta} only={draft.sizes.length === 1} onDelta={(v) => updateSize(s.id, { priceDelta: v })} />
                         <label className="block">
                           <span className="text-ink-soft">Pieces in the set</span>
                           <input className={field} type="number" min={1} max={20} value={s.piecesIncluded} onChange={(e) => updateSize(s.id, { piecesIncluded: Math.max(1, Number(e.target.value) || 1) })} />
@@ -1073,5 +1067,30 @@ export function ProductEditor({
         </div>
       </div>
     </Sheet>
+  );
+}
+
+/**
+ * A size's price: with one size, the product's price is what customers pay (no surcharge);
+ * with several, a + or − difference, and always the price the customer will see.
+ */
+function SizePrice({ price, delta, only, onDelta }: { price: string; delta: number; only: boolean; onDelta: (v: number) => void }) {
+  const base = Number(price) || 0;
+  const pays = (Math.round((base + (only ? 0 : delta || 0)) * 100) / 100).toLocaleString('en-AE', { maximumFractionDigits: 2 });
+  if (only) {
+    return (
+      <p className="block text-ink-soft" data-testid="size-pays">
+        Customers pay <strong className="text-ink">AED {pays}</strong> (the only size: no size surcharge).
+      </p>
+    );
+  }
+  return (
+    <label className="block">
+      <span className="text-ink-soft">Price difference (AED, + or −)</span>
+      <input className={field} type="number" step="0.01" value={delta} onChange={(e) => onDelta(Number(e.target.value) || 0)} />
+      <span className="mt-0.5 block text-[12px] text-ink-soft" data-testid="size-pays">
+        Customers pay <strong className="text-ink">AED {pays}</strong>
+      </span>
+    </label>
   );
 }
