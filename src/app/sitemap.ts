@@ -1,5 +1,5 @@
 import type { MetadataRoute } from 'next';
-import { sitemapEntries } from '@/lib/server/seo';
+import { sitemapEntries, sitemapXmlEntries } from '@/lib/server/seo';
 import { siteUrl } from '@/lib/server/siteUrl';
 
 /**
@@ -12,5 +12,5 @@ export const dynamic = 'force-dynamic';
 
 export default async function sitemap(): Promise<MetadataRoute.Sitemap> {
   const base = await siteUrl();
-  return sitemapEntries(base);
+  return sitemapXmlEntries(sitemapEntries(base));
 }
