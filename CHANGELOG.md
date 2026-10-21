@@ -3,6 +3,7 @@
 ## BUH-02.23.01 — 2026-10-21 06:00 UTC · [#43](https://github.com/cxsmtp/buh/pull/43)
 
 - **A clear message when Gemini needs billing.** Google offers its picture models only on paid accounts, so a key on the free tier was refused every time. The shop said "limit reached, wait a minute", which never helped. It now says the key's project needs billing switched on, where to do it (aistudio.google.com → API keys → your project → Set up billing) and the rough cost: about 4 US cents a picture.
+- **Gemini pictures one at a time, with an automatic retry.** With Gemini, the studio makes the pictures one after another instead of all at once. If Google says its per-minute limit is reached, the studio waits as long as Google asks (shown on the picture) and tries once more by itself. New paid accounts have low per-minute limits.
 - **See what the picture service said.** When a picture isn't made, the studio shows the service's own reason under the shop's message, with the key always removed. You can then tell apart billing, a per-minute limit, or a key from the wrong project.
 - **Status.**
   - **Benchmark:** BENCH_PLACEHOLDER

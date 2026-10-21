@@ -98,7 +98,7 @@ export function scrubGemini(text: string, key: string): string {
 }
 
 interface ErrorReply {
-  error?: { code?: number; message?: string; status?: string; details?: Array<{ reason?: string }> };
+  error?: { code?: number; message?: string; status?: string; details?: Array<{ reason?: string; retryDelay?: string }> };
 }
 
 /** One call to Gemini; Google's answer, or a readable reason (never the key). */
@@ -135,7 +135,12 @@ export async function geminiCall(key: string, req: Omit<GeminiRequest, 'headers'
       { code: 'ai_needs_billing', detail: said }
     );
   }
-  if (reply.status === 429) throw new HttpError(502, 'Google’s limit for your Gemini key was reached. Wait a minute and try again (if it keeps happening, check the key’s quota and billing at aistudio.google.com).', {}, { code: 'ai_busy', detail: said });
+  if (reply.status === 429) {
+    // Google says how long to wait (RetryInfo "37s"); the picture studio waits that long and tries once more.
+    const delay = (e.details ?? []).map((d) => /^(\d+(?:\.\d+)?)s$/.exec(String(d?.retryDelay ?? ''))?.[1]).find(Boolean);
+    const retryAfterSec = Math.min(90, Math.max(5, Math.ceil(Number(delay ?? 30))));
+    throw new HttpError(502, 'Google’s per-minute limit for your Gemini key was reached. Wait a minute and try again (if it keeps happening, check the key’s Rate Limit page at aistudio.google.com).', {}, { code: 'ai_busy', detail: said, retryAfterSec });
+  }
   if (reply.status >= 500) throw new HttpError(502, 'Gemini is busy right now. Please try again in a moment.', {}, { code: 'ai_busy', detail: said });
   throw new HttpError(502, `Gemini said: ${said || `error ${reply.status}`}`, {}, { code: 'ai_error', detail: said });
 }

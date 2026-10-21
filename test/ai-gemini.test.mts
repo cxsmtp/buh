@@ -239,6 +239,13 @@ test('Gemini writing errors are readable and never carry the key (reply or logs)
   assert.ok(!(JSON.stringify({ m: e.message, d: e.details }) + logs).includes('TESTKEY'));
   answer = () => ({ status: 429, data: { error: { code: 429, message: 'Resource has been exhausted', status: 'RESOURCE_EXHAUSTED' } } });
   await assert.rejects(ai.describeProduct({ image: PHOTO_URL }, 'o@s.t'), /limit for your Gemini key/);
+  // A per-minute limit: Google says how long to wait; the studio waits that long and tries once more.
+  answer = () => ({ status: 429, data: { error: { code: 429, status: 'RESOURCE_EXHAUSTED', message: 'Resource has been exhausted (e.g. check quota).', details: [{ '@type': 'type.googleapis.com/google.rpc.RetryInfo', retryDelay: '37s' }] } } });
+  await assert.rejects(ai.describeProduct({ image: PHOTO_URL }, 'o@s.t'), (err: Error & { details?: { code?: string; retryAfterSec?: number } }) => {
+    assert.equal(err.details?.code, 'ai_busy');
+    assert.equal(err.details?.retryAfterSec, 37);
+    return true;
+  });
   // Reported by the owner: a real key, "limit reached" on every picture. Google's free tier has no
   // quota for picture models (limit: 0): the shop says billing is needed, not "wait a minute".
   answer = () => ({
