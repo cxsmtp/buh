@@ -177,6 +177,18 @@ test('sitemap: home, categories, festival pages by season, products on sale; nev
   await settings.updateSettings('seo', { festivals: {} });
 });
 
+test('sitemap.xml is valid XML even when a picture link carries & (Google: "Parsing error, line 150")', async () => {
+  const { resolveSitemap } = await import('next/dist/build/webpack/loaders/metadata/resolve-route-data.js');
+  const pic = 'https://images.unsplash.com/photo-1?auto=format&fit=crop&w=1200&q=80';
+  const entries = [...seo.sitemapEntries(BASE), { url: `${BASE}/p/sample`, changeFrequency: 'weekly' as const, priority: 0.7, images: [pic] }];
+  assert.match(resolveSitemap(entries), /&fit=/, 'as Next writes it, the bare & is there');
+  const xml: string = resolveSitemap(seo.sitemapXmlEntries(entries));
+  // Every & must start an entity; a bare one is what Google could not read.
+  assert.doesNotMatch(xml, /&(?!amp;|lt;|gt;|quot;|apos;|#)/);
+  assert.match(xml, /<image:loc>https:\/\/images\.unsplash\.com\/photo-1\?auto=format&amp;fit=crop&amp;w=1200&amp;q=80<\/image:loc>/);
+  assert.equal(entries.at(-1)!.images![0], pic, 'the entries themselves keep the real link');
+});
+
 test('robots.txt: the shop open, the APIs and private pages closed, the sitemap named; the hub never named', async () => {
   const robots = (await import('@/app/robots')).default;
   const r = await robots();

@@ -477,6 +477,16 @@ export function sitemapEntries(base: string, now: Date = new Date()): SitemapEnt
   return out;
 }
 
+/**
+ * The entries ready for Next.js to write as XML. Next puts each address into the file as it is,
+ * so an `&` in a picture link (Unsplash's `?auto=format&fit=crop`) made the whole sitemap invalid
+ * and Google refused it ("Parsing error"). Escaped here: &, <, >, " and '.
+ */
+export function sitemapXmlEntries(entries: SitemapEntry[]): SitemapEntry[] {
+  const esc = (v: string) => v.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&apos;');
+  return entries.map((e) => ({ ...e, url: esc(e.url), ...(e.images ? { images: e.images.map(esc) } : {}) }));
+}
+
 // ── the Admin Hub's view ────────────────────────────────────────────────────
 
 const problemsOf = (title: string, description: string) => snippetProblems({ title, description });
