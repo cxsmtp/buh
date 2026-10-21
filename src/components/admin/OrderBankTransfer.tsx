@@ -132,7 +132,7 @@ export function OrderBankTransfer({ order, bank, shopName, onOrderChanged }: { o
       {link && (
         <div className="flex items-center gap-2 min-w-0">
           <span className="text-ink-muted shrink-0">Private link:</span>
-          <a href={link} target="_blank" rel="noopener noreferrer" className="font-mono text-[11px] text-ink-soft truncate min-w-0">{link}</a>
+          <a href={safeLinkHref(link)} target="_blank" rel="noopener noreferrer" className="font-mono text-[11px] text-ink-soft truncate min-w-0">{link}</a>
           <button type="button" onClick={() => void copyLink()} aria-label="Copy the private link" className="shrink-0 min-h-9 px-2.5 rounded-lg border border-line-strong bg-surface font-semibold text-ink inline-flex items-center gap-1 focus:outline-none focus-visible:ring-2 focus-visible:ring-gold">
             {copied ? <Check className="w-3.5 h-3.5 text-success" aria-hidden="true" /> : <Copy className="w-3.5 h-3.5" aria-hidden="true" />} {copied ? 'Copied' : 'Copy'}
           </button>

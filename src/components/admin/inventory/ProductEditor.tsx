@@ -202,6 +202,8 @@ export function ProductEditor({
   const [dragFrom, setDragFrom] = useState<number | null>(null);
   // Photos added in this session, as taken (the room-style filter works on these).
   const [originals, setOriginals] = useState<Record<string, string>>({});
+  /** AI pictures among the photos (the product's, and those added here). */
+  const styled = useRef(new Set<string>(Object.keys(product?.stagedPhotos ?? {})));
   const lastSaved = useRef('');
 
   const set = <K extends keyof Draft>(key: K, value: Draft[K]) => setDraft((d) => ({ ...d, [key]: value }));
@@ -608,16 +610,24 @@ export function ProductEditor({
               onNotes={(v) => set('stagingNotes', v)}
               context={{ title: draft.title, motif: draft.aiMotif, colors: draft.colors.map((c) => c.name).filter(Boolean), design: draft.aiDesign || draft.shortDescription }}
               onOpenSettings={onOpenSettings ? () => onOpenSettings('ai-pictures') : undefined}
-              onAdd={(url, after) =>
+              onAdd={(urls, after, order) => {
+                for (const u of urls) styled.current.add(u);
                 setDraft((d) => {
-                  if (d.photos.includes(url) || d.photos.length >= MAX_PHOTOS) return d;
-                  // Right after the photo it was made from: the real photo stays first.
+                  const fresh = urls.filter((u) => !d.photos.includes(u)).slice(0, Math.max(0, MAX_PHOTOS - d.photos.length));
+                  if (!fresh.length) return d;
+                  if (order === 'styled-first') {
+                    // AI pictures first (after any already there), the owner's own photos last.
+                    const ai = d.photos.filter((u) => styled.current.has(u));
+                    const own = d.photos.filter((u) => !styled.current.has(u));
+                    return { ...d, photos: [...ai, ...fresh, ...own] };
+                  }
+                  // Right after the photo they were made from: the real photo stays first.
                   const at = d.photos.indexOf(after);
                   const photos = [...d.photos];
-                  photos.splice(at < 0 ? photos.length : at + 1, 0, url);
+                  photos.splice(at < 0 ? photos.length : at + 1, 0, ...fresh);
                   return { ...d, photos };
-                })
-              }
+                });
+              }}
             />
             {cover && originals[cover] && (
               <details className="rounded-xl border border-line bg-surface px-3 py-2">

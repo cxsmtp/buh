@@ -35,6 +35,7 @@ import { CollectionsSheet, ShareSelectionSheet } from './inventory/Collections';
 import { PictureStudioSheet } from './inventory/PictureStudioSheet';
 import { REASONS, useStockMoves, type StockReason } from './inventory/useStockMoves';
 import { FillSkusNotice } from './inventory/FillSkusNotice';
+import { AutoJobsList, QuickAdd, useAutoJobs } from './inventory/QuickAdd';
 
 /**
  * Inventory, made for the owner's phone: find a product (name or SKU, filters for
@@ -75,7 +76,18 @@ const actionIcon = 'min-h-11 w-11 rounded-xl border border-line-strong bg-surfac
 const actionPrimary = 'min-h-11 px-3 rounded-xl border border-ink bg-ink text-paper text-xs font-semibold inline-flex items-center justify-center gap-1.5';
 
 export const AdminInventoryTab: React.FC<AdminInventoryTabProps> = ({ products, catalog, onChanged, onProductUpdated, startAdding = false, onOpenSettings }) => {
-  const [editing, setEditing] = useState<AdminProduct | 'new' | null>(startAdding ? 'new' : null);
+  const [editing, setEditing] = useState<AdminProduct | 'new' | null>(null);
+  // Add product: the basics only, the AI does the rest (the full editor is one tap away).
+  const [quick, setQuick] = useState(startAdding);
+  // Products the AI is still writing or picturing: shown at the top while there are any.
+  const auto = useAutoJobs(!quick && !editing);
+  const openProduct = (id: string) => {
+    const p = products.find((x) => x.id === id);
+    if (p) {
+      setQuick(false);
+      setEditing(p);
+    }
+  };
   // Inventory → Make pictures: the Picture studio for one product.
   const [studio, setStudio] = useState<AdminProduct | null>(null);
   const [query, setQuery] = useState('');
@@ -199,10 +211,16 @@ export const AdminInventoryTab: React.FC<AdminInventoryTabProps> = ({ products, 
         <h2 className="font-serif font-bold text-lg text-ink flex items-center gap-2">
           <Package className="w-5 h-5 text-gold-deep" aria-hidden="true" /> Inventory
         </h2>
-        <button type="button" onClick={() => setEditing('new')} className="ml-auto min-h-11 px-4 rounded-xl bg-ink text-paper text-sm font-bold flex items-center gap-1.5">
+        <button type="button" onClick={() => setQuick(true)} className="ml-auto min-h-11 px-4 rounded-xl bg-ink text-paper text-sm font-bold flex items-center gap-1.5">
           <Plus className="w-4 h-4" aria-hidden="true" /> Add product
         </button>
       </div>
+      {auto.status && auto.status.jobs.length > 0 && (
+        <section className="space-y-2 rounded-2xl border border-line bg-sand p-3" aria-label="Being made by AI">
+          <h3 className="text-sm font-bold text-ink">Being made by AI</h3>
+          <AutoJobsList jobs={auto.status.jobs.slice(0, 6)} onOpen={openProduct} onDismiss={(id) => void auto.dismiss(id).then(() => onChanged())} />
+        </section>
+      )}
       <div className="flex flex-wrap gap-2">
         <button
           type="button"
@@ -514,6 +532,21 @@ export const AdminInventoryTab: React.FC<AdminInventoryTabProps> = ({ products, 
         />
       )}
 
+      {quick && (
+        <QuickAdd
+          catalog={catalog}
+          onClose={() => {
+            setQuick(false);
+            void onChanged();
+          }}
+          onAdded={() => void onChanged()}
+          onFullEditor={() => {
+            setQuick(false);
+            setEditing('new');
+          }}
+          onOpenProduct={openProduct}
+        />
+      )}
       {editing && (
         <ProductEditor
           product={editing === 'new' ? null : editing}

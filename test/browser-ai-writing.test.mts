@@ -190,6 +190,8 @@ for (const width of [375, 1280]) {
     const { ctx, page, errors } = await hub(width);
     await openAdminSection(page, /^Inventory/);
     await page.getByRole('button', { name: 'Add product' }).first().click();
+    // Add product opens quick add; these steps are the full editor's.
+    await page.getByRole('button', { name: /Use the full editor/ }).click();
     const editor = page.getByRole('dialog', { name: 'Add a product' });
     await editor.waitFor();
     const button = editor.getByRole('button', { name: 'Write name & descriptions from photo' });

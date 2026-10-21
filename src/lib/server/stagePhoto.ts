@@ -1,6 +1,6 @@
 import { type AiProvider, type StagedPhoto } from '@/types';
 import { FAL_KEY, FAL_KEY_HINT, OPENAI_KEY, OPENAI_KEY_HINT, PROVIDER_INFO, type PictureProvider } from '@/lib/pictureProviders';
-import { STAGING_EXTRA_MAX, STAGING_SCENE_MAX, STYLE_MAX, STYLE_SIDE_MAX, lookOf, oneLine, stagingPrompt, usesReferences, type StagingContext, type StagingScene } from '@/lib/staging';
+import { STAGING_EXTRA_MAX, STAGING_SCENE_MAX, STYLE_MAX, STYLE_SIDE_MAX, angleName, lookOf, oneLine, splitAngles, stagingPrompt, usesReferences, type StagingContext, type StagingScene } from '@/lib/staging';
 import { audit } from './audit';
 import { getDb } from './db';
 import { PICTURE_MODULES, modelOk, pictureKey, pictureModel, picturesProviderOf, providerName } from './pictures';
@@ -42,7 +42,7 @@ export const SOURCE_MAX_BYTES = 4 * 1024 * 1024;
 /** The picture Gemini sends back (a 1K picture is 1–2 MB). */
 export const RESULT_MAX_BYTES = 10 * 1024 * 1024;
 const ASPECTS = new Set(['4:5', '1:1']);
-const BODY_FIELDS = new Set(['imageId', 'image', 'preset', 'extra', 'aspect', 'scene', 'context', 'useReferences']);
+const BODY_FIELDS = new Set(['imageId', 'image', 'preset', 'angle', 'sameRoom', 'extra', 'aspect', 'scene', 'context', 'useReferences']);
 /** Where the owner fixes the key or the model. */
 export const PICTURES_PLACE = 'Settings → AI pictures';
 
@@ -115,6 +115,13 @@ export interface StagingStatus {
   /** The style photos (addresses) and whether they are sent. */
   references: string[];
   useReferences: boolean;
+  /**
+   * The numbered angles in the look and mood (Settings → AI pictures), one picture each, in order:
+   * when there are any, one press makes these instead of the scenes.
+   */
+  angles: Array<{ n: number; name: string }>;
+  /** Where AI pictures go among the product's photos. */
+  photoOrder: 'styled-first' | 'photo-first';
 }
 
 /** For the studio and the editor: ready, or why not, who makes pictures, and the scenes to offer. */
@@ -135,7 +142,14 @@ export function stagingStatus(): StagingStatus {
     defaultSet: pictures.defaultSet,
     references: pictures.references ?? [],
     useReferences: pictures.useReferences !== false,
+    angles: anglesOf(pictures).map((a, i) => ({ n: i + 1, name: angleName(a, i) })),
+    photoOrder: pictures.photoOrder ?? 'styled-first',
   };
+}
+
+/** The numbered angles in the owner's look and mood ([] when it has none). */
+export function anglesOf(settings: { look?: string }): string[] {
+  return settings.look?.trim() ? splitAngles(settings.look).angles : [];
 }
 
 /** The style photos to send, in the owner's order, each checked (metadata out) and within the size cap. */
@@ -161,15 +175,26 @@ export async function stagePhoto(body: Record<string, unknown>, actor: string): 
   if (!key) throw new HttpError(409, `Pictures need a ${info.name} key: add one in ${PICTURES_PLACE} (${info.keyUrlLabel}).`, {}, { code: 'staging_off', reason: 'no_key' });
   const model = pictureModel(ai, provider);
   if (!modelOk(provider, model)) throw new HttpError(409, `Your ${info.name} key is saved: now choose an image model (press Test in ${PICTURES_PLACE}).`, {}, { code: 'staging_off', reason: 'no_model' });
-  const preset = sceneById(body.preset);
-  if (!preset) throw new HttpError(400, 'Choose a scene.');
   if (body.useReferences !== undefined && typeof body.useReferences !== 'boolean') throw new HttpError(400, 'Style photos: on or off.');
+  // One of the numbered angles in the owner's prompt, or one of the scenes.
+  let angle = '';
+  let preset: StagingScene | undefined;
+  if (body.angle !== undefined) {
+    const angles = anglesOf(settings);
+    const n = Number(body.angle);
+    if (!Number.isInteger(n) || n < 1 || n > angles.length) throw new HttpError(400, 'That angle is not in your prompt any more (Settings → AI pictures).');
+    angle = angles[n - 1];
+    preset = { id: `angle-${n}`, name: angleName(angle, n - 1), scene: angle };
+  } else {
+    preset = sceneById(body.preset);
+    if (!preset) throw new HttpError(400, 'Choose a scene.');
+  }
   const extra = cleanExtra(body.extra);
-  const shot = cleanScene(body.scene) || preset.scene;
-  const look = lookOf(settings);
+  const shot = angle || cleanScene(body.scene) || preset.scene;
   const context = cleanContext(body.context);
   const aspect = body.aspect === undefined ? '4:5' : String(body.aspect);
   if (!ASPECTS.has(aspect)) throw new HttpError(400, 'Shape: 4:5 or 1:1.');
+  const sameRoom = body.sameRoom === undefined || body.sameRoom === null || body.sameRoom === '' ? '' : stagedName(body.sameRoom);
 
   // The photo: one of the product's stored photos, or one just taken (a data URL).
   let source = '';
@@ -187,25 +212,72 @@ export async function stagePhoto(body: Record<string, unknown>, actor: string): 
   } else {
     throw new HttpError(400, 'Choose a photo first (PNG, JPEG or WebP).');
   }
+  return makePicture({ photo, source, preset, shot, angle, extra, context, aspect: aspect as '4:5' | '1:1', useReferences: body.useReferences as boolean | undefined, sameRoom }, actor);
+}
 
+/** A styled photo this feature made (for "same room as"), by its address; anything else is refused. */
+function stagedName(v: unknown): string {
+  const name = typeof v === 'string' ? v.replace(/^\/api\/images\//, '') : '';
+  if (!IMAGE_NAME.test(name) || !(name in stagedRecords())) throw new HttpError(400, 'The first picture of this set is no longer stored: make the set again.');
+  return name;
+}
+
+export interface PictureJob {
+  photo: { mime: string; bytes: Buffer };
+  /** The product photo's stored name ('' for one just taken). */
+  source: string;
+  preset: StagingScene;
+  /** The scene (or the owner's wording of it), or the angle. */
+  shot: string;
+  /** One of the numbered angles in the owner's prompt ('' for a scene). */
+  angle: string;
+  extra: string;
+  context: StagingContext;
+  aspect: '4:5' | '1:1';
+  useReferences?: boolean;
+  /** A styled photo already made of this product (the first angle): sent so the room stays the same. */
+  sameRoom: string;
+}
+
+/**
+ * One picture: the service, key and model checked, sent, the answer checked, stored and recorded as
+ * styled, audited. Used by the studio (stagePhoto) and by automatic pictures for new products
+ * (src/lib/server/autoAdd.ts).
+ */
+export async function makePicture(job: PictureJob, actor: string): Promise<StageResult> {
+  const ai = getSettings('ai');
+  const settings = getSettings('aiPictures');
+  const provider = picturesProviderOf(ai);
+  if (!provider) throw new HttpError(409, `Pictures need a picture service: choose Google Gemini, OpenAI or fal.ai in ${PICTURES_PLACE} and add its key.`, {}, { code: 'staging_off', reason: 'no_provider' });
+  const key = pictureKey(ai, provider);
+  const model = pictureModel(ai, provider);
+  if (!key || !modelOk(provider, model)) throw new HttpError(409, `Pictures are not set up: ${PICTURES_PLACE}.`, {}, { code: 'staging_off', reason: key ? 'no_model' : 'no_key' });
+  const { photo, source, preset, shot, angle, extra, context, aspect } = job;
+  // Numbered angles never go in a request as a list (the service would put them all in one
+  // picture): the rest of the owner's prompt (the room, the styling) goes with every picture.
+  const look = splitAngles(lookOf(settings)).shared || lookOf(settings);
   const maker = PICTURE_MODULES[provider];
-  // The style photos: after the product photo, as many as the model takes.
-  const references = usesReferences(settings, preset, body.useReferences as boolean | undefined) ? referenceImages(settings.references, maker.maxImages(model) - 1) : [];
+  const room = job.sameRoom ? readImage(job.sameRoom) : null;
+  const roomImage = room ? cleanImage(room.bytes, RESULT_MAX_BYTES) : null;
+  const sameRoom = roomImage ? [{ mime: roomImage.mime, bytes: roomImage.bytes }] : [];
+  // The style photos: after the product photo (and the same-room picture), as many as the model takes.
+  const styles = usesReferences(settings, preset, job.useReferences) ? referenceImages(settings.references, maker.maxImages(model) - 1 - sameRoom.length) : [];
+  const references = [...sameRoom, ...styles];
 
   const r = rateLimit(`ai-stage:${actor}`, STAGE_LIMIT.max, STAGE_LIMIT.windowMs);
-  if (!r.ok) throw new HttpError(429, LIMIT_MESSAGE, { 'Retry-After': String(r.retryAfterSec) });
+  if (!r.ok) throw new HttpError(429, LIMIT_MESSAGE, { 'Retry-After': String(r.retryAfterSec) }, { retryAfterSec: r.retryAfterSec });
 
   const raw = await maker.edit({
     key,
     model,
     product: photo,
     references,
-    prompt: stagingPrompt(shot, extra, aspect, context, look, references.length),
-    aspect: aspect as '4:5' | '1:1',
+    prompt: stagingPrompt(shot, extra, aspect, context, look, references.length, { angle, sameRoom: sameRoom.length > 0 }),
+    aspect,
     again: () => {
       // A second paid call for the same picture counts against the hour's limit too.
       const again = rateLimit(`ai-stage:${actor}`, STAGE_LIMIT.max, STAGE_LIMIT.windowMs);
-      if (!again.ok) throw new HttpError(429, LIMIT_MESSAGE, { 'Retry-After': String(again.retryAfterSec) });
+      if (!again.ok) throw new HttpError(429, LIMIT_MESSAGE, { 'Retry-After': String(again.retryAfterSec) }, { retryAfterSec: again.retryAfterSec });
     },
   });
   // Checked whoever made it: a whole PNG, JPEG or WebP within the limits, metadata out, and marked
@@ -226,7 +298,7 @@ export async function stagePhoto(body: Record<string, unknown>, actor: string): 
   }
   const at = new Date().toISOString();
   recordStaged(name, { source, preset: preset.id, at });
-  audit('product.photo_staged', { by: actor, provider, model, preset: preset.id, source: source || 'upload', sourceBytes: photo.bytes.length, references: references.length, result: name, resultBytes: clean.bytes.length, width: clean.width, height: clean.height, extraLength: extra.length, sceneEdited: shot !== preset.scene, lookDefault: !settings.look, context: Object.keys(context), aspect });
+  audit('product.photo_staged', { by: actor, provider, model, preset: preset.id, source: source || 'upload', sourceBytes: photo.bytes.length, references: references.length, sameRoom: sameRoom.length > 0, result: name, resultBytes: clean.bytes.length, width: clean.width, height: clean.height, extraLength: extra.length, sceneEdited: !angle && shot !== preset.scene, lookDefault: !settings.look, context: Object.keys(context), aspect });
   return { url, staged: { staged: true, source, preset: preset.id, at }, model, provider, references: references.length, width: clean.width, height: clean.height };
 }
 
@@ -273,11 +345,55 @@ export const PRODUCT_MAX_PHOTOS = 8;
 const nameOf = (url: string) => url.replace(/^\/api\/images\//, '');
 
 /**
+ * A product's photos with AI pictures added. "styled-first" (the default, Settings → AI pictures):
+ * every AI picture first, the ones already there then the new ones in the order made, and the
+ * owner's own photos last, so a shopper first sees the product made up in a room and the real photo
+ * at the end. "photo-first": each new one right after the photo it was made from (the owner's
+ * photo stays the cover). Photos already there are never repeated; at most 8 in all, and what does
+ * not fit comes back in "full".
+ */
+export function withStyledPhotos(photos: string[], urls: string[], made: Record<string, { source: string }>, order: 'styled-first' | 'photo-first'): { photos: string[]; added: string[]; full: string[] } {
+  const out = [...photos];
+  const added: string[] = [];
+  const full: string[] = [];
+  const fresh = [...new Set(urls)].filter((u) => !out.includes(u));
+  if (order === 'styled-first') {
+    const styled = out.filter((u) => nameOf(u) in made);
+    const own = out.filter((u) => !(nameOf(u) in made));
+    for (const u of fresh) {
+      if (styled.length + own.length >= PRODUCT_MAX_PHOTOS) full.push(u);
+      else {
+        styled.push(u);
+        added.push(u);
+      }
+    }
+    return { photos: [...styled, ...own], added, full };
+  }
+  /** Where the next one from each source goes: right after the source, in the order sent (as the editor does). */
+  const next = new Map<string, number>();
+  for (const url of fresh) {
+    if (out.length >= PRODUCT_MAX_PHOTOS) {
+      full.push(url);
+      continue;
+    }
+    const source = made[nameOf(url)]?.source ?? '';
+    const from = source ? out.indexOf(`/api/images/${source}`) : -1;
+    // Not made from one of its photos (an upload): at the end.
+    let at = from < 0 ? out.length : (next.get(source) ?? from + 1);
+    at = Math.min(at, out.length);
+    out.splice(at, 0, url);
+    if (from >= 0) next.set(source, at + 1);
+    added.push(url);
+  }
+  return { photos: out, added, full };
+}
+
+/**
  * The Picture studio's "Add to gallery" / "Add all": styled photos this feature made, added to an
- * existing product right after the photo each was made from (the real cover stays first). Safe to
- * send twice: a photo the product already has is not added again. Anything that is not a styled
- * photo is refused; what does not fit (8 photos) is said, not added. Saved through updateProduct
- * (validated, marked styled by the server, audited before it is saved).
+ * existing product where Settings → AI pictures puts them (first, the owner's photo last, by
+ * default: withStyledPhotos). Safe to send twice: a photo the product already has is not added
+ * again. Anything that is not a styled photo is refused; what does not fit (8 photos) is said, not
+ * added. Saved through updateProduct (validated, marked styled by the server, audited before it is saved).
  */
 export function addStyledPhotos(productId: string, body: Record<string, unknown>, actor: string) {
   for (const k of Object.keys(body)) if (k !== 'urls') throw new HttpError(400, `Unexpected field: ${k.slice(0, 30)}.`);
@@ -289,29 +405,15 @@ export function addStyledPhotos(productId: string, body: Record<string, unknown>
     if (!(n in made)) throw new HttpError(404, 'That is not a styled photo (make it again).');
     if (!readImage(n)) throw new HttpError(404, 'That styled photo is no longer stored (make it again).');
   }
+  return saveStyledPhotos(productId, names.map((n) => `/api/images/${n}`), actor);
+}
+
+/** The styled photos (already checked) saved on the product, in the owner's order. */
+export function saveStyledPhotos(productId: string, urls: string[], actor: string) {
   const product = getProduct(productId);
   if (!product) throw new HttpError(404, 'Product not found.');
-  const photos = [product.featuredImage, ...(product.galleryImages ?? [])].filter(Boolean);
-  const added: string[] = [];
-  const full: string[] = [];
-  /** Where the next one from each source goes: right after the source, in the order sent (as the editor does). */
-  const next = new Map<string, number>();
-  for (const name of [...new Set(names)]) {
-    const url = `/api/images/${name}`;
-    if (photos.includes(url)) continue;
-    if (photos.length >= PRODUCT_MAX_PHOTOS) {
-      full.push(url);
-      continue;
-    }
-    const source = made[name].source;
-    const from = source ? photos.indexOf(`/api/images/${source}`) : -1;
-    // Not made from one of its photos (an upload): at the end.
-    let at = from < 0 ? photos.length : (next.get(source) ?? from + 1);
-    at = Math.min(at, photos.length);
-    photos.splice(at, 0, url);
-    if (from >= 0) next.set(source, at + 1);
-    added.push(url);
-  }
+  const current = [product.featuredImage, ...(product.galleryImages ?? [])].filter(Boolean);
+  const { photos, added, full } = withStyledPhotos(current, urls, stagedRecords(), getSettings('aiPictures').photoOrder ?? 'styled-first');
   if (!added.length) return { product, added, full };
   const saved = updateProduct(productId, { featuredImage: photos[0], galleryImages: photos.slice(1) }, actor);
   audit('product.photo_staged_added', { by: actor, productId, added: added.map(nameOf), notAddedFull: full.length });

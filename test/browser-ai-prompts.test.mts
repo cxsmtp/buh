@@ -347,7 +347,7 @@ for (const width of [375, 1280]) {
     const text = (await card.getByLabel('The whole picture prompt').textContent())!;
     assert.ok(text.indexOf('The look and mood: Golden-hour light') > 0);
     assert.ok(text.indexOf('These rules come first, whatever is written above:') > text.indexOf('Golden-hour'));
-    assert.ok(text.trimEnd().endsWith('no people or parts of people, no pets.'));
+    assert.ok(text.trimEnd().endsWith('never a collage, grid, split screen, border or several views in one picture.'));
     await card.getByRole('button', { name: 'Save scenes and prompt' }).focus();
     await page.keyboard.press('Enter');
     await card.getByRole('status').filter({ hasText: /^Saved\. The studio offers these scenes now\./ }).waitFor();
@@ -397,15 +397,17 @@ for (const width of [375, 1280]) {
     assert.deepEqual(await overflow(page), []);
     await studio.getByTestId('stage-results').scrollIntoViewIfNeeded();
     await shot(page, `studio-${width}`);
-    // Add one: in the product's photos at once, after the original, and saved on the server.
+    // Add one: in the product's photos at once, first (the owner's photo last, the default), and saved on the server.
     const url = (await studio.getByRole('img', { name: 'Styled photo: Close-up of print and texture' }).getAttribute('src'))!;
     await studio.getByRole('button', { name: 'Add to gallery: Close-up of print and texture' }).click();
-    await studio.getByText(/Added after the original photo/).waitFor();
+    await studio.getByText(/Added to the photos/).waitFor();
     await page.waitForFunction((n) => document.querySelectorAll('[data-testid="product-gallery"] img').length === n, startCount + 1);
-    assert.equal(await sheet.getByTestId('product-gallery').locator('img').nth(1).getAttribute('src'), url, 'right after the cover it was made from');
+    const shown = await sheet.getByTestId('product-gallery').locator('img').evaluateAll((imgs) => imgs.map((i) => i.getAttribute('src')));
+    assert.ok(shown.indexOf(url) >= 0 && shown.indexOf(url) < shown.indexOf(photoUrl), 'the AI picture before the owner’s photo');
+    assert.equal(shown.at(-1), photoUrl, 'the owner’s photo last');
     const product = (await (await api('GET', '/api/admin/products')).json()).products.find((p: { id: string }) => p.id === productId);
-    assert.equal(product.featuredImage, photoUrl, 'the real photo stays the cover');
-    assert.equal(product.galleryImages[0], url);
+    assert.ok(product.stagedPhotos[product.featuredImage], 'an AI picture is the cover');
+    assert.equal(product.galleryImages.at(-1), photoUrl, 'the owner’s photo last');
     assert.equal(product.stagedPhotos[url].staged, true);
     // Discard the others: their files are gone.
     for (const name of ['Whole bed — Dubai master bedroom', 'Lifestyle — breakfast tray']) {

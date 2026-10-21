@@ -29,8 +29,8 @@ export function StageInBedroom({
   onNotes: (v: string) => void;
   /** The product's own words, so the setting suits it (never changes the product). */
   context: { title?: string; motif?: string; colors?: string[]; design?: string };
-  /** Add the styled photo after the one it was made from. */
-  onAdd: (url: string, after: string) => void;
+  /** Add the styled photos (in the order made): first (the owner's photo last) or after the one they were made from. */
+  onAdd: (urls: string[], after: string, order: 'styled-first' | 'photo-first') => void;
   onOpenSettings?: () => void;
 }) {
   return (
@@ -42,9 +42,8 @@ export function StageInBedroom({
       onNotes={onNotes}
       context={context}
       onOpenSettings={onOpenSettings}
-      onAdd={async (urls, source) => {
-        // Added in order, each after the original (so the last added sits right after it): reversed here.
-        for (const url of [...urls].reverse()) onAdd(url, source);
+      onAdd={async (urls, source, order) => {
+        onAdd(urls, source, order);
         return { added: urls };
       }}
     />

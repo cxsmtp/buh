@@ -10,7 +10,7 @@ import { getDb } from './db';
 import { kvGet, kvSet } from './kv';
 import { logEvent } from './log';
 import { awaitingWhatsAppCount, cardTakings, ordersNeedingAttention, receiptsNoRoom, summaryOrderRows, transfersAwaitedCount, transfersToCheckCount, unconfirmedPressure } from './orders';
-import { listProducts } from './products';
+import { getProduct, listProducts } from './products';
 import { vatStatus } from './reports';
 import { getSettings, phoneCheckMode } from './settings';
 
@@ -274,6 +274,7 @@ export function dailySummary(now = new Date()): { subject: string; text: string;
     vat = null;
   }
 
+  const stuck = (kvGet<Array<{ state: string; productId: string }>>('autoai:jobs')?.data ?? []).filter((j) => j.state === 'needs_you').map((j) => getProduct(j.productId)?.title ?? 'a removed product');
   const action: SummarySection['items'] = [
     // Every order, transfer and chat that needs you, one line each, so the email is enough on its own.
     ...(pending ? [{ text: `Waiting for your confirmation: ${pending}.`, tone: 'action' as const }, ...orderLines('confirm', 'Confirm', pending, now)] : []),
@@ -287,6 +288,8 @@ export function dailySummary(now = new Date()): { subject: string; text: string;
           ...chatRows.map((c) => ({ text: `Reply to: ${shortName(c.customer_name) === 'a customer' ? 'a visitor' : shortName(c.customer_name)} · waiting since ${ago(c.updated_at, now)}`, tone: 'action' as const })),
         ]
       : []),
+    // Quick add: products the AI could not finish (no name, pictures not made).
+    ...(stuck.length ? [{ text: `New products that need you: ${stuck.length} (Inventory → Being made by AI): ${stuck.slice(0, 3).join(' · ')}${stuck.length > 3 ? ' …' : ''}`, tone: 'action' as const }] : []),
     ...(soldOut.length ? [{ text: `Restock: ${plural(soldOut.length, 'product')} sold out, ${plural(low.length, 'size')} running low (see Inventory below).`, tone: 'action' as const }] : []),
     ...problems.map((p) => ({ text: p.text, tone: p.level === 'failing' ? ('action' as const) : ('warn' as const) })),
     ...(vat && !vat.registered && vat.level !== 'ok' ? [{ text: vat.text, tone: 'action' as const }] : []),

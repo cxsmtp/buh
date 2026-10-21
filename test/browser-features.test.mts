@@ -93,6 +93,8 @@ function png(): Buffer {
 test('the owner adds a one-of-a-kind product on a phone, sets pieces per size, and edits it', { skip }, async () => {
   const { ctx, page, errors } = await adminPage(375);
   await openAdminSection(page, /^Add product/);
+  // Add product opens quick add; this test is the full editor's.
+  await page.getByRole('dialog', { name: 'Quick add' }).getByRole('button', { name: /Use the full editor/ }).click();
   const editor = page.getByRole('dialog', { name: 'Add a product' });
   await editor.waitFor();
   assert.deepEqual(await overflow(page), [], 'editor fits a phone');
