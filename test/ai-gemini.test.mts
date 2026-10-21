@@ -247,7 +247,7 @@ test('Gemini writing errors are readable and never carry the key (reply or logs)
   });
   await assert.rejects(ai.describeProduct({ image: PHOTO_URL }, 'o@s.t'), (err: Error & { status?: number; details?: { code?: string } }) => {
     assert.equal(err.details?.code, 'ai_needs_billing');
-    assert.match(err.message, /free tier.*Set up billing/s);
+    assert.match(err.message, /free tier[\s\S]*Set up billing/);
     assert.ok(!/Wait a minute/.test(err.message));
     return true;
   });
