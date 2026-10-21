@@ -280,8 +280,12 @@ export function startAutoAdd(): void {
 /** This running copy of the shop (two run side by side for a minute during an update). */
 const INSTANCE = crypto.randomUUID();
 const LEASE_KEY = 'autoai:lease';
-/** A worker holds the lease while it works and renews it with every step; one that stopped loses it after this. */
-const LEASE_MS = 3 * 60 * 1000;
+/**
+ * A worker holds the lease while it works and renews it with every step and every minute of a
+ * wait; one that stopped loses it after this. Longer than the slowest picture (fal.ai: about 5
+ * minutes), so the other copy never starts a picture this one is still making.
+ */
+const LEASE_MS = 10 * 60 * 1000;
 
 /**
  * Only one copy of the shop works on the jobs at a time, so a picture is never paid for twice
@@ -307,8 +311,15 @@ function dropLease(): void {
 async function work(): Promise<void> {
   try {
     await workHeld();
+  } catch (err) {
+    // A busy database (the other copy writing during an update): tried again on the next round.
+    logEvent('warn', 'autoadd_worker_paused', { error: err instanceof Error ? err.message : String(err) });
   } finally {
-    dropLease();
+    try {
+      dropLease();
+    } catch {
+      // The lease runs out by itself.
+    }
   }
 }
 

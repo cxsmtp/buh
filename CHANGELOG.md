@@ -8,10 +8,10 @@
 - **Add product: just the basics, the AI does the rest.** Give a photo, the price, the sizes and stock (and a name only if you want) and press Add. The form is ready for the next one at once. In the background the shop writes the name and description, makes the pictures and puts the product in the shop. "Being made by AI" in Inventory shows how each one is going.
 - **Hands-off and safe.** If Google asks to wait, the shop waits and tries again by itself. A restart or an update in the middle loses nothing, and pictures already made are never paid for twice. A product the AI could not finish says why under "Needs you" and in the daily summary. Switch it all off in Settings → AI pictures → New products.
 - **Status.**
-  - **Benchmark:** see the status row.
-  - **Tests:** see the status row.
+  - **Benchmark:** 3 alternating rounds (branch first), 0 failed requests. Storefront branch 832 / 724 / 731 req/s vs main 731 / 702 / 762; catalogue API branch 697 / 695 / 700 vs main 689 / 613 / 695; serviceability API branch 622 / 640 / 638 vs main 558 / 569 / 620; gift page branch 610 / 619 / 657 vs main 544 / 504 / 640. No slower tail: the new work runs only for the admin, in the background.
+  - **Tests:** 1,182 of 1,191 on the full run. Five start-up tests found a real bug: the new background worker did not handle a busy database at start-up. It now logs it and tries again on its next round, and those tests pass (22 of 22 with the new tests). Four picture-studio browser tests expected the old order (after the original photo) and were updated to the new default; all pass again (17 of 17). A rerun on a fresh build passed 66 of 66 across quick add, pictures, inventory and start-up. The new tests cover: your own prompt's three angles; one request per angle with the list never sent; the first picture sent with the next ones; the order of pictures; quick add from start to finish; Google's wait; a restart keeping paid pictures; only one copy of the shop working at a time; the daily summary; and the screens at 375 and 1280 px.
   - **Dependency audit:** production 0 vulnerabilities; no new packages.
-  - **Security scan:** see the status row.
+  - **Security scan:** the new route is owner only behind the door, with a size-capped body, an allow-list, stored photos only and the normal product checks; background steps use the same limits and audits as the buttons. A Checkmarx scan found nothing exploitable at critical or high: its secret findings are fake test keys, and its container findings are npm and corepack, which the image already removes. The admin's bank-transfer link now goes through the safe-link check.
 
 ## BUH-02.23.02 — 2026-10-21 08:45 UTC · [#44](https://github.com/cxsmtp/buh/pull/44)
 

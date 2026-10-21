@@ -7,7 +7,7 @@
  *   the old fake /api/ai-transform is an unknown address;
  * - in Chromium at 375 px and 1280 px: Settings → AI writing (provider switch, Gemini key as
  *   ••••last4, Test fills the model lists), the editor's "Style in a bedroom" (original and styled
- *   side by side, Try again, Discard, Add to photos after the original), and the shop's "Styled
+ *   side by side, Try again, Discard, Add to photos: AI pictures first, the owner's photo last), and the shop's "Styled
  *   image" tag on the product card and in the gallery, gone when the setting is off. No sideways
  *   scroll, no page errors.
  * Screenshots go to BUH_SHOTS_DIR when it is set. Skipped without a build or Playwright.
@@ -259,9 +259,11 @@ for (const width of [375, 1280]) {
     assert.deepEqual(await overflow(page), [], 'results shown');
     await panel.getByTestId('stage-results').scrollIntoViewIfNeeded();
     if (SHOTS) await page.screenshot({ path: path.join(SHOTS, `styled-3-${width}.png`) });
-    // Add one: it goes after the original, which stays first.
+    // Add one: AI pictures go first, the owner's own photo last (the default).
+    const wholeBed = await panel.getByRole('img', { name: 'Styled photo: Whole bed — Dubai master bedroom' }).getAttribute('src');
     await panel.getByRole('button', { name: 'Add to gallery: Whole bed — Dubai master bedroom' }).click();
-    await panel.getByText(/Added after the original photo/).waitFor();
+    await panel.getByText(/Added to the photos/).waitFor();
+    assert.equal(await editor.getByAltText('Cover photo').getAttribute('src'), wholeBed, 'the AI picture is first');
     const photos = editor.getByRole('list', { name: 'Photos in order' }).locator('li img');
     assert.equal(await photos.count(), 2);
     // Try again one: a new picture; the first is thrown away.
@@ -284,7 +286,7 @@ for (const width of [375, 1280]) {
     await button.click();
     await page.waitForFunction(() => document.querySelectorAll('[data-testid="stage-result"] img[alt^="Styled photo"]').length === 3);
     await panel.getByRole('button', { name: 'Add all 3 to photos' }).click();
-    await panel.getByText(/3 added after the original photo/).waitFor();
+    await panel.getByText(/3 added to the photos/).waitFor();
     assert.equal(await photos.count(), 5);
     assert.equal(await editor.getByAltText('Cover photo').getAttribute('src').then((s) => s!.startsWith('/api/images/')), true);
     assert.deepEqual(await overflow(page), []);

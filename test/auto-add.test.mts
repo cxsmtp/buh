@@ -241,7 +241,7 @@ test('one copy of the shop works on the jobs at a time (an update’s overlap); 
   assert.equal(auto.takeLease('copy-a', 1000), true);
   assert.equal(auto.takeLease('copy-b', 2000), false, 'the other copy waits');
   assert.equal(auto.takeLease('copy-a', 3000), true, 'renewed by its holder');
-  assert.equal(auto.takeLease('copy-b', 3000 + 3 * 60 * 1000 + 1), true, 'taken over once the holder stopped');
+  assert.equal(auto.takeLease('copy-b', 3000 + 10 * 60 * 1000 + 1), true, 'taken over once the holder stopped');
   assert.equal(kvGet<{ by: string }>('autoai:lease')?.data.by, 'copy-b');
   kvSet('autoai:lease', { by: '', until: 0 });
   const size = [{ id: settings.getSettings('catalog').sizes[0].id, stock: 1 }];
