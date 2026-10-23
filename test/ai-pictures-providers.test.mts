@@ -120,7 +120,8 @@ beforeEach(async () => {
     return { status: 200, ok: true, data: { candidates: [{ content: { parts: [{ inlineData: { mimeType: 'image/png', data: fresh().toString('base64') } }] }, finishReason: 'STOP' }] } };
   });
   await settings.updateSettings('ai', { picturesProvider: '', geminiApiKey: null, openaiApiKey: null, falApiKey: null, openaiImageModel: '', falModel: 'fal-ai/nano-banana/edit' });
-  await settings.updateSettings('aiPictures', { ...staging.DEFAULT_AI_PICTURES } as unknown as Record<string, unknown>);
+  // The picture check has its own tests (auto-add); here each Gemini call is a picture.
+  await settings.updateSettings('aiPictures', { ...staging.DEFAULT_AI_PICTURES, checkPictures: false } as unknown as Record<string, unknown>);
 });
 afterEach(() => {
   transport._setPicturesTransport(null);

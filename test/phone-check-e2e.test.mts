@@ -255,7 +255,9 @@ for (const [width, phone] of [[375, '050 881 2001'], [1280, '055 881 2002']] as 
     await openAdminSection(hp, /^Orders/);
     await hp.getByRole('button', { name: /Awaiting WhatsApp/ }).click();
     const card = hp.getByTestId('whatsapp-check').filter({ hasText: order.customer.phone }).first();
-    await card.getByText(/Awaiting WhatsApp — auto-cancels in [56] h unless the customer opens WhatsApp/).waitFor();
+    // The customer tapped (WhatsApp opened), so the 24-hour deadline applies, not the 6-hour one.
+    await card.getByText(/Awaiting WhatsApp — auto-cancels in 2[34] h/).waitFor();
+    assert.equal(await card.getByText(/unless the customer opens WhatsApp/).count(), 0);
     const ask = card.getByRole('link', { name: 'Ask to confirm' });
     const digits = order.customer.phone.replace(/\D/g, '');
     assert.equal(await ask.getAttribute('href'), `https://wa.me/${digits}?text=${encodeURIComponent(`Hello Hind, please confirm your order ${id} from Beautiful UAE Home by replying YES. Thank you!`)}`);

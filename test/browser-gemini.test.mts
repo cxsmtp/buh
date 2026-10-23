@@ -247,8 +247,10 @@ for (const width of [375, 1280]) {
     const results = panel.getByTestId('stage-result');
     await page.waitForFunction(() => document.querySelectorAll('[data-testid="stage-result"] img[alt^="Styled photo"]').length === 3);
     assert.equal(await results.count(), 3);
-    const prompts = calls.slice(sentBefore).map((c) => String((c.body as { contents: Array<{ parts: Array<{ text?: string }> }> }).contents[0].parts[0].text));
+    const sent = calls.slice(sentBefore).filter((c) => c.method === 'POST').map((c) => String((c.body as { contents: Array<{ parts: Array<{ text?: string }> }> }).contents[0].parts[0].text));
+    const prompts = sent.filter((t) => !t.startsWith('You are checking a picture'));
     assert.equal(prompts.length, 3);
+    assert.equal(sent.length - prompts.length, 3, 'each picture checked against the product photo once');
     assert.ok(prompts.every((p) => /morning light/.test(p) && /These rules come first/.test(p)));
     assert.ok(prompts.some((p) => /karak chai/.test(p)));
     assert.ok(prompts.some((p) => /close-up of the bedding/.test(p)));
