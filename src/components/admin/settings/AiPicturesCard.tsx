@@ -18,6 +18,8 @@ import {
   STAGING_TRIO,
   STYLE_REFS_MAX,
   STYLE_UPLOAD_SIDE,
+  DEFAULT_ON_BED,
+  STAGING_ON_BED_MAX,
   angleName,
   splitAngles,
   stagingPrompt,
@@ -96,6 +98,8 @@ export function AiPicturesCard({
   const [autoCreate, setAutoCreate] = useState(value.autoCreate !== false);
   const [photoOrder, setPhotoOrder] = useState<AiPicturesSettings['photoOrder']>(value.photoOrder ?? 'styled-first');
   const [sameRoom, setSameRoom] = useState(value.sameRoom === true);
+  const [onBed, setOnBed] = useState(value.onBed?.trim() ? value.onBed : DEFAULT_ON_BED);
+  const [checkPictures, setCheckPictures] = useState(value.checkPictures !== false);
   const [uploading, setUploading] = useState(0);
   const [refStatus, setRefStatus] = useState<{ ok: boolean; text: string } | null>(null);
   const [preview, setPreview] = useState(false);
@@ -138,7 +142,7 @@ export function AiPicturesCard({
     setKeyStatus(problem ? { ok: false, text: problem } : { ok: true, text: `Saved: ${SHORT[p]} makes your pictures. Make them in Inventory → a product → Make pictures.` });
   };
 
-  const settings: AiPicturesSettings = { look: look.trim() === DEFAULT_PICTURE_LOOK ? '' : look.trim(), scenes, defaultSet: trio.filter((t) => scenes.some((s) => s.id === t)), references, useReferences: useRefs, autoCreate, photoOrder, sameRoom };
+  const settings: AiPicturesSettings = { look: look.trim() === DEFAULT_PICTURE_LOOK ? '' : look.trim(), scenes, defaultSet: trio.filter((t) => scenes.some((s) => s.id === t)), references, useReferences: useRefs, autoCreate, photoOrder, sameRoom, onBed: onBed.trim() === DEFAULT_ON_BED ? '' : onBed.trim(), checkPictures };
 
   const saveScenes = async () => {
     setSavingScenes(true);
@@ -199,9 +203,9 @@ export function AiPicturesCard({
   const assembled = useMemo(
     () =>
       split.angles.length
-        ? stagingPrompt(split.angles[0], '', '4:5', { title: 'Indigo Chevron Hand Block Print Bed Set', colors: ['Indigo', 'Ivory'] }, split.shared || DEFAULT_PICTURE_LOOK, refsInPreview, { angle: split.angles[0] })
-        : stagingPrompt(firstScene?.scene || '(the scene)', '', '4:5', { title: 'Indigo Chevron Hand Block Print Bed Set', colors: ['Indigo', 'Ivory'] }, look.trim() || DEFAULT_PICTURE_LOOK, refsInPreview),
-    [firstScene?.scene, split, look, refsInPreview]
+        ? stagingPrompt(split.angles[0], '', '4:5', { title: 'Indigo Chevron Hand Block Print Bed Set', colors: ['Indigo', 'Ivory'] }, split.shared || DEFAULT_PICTURE_LOOK, refsInPreview, { angle: split.angles[0], onBed: onBed.trim() || DEFAULT_ON_BED })
+        : stagingPrompt(firstScene?.scene || '(the scene)', '', '4:5', { title: 'Indigo Chevron Hand Block Print Bed Set', colors: ['Indigo', 'Ivory'] }, look.trim() || DEFAULT_PICTURE_LOOK, refsInPreview, { onBed: onBed.trim() || DEFAULT_ON_BED }),
+    [firstScene?.scene, split, look, refsInPreview, onBed]
   );
   const copy = async () => {
     try {
@@ -499,6 +503,25 @@ export function AiPicturesCard({
             </div>
           )}
         </div>
+        <div>
+          <div className="flex flex-wrap items-end justify-between gap-2 mb-1">
+            <label className="block text-xs font-semibold text-ink-soft" htmlFor="pictures-on-bed">
+              What goes on the bed (a rule for every picture)
+            </label>
+            <button type="button" className={small} onClick={() => setOnBed(DEFAULT_ON_BED)} disabled={onBed === DEFAULT_ON_BED} aria-label="Reset what goes on the bed to the shop's default">
+              <RotateCcw className="w-3.5 h-3.5" aria-hidden="true" /> Reset
+            </button>
+          </div>
+          <textarea id="pictures-on-bed" rows={3} className={field} value={onBed} maxLength={STAGING_ON_BED_MAX} onChange={(e) => setOnBed(e.target.value)} data-testid="pictures-on-bed" />
+          <p className="text-[11px] text-ink-muted mt-1">Sent after your prompt, with the fixed rules. By default only the bedsheet and its matching pillow covers: no comforter, throw or cushions.</p>
+        </div>
+        <label className="flex items-start gap-3 min-h-11">
+          <input type="checkbox" className="mt-1 w-5 h-5 shrink-0" checked={checkPictures} onChange={(e) => setCheckPictures(e.target.checked)} data-testid="pictures-check" />
+          <span className="text-sm text-ink">
+            <span className="font-semibold">Check every picture against the product photo</span>
+            <span className="block text-xs text-ink-soft">Gemini compares each new picture with your photo: the same design and colours, and nothing extra on the bed. One that doesn&rsquo;t match is made again once; if it still doesn&rsquo;t, it is marked &ldquo;Doesn&rsquo;t match&rdquo; and never added to a product by itself. Needs a Gemini key (a fraction of a cent per check).</span>
+          </span>
+        </label>
         <div className="space-y-1 rounded-xl border border-line bg-sand p-3" data-testid="pictures-fixed">
           <p className="text-xs font-bold text-ink flex items-center gap-1.5">
             <Lock className="w-3.5 h-3.5" aria-hidden="true" /> Fixed rules: always sent last, can&rsquo;t be removed

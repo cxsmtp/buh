@@ -21,7 +21,7 @@ import { DEFAULT_CARD_FEE_PERCENT, MAX_CARD_FEE_PERCENT } from '@/lib/money';
 import { waMeLink } from '@/lib/whatsappConfirm';
 import { DEFAULT_AI_PROMPT, FIELD_GUIDE_MAX, PROMPT_INSTRUCTIONS_MAX, WRITING_FIELDS, cleanGuide, cleanInstructions, type AiPromptSettings, type WritingFieldId } from '@/lib/aiPrompt';
 import { FAL_KEY, FAL_KEY_HINT, FAL_MODEL_ID, OPENAI_IMAGE_MODEL_ID, OPENAI_KEY, OPENAI_KEY_HINT, PICTURE_PROVIDERS } from '@/lib/pictureProviders';
-import { DEFAULT_AI_PICTURES, SCENE_ID, STYLE_MAX, STYLE_REFS_MAX, STYLE_SIDE_MAX, STAGING_LOOK_MAX, STAGING_MAX_SCENES, STAGING_NAME_MAX, STAGING_SCENE_MAX, STAGING_TRIO, oneLine, type AiPicturesSettings, type StagingScene } from '@/lib/staging';
+import { DEFAULT_AI_PICTURES, DEFAULT_ON_BED, SCENE_ID, STAGING_ON_BED_MAX, STYLE_MAX, STYLE_REFS_MAX, STYLE_SIDE_MAX, STAGING_LOOK_MAX, STAGING_MAX_SCENES, STAGING_NAME_MAX, STAGING_SCENE_MAX, STAGING_TRIO, oneLine, type AiPicturesSettings, type StagingScene } from '@/lib/staging';
 import { DEFAULT_SEO, type SeoSettings } from '@/lib/seo/types';
 import { validateSeoSettings } from './seoSettings';
 import { refreshShopPages } from './pageCache';
@@ -1306,7 +1306,7 @@ export function validateAiPrompt(v: unknown, current: AiPromptSettings): AiPromp
  * (first). The fixed rules are not settings.
  */
 export function validateAiPictures(input: Obj, current: AiPicturesSettings): AiPicturesSettings {
-  for (const k of Object.keys(input)) if (!['look', 'scenes', 'defaultSet', 'references', 'useReferences', 'autoCreate', 'photoOrder', 'sameRoom'].includes(k)) throw new HttpError(400, `Unexpected field: ${k.slice(0, 30)}.`);
+  for (const k of Object.keys(input)) if (!['look', 'scenes', 'defaultSet', 'references', 'useReferences', 'autoCreate', 'photoOrder', 'sameRoom', 'onBed', 'checkPictures'].includes(k)) throw new HttpError(400, `Unexpected field: ${k.slice(0, 30)}.`);
   let look = current.look ?? '';
   if (input.look !== undefined) {
     if (typeof input.look !== 'string') throw new HttpError(400, 'The look and mood must be text.');
@@ -1344,10 +1344,18 @@ export function validateAiPictures(input: Obj, current: AiPicturesSettings): AiP
   if (!defaultSet.length) defaultSet = scenes.slice(0, STAGING_TRIO).map((s) => s.id);
   const references = input.references === undefined ? current.references ?? [] : cleanReferences(input.references);
   const photoOrder = input.photoOrder === undefined ? (current.photoOrder ?? 'styled-first') : input.photoOrder;
+  let onBed = current.onBed ?? '';
+  if (input.onBed !== undefined) {
+    if (typeof input.onBed !== 'string') throw new HttpError(400, 'What goes on the bed must be text.');
+    onBed = oneLine(input.onBed);
+    if (onBed.length > STAGING_ON_BED_MAX) throw new HttpError(400, `What goes on the bed: at most ${STAGING_ON_BED_MAX} characters.`);
+    if (onBed === DEFAULT_ON_BED) onBed = '';
+  }
+  if (input.checkPictures !== undefined && typeof input.checkPictures !== 'boolean') throw new HttpError(400, 'Check each picture: on or off.');
   if (input.sameRoom !== undefined && typeof input.sameRoom !== 'boolean') throw new HttpError(400, 'Same room in every angle: on or off.');
   if (input.autoCreate !== undefined && typeof input.autoCreate !== 'boolean') throw new HttpError(400, 'New products written and pictured by AI: on or off.');
   if (photoOrder !== 'styled-first' && photoOrder !== 'photo-first') throw new HttpError(400, 'Picture order: AI pictures first, or your photo first.');
-  return { look, scenes, defaultSet, references, useReferences: bool(input.useReferences, current.useReferences ?? true), autoCreate: bool(input.autoCreate, current.autoCreate ?? true), photoOrder, sameRoom: bool(input.sameRoom, current.sameRoom ?? false) };
+  return { look, scenes, defaultSet, references, useReferences: bool(input.useReferences, current.useReferences ?? true), autoCreate: bool(input.autoCreate, current.autoCreate ?? true), photoOrder, sameRoom: bool(input.sameRoom, current.sameRoom ?? false), onBed, checkPictures: bool(input.checkPictures, current.checkPictures ?? true) };
 }
 
 /**

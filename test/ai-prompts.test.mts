@@ -91,6 +91,8 @@ const status = (p: Promise<unknown> | (() => unknown)) =>
   );
 
 beforeEach(async () => {
+  // The design check (its own tests: auto-add.test.mts) makes calls of its own; these tests count the picture calls.
+  await settings.updateSettings('aiPictures', { checkPictures: false });
   _clearAllRateLimits();
   sent = [];
   geminiSent = [];
