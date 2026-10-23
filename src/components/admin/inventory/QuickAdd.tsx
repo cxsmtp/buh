@@ -215,6 +215,10 @@ export function QuickAdd({
   const [publish, setPublish] = useState(true);
   const [error, setError] = useState('');
   const [done, setDone] = useState('');
+  /** The list of items being made: folded into one line so the form stays in view (opened on a tap, or when one failed). */
+  const [showMade, setShowMade] = useState(false);
+  const scroller = useRef<HTMLDivElement>(null);
+  const camera = useRef<HTMLInputElement>(null);
   /** Items already added here, still uploading their photos or being sent (or that failed: Try again). */
   const [sending, setSending] = useState<Sending[]>([]);
   const key = useRef(newKey('q'));
@@ -293,7 +297,11 @@ export function QuickAdd({
     setPhotos([]);
     setTitle('');
     setSending((all) => [...all, item]);
-    setDone(status?.writer || status?.pictures ? 'Added: add the next one. The AI writes it, makes its pictures and puts it in the shop by itself.' : `Added${publish ? ' to the shop' : ' (hidden)'}: add the next one.`);
+    setDone(status?.writer || status?.pictures ? 'The AI is finishing it in the background (name, description, pictures) and puts it in the shop by itself. Add the next item:' : `It is ${publish ? 'in the shop' : 'saved, hidden'}. Add the next item:`);
+    // Back to the top, ready for the next item: the camera is one tap away (reported: the form
+    // stayed scrolled down after Add, so it didn't look open for the next item).
+    scroller.current?.scrollTo({ top: 0, behavior: 'smooth' });
+    window.setTimeout(() => camera.current?.focus({ preventScroll: true }), 50);
     void send(item);
   };
 
@@ -321,12 +329,37 @@ export function QuickAdd({
           <X className="w-5 h-5" aria-hidden="true" />
         </button>
       </div>
-      <div className="flex-1 overflow-y-auto px-4 py-3 space-y-4" data-testid="quick-add">
+      <div ref={scroller} className="flex-1 overflow-y-auto px-4 py-3 space-y-4" data-testid="quick-add">
+        {done && (
+          <div role="status" className="rounded-xl border border-success-line bg-success-soft p-3 text-sm text-ink" data-testid="quick-added">
+            <p className="font-bold flex items-center gap-1.5">
+              <Check className="w-4 h-4 text-success shrink-0" aria-hidden="true" /> Added
+            </p>
+            <p className="text-xs text-ink-soft mt-0.5">{done}</p>
+          </div>
+        )}
+        {(() => {
+          const made = status ? visibleJobs(status.jobs, 'form') : [];
+          const count = sending.length + made.length;
+          if (!count) return null;
+          const failed = sending.some((x) => x.failed) || made.some((j) => j.state === 'needs_you');
+          const working = sending.filter((x) => !x.failed).length + made.filter((j) => j.state !== 'done' && j.state !== 'needs_you').length;
+          return (
+            <button type="button" onClick={() => setShowMade((v) => !v)} aria-expanded={showMade || failed} aria-controls="quick-being-made" className={`w-full min-h-11 px-3 rounded-xl border text-left text-xs font-semibold flex items-center gap-2 ${failed ? 'border-warning-line bg-warning-soft text-ink' : 'border-line bg-surface text-ink'}`} data-testid="quick-made-summary">
+              {working > 0 ? <Loader2 className="w-4 h-4 animate-spin shrink-0" aria-hidden="true" /> : <Check className="w-4 h-4 text-success shrink-0" aria-hidden="true" />}
+              <span className="flex-1">
+                {working > 0 ? `${working} being made by AI` : 'All finished'}
+                {failed ? ' · one needs you' : ''}
+              </span>
+              <span className="text-ink-soft">{showMade || failed ? 'Hide' : 'See them'}</span>
+            </button>
+          );
+        })()}
         <section className="space-y-2" aria-label="Photos">
           <div className="grid grid-cols-2 gap-2">
             <label className={`min-h-12 rounded-xl bg-ink text-paper font-bold flex items-center justify-center gap-2 cursor-pointer focus-within:ring-2 focus-within:ring-gold ${photos.length >= MAX_PHOTOS ? 'opacity-50' : ''}`}>
               <Camera className="w-5 h-5" aria-hidden="true" /> Camera
-              <input type="file" accept="image/*" capture="environment" className="sr-only" aria-label="Take a photo with the camera" onChange={(e) => { addPhotos(e.target.files); e.target.value = ''; }} disabled={photos.length >= MAX_PHOTOS} />
+              <input ref={camera} type="file" accept="image/*" capture="environment" className="sr-only" aria-label="Take a photo with the camera" onChange={(e) => { addPhotos(e.target.files); e.target.value = ''; }} disabled={photos.length >= MAX_PHOTOS} />
             </label>
             <label className={`min-h-12 rounded-xl border border-ink bg-surface text-ink font-bold flex items-center justify-center gap-2 cursor-pointer focus-within:ring-2 focus-within:ring-gold ${photos.length >= MAX_PHOTOS ? 'opacity-50' : ''}`}>
               <ImagePlus className="w-5 h-5" aria-hidden="true" /> Gallery
@@ -428,14 +461,9 @@ export function QuickAdd({
             {error}
           </p>
         )}
-        {done && (
-          <p role="status" className="text-sm font-semibold text-success flex items-start gap-1">
-            <Check className="w-4 h-4 shrink-0 mt-0.5" aria-hidden="true" /> {done}
-          </p>
-        )}
 
-        {(sending.length > 0 || (status && visibleJobs(status.jobs, 'form').length > 0)) && (
-          <section className="space-y-2" aria-label="Being made">
+        {(sending.length > 0 || (status && visibleJobs(status.jobs, 'form').length > 0)) && (showMade || sending.some((x) => x.failed) || Boolean(status?.jobs.some((j) => j.state === 'needs_you'))) && (
+          <section id="quick-being-made" className="space-y-2" aria-label="Being made">
             <h4 className="text-sm font-bold text-ink">Being made</h4>
             {sending.length > 0 && (
               <ul className="space-y-2" data-testid="quick-sending">
