@@ -220,6 +220,14 @@ for (const [width, phone] of [[375, '050 881 2001'], [1280, '055 881 2002']] as 
     // Not "thank you, confirmed": the last step is the main action (reported: it was not clear).
     await page.getByRole('heading', { name: 'Confirm your order on WhatsApp' }).waitFor();
     await page.getByText('Last step · not confirmed yet').waitFor();
+    // Reported: the action must stand out. The label in red, the heading in the button's green, and "click the green button".
+    await page.getByText('Click the green button below to confirm your order').waitFor();
+    const colour = (sel: string) => page.locator(sel).first().evaluate((el) => getComputedStyle(el).color);
+    const background = (sel: string) => page.locator(sel).first().evaluate((el) => getComputedStyle(el).backgroundColor);
+    const rgb = (c: string) => c.match(/\d+/g)!.slice(0, 3).map(Number);
+    const [lr, lg, lb] = rgb(await colour('[data-testid="order-last-step-label"]'));
+    assert.ok(lr > lg + 40 && lr > lb + 40, `the last-step line is red: ${lr},${lg},${lb}`);
+    assert.equal(await colour('#order-confirmed-title'), await background('[data-testid="wa-confirm-button"]'), 'the heading in the button’s green');
     await page.getByText(/Please tap within 6 hours: orders not confirmed within 24 hours are cancelled \(after 6 hours if WhatsApp is never opened\)\./).waitFor();
     assert.equal(await page.getByText('Thank you for your order').count(), 0, 'not thanked as if it were confirmed');
     const button = page.getByRole('link', { name: /Confirm (my order )?on WhatsApp/ });
