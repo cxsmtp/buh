@@ -1,6 +1,7 @@
 import { after } from 'next/server';
 import { audit } from '@/lib/server/audit';
 import { emailBankDetails } from '@/lib/server/bankMail';
+import { emailOrder } from '@/lib/server/orderMail';
 import { enforceIpLimit } from '@/lib/server/guard';
 import { assertSameOrigin, clientIp, handleRouteError, HttpError, json, readJsonBody } from '@/lib/server/http';
 import { customerView, getOrder, placeOrder } from '@/lib/server/orders';
@@ -26,6 +27,8 @@ export async function POST(req: Request) {
     const { order, created } = placeOrder(body, { ip });
     if (created) audit('order.created', { orderId: order.id, total: order.total, paymentMethod: order.paymentMethod, ip });
     if (created && order.bankTransfer && order.customer.email) after(() => emailBankDetails(order.id));
+    // Cash on delivery: "your order is in process", with the one last step (confirm on WhatsApp).
+    if (created && order.paymentMethod === 'cod' && order.customer.email) after(() => emailOrder(order.id, 'received'));
     if (order.paymentMethod !== 'online_card') return json({ success: true, order: customerView(order) }, created ? 201 : 200);
     // The same checkout sent again (a retry): the same order, and the same PaymentIntent (or, once
     // paid, the paid order: never a second charge).

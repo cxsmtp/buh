@@ -5,6 +5,7 @@ import type { Order } from '@/types';
 import { HttpError } from './http';
 import { cancelJeeblyBooking, jeeblyBooking } from './jeeblyOps';
 import { assertNotHeld, assertShipAllowed, getOrder, recordBooking } from './orders';
+import { emailOrder } from './orderMail';
 import { contactEmail, getSettings } from './settings';
 
 export interface DispatchOutcome {
@@ -165,6 +166,8 @@ export async function dispatchOrder(input: {
       saved = getOrder(order.id) ?? saved;
     }
 
+    // Booked with a real courier: the order is confirmed for the customer too (once; never a test booking).
+    if (result.success && !result.isSimulated && saved.status !== 'cancelled' && saved.customer.email) void emailOrder(saved.id, 'confirmed');
     const { rawResponse: _raw, ...safe } = result as typeof result & { rawResponse?: unknown };
     void _raw;
     return {

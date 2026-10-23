@@ -1,4 +1,6 @@
+import { after } from 'next/server';
 import { audit } from '@/lib/server/audit';
+import { emailOrder } from '@/lib/server/orderMail';
 import { requireAdmin } from '@/lib/server/guard';
 import { allowFields, handleRouteError, HttpError, json, readJsonBody } from '@/lib/server/http';
 import { getOrder, orderEvents, updateOrderByAdmin } from '@/lib/server/orders';
@@ -40,6 +42,8 @@ export async function PATCH(req: Request, { params }: { params: Promise<{ id: st
     }
     // Audited (before → after) inside updateOrderByAdmin, before anything is saved.
     const order = updateOrderByAdmin(id, body, session.email);
+    // Moved on by the shop (Confirmed, Dispatched…): "your order is confirmed", once (emailOrder checks).
+    if (order.customer.email && order.status !== 'cancelled') after(() => emailOrder(id, 'confirmed'));
     // Cancelled: its Jeebly booking is cancelled with Jeebly too, the answer audited before it is
     // reported; a refusal is said (cancel it in the portal), never claimed as done.
     if (body.status === 'cancelled' && current?.status !== 'cancelled') {

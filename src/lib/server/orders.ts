@@ -994,6 +994,38 @@ export function claimBankEmail(id: string): 'claimed' | 'already' | 'limited' {
   });
 }
 
+/** The customer's order emails ("in process", "confirmed"): at most this many a day to one address, and per connection. */
+export const ORDER_EMAIL_LIMITS = { perAddress: 6, perConnection: 10, windowMs: 24 * 3600_000 };
+export type OrderEmailKind = 'received' | 'confirmed';
+const ORDER_EMAIL_COLUMN: Record<OrderEmailKind, string> = { received: 'received_emailed_at', confirmed: 'confirmed_emailed_at' };
+
+/**
+ * Claim one of an order's customer emails (src/lib/server/orderMail.ts) before it is sent: once per
+ * order and kind (two copies of the shop during an update, a retry), and within the day's share for
+ * the address and the connection (the address is whatever was typed at checkout), counting both kinds.
+ */
+export function claimOrderEmail(id: string, kind: OrderEmailKind): 'claimed' | 'already' | 'limited' {
+  const column = ORDER_EMAIL_COLUMN[kind];
+  return inTransaction(() => {
+    const db = getDb();
+    const row = db.prepare(`SELECT ${column} AS at, card_ip, lower(json_extract(data, '$.customer.email')) AS email FROM orders WHERE id = ?`).get(id) as { at: string | null; card_ip: string | null; email: string | null } | undefined;
+    if (!row || row.at) return 'already';
+    const since = new Date(Date.now() - ORDER_EMAIL_LIMITS.windowMs).toISOString();
+    const sent = (where: string, value: string) =>
+      db.prepare(`SELECT (SELECT COUNT(*) FROM orders WHERE received_emailed_at >= ? AND ${where}) + (SELECT COUNT(*) FROM orders WHERE confirmed_emailed_at >= ? AND ${where})`).pluck().get(since, value, since, value) as number;
+    if (row.email && sent("lower(json_extract(data, '$.customer.email')) = ?", row.email) >= ORDER_EMAIL_LIMITS.perAddress) return 'limited';
+    if (row.card_ip && sent('card_ip = ?', row.card_ip) >= ORDER_EMAIL_LIMITS.perConnection) return 'limited';
+    return db.prepare(`UPDATE orders SET ${column} = ? WHERE id = ? AND ${column} IS NULL`).run(new Date().toISOString(), id).changes === 1 ? 'claimed' : 'already';
+  });
+}
+
+/** An order email sent (noted on the order's history), failed (released, noted), or over the day's share (noted). */
+export function orderEmailDone(id: string, kind: OrderEmailKind, outcome: 'sent' | 'failed' | 'limited'): void {
+  if (outcome === 'failed') getDb().prepare(`UPDATE orders SET ${ORDER_EMAIL_COLUMN[kind]} = NULL WHERE id = ?`).run(id);
+  logEvent(id, 'shop', outcome === 'sent' ? `${kind}_emailed` : `${kind}_email_${outcome}`);
+  bump('orders');
+}
+
 /** A bank-details email not sent because of the limits above (noted on the order's history). */
 export function bankEmailLimited(id: string): void {
   logEvent(id, 'shop', 'bank_email_limited');

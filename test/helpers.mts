@@ -34,7 +34,7 @@ export async function openAdminSection(page: import('playwright').Page, name: Re
 }
 
 /** The database version the current build migrates to (db.ts MIGRATIONS.length). */
-export const LATEST_DB_VERSION = 16;
+export const LATEST_DB_VERSION = 17;
 
 /** Undo migration 14 (accountant accounts, VAT), for tests that rebuild an older database. */
 export const UNDO_MIGRATION_15 = 'DROP TABLE collections;';

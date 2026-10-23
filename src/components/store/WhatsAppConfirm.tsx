@@ -23,6 +23,9 @@ export function WhatsAppConfirm({
   cancelHours,
   openHours,
   buttonLabel = 'Confirm on WhatsApp',
+  lead = false,
+  tapped = false,
+  onTapped,
 }: {
   orderId: string;
   phone: string;
@@ -33,6 +36,14 @@ export function WhatsAppConfirm({
   openHours?: number | null;
   /** "Confirm & ask for bank details on WhatsApp" for a bank transfer "on request" (the one button). */
   buttonLabel?: string;
+  /**
+   * The order page's main action (the page's heading says "Last step: confirm your order on
+   * WhatsApp"): the button only, large, without this box's own heading and text.
+   */
+  lead?: boolean;
+  /** The customer already tapped it (the button then reads "Open WhatsApp again"). */
+  tapped?: boolean;
+  onTapped?: () => void;
 }) {
   const link = confirmLink(useShop().store.whatsappNumber, orderId, check.code, { bankDetails });
   if (!link) return null;
@@ -47,6 +58,7 @@ export function WhatsAppConfirm({
 
   // Note that WhatsApp opened (for the shop's timeline). Never holds up the link.
   const opened = () => {
+    onTapped?.();
     void fetch('/api/orders/whatsapp-opened', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -55,6 +67,34 @@ export function WhatsAppConfirm({
       body: JSON.stringify({ orderId, phone }),
     }).catch(() => {});
   };
+
+  const button = (
+    <a
+      href={link}
+      target="_blank"
+      rel="noopener noreferrer"
+      onClick={opened}
+      data-testid="wa-confirm-button"
+      className={`w-full ${lead && !tapped ? 'min-h-14 text-base' : 'min-h-12 text-sm'} ${tapped ? 'bg-surface text-ink border border-success-line hover:bg-success-soft' : 'bg-whatsapp text-paper hover:brightness-110'} font-semibold py-3 px-4 rounded-xl flex items-center justify-center gap-2 transition-all focus:outline-none focus-visible:ring-2 focus-visible:ring-gold focus-visible:ring-offset-2`}
+    >
+      <MessageCircle className="w-5 h-5 shrink-0" aria-hidden="true" />
+      <span>{tapped ? 'Didn’t send it? Open WhatsApp again' : buttonLabel}</span>
+    </a>
+  );
+  const says = (
+    <p className="text-[11px] text-ink-muted text-center break-anywhere">
+      It says: &ldquo;Confirm my order <span className="font-mono">{orderId}</span> · code <span className="font-mono">{check.code}</span>{bankDetails ? ', and please send me the bank details' : ''}&rdquo;. Just tap Send.
+    </p>
+  );
+
+  if (lead) {
+    return (
+      <div className="space-y-2" data-testid="wa-confirm-lead">
+        {button}
+        {says}
+      </div>
+    );
+  }
 
   return (
     <section aria-labelledby={`wa-confirm-${orderId}`} className="rounded-2xl border border-success-line bg-success-soft/60 p-4 space-y-3 text-left">
@@ -75,19 +115,8 @@ export function WhatsAppConfirm({
             ? 'We’ll start your order once we get your message.'
             : 'Your order is placed either way.'}
       </p>
-      <a
-        href={link}
-        target="_blank"
-        rel="noopener noreferrer"
-        onClick={opened}
-        className="w-full min-h-12 bg-whatsapp hover:brightness-110 text-paper font-semibold text-sm py-3 px-4 rounded-xl flex items-center justify-center gap-2 transition-all focus:outline-none focus-visible:ring-2 focus-visible:ring-gold focus-visible:ring-offset-2"
-      >
-        <MessageCircle className="w-5 h-5 shrink-0" aria-hidden="true" />
-        <span>{buttonLabel}</span>
-      </a>
-      <p className="text-[11px] text-ink-muted text-center break-anywhere">
-        It says: &ldquo;Confirm my order <span className="font-mono">{orderId}</span> · code <span className="font-mono">{check.code}</span>{bankDetails ? ', and please send me the bank details' : ''}&rdquo;. Just tap Send.
-      </p>
+      {button}
+      {says}
     </section>
   );
 }
