@@ -1,5 +1,14 @@
 # Changelog
 
+## BUH-02.24.03 — 2026-10-23 · [#48](https://github.com/cxsmtp/buh/pull/48)
+
+- **Security update: Next.js 16.4.3.** The web framework the shop runs on published three serious fixes: two ways an attacker could run code on a server (through the image optimiser with SVG files, and through cached functions) and a way to overload it. The shop now runs the fixed version, and it reaches your shop by itself, like every release. Nothing changes in how the shop looks or works.
+- **Status.**
+  - **Benchmark:** see the status row.
+  - **Tests:** see the status row.
+  - **Dependency audit:** production 0 vulnerabilities (it was 1 critical: next 16.0.0–16.4.0).
+  - **Security scan:** dependency update only; no code changed.
+
 ## BUH-02.24.02 — 2026-10-21 16:10 UTC · [#47](https://github.com/cxsmtp/buh/pull/47)
 
 - **Each angle is really a new picture.** The 3 AI pictures of a product came out almost the same, because each one was asked to "edit" your photo, which kept your camera position. Each angle in your prompt is now a new photograph from its own camera position. Your photo is used only for the bedding's true pattern and colours, so the bed is seen from three clearly different sides.
