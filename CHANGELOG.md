@@ -4,8 +4,8 @@
 
 - **Security update: Next.js 16.4.3.** The web framework the shop runs on published three serious fixes: two ways an attacker could run code on a server (through the image optimiser with SVG files, and through cached functions) and a way to overload it. The shop now runs the fixed version, and it reaches your shop by itself, like every release. Nothing changes in how the shop looks or works.
 - **Status.**
-  - **Benchmark:** see the status row.
-  - **Tests:** see the status row.
+  - **Benchmark:** 3 alternating rounds, 0 failed requests in every run. Part of that run overlapped with other tests on the same machine, so the home page was rerun alone as a 4-round A/B, taking turns: branch 678 / 638 / 692 / 701 req/s vs main 668 / 700 / 702 / 740, p95 107–114 ms vs 102–113 ms. That is within noise.
+  - **Tests:** 1,195 of 1,197 on the full run. The 2 failures were a look screen and the quick-add screen, during the same overlap; both files pass alone (30 of 30). No code changed.
   - **Dependency audit:** production 0 vulnerabilities (it was 1 critical: next 16.0.0–16.4.0).
   - **Security scan:** dependency update only; no code changed.
 
