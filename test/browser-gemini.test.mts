@@ -70,6 +70,10 @@ before(async () => {
         return res.end(JSON.stringify({ error: { code: 400, message: `API key not valid. ${String(req.headers['x-goog-api-key'])}`, status: 'INVALID_ARGUMENT', details: [{ reason: 'API_KEY_INVALID' }] } }));
       }
       if (req.method === 'GET' && req.url === '/v1beta/models?pageSize=1000') return res.end(JSON.stringify(MODELS));
+      // The check on every picture (on by default): it matches.
+      if (req.method === 'POST' && /You are the strict quality check/.test(text)) {
+        return res.end(JSON.stringify({ candidates: [{ content: { role: 'model', parts: [{ text: JSON.stringify({ samePrint: true, sameColours: true, pillowCovers: true, extraItems: false, reason: 'matches' }) }] }, finishReason: 'STOP' }] }));
+      }
       if (req.method === 'POST' && /^\/v1beta\/models\/gemini-[a-z0-9.-]+:generateContent$/.test(req.url!)) {
         // A little wait, as a real image model takes a while (the editor shows its spinner).
         return setTimeout(() => res.end(JSON.stringify({ candidates: [{ content: { role: 'model', parts: [{ inlineData: { mimeType: 'image/png', data: staged().toString('base64') } }] }, finishReason: 'STOP' }] })), 400);
@@ -248,7 +252,7 @@ for (const width of [375, 1280]) {
     await page.waitForFunction(() => document.querySelectorAll('[data-testid="stage-result"] img[alt^="Styled photo"]').length === 3);
     assert.equal(await results.count(), 3);
     const sent = calls.slice(sentBefore).filter((c) => c.method === 'POST').map((c) => String((c.body as { contents: Array<{ parts: Array<{ text?: string }> }> }).contents[0].parts[0].text));
-    const prompts = sent.filter((t) => !t.startsWith('You are checking a picture'));
+    const prompts = sent.filter((t) => !t.startsWith('You are the strict quality check'));
     assert.equal(prompts.length, 3);
     assert.equal(sent.length - prompts.length, 3, 'each picture checked against the product photo once');
     assert.ok(prompts.every((p) => /morning light/.test(p) && /These rules come first/.test(p)));

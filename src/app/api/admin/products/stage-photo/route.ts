@@ -1,6 +1,6 @@
 import { requireAdmin } from '@/lib/server/guard';
 import { handleRouteError, json, readJsonBody } from '@/lib/server/http';
-import { discardStagedPhoto, stagePhoto, stagingStatus } from '@/lib/server/stagePhoto';
+import { approveStagedPhoto, discardStagedPhoto, stagePhoto, stagingStatus } from '@/lib/server/stagePhoto';
 
 /** Whether "Style in a bedroom" can run (the editor explains how to add a Gemini key when not). */
 export async function GET(req: Request) {
@@ -38,5 +38,16 @@ export async function DELETE(req: Request) {
     return json({ success: true, ...discardStagedPhoto(body, session.email) });
   } catch (err) {
     return handleRouteError(err, 'admin/products/stage-photo/discard');
+  }
+}
+
+/** "I've compared it": { url, approve: true } for an AI picture that could not be checked (never one that failed). */
+export async function PATCH(req: Request) {
+  try {
+    const session = await requireAdmin(req);
+    const body = await readJsonBody(req, 1024);
+    return json({ success: true, ...approveStagedPhoto(body, session.email) });
+  } catch (err) {
+    return handleRouteError(err, 'admin/products/stage-photo/approve');
   }
 }

@@ -91,8 +91,9 @@ const status = (p: Promise<unknown> | (() => unknown)) =>
   );
 
 beforeEach(async () => {
-  // The design check (its own tests: auto-add.test.mts) makes calls of its own; these tests count the picture calls.
-  await settings.updateSettings('aiPictures', { checkPictures: false });
+  // The check on every picture (its own tests: auto-add.test.mts) is on, as in the shop, and finds the
+  // pictures match; its calls are answered here and not counted.
+  await settings.updateSettings('aiPictures', { checkPictures: true });
   _clearAllRateLimits();
   sent = [];
   geminiSent = [];
@@ -105,6 +106,10 @@ beforeEach(async () => {
   });
   gemini._setGeminiTransport(async (req) => {
     const body = req.body ? JSON.parse(req.body) : null;
+    if (req.path.startsWith('/models?')) return { status: 200, ok: true, data: { models: [{ name: 'models/gemini-3-flash', supportedGenerationMethods: ['generateContent'] }, { name: 'models/gemini-3.1-flash-image', supportedGenerationMethods: ['generateContent'] }] } };
+    if (String(body?.contents?.[0]?.parts?.[0]?.text ?? '').startsWith('You are the strict quality check')) {
+      return { status: 200, ok: true, data: { candidates: [{ content: { parts: [{ text: JSON.stringify({ samePrint: true, sameColours: true, pillowCovers: true, extraItems: false, reason: 'matches' }) }] }, finishReason: 'STOP' }] } };
+    }
     geminiSent.push({ path: req.path, body });
     if (req.path.includes('image')) return { status: 200, ok: true, data: { candidates: [{ content: { parts: [{ inlineData: { mimeType: 'image/png', data: freshStaged().toString('base64') } }] }, finishReason: 'STOP' }] } };
     const sys = String((body?.systemInstruction as { parts: Array<{ text: string }> })?.parts?.[0]?.text ?? '');

@@ -700,7 +700,7 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
                 {waTapped ? <Hourglass className="w-7 h-7" strokeWidth={1.25} /> : <MessageCircle className="w-7 h-7" strokeWidth={1.25} />}
               </div>
               <div>
-                {/* Not confirmed yet: the label in red and the heading in the button's green, so the action stands out. */}
+                {/* Not confirmed yet: the label in red, the heading in the button's green and the call to action in amber, so the action stands out. */}
                 <span data-testid="order-last-step-label" className={`label-caps ${waTapped ? 'text-gold-deep' : 'text-danger font-semibold'}`}>{waTapped ? 'Order in process' : 'Last step · not confirmed yet'}</span>
                 <h2 id="order-confirmed-title" className={`font-serif text-3xl mt-2 ${waTapped ? 'text-ink' : 'text-whatsapp'}`}>
                   {waTapped ? 'Your order is in process' : 'Confirm your order on WhatsApp'}
@@ -712,7 +712,7 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
                     </>
                   ) : (
                     <>
-                      Your order <span className="font-mono">{confirmedOrder.id}</span> is reserved for you. <strong className="text-ink">Click the green button below to confirm your order</strong>, then press <strong>Send</strong> in WhatsApp.
+                      Your order <span className="font-mono">{confirmedOrder.id}</span> is reserved for you. <strong data-testid="order-last-step-cta" className="text-warning">Click the green button below to confirm your order</strong>, then press <strong>Send</strong> in WhatsApp.
                       {cancelHours
                         ? openHours && openHours < cancelHours
                           ? ` Please tap within ${openHours} hours: orders not confirmed within ${cancelHours} hours are cancelled (after ${openHours} hours if WhatsApp is never opened).`

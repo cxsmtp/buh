@@ -1,5 +1,18 @@
 # Changelog
 
+## BUH-02.25.01 — 2026-10-23 HH:MM UTC · [#50](https://github.com/cxsmtp/buh/pull/50)
+
+- **Only pictures of your exact product reach the shop.** Every AI picture is checked against your photo for the same design, the same colours, the product's pillow covers and nothing else on the bed. A picture that isn't exactly your product can't be added to it by anyone: the studio, quick add or the server itself.
+- **Pillow covers are a must.** Every picture is told to show the product's pillow covers in its own design, even in a close-up. A picture without them fails the check.
+- **Stricter check, more tries.** The check now fails a picture whenever it is unsure, and a failing picture is made again up to 3 times in all, told what was wrong each time.
+- **Not checked means not published.** Quick add adds only pictures that passed. It makes none when the check can't run (switched off, or no Gemini key), so nothing is paid for that could never be shown. In the studio, a picture that couldn't be checked is added only after you compare it yourself and confirm.
+- **The order page's action stands out.** "Last step · not confirmed yet" is in red, "Confirm your order on WhatsApp" is in the button's green, and the amber line says "Click the green button below to confirm your order".
+- **Status.**
+  - **Benchmark:** pending.
+  - **Tests:** pending.
+  - **Dependency audit:** pending.
+  - **Security scan:** pending.
+
 ## BUH-02.25.00 — 2026-10-23 20:10 UTC · [#49](https://github.com/cxsmtp/buh/pull/49)
 
 - **The order's last step is clear.** A cash-on-delivery or bank-transfer order that still needs its WhatsApp message no longer says "thank you, confirmed". It says **Last step: confirm your order on WhatsApp**, with one large button. Once the customer taps it, the page says **Your order is in process**: "we'll confirm it shortly".

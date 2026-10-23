@@ -482,6 +482,13 @@ async function runJob(job: AutoJob): Promise<void> {
 
   // 2. The pictures, one request each, one after another.
   const failures: string[] = [];
+  // Only pictures checked against the product photo are ever added: when the check can't run (switched
+  // off, or no Gemini key), none are made (they would be paid for and never shown).
+  if (job.made.length < job.plan.length && !picturesCheckable()) {
+    failures.push('AI pictures were not made: they can only be added once checked against your photo, which needs “Check every picture” on and a Google Gemini key (Settings → AI pictures)');
+    while (job.made.length < job.plan.length) job.made.push('');
+    saveJob(job);
+  }
   for (let i = job.made.length; i < job.plan.length; i++) {
     // Removed meanwhile: no more paid pictures for it.
     if (!liveProduct(job.productId)) return finish(job, 'needs_you', 'The product was removed before it was finished.');
@@ -498,10 +505,10 @@ async function runJob(job: AutoJob): Promise<void> {
       };
       if (img.bytes.length > SOURCE_MAX_BYTES) throw new HttpError(413, 'The photo is too large (at most 4 MB).');
       const r = await patiently(job, 'pictures', () => stagePhoto(body, job.by));
-      if (r.check && !r.check.ok) {
-        // The check found another design, or other bedding, even on the second try: never put in
-        // the shop by itself (the owner's two must-haves). The picture is not kept.
-        failures.push(`picture ${i + 1} did not match the product (${r.check.reason}), so it was not added`);
+      if (!r.check?.ok) {
+        // Not exactly the product (the design, the colours, the pillow covers, or other bedding), even
+        // after the tries, or not checked: never put in the shop. The picture is not kept.
+        failures.push(r.check ? `picture ${i + 1} did not match the product (${r.check.reason}), so it was not added` : `picture ${i + 1} could not be checked against your photo, so it was not added`);
         job.made.push('');
         try {
           discardStagedPhoto({ url: r.url }, job.by);
@@ -552,6 +559,11 @@ async function runJob(job: AutoJob): Promise<void> {
     published: job.publish,
   });
   finish(job, failures.length || writeProblem ? 'needs_you' : 'done', `${job.publish ? 'In the shop.' : 'Ready (kept hidden).'}${writeProblem ? ` The words were not written: ${writeProblem}` : ''}${pics}`.trim());
+}
+
+/** Whether new AI pictures can be checked against the product photo (the check on, and a Gemini key). */
+function picturesCheckable(): boolean {
+  return getSettings('aiPictures').checkPictures !== false && Boolean(getSettings('ai').geminiApiKey);
 }
 
 /** The job still working on this product, if any. */

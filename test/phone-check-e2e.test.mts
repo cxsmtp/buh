@@ -228,6 +228,8 @@ for (const [width, phone] of [[375, '050 881 2001'], [1280, '055 881 2002']] as 
     const [lr, lg, lb] = rgb(await colour('[data-testid="order-last-step-label"]'));
     assert.ok(lr > lg + 40 && lr > lb + 40, `the last-step line is red: ${lr},${lg},${lb}`);
     assert.equal(await colour('#order-confirmed-title'), await background('[data-testid="wa-confirm-button"]'), 'the heading in the button’s green');
+    const [cr, cg, cb] = rgb(await colour('[data-testid="order-last-step-cta"]'));
+    assert.ok(cr > cg && cg > cb + 30, `"click the green button" in amber: ${cr},${cg},${cb}`);
     await page.getByText(/Please tap within 6 hours: orders not confirmed within 24 hours are cancelled \(after 6 hours if WhatsApp is never opened\)\./).waitFor();
     assert.equal(await page.getByText('Thank you for your order').count(), 0, 'not thanked as if it were confirmed');
     const button = page.getByRole('link', { name: /Confirm (my order )?on WhatsApp/ });

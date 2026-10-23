@@ -125,6 +125,7 @@ export const STAGING_FIXED_RULES = [
   '- the same colours and shades: do not recolour, brighten, saturate or fade the fabric;',
   '- the same stitching, piping, borders, edges, folds of the fabric where visible, and texture;',
   '- the same number of pieces (sheets, pillowcases, covers): add none and remove none.',
+  '- its pillow covers, in the product’s own design and colours, clearly visible in every picture (in a close-up, a pillow cover beside the sheet).',
   'The colours and pattern must stay true to the photo: shoppers buy from this picture and return what does not match it.',
   'No text, letters or numbers anywhere, no logos, no watermarks, no people or parts of people, no pets.',
   'One single photograph that fills the whole frame, from one camera angle: never a collage, grid, split screen, border or several views in one picture.',
