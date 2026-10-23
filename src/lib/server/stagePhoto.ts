@@ -11,7 +11,7 @@ import { logEvent } from './log';
 import { getProduct, updateProduct } from './products';
 import { rateLimit } from './rateLimit';
 import { getSettings, withStoredSecrets } from './settings';
-import { forgetStaged, recordStaged, stagedRecords } from './stagedPhotos';
+import { approveStaged, forgetStaged, recordStaged, stagedRecords } from './stagedPhotos';
 import { checkPicture, type PictureVerdict } from './pictureCheck';
 
 export { stagingPrompt, type StagingContext };
@@ -260,6 +260,9 @@ export interface PictureJob {
  * styled, audited. Used by the studio (stagePhoto) and by automatic pictures for new products
  * (src/lib/server/autoAdd.ts).
  */
+/** Tries for one picture while the check finds it isn't exactly the product (each a paid call). */
+export const PICTURE_TRIES = 3;
+
 export async function makePicture(job: PictureJob, actor: string): Promise<StageResult> {
   const ai = getSettings('ai');
   const settings = getSettings('aiPictures');
@@ -286,11 +289,11 @@ export async function makePicture(job: PictureJob, actor: string): Promise<Stage
   const checkKey = settings.checkPictures === false ? '' : ai.geminiApiKey;
   let clean: NonNullable<ReturnType<typeof cleanImage>> | null = null;
   let verdict: PictureVerdict | null = null;
-  // One picture, and at most one more when the check says it changed the design or added bedding.
-  for (let attempt = 0; attempt < 2; attempt++) {
+  // One picture, made again (at most PICTURE_TRIES in all) while the check says it isn't exactly the product.
+  for (let attempt = 0; attempt < PICTURE_TRIES; attempt++) {
     const r = rateLimit(`ai-stage:${actor}`, STAGE_LIMIT.max, STAGE_LIMIT.windowMs);
     if (!r.ok) {
-      if (attempt > 0) break; // the first picture is kept, marked as not matching
+      if (attempt > 0) break; // the last picture is kept, marked as not matching (it can't be added)
       throw new HttpError(429, LIMIT_MESSAGE, { 'Retry-After': String(r.retryAfterSec) }, { retryAfterSec: r.retryAfterSec });
     }
     const raw = await maker.edit({
@@ -310,14 +313,14 @@ export async function makePicture(job: PictureJob, actor: string): Promise<Stage
     // as made with AI (kept from the service, or added).
     const made = cleanImage(raw, RESULT_MAX_BYTES, { keepProvenance: true });
     if (!made) {
-      if (clean) break; // a second try that came back broken: the first one stands
+      if (clean) break; // a later try that came back broken: the one before stands (with its verdict)
       logEvent('warn', 'pictures_bad_image', { provider, length: raw.length });
       throw new HttpError(502, `${maker.name}’s picture could not be used (not a whole PNG, JPEG or WebP, or too large). Nothing was saved; please try again.`, {}, { code: 'ai_bad_image' });
     }
     clean = made;
     verdict = checkKey ? await checkPicture(checkKey, photo, { mime: made.mime, bytes: made.bytes }) : null;
     if (!verdict || verdict.ok) break;
-    logEvent('warn', 'picture_check_rejected', { provider, attempt, samePrint: verdict.samePrint, extraItems: verdict.extraItems });
+    logEvent('warn', 'picture_check_rejected', { provider, attempt, samePrint: verdict.samePrint, sameColours: verdict.sameColours, pillowCovers: verdict.pillowCovers, extraItems: verdict.extraItems });
   }
   if (!clean) throw new HttpError(502, `${maker.name}’s picture could not be used. Please try again.`, {}, { code: 'ai_bad_image' });
 
@@ -330,8 +333,11 @@ export async function makePicture(job: PictureJob, actor: string): Promise<Stage
     throw new HttpError(502, `${maker.name} returned the same photo; try another scene.`, {}, { code: 'ai_same_image' });
   }
   const at = new Date().toISOString();
-  recordStaged(name, { source, preset: preset.id, at });
-  audit('product.photo_staged', { by: actor, provider, model, preset: preset.id, source: source || 'upload', sourceBytes: photo.bytes.length, references: references.length, sameRoom: sameRoom.length > 0, result: name, resultBytes: clean.bytes.length, width: clean.width, height: clean.height, extraLength: extra.length, sceneEdited: !angle && shot !== preset.scene, lookDefault: !settings.look, context: Object.keys(context), aspect, check: verdict ? (verdict.ok ? 'matches' : 'does_not_match') : 'not_checked' });
+  // The verdict goes with the record: the server refuses to put a picture on a product unless it
+  // matched (or the owner confirmed one that could not be checked): src/lib/server/stagedPhotos.ts.
+  const check = verdict ? (verdict.ok ? 'matches' : 'does_not_match') : 'not_checked';
+  recordStaged(name, { source, preset: preset.id, at, check, ...(verdict && !verdict.ok ? { reason: verdict.reason } : {}) });
+  audit('product.photo_staged', { by: actor, provider, model, preset: preset.id, source: source || 'upload', sourceBytes: photo.bytes.length, references: references.length, sameRoom: sameRoom.length > 0, result: name, resultBytes: clean.bytes.length, width: clean.width, height: clean.height, extraLength: extra.length, sceneEdited: !angle && shot !== preset.scene, lookDefault: !settings.look, context: Object.keys(context), aspect, check });
   return { url, staged: { staged: true, source, preset: preset.id, at }, model, provider, references: references.length, width: clean.width, height: clean.height, check: verdict ? { ok: verdict.ok, reason: verdict.reason } : null };
 }
 
@@ -370,6 +376,21 @@ export function discardStagedPhoto(body: Record<string, unknown>, actor: string)
   forgetStaged(name);
   audit('product.photo_staged_discarded', { by: actor, result: name });
   return { deleted };
+}
+
+/**
+ * "I've compared it": { url, approve: true } for an AI picture that could not be checked against the
+ * product photo; the owner confirms it shows exactly the product, and it may then be added. One the
+ * check rejected is refused (409). Audited.
+ */
+export function approveStagedPhoto(body: Record<string, unknown>, actor: string): { check: string } {
+  for (const k of Object.keys(body)) if (k !== 'url' && k !== 'approve') throw new HttpError(400, `Unexpected field: ${k.slice(0, 30)}.`);
+  if (body.approve !== true) throw new HttpError(400, 'Confirm with approve: true.');
+  const name = typeof body.url === 'string' ? body.url.replace(/^\/api\/images\//, '') : '';
+  if (!IMAGE_NAME.test(name)) throw new HttpError(400, 'Which styled photo?');
+  const rec = approveStaged(name);
+  audit('product.photo_staged_approved', { by: actor, result: name, check: rec.check ?? 'before_checks' });
+  return { check: rec.check ?? 'matches' };
 }
 
 /** A product holds at most this many photos (the cover and 7 more), as the editor does. */

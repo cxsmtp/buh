@@ -404,10 +404,13 @@ test('styling: 3 pictures side by side, one failing loses none of the others; th
   const prompts: string[] = [];
   let made = 0;
   gemini._setGeminiTransport(async (req) => {
+    // The check on every picture (its own tests: auto-add.test.mts): it finds the pictures match.
+    if (req.path.startsWith('/models?')) return { status: 200, ok: true, data: { models: [{ name: 'models/gemini-3-flash', supportedGenerationMethods: ['generateContent'] }] } };
     const body = JSON.parse(req.body!);
     const prompt = String(body.contents[0].parts[0].text);
+    if (prompt.startsWith('You are the strict quality check')) return { status: 200, ok: true, data: { candidates: [{ content: { parts: [{ text: JSON.stringify({ samePrint: true, sameColours: true, pillowCovers: true, extraItems: false, reason: 'matches' }) }] }, finishReason: 'STOP' }] } };
     prompts.push(prompt);
-    if (/close-up/.test(prompt)) return { status: 400, ok: false, data: { error: { code: 400, message: 'Image generation failed', status: 'INVALID_ARGUMENT' } } };
+    if (/a close-up of the bedding on the bed/.test(prompt)) return { status: 400, ok: false, data: { error: { code: 400, message: 'Image generation failed', status: 'INVALID_ARGUMENT' } } };
     const phys = Buffer.alloc(9);
     phys.writeUInt32BE(3000 + ++made, 0);
     phys.writeUInt32BE(2835, 4);

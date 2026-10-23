@@ -58,15 +58,25 @@ const imagesOf = (s: Sent) => s.body.contents[0].parts.filter((p) => p.inlineDat
 const ok = (data: unknown) => ({ status: 200, data });
 const picture = () => ok({ candidates: [{ content: { role: 'model', parts: [{ inlineData: { mimeType: 'image/png', data: fresh().toString('base64') } }] }, finishReason: 'STOP' }] });
 const text = () => ok({ candidates: [{ content: { role: 'model', parts: [{ text: JSON.stringify(SUGGESTION) }] }, finishReason: 'STOP' }] });
+const isCheck = (s: Sent) => Boolean(s.body?.contents?.[0]?.parts?.[0]?.text?.startsWith('You are the strict quality check'));
+const verdict = (v: Record<string, unknown>) => ok({ candidates: [{ content: { role: 'model', parts: [{ text: JSON.stringify(v) }] }, finishReason: 'STOP' }] });
+const MODEL_LIST = ok({ models: [{ name: 'models/gemini-3-flash', supportedGenerationMethods: ['generateContent'] }, { name: 'models/gemini-3.1-flash-image', supportedGenerationMethods: ['generateContent'] }] });
+/** The check's answers: all fine, or one thing wrong. */
+const MATCHES = { samePrint: true, sameColours: true, pillowCovers: true, extraItems: false, reason: 'matches' };
+const wrong = (v: Record<string, unknown>) => ({ ...MATCHES, ...v });
+/** How the check answers (the model list and the check go here, whatever `answer` does). */
+let checks: (req: Sent) => { status: number; data: unknown } = () => verdict(MATCHES);
 
 beforeEach(async () => {
   _clearAllRateLimits();
   sent = [];
+  // Every picture is checked (Settings → AI pictures, on by default): it matches unless a test says otherwise.
+  checks = () => verdict(MATCHES);
   answer = (req) => (req.path.includes('image') ? picture() : text());
   gemini._setGeminiTransport(async (req) => {
     const s: Sent = { path: req.path, body: req.body ? JSON.parse(req.body) : null };
     sent.push(s);
-    const a = answer(s);
+    const a = s.path.startsWith('/models?') ? MODEL_LIST : isCheck(s) ? checks(s) : answer(s);
     return { ...a, ok: a.status >= 200 && a.status < 300 };
   });
   auto._setSleep(async () => undefined);
@@ -388,9 +398,6 @@ test('the daily summary stops listing a product once the owner has named and pub
 
 // ── the design and the items on the bed (BUH-02.25) ─────────────────────────
 
-const MODEL_LIST = ok({ models: [{ name: 'models/gemini-3-flash', supportedGenerationMethods: ['generateContent'] }, { name: 'models/gemini-3.1-flash-image', supportedGenerationMethods: ['generateContent'] }] });
-const isCheck = (s: Sent) => Boolean(s.body?.contents?.[0]?.parts?.[0]?.text?.startsWith('You are checking a picture'));
-const verdict = (v: Record<string, unknown>) => ok({ candidates: [{ content: { role: 'model', parts: [{ text: JSON.stringify(v) }] }, finishReason: 'STOP' }] });
 
 test('every picture is sent with the rules: the exact printed design (never invented), and only the bedsheet and its pillow covers on the bed (no comforter, throw or cushions); the owner can reword the bed rule', async () => {
   const pic = await import('@/lib/server/pictureCheck');
@@ -413,30 +420,26 @@ test('every picture is sent with the rules: the exact printed design (never inve
   await assert.rejects(settings.updateSettings('aiPictures', { checkPictures: 'yes' }), /on or off/);
 });
 
-test('each picture is checked against the product photo (reported: the design was changed and bedding added): a mismatch is made again once with what was wrong; twice wrong is marked and never added by quick add', async () => {
+test('each picture is checked against the product photo (reported: the design was changed and bedding added): a mismatch is made again with what was wrong; still wrong is marked and never added by quick add', async () => {
   const pic = await import('@/lib/server/pictureCheck');
   pic._resetCheckModel();
   const own = photo().url.replace('/api/images/', '');
   // Matches: one picture, checked.
-  answer = (req) => (req.path.startsWith('/models?') ? MODEL_LIST : isCheck(req) ? verdict({ samePrint: true, extraItems: false, reason: 'matches' }) : req.path.includes('image') ? picture() : text());
+  checks = () => verdict(MATCHES);
   sent = [];
   const good = await stage.stagePhoto({ imageId: own, angle: 1 }, OWNER);
   assert.deepEqual(good.check, { ok: true, reason: 'matches' });
   assert.equal(pictureCalls().length, 1);
-  const checks = sent.filter(isCheck);
-  assert.equal(checks.length, 1);
-  assert.equal(imagesOf(checks[0]), 2, 'the product photo and the new picture');
+  const checkCalls = sent.filter(isCheck);
+  assert.equal(checkCalls.length, 1);
+  assert.equal(imagesOf(checkCalls[0]), 2, 'the product photo and the new picture');
 
   // A different design the first time, right the second: made again with what was wrong.
   let first = true;
-  answer = (req) => {
-    if (req.path.startsWith('/models?')) return MODEL_LIST;
-    if (isCheck(req)) {
-      const v = first ? { samePrint: false, extraItems: true, reason: 'the print is a different floral, and a grey comforter was added' } : { samePrint: true, extraItems: false, reason: 'matches' };
-      first = false;
-      return verdict(v);
-    }
-    return req.path.includes('image') ? picture() : text();
+  checks = () => {
+    const v = first ? wrong({ samePrint: false, extraItems: true, reason: 'the print is a different floral, and a grey comforter was added' }) : MATCHES;
+    first = false;
+    return verdict(v);
   };
   sent = [];
   const fixed = await stage.stagePhoto({ imageId: own, angle: 2 }, OWNER);
@@ -446,11 +449,11 @@ test('each picture is checked against the product photo (reported: the design wa
   assert.match(promptOf(calls[1]), /The previous picture was rejected: the print is a different floral, and a grey comforter was added\. Copy the product from image 1 exactly this time\./);
 
   // Wrong both times: kept for the studio, marked; quick add never adds it.
-  answer = (req) => (req.path.startsWith('/models?') ? MODEL_LIST : isCheck(req) ? verdict({ samePrint: false, extraItems: false, reason: 'the pattern was redrawn' }) : req.path.includes('image') ? picture() : text());
+  checks = () => verdict(wrong({ samePrint: false, reason: 'the pattern was redrawn' }));
   sent = [];
   const bad = await stage.stagePhoto({ imageId: own, angle: 3 }, OWNER);
   assert.deepEqual(bad.check, { ok: false, reason: 'the pattern was redrawn' });
-  assert.equal(pictureCalls().length, 2, 'never more than one extra try');
+  assert.equal(pictureCalls().length, stage.PICTURE_TRIES, 'made again up to 3 times in all, never more');
 
   const r = auto.quickAdd({ key: 'q-test-0201abcd', photos: [photo().url], price: 99, sizes: [{ id: settings.getSettings('catalog').sizes[0].id, stock: 1 }] }, OWNER);
   await auto.kick();
@@ -466,5 +469,66 @@ test('each picture is checked against the product photo (reported: the design wa
   assert.equal(unchecked.check, null);
   assert.equal(sent.filter(isCheck).length, 0);
   await settings.updateSettings('aiPictures', { checkPictures: true });
-  answer = (req) => (req.path.includes('image') ? picture() : text());
+});
+
+test('only pictures of exactly the product reach a product (reported: pictures not true to the product were published): the server refuses one that failed the check or was never checked; the owner confirms an unchecked one; pillow covers are a must', async () => {
+  const pic = await import('@/lib/server/pictureCheck');
+  const { stagedRecords } = await import('@/lib/server/stagedPhotos');
+  pic._resetCheckModel();
+  const own = photo().url;
+  const imageId = own.replace('/api/images/', '');
+  const nameOf = (url: string) => url.replace('/api/images/', '');
+  const product = auto.quickAdd({ key: 'q-test-0251abcd', photos: [own], price: 99, sizes: [{ id: settings.getSettings('catalog').sizes[0].id, stock: 1 }] }, OWNER).product;
+  await auto.kick();
+  const addTo = (url: string) => products.updateProduct(product.id, { galleryImages: [...products.getProduct(product.id)!.galleryImages, url] }, OWNER);
+
+  // Every picture is told to show the product's pillow covers, and the check asks for them.
+  await stage.stagePhoto({ imageId, angle: 1 }, OWNER);
+  assert.match(promptOf(pictureCalls().at(-1)!), /its pillow covers, in the product’s own design and colours, clearly visible in every picture/);
+  assert.match(pic.CHECK_PROMPT, /pillowCovers: if image 1 shows pillow covers, true only if image 2 also clearly shows the pillow covers/);
+  assert.match(pic.CHECK_PROMPT, /If you are not sure about any of these, answer the failing value\./);
+
+  // Pillow covers missing every time: three tries, then marked; the record keeps the verdict.
+  checks = () => verdict(wrong({ pillowCovers: false, reason: '' }));
+  sent = [];
+  const noCovers = await stage.stagePhoto({ imageId, angle: 2 }, OWNER);
+  assert.deepEqual(noCovers.check, { ok: false, reason: 'the product’s pillow covers are missing or different' });
+  assert.equal(pictureCalls().length, 3);
+  assert.equal(stagedRecords()[nameOf(noCovers.url)].check, 'does_not_match');
+  // Refused on a product, whoever sends it, and it can't be confirmed by hand either.
+  assert.throws(() => addTo(noCovers.url), (e: { status: number; details?: { code?: string } }) => e.status === 409 && e.details?.code === 'picture_not_verified');
+  assert.throws(() => stage.approveStagedPhoto({ url: noCovers.url, approve: true }, OWNER), (e: { status: number }) => e.status === 409);
+  // Other colours fail too.
+  checks = () => verdict(wrong({ sameColours: false, reason: 'the blue was turned green' }));
+  assert.equal((await stage.stagePhoto({ imageId, angle: 3 }, OWNER)).check?.ok, false);
+
+  // An answer missing a field is no verdict: not checked.
+  assert.equal(pic.parseVerdict(JSON.stringify({ samePrint: true, extraItems: false, reason: 'matches' })), null);
+  checks = () => verdict({ samePrint: true, extraItems: false });
+  const unchecked = await stage.stagePhoto({ imageId, angle: 1 }, OWNER);
+  assert.equal(unchecked.check, null);
+  assert.equal(stagedRecords()[nameOf(unchecked.url)].check, 'not_checked');
+  assert.throws(() => addTo(unchecked.url), (e: { status: number }) => e.status === 409);
+  // The owner compared it and confirms: then it may be added (audited).
+  assert.throws(() => stage.approveStagedPhoto({ url: unchecked.url }, OWNER), (e: { status: number }) => e.status === 400);
+  assert.throws(() => stage.approveStagedPhoto({ url: unchecked.url, approve: true, extra: 1 }, OWNER), (e: { status: number }) => e.status === 400);
+  assert.deepEqual(stage.approveStagedPhoto({ url: unchecked.url, approve: true }, OWNER), { check: 'approved' });
+  assert.ok(addTo(unchecked.url).galleryImages.includes(unchecked.url));
+
+  // A matching picture goes on; pictures already on a product (from before the checks) stay.
+  checks = () => verdict(MATCHES);
+  const good = await stage.stagePhoto({ imageId, angle: 2 }, OWNER);
+  assert.equal(stagedRecords()[nameOf(good.url)].check, 'matches');
+  assert.ok(addTo(good.url).galleryImages.includes(good.url));
+  assert.ok(products.updateProduct(product.id, { title: 'Indigo Garden Set' }, OWNER), 'saving the product again keeps its pictures');
+
+  // Quick add with the check switched off: no pictures made at all (they could never be added).
+  await settings.updateSettings('aiPictures', { checkPictures: false });
+  sent = [];
+  const q = auto.quickAdd({ key: 'q-test-0252abcd', photos: [photo().url], price: 99, sizes: [{ id: settings.getSettings('catalog').sizes[0].id, stock: 1 }] }, OWNER);
+  await auto.kick();
+  assert.equal(pictureCalls().length, 0, 'none paid for');
+  assert.equal(Object.keys(products.getProduct(q.product.id)!.stagedPhotos ?? {}).length, 0);
+  assert.match(auto.listJobs().find((j) => j.productId === q.product.id)!.note, /AI pictures were not made: they can only be added once checked against your photo/);
+  await settings.updateSettings('aiPictures', { checkPictures: true });
 });

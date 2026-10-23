@@ -113,14 +113,19 @@ const auditEntry = (action: string) =>
     .find((e) => e.action === action);
 const status = (p: Promise<unknown>) => p.then(() => 200, (e: { status?: number }) => e.status ?? -1);
 
+const isCheck = (s: Sent) => String((s.body as { contents?: Array<{ parts?: Array<{ text?: string }> }> } | null)?.contents?.[0]?.parts?.[0]?.text ?? '').startsWith('You are the strict quality check');
+const MATCHES = { status: 200, data: { candidates: [{ content: { role: 'model', parts: [{ text: JSON.stringify({ samePrint: true, sameColours: true, pillowCovers: true, extraItems: false, reason: 'matches' }) }] }, finishReason: 'STOP' }] } };
+
 beforeEach(async () => {
-  // The design check (its own tests: auto-add.test.mts) makes calls of its own; these tests count the picture calls.
-  await settings.updateSettings('aiPictures', { checkPictures: false });
+  // The check on every picture (its own tests: auto-add.test.mts) is on, as in the shop, and finds the
+  // pictures match; its calls are answered here and not counted with the picture calls.
+  await settings.updateSettings('aiPictures', { checkPictures: true });
   _clearAllRateLimits();
   sent = [];
   answer = (req) => (req.method === 'GET' ? { status: 200, data: MODELS } : req.path.includes('image') ? imageReply(freshStaged()) : textReply(SUGGESTION));
   gemini._setGeminiTransport(async (req) => {
     const s: Sent = { method: req.method, path: req.path, headers: req.headers, body: req.body ? JSON.parse(req.body) : null };
+    if (isCheck(s)) return { ...MATCHES, ok: true };
     sent.push(s);
     const a = answer(s);
     return { ...a, ok: a.status >= 200 && a.status < 300 };

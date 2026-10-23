@@ -300,11 +300,18 @@ export function PictureStudio({
   };
 
   const add = async (picked: Slot[]) => {
-    const wrong = picked.filter((s) => s.state === 'done' && s.matches === false);
-    // The owner's must-haves (the design, nothing else on the bed): a picture the check rejected is added only on purpose.
-    if (wrong.length && !window.confirm(`${wrong.length === 1 ? 'This picture doesn’t' : `${wrong.length} pictures don’t`} match the product (${wrong[0].mismatch}). Add anyway?`)) return;
-    const ready = picked.filter((s) => s.state === 'done' && s.url);
+    // Only pictures of exactly the product: one the check rejected is never added (the server refuses
+    // it too); one that could not be checked is added only once the owner has compared it and confirms.
+    const ready = picked.filter((s) => s.state === 'done' && s.url && s.matches !== false);
     if (!ready.length || adding) return;
+    const unchecked = ready.filter((s) => s.matches === undefined);
+    if (unchecked.length) {
+      if (!window.confirm(`${unchecked.length === 1 ? 'This picture was' : `${unchecked.length} pictures were`} not checked against your product photo. Add only if ${unchecked.length === 1 ? 'it shows' : 'they show'} exactly your product: the same design and colours, its pillow covers, and nothing else on the bed. Add?`)) return;
+      for (const s of unchecked) {
+        const r = await sendJson<{ message?: string }>('PATCH', '/api/admin/products/stage-photo', { url: s.url, approve: true });
+        if (!r.ok) return setError(r.data.message || 'That picture could not be confirmed. Please try again.');
+      }
+    }
     if (room <= 0) return setError('This product already has 8 photos: remove one first.');
     const taking = ready.slice(0, room);
     setAdding(true);
@@ -339,7 +346,7 @@ export function PictureStudio({
   const off = status && !status.ready;
   const maker = SHORT[status?.provider ?? ''] ?? 'Gemini';
   const writerNote = status?.provider && status.writer && status.writer !== status.provider ? ` Your text is written by ${status.writer === 'deepseek' ? 'DeepSeek' : status.writer === 'gemini' ? 'Gemini' : 'Claude'}; pictures are made by ${maker}.` : '';
-  const done = slots.filter((s) => s.state === 'done');
+  const done = slots.filter((s) => s.state === 'done' && s.matches !== false);
 
   return (
     <section className="rounded-2xl border border-line bg-surface p-3 space-y-3 min-w-0" aria-labelledby={`${id}-h`} data-testid={testId}>
@@ -491,13 +498,18 @@ export function PictureStudio({
                     <figcaption className="text-[11px] text-ink-soft mt-1">Styled by AI{s.matches === true ? ' · checked: matches the product' : ''}</figcaption>
                     {s.matches === false && (
                       <p role="alert" className="mt-1 text-xs font-semibold text-danger break-words" data-testid="stage-mismatch">
-                        Doesn&rsquo;t match the product: {s.mismatch}. Try again, or discard it.
+                        Doesn&rsquo;t match the product: {s.mismatch}. It can&rsquo;t be added: try again, or discard it.
+                      </p>
+                    )}
+                    {s.matches === undefined && (
+                      <p className="mt-1 text-xs font-semibold text-warning break-words" data-testid="stage-unchecked">
+                        Not checked against your photo: compare it yourself before adding.
                       </p>
                     )}
                   </figure>
                 )}
                 <div className="grid grid-cols-3 gap-1">
-                  <button type="button" onClick={() => void add([s])} disabled={s.state !== 'done' || adding} className={`${base} border-ink bg-ink text-paper`} aria-label={`Add to gallery: ${nameOf(s.preset)}`}>
+                  <button type="button" onClick={() => void add([s])} disabled={s.state !== 'done' || s.matches === false || adding} className={`${base} border-ink bg-ink text-paper`} aria-label={`Add to gallery: ${nameOf(s.preset)}`}>
                     <Check className="w-4 h-4 shrink-0" aria-hidden="true" /> Add
                   </button>
                   <button type="button" onClick={() => void retry(s)} disabled={s.state === 'busy'} className={btn} aria-label={`Try again: ${nameOf(s.preset)}`}>

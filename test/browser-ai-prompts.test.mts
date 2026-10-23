@@ -87,6 +87,8 @@ function readBody(req: http.IncomingMessage): Promise<string> {
   });
 }
 
+let checkMode: 'match' | 'mismatch' | 'down' = 'match';
+
 before(async () => {
   if (skip) return;
   google = http.createServer(async (req, res) => {
@@ -97,6 +99,15 @@ before(async () => {
       return res.end(JSON.stringify({ error: { code: 400, message: 'API key not valid.', status: 'INVALID_ARGUMENT', details: [{ reason: 'API_KEY_INVALID' }] } }));
     }
     if (req.method === 'GET' && req.url === '/v1beta/models?pageSize=1000') return res.end(JSON.stringify(MODELS));
+    // The check on every picture: matches, doesn't match (the pillow covers), or Google is down (not checked).
+    if (req.method === 'POST' && text.includes('You are the strict quality check')) {
+      if (checkMode === 'down') {
+        res.statusCode = 503;
+        return res.end(JSON.stringify({ error: { code: 503, message: 'The model is overloaded.', status: 'UNAVAILABLE' } }));
+      }
+      const v = checkMode === 'match' ? { samePrint: true, sameColours: true, pillowCovers: true, extraItems: false, reason: 'matches' } : { samePrint: true, sameColours: true, pillowCovers: false, extraItems: false, reason: 'the pillow covers are missing' };
+      return res.end(JSON.stringify({ candidates: [{ content: { role: 'model', parts: [{ text: JSON.stringify(v) }] }, finishReason: 'STOP' }] }));
+    }
     if (req.method === 'POST' && /^\/v1beta\/models\/gemini-[a-z0-9.-]+-image:generateContent$/.test(req.url!)) {
       const parts = JSON.parse(text).contents[0].parts as Array<{ text?: string; inlineData?: unknown }>;
       pictureCalls.push(String(parts[0].text));
@@ -409,8 +420,31 @@ for (const width of [375, 1280]) {
     assert.ok(product.stagedPhotos[product.featuredImage], 'an AI picture is the cover');
     assert.equal(product.galleryImages.at(-1), photoUrl, 'the owner’s photo last');
     assert.equal(product.stagedPhotos[url].staged, true);
+    // Reported: pictures not true to the product must never be published. At one width (each try
+    // counts in the 30 an hour): made again, still without the pillow covers, it is marked and can't
+    // be added; not checked (Google down), it is added only once the owner confirms it.
+    const strict = width < 640;
+    if (strict) {
+      checkMode = 'mismatch';
+      await studio.getByRole('button', { name: 'Try again: Whole bed — Dubai master bedroom' }).click();
+      await studio.getByTestId('stage-mismatch').getByText(/Doesn’t match the product: the pillow covers are missing\. It can’t be added/).waitFor();
+      assert.ok(await studio.getByRole('button', { name: 'Add to gallery: Whole bed — Dubai master bedroom' }).isDisabled());
+      checkMode = 'down';
+      await studio.getByRole('button', { name: 'Try again: Lifestyle — breakfast tray' }).click();
+      await studio.getByTestId('stage-unchecked').waitFor();
+      let asked = '';
+      page.once('dialog', (d) => {
+        asked = d.message();
+        void d.accept();
+      });
+      await studio.getByRole('button', { name: 'Add to gallery: Lifestyle — breakfast tray' }).click();
+      await page.waitForFunction((n) => document.querySelectorAll('[data-testid="product-gallery"] img').length === n, startCount + 2);
+      assert.match(asked, /not checked against your product photo\. Add only if it shows exactly your product: the same design and colours, its pillow covers, and nothing else on the bed/);
+      checkMode = 'match';
+      assert.deepEqual(await overflow(page), []);
+    }
     // Discard the others: their files are gone.
-    for (const name of ['Whole bed — Dubai master bedroom', 'Lifestyle — breakfast tray']) {
+    for (const name of strict ? ['Whole bed — Dubai master bedroom'] : ['Whole bed — Dubai master bedroom', 'Lifestyle — breakfast tray']) {
       const src = await studio.getByRole('img', { name: `Styled photo: ${name}` }).getAttribute('src');
       await studio.getByRole('button', { name: `Discard: ${name}` }).click();
       await page.waitForTimeout(300);

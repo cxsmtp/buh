@@ -1,5 +1,18 @@
 # Changelog
 
+## BUH-02.25.01 — 2026-10-23 23:18 UTC · [#50](https://github.com/cxsmtp/buh/pull/50)
+
+- **Only pictures of your exact product reach the shop.** Every AI picture is checked against your photo for the same design, the same colours, the product's pillow covers and nothing else on the bed. A picture that isn't exactly your product can't be added to it by anyone: the studio, quick add or the server itself.
+- **Pillow covers are a must.** Every picture is told to show the product's pillow covers in its own design, even in a close-up. A picture without them fails the check.
+- **Stricter check, more tries.** The check now fails a picture whenever it is unsure, and a failing picture is made again up to 3 times in all, told what was wrong each time.
+- **Not checked means not published.** Quick add adds only pictures that passed. It makes none when the check can't run (switched off, or no Gemini key), so nothing is paid for that could never be shown. In the studio, a picture that couldn't be checked is added only after you compare it yourself and confirm.
+- **The order page's action stands out.** "Last step · not confirmed yet" is in red, "Confirm your order on WhatsApp" is in the button's green, and the amber line says "Click the green button below to confirm your order".
+- **Status.**
+  - **Benchmark:** 0 failed requests in every round. The medians are catalogue 722 vs 694 req/s, gift page 655 vs 630, and courier check 641 vs 604. On the home page the full run showed a higher p50 in 2 of 3 rounds; a quiet A/B gave the same results on both (branch 764–793 vs main 760–804 req/s, p50 61–64 vs 58–67 ms), so that was noise.
+  - **Tests:** 1,200/1,203 in the full run. The 3 failures were the Google Drive browser screens, which time out on this machine (no Drive or backup code changed); main passed them, and the branch then passed 7/7 three times alone. New tests cover a mismatch refused by the server, an unchecked picture needing the owner's confirmation, pillow covers required, the amber call to action, and the studio at 375 px. Each new test fails on the old code and passes on the new.
+  - **Dependency audit:** production 0 vulnerabilities; no new packages.
+  - **Security scan:** one new owner-only action, `PATCH /api/admin/products/stage-photo`: admin check, 1 KB body, allow-list `{ url, approve }`, audited. The picture check now fails closed. Checkmarx could not run because its sign-in has expired.
+
 ## BUH-02.25.00 — 2026-10-23 20:10 UTC · [#49](https://github.com/cxsmtp/buh/pull/49)
 
 - **The order's last step is clear.** A cash-on-delivery or bank-transfer order that still needs its WhatsApp message no longer says "thank you, confirmed". It says **Last step: confirm your order on WhatsApp**, with one large button. Once the customer taps it, the page says **Your order is in process**: "we'll confirm it shortly".

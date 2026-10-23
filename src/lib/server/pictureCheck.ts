@@ -6,18 +6,23 @@ import { logEvent } from './log';
  * photo", on by default): Gemini looks at the product photo and the new picture side by side and
  * says whether the picture shows the same printed design in the same colours, and whether anything
  * but the product's own pieces is on the bed (a comforter, a throw, cushions of another design…).
- * The owner's two must-haves: the design, and the items in the scene. A picture that fails is made
- * again once (stagePhoto.ts); one that fails twice is marked "Doesn't match" and never added to a
- * product by itself (quick add).
+ * The owner's must-haves: the exact design and colours, the product's pillow covers, and nothing
+ * else on the bed. A picture that fails is made again (stagePhoto.ts); one that still fails is
+ * marked "Doesn't match" and can never be added to a product (src/lib/server/stagedPhotos.ts).
  * Uses the shop's Gemini key with a fast writing model (the newest "flash" the key offers, looked
- * up once and kept for a few hours). No key, or Google unreachable: no verdict (null), never a block.
+ * up once and kept for a few hours). No key, or Google unreachable: no verdict (null): the picture
+ * is "not checked", never added by itself, and added by hand only once the owner confirms it.
  */
 
 export interface PictureVerdict {
   ok: boolean;
   samePrint: boolean;
+  /** The same colours and shades as the photo (not recoloured, brightened or faded). */
+  sameColours: boolean;
+  /** The product's pillow covers shown, in the product's design (when the photo shows them). */
+  pillowCovers: boolean;
   extraItems: boolean;
-  /** Plain words for the owner (and for the second try's prompt). */
+  /** Plain words for the owner (and for the next try's prompt). */
   reason: string;
 }
 
@@ -40,11 +45,14 @@ export function _resetCheckModel() {
 }
 
 export const CHECK_PROMPT = [
-  'You are checking a picture for a bed-linen shop. Image 1 is the real product photo. Image 2 is an AI-made picture that must show exactly that product.',
-  'Answer only with JSON: {"samePrint": true|false, "extraItems": true|false, "reason": "one short sentence"}.',
-  'samePrint: true only if the bedsheet and the pillow covers in image 2 carry the same printed design as image 1: the same motifs, arrangement, print scale and colours (camera angle, light and folds may differ). False if the pattern is different, redrawn, simplified, invented, or a different design appears on any piece.',
+  'You are the strict quality check for a bed-linen shop. Image 1 is the real product photo. Image 2 is an AI-made picture that must show exactly that product: shoppers buy from it, so any difference is a failure.',
+  'Answer only with JSON: {"samePrint": true|false, "sameColours": true|false, "pillowCovers": true|false, "extraItems": true|false, "reason": "one short sentence"}.',
+  'samePrint: true only if the bedsheet and the pillow covers in image 2 carry the same printed design as image 1: the same motifs, arrangement and print scale (camera angle, light and folds may differ). False if the pattern is different, redrawn, simplified, invented, mirrored into another layout, or a different design appears on any piece.',
+  'sameColours: true only if the fabric colours and shades in image 2 are the same as in image 1. False if any colour is changed, recoloured, much brighter, more saturated or faded.',
+  'pillowCovers: if image 1 shows pillow covers, true only if image 2 also clearly shows the pillow covers, in the same design and colours as in image 1. False if they are missing, hidden, plain, or in another design. If image 1 shows no pillow covers, true.',
   'extraItems: true if image 2 shows any bedding that is not the product: a comforter, duvet, quilt, blanket, throw, bed runner, decorative cushions, more than two pillows, or any sheet or pillow cover in another design or colour.',
-  'reason: what is wrong, in plain words for the shop owner (or "matches" when both are fine).',
+  'If you are not sure about any of these, answer the failing value.',
+  'reason: what is wrong, in plain words for the shop owner (or "matches" when everything is fine).',
 ].join('\n');
 
 export function parseVerdict(text: string): PictureVerdict | null {
@@ -54,10 +62,14 @@ export function parseVerdict(text: string): PictureVerdict | null {
   if (start < 0 || end <= start) return null;
   try {
     const o = JSON.parse(body.slice(start, end + 1)) as Record<string, unknown>;
-    if (typeof o.samePrint !== 'boolean' || typeof o.extraItems !== 'boolean') return null;
+    const flags = ['samePrint', 'sameColours', 'pillowCovers', 'extraItems'] as const;
+    // Every answer must be there: a verdict with one missing is no verdict (not checked, never added by itself).
+    if (flags.some((f) => typeof o[f] !== 'boolean')) return null;
+    const v = { samePrint: o.samePrint as boolean, sameColours: o.sameColours as boolean, pillowCovers: o.pillowCovers as boolean, extraItems: o.extraItems as boolean };
     const reason = typeof o.reason === 'string' ? o.reason.replace(/[\u0000-\u001f<>]/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 200) : '';
-    const ok = o.samePrint && !o.extraItems;
-    return { ok, samePrint: o.samePrint, extraItems: o.extraItems, reason: ok ? 'matches' : reason || (!o.samePrint ? 'the design does not match the product' : 'other bedding was added') };
+    const ok = v.samePrint && v.sameColours && v.pillowCovers && !v.extraItems;
+    const why = !v.samePrint ? 'the design does not match the product' : !v.sameColours ? 'the colours do not match the product' : !v.pillowCovers ? 'the product’s pillow covers are missing or different' : 'other bedding was added';
+    return { ok, ...v, reason: ok ? 'matches' : reason && !/^matches\.?$/i.test(reason) ? reason : why };
   } catch {
     return null;
   }

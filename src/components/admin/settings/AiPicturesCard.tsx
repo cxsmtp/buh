@@ -519,7 +519,7 @@ export function AiPicturesCard({
           <input type="checkbox" className="mt-1 w-5 h-5 shrink-0" checked={checkPictures} onChange={(e) => setCheckPictures(e.target.checked)} data-testid="pictures-check" />
           <span className="text-sm text-ink">
             <span className="font-semibold">Check every picture against the product photo</span>
-            <span className="block text-xs text-ink-soft">Gemini compares each new picture with your photo: the same design and colours, and nothing extra on the bed. One that doesn&rsquo;t match is made again once; if it still doesn&rsquo;t, it is marked &ldquo;Doesn&rsquo;t match&rdquo; and never added to a product by itself. Needs a Gemini key (a fraction of a cent per check).</span>
+            <span className="block text-xs text-ink-soft">Gemini compares each new picture with your photo: the same design and colours, the product&rsquo;s pillow covers, and nothing extra on the bed. One that doesn&rsquo;t match is made again (up to 3 tries); if it still doesn&rsquo;t, it is marked &ldquo;Doesn&rsquo;t match&rdquo; and can never be added to a product. Only checked pictures are added by quick add; switched off (or with no Gemini key), quick add makes no pictures, and in the studio you confirm each one yourself. Needs a Gemini key (a fraction of a cent per check).</span>
           </span>
         </label>
         <div className="space-y-1 rounded-xl border border-line bg-sand p-3" data-testid="pictures-fixed">
