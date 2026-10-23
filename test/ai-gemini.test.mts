@@ -114,6 +114,8 @@ const auditEntry = (action: string) =>
 const status = (p: Promise<unknown>) => p.then(() => 200, (e: { status?: number }) => e.status ?? -1);
 
 beforeEach(async () => {
+  // The design check (its own tests: auto-add.test.mts) makes calls of its own; these tests count the picture calls.
+  await settings.updateSettings('aiPictures', { checkPictures: false });
   _clearAllRateLimits();
   sent = [];
   answer = (req) => (req.method === 'GET' ? { status: 200, data: MODELS } : req.path.includes('image') ? imageReply(freshStaged()) : textReply(SUGGESTION));

@@ -1,6 +1,6 @@
 import { type AiProvider, type StagedPhoto } from '@/types';
 import { FAL_KEY, FAL_KEY_HINT, OPENAI_KEY, OPENAI_KEY_HINT, PROVIDER_INFO, type PictureProvider } from '@/lib/pictureProviders';
-import { DEFAULT_PICTURE_LOOK, STAGING_EXTRA_MAX, STAGING_SCENE_MAX, STYLE_MAX, STYLE_SIDE_MAX, angleName, lookOf, oneLine, splitAngles, stagingPrompt, usesReferences, type StagingContext, type StagingScene } from '@/lib/staging';
+import { DEFAULT_PICTURE_LOOK, onBedOf, STAGING_EXTRA_MAX, STAGING_SCENE_MAX, STYLE_MAX, STYLE_SIDE_MAX, angleName, lookOf, oneLine, splitAngles, stagingPrompt, usesReferences, type StagingContext, type StagingScene } from '@/lib/staging';
 import { audit } from './audit';
 import { getDb } from './db';
 import { PICTURE_MODULES, modelOk, pictureKey, pictureModel, picturesProviderOf, providerName } from './pictures';
@@ -12,6 +12,7 @@ import { getProduct, updateProduct } from './products';
 import { rateLimit } from './rateLimit';
 import { getSettings, withStoredSecrets } from './settings';
 import { forgetStaged, recordStaged, stagedRecords } from './stagedPhotos';
+import { checkPicture, type PictureVerdict } from './pictureCheck';
 
 export { stagingPrompt, type StagingContext };
 
@@ -94,6 +95,12 @@ export interface StageResult {
   references: number;
   width: number;
   height: number;
+  /**
+   * The check against the product photo (same design, nothing extra on the bed): ok, or what is
+   * wrong after a second try; null when it was not checked (switched off, no Gemini key, Google
+   * unreachable).
+   */
+  check: { ok: boolean; reason: string } | null;
 }
 
 export interface StagingStatus {
@@ -274,29 +281,45 @@ export async function makePicture(job: PictureJob, actor: string): Promise<Stage
   const styles = usesReferences(settings, preset, job.useReferences) ? referenceImages(settings.references, maker.maxImages(model) - 1 - sameRoom.length) : [];
   const references = [...sameRoom, ...styles];
 
-  const r = rateLimit(`ai-stage:${actor}`, STAGE_LIMIT.max, STAGE_LIMIT.windowMs);
-  if (!r.ok) throw new HttpError(429, LIMIT_MESSAGE, { 'Retry-After': String(r.retryAfterSec) }, { retryAfterSec: r.retryAfterSec });
-
-  const raw = await maker.edit({
-    key,
-    model,
-    product: photo,
-    references,
-    prompt: stagingPrompt(shot, extra, aspect, context, look, references.length, { angle, sameRoom: sameRoom.length > 0 }),
-    aspect,
-    again: () => {
-      // A second paid call for the same picture counts against the hour's limit too.
-      const again = rateLimit(`ai-stage:${actor}`, STAGE_LIMIT.max, STAGE_LIMIT.windowMs);
-      if (!again.ok) throw new HttpError(429, LIMIT_MESSAGE, { 'Retry-After': String(again.retryAfterSec) }, { retryAfterSec: again.retryAfterSec });
-    },
-  });
-  // Checked whoever made it: a whole PNG, JPEG or WebP within the limits, metadata out, and marked
-  // as made with AI (kept from the service, or added).
-  const clean = cleanImage(raw, RESULT_MAX_BYTES, { keepProvenance: true });
-  if (!clean) {
-    logEvent('warn', 'pictures_bad_image', { provider, length: raw.length });
-    throw new HttpError(502, `${maker.name}’s picture could not be used (not a whole PNG, JPEG or WebP, or too large). Nothing was saved; please try again.`, {}, { code: 'ai_bad_image' });
+  const onBed = onBedOf(settings);
+  // The check (design and items on the bed) uses the shop's Gemini key, whoever makes the pictures.
+  const checkKey = settings.checkPictures === false ? '' : ai.geminiApiKey;
+  let clean: NonNullable<ReturnType<typeof cleanImage>> | null = null;
+  let verdict: PictureVerdict | null = null;
+  // One picture, and at most one more when the check says it changed the design or added bedding.
+  for (let attempt = 0; attempt < 2; attempt++) {
+    const r = rateLimit(`ai-stage:${actor}`, STAGE_LIMIT.max, STAGE_LIMIT.windowMs);
+    if (!r.ok) {
+      if (attempt > 0) break; // the first picture is kept, marked as not matching
+      throw new HttpError(429, LIMIT_MESSAGE, { 'Retry-After': String(r.retryAfterSec) }, { retryAfterSec: r.retryAfterSec });
+    }
+    const raw = await maker.edit({
+      key,
+      model,
+      product: photo,
+      references,
+      prompt: stagingPrompt(shot, extra, aspect, context, look, references.length, { angle, sameRoom: sameRoom.length > 0, onBed, again: attempt > 0 && verdict ? verdict.reason : '' }),
+      aspect,
+      again: () => {
+        // A second paid call for the same picture counts against the hour's limit too.
+        const again = rateLimit(`ai-stage:${actor}`, STAGE_LIMIT.max, STAGE_LIMIT.windowMs);
+        if (!again.ok) throw new HttpError(429, LIMIT_MESSAGE, { 'Retry-After': String(again.retryAfterSec) }, { retryAfterSec: again.retryAfterSec });
+      },
+    });
+    // Checked whoever made it: a whole PNG, JPEG or WebP within the limits, metadata out, and marked
+    // as made with AI (kept from the service, or added).
+    const made = cleanImage(raw, RESULT_MAX_BYTES, { keepProvenance: true });
+    if (!made) {
+      if (clean) break; // a second try that came back broken: the first one stands
+      logEvent('warn', 'pictures_bad_image', { provider, length: raw.length });
+      throw new HttpError(502, `${maker.name}’s picture could not be used (not a whole PNG, JPEG or WebP, or too large). Nothing was saved; please try again.`, {}, { code: 'ai_bad_image' });
+    }
+    clean = made;
+    verdict = checkKey ? await checkPicture(checkKey, photo, { mime: made.mime, bytes: made.bytes }) : null;
+    if (!verdict || verdict.ok) break;
+    logEvent('warn', 'picture_check_rejected', { provider, attempt, samePrint: verdict.samePrint, extraItems: verdict.extraItems });
   }
+  if (!clean) throw new HttpError(502, `${maker.name}’s picture could not be used. Please try again.`, {}, { code: 'ai_bad_image' });
 
   // Stored by its SHA-256: a picture already stored (the photo sent, or any other) is not a new
   // styled photo, and must never be marked styled or deleted by Discard.
@@ -308,8 +331,8 @@ export async function makePicture(job: PictureJob, actor: string): Promise<Stage
   }
   const at = new Date().toISOString();
   recordStaged(name, { source, preset: preset.id, at });
-  audit('product.photo_staged', { by: actor, provider, model, preset: preset.id, source: source || 'upload', sourceBytes: photo.bytes.length, references: references.length, sameRoom: sameRoom.length > 0, result: name, resultBytes: clean.bytes.length, width: clean.width, height: clean.height, extraLength: extra.length, sceneEdited: !angle && shot !== preset.scene, lookDefault: !settings.look, context: Object.keys(context), aspect });
-  return { url, staged: { staged: true, source, preset: preset.id, at }, model, provider, references: references.length, width: clean.width, height: clean.height };
+  audit('product.photo_staged', { by: actor, provider, model, preset: preset.id, source: source || 'upload', sourceBytes: photo.bytes.length, references: references.length, sameRoom: sameRoom.length > 0, result: name, resultBytes: clean.bytes.length, width: clean.width, height: clean.height, extraLength: extra.length, sceneEdited: !angle && shot !== preset.scene, lookDefault: !settings.look, context: Object.keys(context), aspect, check: verdict ? (verdict.ok ? 'matches' : 'does_not_match') : 'not_checked' });
+  return { url, staged: { staged: true, source, preset: preset.id, at }, model, provider, references: references.length, width: clean.width, height: clean.height, check: verdict ? { ok: verdict.ok, reason: verdict.reason } : null };
 }
 
 /**

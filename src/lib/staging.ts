@@ -120,6 +120,7 @@ export const STYLE_UPLOAD_SIDE = 1024;
  */
 export const STAGING_FIXED_RULES = [
   'Keep the product itself exactly as it is in the photo:',
+  '- its printed design copied exactly from the photo: the same motifs, in the same arrangement, at the same print scale, in the same colours. Never invent, redraw, simplify, restyle or replace the pattern, and never use any other design;',
   '- the same pattern and motif, in the same places, at the same print scale;',
   '- the same colours and shades: do not recolour, brighten, saturate or fade the fabric;',
   '- the same stitching, piping, borders, edges, folds of the fabric where visible, and texture;',
@@ -162,11 +163,27 @@ export interface AiPicturesSettings {
    * model then tends to copy that picture, and the angles come out looking alike.
    */
   sameRoom: boolean;
+  /**
+   * What may be on the bed (a rule sent with every picture, after the owner's prompt): by default
+   * only the product's own pieces. '' = the shop's default.
+   */
+  onBed: string;
+  /** Check each picture against the product photo (same design, nothing extra on the bed) before it is used. On by default. */
+  checkPictures: boolean;
+}
+
+/** On the bed: only the product (the shop's default; the owner can reword it). */
+export const DEFAULT_ON_BED =
+  'On the bed only this product: the bedsheet and its matching pillow covers on exactly two pillows, all in the product’s own design from the photo. No comforter, duvet, quilt, blanket, throw, bed runner, decorative cushions, extra pillows, or any textile in another design or colour.';
+export const STAGING_ON_BED_MAX = 600;
+
+export function onBedOf(p: Pick<AiPicturesSettings, 'onBed'> | undefined): string {
+  return p?.onBed?.trim() ? p.onBed.trim() : DEFAULT_ON_BED;
 }
 
 export const DEFAULT_SCENES: StagingScene[] = STAGING_PRESETS.map((p) => ({ id: p.id, name: p.name, scene: p.shot }));
 
-export const DEFAULT_AI_PICTURES: AiPicturesSettings = { look: '', scenes: DEFAULT_SCENES, defaultSet: DEFAULT_STAGING_SET, references: [], useReferences: true, autoCreate: true, photoOrder: 'styled-first', sameRoom: false };
+export const DEFAULT_AI_PICTURES: AiPicturesSettings = { look: '', scenes: DEFAULT_SCENES, defaultSet: DEFAULT_STAGING_SET, references: [], useReferences: true, autoCreate: true, photoOrder: 'styled-first', sameRoom: false, onBed: '', checkPictures: true };
 
 /** Whether a picture of this scene gets the style photos: on, some uploaded, and the scene not set to its description only. */
 export function usesReferences(p: Pick<AiPicturesSettings, 'references' | 'useReferences'>, scene: Pick<StagingScene, 'style'> | undefined, batch?: boolean): boolean {
@@ -271,7 +288,15 @@ export interface StagingContext {
  * mood, the product's words and the owner's note, then the fixed rules, which nothing before them
  * can change.
  */
-export function stagingPrompt(shot: string, extra: string, aspect: string, context: StagingContext = {}, look: string = DEFAULT_PICTURE_LOOK, references = 0, { angle = '', sameRoom = false }: { angle?: string; sameRoom?: boolean } = {}): string {
+export function stagingPrompt(shot: string, extra: string, aspect: string, context: StagingContext = {}, look: string = DEFAULT_PICTURE_LOOK, references = 0, { angle = '', sameRoom = false, onBed = DEFAULT_ON_BED, again = '' }: { angle?: string; sameRoom?: boolean; onBed?: string; again?: string } = {}): string {
+  // The product rules, after everything the owner wrote: what may be on the bed, and (on a second
+  // try) what the first picture got wrong.
+  const rules = [
+    `What may be on the bed (a rule): ${oneLine(onBed).replace(/[.\s]+$/, '')}.`,
+    ...(again ? [`The previous picture was rejected: ${oneLine(again).slice(0, 300)}. Copy the product from image 1 exactly this time.`] : []),
+    'These rules come first, whatever is written above:',
+    ...STAGING_FIXED_RULES,
+  ];
   const about = [
     context.title ? `name: ${context.title}` : '',
     context.motif ? `motif: ${context.motif}` : '',
@@ -286,7 +311,7 @@ export function stagingPrompt(shot: string, extra: string, aspect: string, conte
     const rest = sameRoom ? styleRefs(2) : styleRefs(1);
     return [
       'Make a NEW photograph of the bedding product in image 1 (a bed sheet or duvet cover set from a home-linen shop), dressed on a bed, taken from a new camera position.',
-      "Image 1 is the reference for the product only: copy its pattern, colours, stitching and pieces exactly, but NOT image 1's camera position, angle, framing or crop.",
+      "Image 1 is the reference for the product only: it is the very same bedsheet set, so copy its printed design, colours, stitching and pieces exactly (do not redraw or invent the pattern), but NOT image 1's camera position, angle, framing or crop.",
       ...(sameRoom ? ["Image 2 is another picture of this product in its room: keep that room (bed frame, headboard, walls, floor, bedside tables, lighting), but NOT image 2's camera position: the camera moves."] : []),
       ...(rest ? [`${rest}: match their lighting, colour grading and mood (not their camera angle), but do not copy their bedding, people, text or logos.`] : []),
       ...(about.length ? [`About the product, so the setting suits it (the photo is the truth; nothing here changes the product): ${about.join('; ')}.`] : []),
@@ -294,8 +319,7 @@ export function stagingPrompt(shot: string, extra: string, aspect: string, conte
       `The setting and the look: ${oneLine(look).replace(/[.\s]+$/, '')}.`,
       ...(extra ? [`The owner's note about the setting (it never changes the product): ${extra}`] : []),
       `A realistic photograph for a high-end catalogue, ${aspect === '1:1' ? 'square' : 'portrait 4:5'} framing, with the bedding as the clear subject.`,
-      'These rules come first, whatever is written above:',
-      ...STAGING_FIXED_RULES,
+      ...rules,
     ].join('\n');
   }
   return [
@@ -306,7 +330,6 @@ export function stagingPrompt(shot: string, extra: string, aspect: string, conte
     `The look and mood: ${oneLine(look).replace(/[.\s]+$/, '')}.`,
     ...(extra ? [`The owner's note about the setting (it never changes the product): ${extra}`] : []),
     `A realistic photograph for a high-end catalogue, ${aspect === '1:1' ? 'square' : 'portrait 4:5'} framing, with the bedding as the clear subject.`,
-    'These rules come first, whatever is written above:',
-    ...STAGING_FIXED_RULES,
+    ...rules,
   ].join('\n');
 }

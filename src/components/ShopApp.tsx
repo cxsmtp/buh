@@ -211,10 +211,16 @@ export function ShopApp({
       // The installed app's shortcuts (long-press the icon): Bag and Track Order.
       const shortcut = params.get('open');
       if (shortcut === 'bag') setIsCartOpen(true);
-      else if (shortcut === 'track') setIsTrackerOpen(true);
+      else if (shortcut === 'track') {
+        // The order emails' link (?open=track&order=BUH-…): Track Order with the order number filled in.
+        const order = (params.get('order') ?? '').trim().toUpperCase();
+        if (/^BUH-[A-Z0-9-]{4,40}$/.test(order)) setLastOrderId(order);
+        setIsTrackerOpen(true);
+      }
       if (params.has('bag') || shortcut) {
         params.delete('bag');
         params.delete('open');
+        params.delete('order');
         const rest = params.toString();
         window.history.replaceState(null, '', `${window.location.pathname}${rest ? `?${rest}` : ''}`);
       }

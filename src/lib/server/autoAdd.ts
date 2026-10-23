@@ -13,7 +13,7 @@ import { logEvent } from './log';
 import { createProduct, getProduct, updateProduct } from './products';
 import { getSettings } from './settings';
 import { suggestSku } from './sku';
-import { PRODUCT_MAX_PHOTOS, SOURCE_MAX_BYTES, anglesOf, saveStyledPhotos, sceneById, stagePhoto, stagingStatus } from './stagePhoto';
+import { PRODUCT_MAX_PHOTOS, SOURCE_MAX_BYTES, anglesOf, discardStagedPhoto, saveStyledPhotos, sceneById, stagePhoto, stagingStatus } from './stagePhoto';
 
 /**
  * Quick add (Inventory → Add product): the owner gives only the basics (photos, price, category,
@@ -498,7 +498,19 @@ async function runJob(job: AutoJob): Promise<void> {
       };
       if (img.bytes.length > SOURCE_MAX_BYTES) throw new HttpError(413, 'The photo is too large (at most 4 MB).');
       const r = await patiently(job, 'pictures', () => stagePhoto(body, job.by));
-      job.made.push(r.url);
+      if (r.check && !r.check.ok) {
+        // The check found another design, or other bedding, even on the second try: never put in
+        // the shop by itself (the owner's two must-haves). The picture is not kept.
+        failures.push(`picture ${i + 1} did not match the product (${r.check.reason}), so it was not added`);
+        job.made.push('');
+        try {
+          discardStagedPhoto({ url: r.url }, job.by);
+        } catch {
+          // Already gone, or in use somewhere: left as it is.
+        }
+      } else {
+        job.made.push(r.url);
+      }
     } catch (err) {
       failures.push(said(err));
       job.made.push('');

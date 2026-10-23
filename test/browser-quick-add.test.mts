@@ -96,7 +96,11 @@ for (const width of [375, 1280]) {
     // Add at once, without waiting for anything: the form is ready for the next one straight away
     // (photos and name cleared, the price kept), and the item is sent in the background.
     await sheet.getByTestId('quick-add-save').click();
-    await sheet.getByRole('status').filter({ hasText: /add the next one/ }).waitFor();
+    await sheet.getByTestId('quick-added').filter({ hasText: /Add the next item/ }).waitFor();
+    // Back at the top, the camera ready (reported: after Add the form stayed scrolled down).
+    await page.waitForFunction(() => (document.querySelector('[data-testid="quick-add"]') as HTMLElement).scrollTop === 0);
+    await page.waitForFunction(() => document.activeElement?.getAttribute('aria-label') === 'Take a photo with the camera');
+    assert.ok(await sheet.getByLabel('Take a photo with the camera').evaluate((el) => el.closest('label')!.getBoundingClientRect().top < window.innerHeight), 'the camera button is in view');
     assert.equal(await sheet.getByTestId('quick-photos').count(), 0);
     assert.equal(await sheet.getByLabel(/^Name/).inputValue(), '');
     assert.equal(await sheet.getByLabel('Price (AED)').inputValue(), '245');

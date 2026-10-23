@@ -570,6 +570,15 @@ const MIGRATIONS: Array<(db: DB) => void> = [
     // The triggers, from the one list the startup self-check repairs from (ensureChangeTriggers).
     ensureChangeTriggers(db);
   },
+  // 17: the customer's order emails (orderMail.ts): "your order is in process" when it is placed,
+  //     and "your order is confirmed" once the shop has confirmed it. Each is claimed on the order
+  //     before it is sent (two copies of the shop during an update, a retry), so it goes once.
+  //     Add-only columns: an older version simply ignores them.
+  (db) => {
+    const have = new Set((db.prepare('PRAGMA table_info(orders)').all() as Array<{ name: string }>).map((c) => c.name));
+    if (!have.has('received_emailed_at')) db.exec('ALTER TABLE orders ADD COLUMN received_emailed_at TEXT');
+    if (!have.has('confirmed_emailed_at')) db.exec('ALTER TABLE orders ADD COLUMN confirmed_emailed_at TEXT');
+  },
 ];
 
 // ── What changed since the last backup: the triggers (migration 16) ─────────

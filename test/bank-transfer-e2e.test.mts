@@ -295,14 +295,14 @@ for (const [width, phone] of [[375, '050 881 3001'], [1280, '055 881 3002']] as 
     for (const s of SECRETS) assert.ok(!checkoutText.includes(s), `checkout never shows ${s}`);
     assert.deepEqual(await overflow(page), [], 'checkout: no sideways scroll');
     await page.locator('button[type=submit]').click();
-    await page.getByText('Thank you for your order').waitFor({ timeout: 10_000 });
+    await page.locator('#order-confirmed-title').waitFor({ timeout: 10_000 });
 
     // The confirmation: the customer's own private link, and "Confirm on WhatsApp" asks for the details.
     const uploadLink = page.getByRole('link', { name: 'Upload your transfer screenshot' });
     await uploadLink.waitFor();
     const payPath = (await uploadLink.getAttribute('href'))!;
     assert.match(payPath, /^\/pay\/[A-Za-z0-9_-]{43}$/);
-    const confirm = page.getByRole('link', { name: 'Confirm on WhatsApp' });
+    const confirm = page.getByRole('link', { name: /Confirm (my order )?on WhatsApp/ });
     const confirmHref = (await confirm.getAttribute('href'))!;
     const id = confirmHref.match(/BUH-\d{6}-[A-Z2-9]{6}/)?.[0];
     assert.ok(id, confirmHref);

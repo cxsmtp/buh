@@ -37,6 +37,9 @@ interface Slot {
   said?: string;
   /** Waiting before trying again (the service's per-minute limit). */
   waiting?: string;
+  /** The check against the product photo: false when it found another design or other bedding. */
+  matches?: boolean;
+  mismatch?: string;
 }
 
 export interface StudioStatus {
@@ -209,7 +212,7 @@ export function PictureStudio({
   const make = async (key: number, preset: string, field: Record<string, string>, attempt = 0): Promise<void> => {
     const scene = (scenes[preset] ?? '').trim();
     const ctx = Object.fromEntries(Object.entries(context).filter(([, v]) => (Array.isArray(v) ? v.length : typeof v === 'string' && v.trim())));
-    const call = postJson<{ url?: string; message?: string; code?: string; reason?: string; detail?: string; retryAfterSec?: number }>('/api/admin/products/stage-photo', {
+    const call = postJson<{ url?: string; message?: string; code?: string; reason?: string; detail?: string; retryAfterSec?: number; check?: { ok: boolean; reason: string } | null }>('/api/admin/products/stage-photo', {
       ...field,
       // One of the angles in the owner's prompt (with the set's first picture, so the room matches), or a scene.
       ...(isAngle(preset) ? { angle: Number(preset.slice(6)), ...(firstAngle.current ? { sameRoom: firstAngle.current } : {}) } : { preset }),
@@ -245,7 +248,7 @@ export function PictureStudio({
     // Discarded (or tried again) while it was being made: thrown away.
     if (!live.current.has(key)) return void discard(data.url);
     if (isAngle(preset) && !firstAngle.current) firstAngle.current = data.url;
-    update({ state: 'done', url: data.url });
+    update({ state: 'done', url: data.url, matches: data.check ? data.check.ok : undefined, mismatch: data.check && !data.check.ok ? data.check.reason : undefined });
   };
 
   const start = async () => {
@@ -297,6 +300,9 @@ export function PictureStudio({
   };
 
   const add = async (picked: Slot[]) => {
+    const wrong = picked.filter((s) => s.state === 'done' && s.matches === false);
+    // The owner's must-haves (the design, nothing else on the bed): a picture the check rejected is added only on purpose.
+    if (wrong.length && !window.confirm(`${wrong.length === 1 ? 'This picture doesn’t' : `${wrong.length} pictures don’t`} match the product (${wrong[0].mismatch}). Add anyway?`)) return;
     const ready = picked.filter((s) => s.state === 'done' && s.url);
     if (!ready.length || adding) return;
     if (room <= 0) return setError('This product already has 8 photos: remove one first.');
@@ -482,7 +488,12 @@ export function PictureStudio({
                   <figure className="min-w-0">
                     {/* eslint-disable-next-line @next/next/no-img-element */}
                     <img src={s.url} alt={`Styled photo: ${nameOf(s.preset)}`} className="w-full aspect-[4/5] object-cover rounded-xl border border-gold" />
-                    <figcaption className="text-[11px] text-ink-soft mt-1">Styled by AI</figcaption>
+                    <figcaption className="text-[11px] text-ink-soft mt-1">Styled by AI{s.matches === true ? ' · checked: matches the product' : ''}</figcaption>
+                    {s.matches === false && (
+                      <p role="alert" className="mt-1 text-xs font-semibold text-danger break-words" data-testid="stage-mismatch">
+                        Doesn&rsquo;t match the product: {s.mismatch}. Try again, or discard it.
+                      </p>
+                    )}
                   </figure>
                 )}
                 <div className="grid grid-cols-3 gap-1">

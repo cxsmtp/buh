@@ -1,5 +1,18 @@
 # Changelog
 
+## BUH-02.25.00 — 2026-10-23 20:10 UTC · [#49](https://github.com/cxsmtp/buh/pull/49)
+
+- **The order's last step is clear.** A cash-on-delivery or bank-transfer order that still needs its WhatsApp message no longer says "thank you, confirmed". It says **Last step: confirm your order on WhatsApp**, with one large button. Once the customer taps it, the page says **Your order is in process**: "we'll confirm it shortly".
+- **Order emails for customers.** When a customer gives an email, a cash-on-delivery order gets "your order is in process", with the one-tap WhatsApp confirmation and a Track Order link. Every cash-on-delivery or bank-transfer order gets "your order is confirmed" once you confirm it. Each email goes once per order, and an address can't be flooded.
+- **Email recommended at checkout.** It stays optional, but checkout now advises it, for the confirmation and a tracking link by email.
+- **Quick add is ready for the next item.** After Add, the form goes back to the top with the camera ready. The items being made fold into one line.
+- **AI pictures keep your design and only your product.** Every picture is told to copy your print exactly and to show only the bedsheet and its matching pillow covers (Settings → AI pictures → What goes on the bed). Each picture is then checked against your photo. One that changes the design or adds bedding is made again once. If it still fails, it is marked "Doesn't match" and never added by itself.
+- **Status.**
+  - **Benchmark:** 0 failed requests in every round, and the branch keeps pace with main. The medians are catalogue 725 vs 690 req/s, gift page 666 vs 629, courier check 616 vs 637, and home page 762 vs 760 (p95 167 vs 162 ms, within main's own 122–167 ms swing).
+  - **Tests:** 1,192/1,202 in the full run. Six failures were tests still expecting the old behaviour (each picture is now checked, and a tapped order gets the 24-hour deadline). They are updated, and their files now pass alone (23/23). Four browser screens timed out under load and pass alone (34/34).
+  - **Dependency audit:** production 0 vulnerabilities; no new packages.
+  - **Security scan:** no new route. The order emails are rate-limited per address and per connection and sent once per order (claimed in the database). Checkmarx could not run because its sign-in has expired.
+
 ## BUH-02.24.03 — 2026-10-23 · [#48](https://github.com/cxsmtp/buh/pull/48)
 
 - **Security update: Next.js 16.4.3.** The web framework the shop runs on published three serious fixes: two ways an attacker could run code on a server (through the image optimiser with SVG files, and through cached functions) and a way to overload it. The shop now runs the fixed version, and it reaches your shop by itself, like every release. Nothing changes in how the shop looks or works.

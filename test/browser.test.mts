@@ -103,7 +103,7 @@ for (const [width, phone] of [[375, '050 123 4567'], [1280, '055 765 4321']] as 
     await page.getByPlaceholder('e.g. Apt 1402 or Villa 24').fill('1402');
     assert.deepEqual(await overflow(page), [], 'no horizontal overflow');
     await submit.click();
-    await page.getByText('Thank you for your order').waitFor({ timeout: 10_000 });
+    await page.locator('#order-confirmed-title').waitFor({ timeout: 10_000 });
 
     // Stored on the server under the verified number (in any format the customer typed).
     const id = await confirmedOrderId(page);
@@ -195,7 +195,7 @@ test('regression: a placed order carries no made-up AWB, and a second order is n
     await page.getByPlaceholder('e.g. Marina Gate 1 or Villa 24').fill('Tower A');
     await page.getByPlaceholder('e.g. Apt 1402 or Villa 24').fill('101');
     await page.locator('button[type=submit]').click();
-    await page.getByText('Thank you for your order').waitFor({ timeout: 10_000 });
+    await page.locator('#order-confirmed-title').waitFor({ timeout: 10_000 });
   };
   await placeOrder('052 111 2233');
   const firstId = await confirmedOrderId(page);
@@ -209,7 +209,7 @@ test('regression: a placed order carries no made-up AWB, and a second order is n
   await page.getByRole('button', { name: /Add to Bag/ }).click();
   await page.getByRole('button', { name: /Proceed to Checkout/ }).click();
   await page.locator('#checkout-phone').waitFor();
-  assert.equal(await page.getByText('Thank you for your order').count(), 0, 'fresh checkout, not the old confirmation');
+  assert.equal(await page.locator('#order-confirmed-title').count(), 0, 'fresh checkout, not the old confirmation');
   await placeOrder('052 111 2244');
   const secondId = await confirmedOrderId(page);
   assert.notEqual(secondId, firstId);
@@ -259,7 +259,7 @@ test('the shop and the admin hub share one store: a customer order reaches the o
   // No bank account saved yet: bank transfer is not offered (there is no demo account to pay into).
   assert.equal(await sp.getByRole('radio', { name: /Bank transfer/ }).count(), 0);
   await sp.locator('button[type=submit]').click();
-  await sp.getByText('Thank you for your order').waitFor({ timeout: 10_000 });
+  await sp.locator('#order-confirmed-title').waitFor({ timeout: 10_000 });
   const orderId = await confirmedOrderId(sp);
 
   // 2. The owner, in a different browser, sees it and books the courier.
@@ -368,7 +368,7 @@ test('regression: a price changed during checkout is shown before the customer i
     await page.waitForFunction((old) => document.querySelector('button[type=submit]')?.textContent !== old, before);
     assert.notEqual(await submit.textContent(), before, 'the new total is shown');
     await submit.click();
-    await page.getByText('Thank you for your order').waitFor({ timeout: 10_000 });
+    await page.locator('#order-confirmed-title').waitFor({ timeout: 10_000 });
     const id = await confirmedOrderId(page);
     const placed = await lookup(id, '0564007007');
     assert.ok(before.endsWith(`AED ${placed.order!.total - 50}`), 'the old total was shown first');

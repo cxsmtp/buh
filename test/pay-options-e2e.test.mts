@@ -179,7 +179,7 @@ for (const [width, phone] of [[375, '050 662 3001'], [1280, '055 662 3002']] as 
     await page.getByRole('radio', { name: /Bank transfer/, checked: true }).waitFor();
 
     await page.locator('button[type=submit]').click();
-    await page.getByText('Thank you for your order').waitFor({ timeout: 10_000 });
+    await page.locator('#order-confirmed-title').waitFor({ timeout: 10_000 });
     // The order still waits for its WhatsApp confirmation (Store & contact's "Confirm orders on
     // WhatsApp"): one button, the confirmation with its code, which also asks for the details.
     const dialog = page.getByRole('dialog');
@@ -273,7 +273,7 @@ test('at 375px, phone check WhatsApp, "on request" with an account saved: one Wh
     await fillDetails(page, 'Noura Ask', '050 662 3011');
     await page.getByRole('radio', { name: /Bank transfer/ }).click();
     await page.locator('button[type=submit]').click();
-    await page.getByText('Thank you for your order').waitFor({ timeout: 10_000 });
+    await page.locator('#order-confirmed-title').waitFor({ timeout: 10_000 });
     const dialog = page.getByRole('dialog');
     const button = dialog.getByRole('link', { name: 'Confirm & ask for bank details on WhatsApp' });
     await button.waitFor();

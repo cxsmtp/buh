@@ -220,9 +220,9 @@ for (const [width, phone] of [[375, '050 771 2001'], [1280, '055 771 2002']] as 
     await page.getByPlaceholder('e.g. Marina Gate 1 or Villa 24').fill('Marina Gate 1');
     await page.getByPlaceholder('e.g. Apt 1402 or Villa 24').fill('1402');
     await page.locator('button[type=submit]').click();
-    await page.getByText('Thank you for your order').waitFor({ timeout: 10_000 });
+    await page.locator('#order-confirmed-title').waitFor({ timeout: 10_000 });
 
-    const button = page.getByRole('link', { name: 'Confirm on WhatsApp' });
+    const button = page.getByRole('link', { name: /Confirm (my order )?on WhatsApp/ });
     await button.waitFor();
     assert.ok(await button.isVisible());
     await page.getByText('One last step').waitFor();
@@ -237,7 +237,7 @@ for (const [width, phone] of [[375, '050 771 2001'], [1280, '055 771 2002']] as 
     assert.equal(href, `https://wa.me/971509998877?text=${encodeURIComponent(`Confirm my order ${id} · code ${order.whatsappCheck!.code}`)}`);
     assert.equal(await page.getByRole('link', { name: /Send WhatsApp Order Update/ }).count(), 0, 'one WhatsApp button, not two');
     // Keyboard: Tab reaches it.
-    assert.ok(await tabTo(page, /Confirm on WhatsApp/), 'reachable with Tab');
+    assert.ok(await tabTo(page, /Confirm (my order )?on WhatsApp/), 'reachable with Tab');
     // Tapping it notes "Customer opened WhatsApp" on the order.
     const noted = page.waitForResponse((r) => r.url().endsWith('/api/orders/whatsapp-opened'));
     const popup = ctx.waitForEvent('page');

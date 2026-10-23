@@ -210,16 +210,22 @@ for (const [width, phone] of [[375, '050 881 2001'], [1280, '055 881 2002']] as 
     await page.getByPlaceholder('Street name, road, or community number').fill('Marina Walk');
     await page.getByPlaceholder('e.g. Marina Gate 1 or Villa 24').fill('Marina Gate 1');
     await page.getByPlaceholder('e.g. Apt 1402 or Villa 24').fill('1402');
+    // The email: optional, recommended, and why (reported: it should be advised).
+    await page.getByText('(recommended)').waitFor();
+    await page.getByText(/Not required, but we advise it: get your order confirmation and a link to track your order by email\./).waitFor();
     const submit = page.locator('button[type=submit]');
     await submit.getByText(/Place order/).waitFor();
     await submit.click();
-    await page.getByText('Thank you for your order').waitFor({ timeout: 10_000 });
-    await page.getByText('To confirm your order, tap to send us a WhatsApp message. Please tap within 6 hours: orders not confirmed within 24 hours are cancelled (after 6 hours if WhatsApp is never opened).').waitFor();
-    await page.getByText('Order received').waitFor();
-    const button = page.getByRole('link', { name: 'Confirm on WhatsApp' });
+    await page.locator('#order-confirmed-title').waitFor({ timeout: 10_000 });
+    // Not "thank you, confirmed": the last step is the main action (reported: it was not clear).
+    await page.getByRole('heading', { name: 'Confirm your order on WhatsApp' }).waitFor();
+    await page.getByText('Last step · not confirmed yet').waitFor();
+    await page.getByText(/Please tap within 6 hours: orders not confirmed within 24 hours are cancelled \(after 6 hours if WhatsApp is never opened\)\./).waitFor();
+    assert.equal(await page.getByText('Thank you for your order').count(), 0, 'not thanked as if it were confirmed');
+    const button = page.getByRole('link', { name: /Confirm (my order )?on WhatsApp/ });
     assert.ok(await button.isVisible());
     assert.deepEqual(await overflow(page), [], 'confirmation: no sideways scroll');
-    assert.ok(await tabTo(page, /Confirm on WhatsApp/), 'reachable with Tab');
+    assert.ok(await tabTo(page, /Confirm (my order )?on WhatsApp/), 'reachable with Tab');
     const href = (await button.getAttribute('href'))!;
     const id = href.match(/BUH-\d{6}-[A-Z2-9]{6}/)?.[0];
     assert.ok(id, href);
@@ -228,6 +234,14 @@ for (const [width, phone] of [[375, '050 881 2001'], [1280, '055 881 2002']] as 
     const { order } = await adminOrder(id!);
     assert.equal(order.customer.phoneVerified, false);
     assert.equal(order.whatsappCheck!.status, 'awaiting');
+    // Tapped: "your order is in process" (and the button to open WhatsApp again, if not sent).
+    const popup = ctx.waitForEvent('page');
+    await button.click();
+    await (await popup).close();
+    await page.getByRole('heading', { name: 'Your order is in process' }).waitFor();
+    await page.getByText(/will confirm it shortly on WhatsApp/).waitFor();
+    await page.getByRole('link', { name: /Didn’t send it\? Open WhatsApp again/ }).waitFor();
+    assert.deepEqual(await overflow(page), [], 'in process: no sideways scroll');
     await ctx.close();
 
     // The hub (phone view): the time left, "Ask to confirm" to the customer, and "Confirmed by phone call".
@@ -241,7 +255,9 @@ for (const [width, phone] of [[375, '050 881 2001'], [1280, '055 881 2002']] as 
     await openAdminSection(hp, /^Orders/);
     await hp.getByRole('button', { name: /Awaiting WhatsApp/ }).click();
     const card = hp.getByTestId('whatsapp-check').filter({ hasText: order.customer.phone }).first();
-    await card.getByText(/Awaiting WhatsApp — auto-cancels in [56] h unless the customer opens WhatsApp/).waitFor();
+    // The customer tapped (WhatsApp opened), so the 24-hour deadline applies, not the 6-hour one.
+    await card.getByText(/Awaiting WhatsApp — auto-cancels in 2[34] h/).waitFor();
+    assert.equal(await card.getByText(/unless the customer opens WhatsApp/).count(), 0);
     const ask = card.getByRole('link', { name: 'Ask to confirm' });
     const digits = order.customer.phone.replace(/\D/g, '');
     assert.equal(await ask.getAttribute('href'), `https://wa.me/${digits}?text=${encodeURIComponent(`Hello Hind, please confirm your order ${id} from Beautiful UAE Home by replying YES. Thank you!`)}`);

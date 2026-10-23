@@ -1,4 +1,6 @@
+import { after } from 'next/server';
 import { requireAdmin } from '@/lib/server/guard';
+import { emailOrder } from '@/lib/server/orderMail';
 import { allowFields, handleRouteError, HttpError, json, readJsonBody, str } from '@/lib/server/http';
 import { checkWhatsApp, getOrder, type WhatsAppResult } from '@/lib/server/orders';
 
@@ -25,6 +27,8 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
     const phone = WITH_PHONE.includes(result) ? str(body.phone, 'Phone number', 32) : undefined;
     if (!/^BUH-[A-Z0-9-]{4,40}$/.test(id) || !getOrder(id)) throw new HttpError(404, 'Order not found.');
     const { order, changed } = checkWhatsApp(id, result, session.email, { phone });
+    // Confirmed (on WhatsApp, by phone call, or with the number it came from): "your order is confirmed".
+    if (changed && order.whatsappCheck?.status === 'confirmed' && order.customer.email) after(() => emailOrder(id, 'confirmed'));
     return json({ order, changed });
   } catch (err) {
     return handleRouteError(err, 'admin/orders/whatsapp');

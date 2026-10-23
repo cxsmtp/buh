@@ -22,6 +22,7 @@ import {
   Check, 
   Upload, 
   MessageCircle, 
+  Hourglass,
   ArrowRight, 
   ShieldCheck, 
   Banknote, 
@@ -213,6 +214,25 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
   // Submission State
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [confirmedOrder, setConfirmedOrder] = useState<Order | null>(null);
+  // The customer tapped "Confirm my order on WhatsApp" for this order (kept for this visit, so a
+  // reload still says "in process"). Only shown after an order, in the browser.
+  const [tappedNow, setTappedNow] = useState<string[]>([]);
+  const wasTapped = (orderId: string) => {
+    if (tappedNow.includes(orderId)) return true;
+    try {
+      return sessionStorage.getItem(`buh:wa-tapped:${orderId}`) === '1';
+    } catch {
+      return false;
+    }
+  };
+  const markWaTapped = (orderId: string) => {
+    setTappedNow((list) => [...list, orderId]);
+    try {
+      sessionStorage.setItem(`buh:wa-tapped:${orderId}`, '1');
+    } catch {
+      // A convenience only.
+    }
+  };
   const [submitError, setSubmitError] = useState('');
 
   // Card payments: Stripe's fields say when they can pay; the confirmation screen asks the server
@@ -645,7 +665,12 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
     const askWhatsApp = Boolean(confirmedOrder.whatsappCheck && shopWhatsApp);
     // WhatsApp check: the message is the order's confirmation (with the hours before an unconfirmed one is cancelled).
     const cancelHours = cancelHoursOf(confirmedOrder.createdAt, confirmedOrder.whatsappCheck?.cancelAt) ?? (whatsappCheck && confirmedOrder.whatsappCheck?.cancelAt ? phoneVerification?.cancelHours ?? null : null);
-    const awaitingConfirmation = askWhatsApp && confirmedOrder.whatsappCheck?.status !== 'confirmed' && (Boolean(confirmedOrder.whatsappCheck?.hold) || Boolean(cancelHours));
+    // The order still needs the customer's WhatsApp message (Settings → Phone check "WhatsApp (free)":
+    // every cash-on-delivery and bank-transfer order no code proved; or the shop holds orders until it).
+    const awaitingConfirmation =
+      askWhatsApp && confirmedOrder.whatsappCheck?.status !== 'confirmed' && (Boolean(confirmedOrder.whatsappCheck?.hold) || Boolean(cancelHours) || (whatsappCheck && !confirmedOrder.customer.phoneVerified));
+    const openHours = cancelHoursOf(confirmedOrder.createdAt, confirmedOrder.whatsappCheck?.openBy);
+    const waTapped = wasTapped(confirmedOrder.id);
     // WhatsApp check without the shop's number: nothing to tap, the shop calls instead.
     const weCall = whatsappCheck && !askWhatsApp && !confirmedOrder.customer.phoneVerified && !paidByCardOrder(confirmedOrder);
     const paidByCard = confirmedOrder.paymentMethod === 'online_card';
@@ -667,22 +692,68 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
       <div className="fixed inset-0 z-50 flex items-stretch sm:items-center justify-center bg-scrim/45 sm:p-4" role="dialog" aria-modal="true" aria-labelledby="order-confirmed-title">
         <div className="bg-surface sm:rounded-3xl max-w-lg w-full h-[100dvh] sm:h-auto sm:max-h-[92dvh] flex flex-col border border-line pt-safe sm:pt-0 overflow-hidden">
           <div className="flex-1 min-h-0 overflow-y-auto overflow-x-hidden p-6 text-center space-y-5">
-          <div className="w-14 h-14 rounded-full border border-gold text-gold-deep flex items-center justify-center mx-auto">
-            <CheckCircle2 className="w-7 h-7" strokeWidth={1.25} />
-          </div>
+          {awaitingConfirmation ? (
+            // Not confirmed yet: no "thank you, confirmed". The one thing left to do is the main
+            // action; once tapped, "your order is in process" (the shop confirms it shortly).
+            <div data-testid="order-last-step" className="space-y-4">
+              <div className={`w-14 h-14 rounded-full border flex items-center justify-center mx-auto ${waTapped ? 'border-gold text-gold-deep' : 'border-success-line text-whatsapp'}`}>
+                {waTapped ? <Hourglass className="w-7 h-7" strokeWidth={1.25} /> : <MessageCircle className="w-7 h-7" strokeWidth={1.25} />}
+              </div>
+              <div>
+                <span className="label-caps text-gold-deep">{waTapped ? 'Order in process' : 'Last step · not confirmed yet'}</span>
+                <h2 id="order-confirmed-title" className="font-serif text-3xl text-ink mt-2">
+                  {waTapped ? 'Your order is in process' : 'Confirm your order on WhatsApp'}
+                </h2>
+                <p className="text-[13px] text-ink-soft mt-2 leading-relaxed">
+                  {waTapped ? (
+                    <>
+                      Thank you! We&rsquo;ve got your order <span className="font-mono">{confirmedOrder.id}</span> and will confirm it shortly on WhatsApp{confirmedOrder.customer.email ? ' and by email' : ''}.
+                    </>
+                  ) : (
+                    <>
+                      Your order <span className="font-mono">{confirmedOrder.id}</span> is reserved for you. Tap the green button and press <strong>Send</strong> in WhatsApp: that confirms it.
+                      {cancelHours
+                        ? openHours && openHours < cancelHours
+                          ? ` Please tap within ${openHours} hours: orders not confirmed within ${cancelHours} hours are cancelled (after ${openHours} hours if WhatsApp is never opened).`
+                          : ` Orders not confirmed within ${cancelHours} hours are cancelled.`
+                        : ''}
+                    </>
+                  )}
+                </p>
+              </div>
+              <WhatsAppConfirm
+                lead
+                tapped={waTapped}
+                onTapped={() => markWaTapped(confirmedOrder.id)}
+                orderId={confirmedOrder.id}
+                phone={confirmedOrder.customer.phone}
+                check={confirmedOrder.whatsappCheck!}
+                bankDetails={byTransfer}
+                cancelHours={cancelHours}
+                openHours={openHours}
+                buttonLabel={confirmAsks ? 'Confirm & ask for bank details on WhatsApp' : 'Confirm my order on WhatsApp'}
+              />
+            </div>
+          ) : (
+            <>
+              <div className="w-14 h-14 rounded-full border border-gold text-gold-deep flex items-center justify-center mx-auto">
+                <CheckCircle2 className="w-7 h-7" strokeWidth={1.25} />
+              </div>
 
-          <div>
-            <span className="label-caps text-gold-deep">{cardOver ? 'Payment not taken' : paidByCard && !cardPaid ? 'Order received' : awaitingConfirmation || weCall ? 'Order received' : 'Order confirmed'}</span>
-            <h2 id="order-confirmed-title" className="font-serif text-3xl text-ink mt-2">
-              Thank you for your order
-            </h2>
-            <p className="text-[13px] text-ink-soft mt-2 leading-relaxed">
-              Your linens are being prepared with care in Dubai. We will send a tracking link as soon as they ship.
-            </p>
-          </div>
+              <div>
+                <span className="label-caps text-gold-deep">{cardOver ? 'Payment not taken' : paidByCard && !cardPaid ? 'Order received' : weCall ? 'Order received' : 'Order confirmed'}</span>
+                <h2 id="order-confirmed-title" className="font-serif text-3xl text-ink mt-2">
+                  Thank you for your order
+                </h2>
+                <p className="text-[13px] text-ink-soft mt-2 leading-relaxed">
+                  Your linens are being prepared with care in Dubai. We will send a tracking link as soon as they ship.
+                </p>
+              </div>
 
-          {/* Confirm on WhatsApp (Settings → Store & contact): one message from the customer's own WhatsApp. */}
-          {askWhatsApp && <WhatsAppConfirm orderId={confirmedOrder.id} phone={confirmedOrder.customer.phone} check={confirmedOrder.whatsappCheck!} bankDetails={byTransfer} cancelHours={cancelHours} openHours={cancelHoursOf(confirmedOrder.createdAt, confirmedOrder.whatsappCheck?.openBy)} {...(confirmAsks ? { buttonLabel: 'Confirm & ask for bank details on WhatsApp' } : {})} />}
+              {/* Confirm on WhatsApp (Settings → Store & contact): optional here (the order goes ahead either way). */}
+              {askWhatsApp && <WhatsAppConfirm orderId={confirmedOrder.id} phone={confirmedOrder.customer.phone} check={confirmedOrder.whatsappCheck!} bankDetails={byTransfer} cancelHours={cancelHours} openHours={cancelHoursOf(confirmedOrder.createdAt, confirmedOrder.whatsappCheck?.openBy)} {...(confirmAsks ? { buttonLabel: 'Confirm & ask for bank details on WhatsApp' } : {})} />}
+            </>
+          )}
           {weCall && (
             <p role="status" className="text-xs text-ink-soft bg-ivory border border-line rounded-xl px-3 py-2">
               We&rsquo;ll call you on <span className="font-mono">{confirmedOrder.customer.phone}</span> to confirm your order.
@@ -992,16 +1063,23 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
               />
 
               <div className="sm:col-span-2">
-                <label className="block text-ink font-semibold mb-1">
-                  Email Address <span className="text-ink-muted font-normal">(Optional for order tracking receipt)</span>
+                <label htmlFor="checkout-email" className="block text-ink font-semibold mb-1">
+                  Email address <span className="text-gold-deep font-semibold">(recommended)</span>
                 </label>
                 <input
+                  id="checkout-email"
                   type="email"
+                  inputMode="email"
+                  autoComplete="email"
                   placeholder="name@domain.com"
                   value={email}
                   onChange={(e) => setEmail(e.target.value)}
-                  className="w-full px-3.5 py-2.5 rounded-xl border border-line-strong bg-surface text-ink placeholder:text-ink-muted font-medium focus:outline-none focus:ring-2 focus:ring-gold focus:bg-surface text-xs"
+                  aria-describedby="checkout-email-why"
+                  className="w-full px-3.5 py-2.5 rounded-xl border border-line-strong bg-surface text-ink placeholder:text-ink-muted font-medium focus:outline-none focus:ring-2 focus:ring-gold focus:bg-surface text-base sm:text-xs"
                 />
+                <p id="checkout-email-why" className="text-[11px] text-ink-muted mt-1 leading-relaxed">
+                  Not required, but we advise it: get your order confirmation and a link to track your order by email.
+                </p>
               </div>
             </div>
           </div>
