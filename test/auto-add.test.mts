@@ -546,10 +546,12 @@ test('the owner’s fixed prompt and the set’s pieces (reported: pillow covers
   const plain = staging.stagingPrompt('the whole bed', '', '4:5');
   for (const line of [
     'Strict fidelity requirements:',
-    '- Exact print and motif replication: copy the printed design directly from its reference photo onto the sheets and the pillow covers (the bedsheets from image 1, the pillow covers from image 1). Retain the exact motifs, arrangement, print scale and colours without inventing, redrawing, simplifying, restyling or replacing patterns.',
+    '- Exact print and motif replication: copy the printed design directly from each piece’s reference photo onto that piece (the comforter, sheets and pillow covers). Retain the exact motifs, arrangement, print scale and colours without inventing, redrawing, simplifying, restyling or replacing patterns.',
     '- Colour accuracy: maintain the exact colours, shades and fabric tones of the reference photo; do not recolour, brighten, saturate or fade the fabric.',
     '- Texturing and construction: accurately render the fabric texture, stitching, piping, borders, edges and natural folds.',
-    '- Component count: exactly match the pieces of this set (sheets, pillow covers); add no extra items, and remove none. This set has no comforter: show none. Ensure the pillow covers display their design clearly.',
+    '- Component count: exactly match the pieces of this set; add no extra items, and remove none. Ensure the pillow covers display their design clearly.',
+    "This set's pieces (sheets, pillow covers), each copied exactly from its own photo: the bedsheets from image 1, the pillow covers from image 1.",
+    'This set has no comforter: show none.',
     'Composition and environment:',
     '- A clean, minimalist, well-lit upscale bedroom interior background that complements the bedding without distracting from it.',
     '- Single frame: one single photograph filling the entire frame from one fixed camera angle. Never a collage, grid, split screen, multiple views or framed border.',
@@ -569,7 +571,7 @@ test('the owner’s fixed prompt and the set’s pieces (reported: pillow covers
   assert.equal(imagesOf(call), 2, 'no comforter photo');
   let p = promptOf(call);
   assert.match(p, /Image 1 is the bedsheet of this set; image 2 is its pillow cover \(the pillow covers carry exactly this design, not the bedsheet's\)/);
-  assert.match(p, /the bedsheets from image 1, the pillow covers from image 2\)/);
+  assert.match(p, /This set's pieces \(sheets, pillow covers\), each copied exactly from its own photo: the bedsheets from image 1, the pillow covers from image 2\./);
   assert.match(p, /This set has no comforter: show none\./);
   // The check sees the bedsheet, the pillow cover and the picture, and asks for each.
   let check = sent.filter(isCheck).at(-1)!;
@@ -586,8 +588,8 @@ test('the owner’s fixed prompt and the set’s pieces (reported: pillow covers
   assert.equal(parts[3].inlineData!.data, bytesOf(comforter), 'image 3: the comforter');
   p = promptOf(call);
   assert.match(p, /image 3 is its comforter/);
-  assert.match(p, /onto the comforter, the sheets and the pillow covers \(the bedsheets from image 1, the pillow covers from image 2, the comforter from image 3\)/);
-  assert.match(p, /\(comforter, sheets, pillow covers\); add no extra items, and remove none\. Ensure/);
+  assert.match(p, /This set's pieces \(comforter, sheets, pillow covers\), each copied exactly from its own photo: the bedsheets from image 1, the pillow covers from image 2, the comforter from image 3\./);
+  assert.match(p, /This set has a comforter: copy it from image 3\./);
   assert.match(p, /a plush comforter and matching bedsheets/);
   assert.match(p, /On the bed only this set: the comforter, the bedsheet and the pillow covers/);
   check = sent.filter(isCheck).at(-1)!;
@@ -615,4 +617,69 @@ test('the owner’s fixed prompt and the set’s pieces (reported: pillow covers
     assert.equal((c.body.contents[0].parts as Array<{ inlineData?: { data: string } }>)[2].inlineData!.data, bytesOf(pillow), 'the pillow cover with every picture');
     assert.match(promptOf(c), /This set has no comforter: show none\./);
   }
+});
+
+test('the fixed prompt can be fine-tuned (reported: make it editable); the set’s pieces and "never change the design or colours" are always added after it; festival scenes next to the standard ones, editable, and a festival picture for new products when switched on', async () => {
+  const sheet = photo().url;
+  const nameOf = (url: string) => url.replace('/api/images/', '');
+  // The default: the owner's optimized prompt, then the locked lines.
+  assert.equal(settings.getSettings('aiPictures').fixedPrompt ?? '', '');
+  sent = [];
+  await stage.stagePhoto({ imageId: nameOf(sheet), preset: 'whole-bed' }, OWNER);
+  let p = promptOf(pictureCalls().at(-1)!);
+  assert.ok(p.includes(staging.DEFAULT_FIXED_PROMPT), 'the default fixed prompt');
+  assert.match(p, /This set's pieces \(sheets, pillow covers\), each copied exactly from its own photo: the bedsheets from image 1, the pillow covers from image 1\.\nThis set has no comforter: show none\.\nWhatever is written above, never change the printed design or the colours of any piece\.$/);
+
+  // Fine-tuned: the owner's words replace it (cleaned, one rule a line); the locked lines stay.
+  await settings.updateSettings('aiPictures', { fixedPrompt: 'Keep every motif exactly as photographed.\n\n- Soft daylight only.\u0007<script>\n' });
+  assert.equal(settings.getSettings('aiPictures').fixedPrompt, 'Keep every motif exactly as photographed.\n- Soft daylight only. script');
+  sent = [];
+  await stage.stagePhoto({ imageId: nameOf(sheet), preset: 'whole-bed' }, OWNER);
+  p = promptOf(pictureCalls().at(-1)!);
+  assert.match(p, /These rules come first, whatever is written above:\nKeep every motif exactly as photographed\.\n- Soft daylight only\. script\nThis set's pieces/);
+  assert.ok(!p.includes('Strict fidelity requirements:'), 'the default is replaced');
+  assert.match(p, /Whatever is written above, never change the printed design or the colours of any piece\.$/);
+  assert.equal(stage.stagingStatus().fixedPrompt, 'Keep every motif exactly as photographed.\n- Soft daylight only. script');
+  // At most 40 lines and 3,000 characters; the default saved back is stored as ''.
+  await settings.updateSettings('aiPictures', { fixedPrompt: Array.from({ length: 60 }, (_, i) => `rule ${i}`).join('\n') });
+  assert.equal(settings.getSettings('aiPictures').fixedPrompt!.split('\n').length, 40);
+  await assert.rejects(settings.updateSettings('aiPictures', { fixedPrompt: 'x'.repeat(3001) }), /at most 3000 characters/);
+  await assert.rejects(settings.updateSettings('aiPictures', { fixedPrompt: 42 }), /must be text/);
+  await settings.updateSettings('aiPictures', { fixedPrompt: staging.DEFAULT_FIXED_PROMPT });
+  assert.equal(settings.getSettings('aiPictures').fixedPrompt, '');
+
+  // Festival scenes: every festival the shop themes for (not the solemn days), decorations around the bed only.
+  const { FESTIVALS } = await import('@/lib/festivals/catalog');
+  for (const f of FESTIVALS.filter((x) => !x.solemn && !x.parent)) {
+    const scene = staging.festivalScene(f.id)!;
+    assert.ok(scene, f.id);
+    assert.ok(scene.scene.length <= staging.STAGING_SCENE_MAX, f.id);
+    assert.match(scene.scene, /every decoration stays around the bed, never on it$/);
+  }
+  for (const f of FESTIVALS.filter((x) => x.solemn || x.parent)) assert.equal(staging.festivalScene(f.id), undefined, `none for ${f.id}`);
+  sent = [];
+  await stage.stagePhoto({ imageId: nameOf(sheet), preset: 'festival-diwali' }, OWNER);
+  assert.match(promptOf(pictureCalls().at(-1)!), /Change only what is around it and the framing: the whole set neatly made on a bed, seen at eye level, in a Diwali evening: clay diyas/);
+  // The owner's words for a festival; unknown festivals and long text refused.
+  await settings.updateSettings('aiPictures', { festivalScenes: { diwali: 'rows of diyas on the windowsill, soft gold light', christmas: staging.FESTIVAL_DECOR.christmas } });
+  assert.deepEqual(settings.getSettings('aiPictures').festivalScenes, { diwali: 'rows of diyas on the windowsill, soft gold light' }, 'a default is not stored');
+  assert.match(stage.sceneById('festival-diwali')!.scene, /in rows of diyas on the windowsill, soft gold light; every decoration/);
+  await assert.rejects(settings.updateSettings('aiPictures', { festivalScenes: { 'good-friday': 'x' } }), /Unknown festival/);
+  await assert.rejects(settings.updateSettings('aiPictures', { festivalScenes: { diwali: 'x'.repeat(301) } }), /at most 300 characters/);
+
+  // Offered in the studio while the shop is themed for a festival; none on an everyday theme.
+  await settings.updateSettings('theme', { mode: 'manual', themeId: 'diwali' });
+  assert.equal(stage.stagingStatus().festival?.id, 'festival-diwali');
+  assert.match(stage.stagingStatus().festival!.name, /^Diwali — festive bedroom$/);
+  // New products: one more picture in the festival scene, only when the owner switched it on.
+  await settings.updateSettings('aiPictures', { look: '' });
+  const plain = auto.quickAdd({ key: 'q-test-0262abcd', photos: [photo().url], price: 99, sizes: [{ id: settings.getSettings('catalog').sizes[0].id, stock: 1 }] }, OWNER);
+  assert.ok(!plain.job!.plan.some((s) => s.startsWith('festival-')), 'off by default');
+  await settings.updateSettings('aiPictures', { festivalPictures: true });
+  const festive = auto.quickAdd({ key: 'q-test-0263abcd', photos: [photo().url], price: 99, sizes: [{ id: settings.getSettings('catalog').sizes[0].id, stock: 1 }] }, OWNER);
+  assert.equal(festive.job!.plan.at(-1), 'festival-diwali');
+  await settings.updateSettings('theme', { mode: 'off' });
+  assert.equal(stage.stagingStatus().festival, null);
+  await settings.updateSettings('theme', { mode: 'auto' });
+  await settings.updateSettings('aiPictures', { festivalPictures: false, festivalScenes: {}, look: PROMPT });
 });

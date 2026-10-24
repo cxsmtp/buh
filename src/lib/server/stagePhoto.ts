@@ -1,10 +1,11 @@
 import { type AiProvider, type StagedPhoto } from '@/types';
 import { FAL_KEY, FAL_KEY_HINT, OPENAI_KEY, OPENAI_KEY_HINT, PROVIDER_INFO, type PictureProvider } from '@/lib/pictureProviders';
-import { DEFAULT_PICTURE_LOOK, onBedOf, STAGING_EXTRA_MAX, STAGING_SCENE_MAX, STYLE_MAX, STYLE_SIDE_MAX, angleName, lookOf, oneLine, splitAngles, stagingPrompt, usesReferences, type StagingContext, type StagingScene } from '@/lib/staging';
+import { DEFAULT_PICTURE_LOOK, FESTIVAL_SCENE_PREFIX, festivalScene, fixedPromptOf, onBedOf, STAGING_EXTRA_MAX, STAGING_SCENE_MAX, STYLE_MAX, STYLE_SIDE_MAX, angleName, lookOf, oneLine, splitAngles, stagingPrompt, usesReferences, type StagingContext, type StagingScene } from '@/lib/staging';
 import { audit } from './audit';
 import { getDb } from './db';
 import { PICTURE_MODULES, modelOk, pictureKey, pictureModel, picturesProviderOf, providerName } from './pictures';
 import { HttpError } from './http';
+import { themedFestivalId } from './giftLines';
 import { parseImageDataUrl } from './imageInput';
 import { IMAGE_NAME, cleanImage, deleteImage, readImage, saveImageBytes } from './images';
 import { logEvent } from './log';
@@ -83,7 +84,17 @@ export function cleanContext(v: unknown): StagingContext {
 
 /** One of the owner's scenes (Settings → AI pictures) by its id. */
 export function sceneById(id: unknown): StagingScene | undefined {
-  return typeof id === 'string' ? getSettings('aiPictures').scenes.find((s) => s.id === id) : undefined;
+  if (typeof id !== 'string') return undefined;
+  const settings = getSettings('aiPictures');
+  // A festival scene (festival-<id>): the room dressed for that festival, in the owner's words or the shop's.
+  if (id.startsWith(FESTIVAL_SCENE_PREFIX)) return festivalScene(id.slice(FESTIVAL_SCENE_PREFIX.length), settings.festivalScenes);
+  return settings.scenes.find((s) => s.id === id);
+}
+
+/** The scene for the festival the shop is themed for now (none outside festivals). */
+export function currentFestivalScene(): StagingScene | null {
+  const id = themedFestivalId();
+  return (id && festivalScene(id, getSettings('aiPictures').festivalScenes)) || null;
 }
 
 export interface StageResult {
@@ -127,6 +138,10 @@ export interface StagingStatus {
    * when there are any, one press makes these instead of the scenes.
    */
   angles: Array<{ n: number; name: string }>;
+  /** The scene for the festival the shop is themed for now, offered next to the standard ones (none outside festivals). */
+  festival: StagingScene | null;
+  /** The owner's fixed prompt ('' = the shop's default). */
+  fixedPrompt: string;
   /** Where AI pictures go among the product's photos. */
   photoOrder: 'styled-first' | 'photo-first';
   /** Angles: the first picture is sent with the next ones (off by default). */
@@ -154,6 +169,8 @@ export function stagingStatus(): StagingStatus {
     angles: anglesOf(pictures).map((a, i) => ({ n: i + 1, name: angleName(a, i) })),
     photoOrder: pictures.photoOrder ?? 'styled-first',
     sameRoom: pictures.sameRoom === true,
+    festival: currentFestivalScene(),
+    fixedPrompt: fixedPromptOf(pictures),
   };
 }
 
@@ -323,7 +340,7 @@ export async function makePicture(job: PictureJob, actor: string): Promise<Stage
       model,
       product: photo,
       references: [...pieceImgs, ...references],
-      prompt: stagingPrompt(shot, extra, aspect, context, look, references.length, { angle, sameRoom: sameRoom.length > 0, onBed, again: attempt > 0 && verdict ? verdict.reason : '', pieces }),
+      prompt: stagingPrompt(shot, extra, aspect, context, look, references.length, { angle, sameRoom: sameRoom.length > 0, onBed, again: attempt > 0 && verdict ? verdict.reason : '', pieces, fixedPrompt: fixedPromptOf(settings) }),
       aspect,
       again: () => {
         // A second paid call for the same picture counts against the hour's limit too.

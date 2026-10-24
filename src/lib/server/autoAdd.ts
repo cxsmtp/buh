@@ -13,7 +13,7 @@ import { logEvent } from './log';
 import { createProduct, getProduct, updateProduct } from './products';
 import { getSettings } from './settings';
 import { suggestSku } from './sku';
-import { PRODUCT_MAX_PHOTOS, SOURCE_MAX_BYTES, anglesOf, discardStagedPhoto, saveStyledPhotos, sceneById, stagePhoto, stagingStatus } from './stagePhoto';
+import { PRODUCT_MAX_PHOTOS, SOURCE_MAX_BYTES, anglesOf, currentFestivalScene, discardStagedPhoto, saveStyledPhotos, sceneById, stagePhoto, stagingStatus } from './stagePhoto';
 
 /**
  * Quick add (Inventory → Add product): the owner gives only the basics (photos, price, category,
@@ -236,7 +236,7 @@ export function quickAdd(body: Record<string, unknown>, actor: string): { produc
     publish,
   });
   if (!runs) return { product, job: null, replayed: false };
-  const plan = status.pictures ? picturePlan() : [];
+  const plan = status.pictures ? newProductPlan() : [];
   const job: AutoJob = {
     id: crypto.randomUUID(),
     key,
@@ -264,6 +264,12 @@ export function picturePlan(): string[] {
   if (angles.length) return angles.map((_, i) => `angle:${i + 1}`);
   const set = (settings.defaultSet?.length ? settings.defaultSet : DEFAULT_STAGING_SET).filter((id) => sceneById(id));
   return set;
+}
+
+/** The pictures for a new product: the angles or the scenes, and (when the owner switched it on) one in the festival's scene. */
+function newProductPlan(): string[] {
+  const festival = getSettings('aiPictures').festivalPictures === true ? currentFestivalScene() : null;
+  return [...picturePlan(), ...(festival ? [festival.id] : [])];
 }
 
 // ── the worker ──────────────────────────────────────────────────────────────

@@ -55,6 +55,10 @@ export interface StudioStatus {
   /** The numbered angles in the owner's prompt: one picture each, made one after another. */
   angles?: Array<{ n: number; name: string }>;
   photoOrder?: 'styled-first' | 'photo-first';
+  /** The scene for the festival the shop is themed for now (none outside festivals). */
+  festival?: StagingScene | null;
+  /** The owner's fixed prompt ('' = the shop's default). */
+  fixedPrompt?: string;
 }
 
 const input = 'w-full px-3 py-2 rounded-xl border border-line-strong bg-surface text-ink text-base sm:text-sm focus:outline-none focus:ring-2 focus:ring-gold';
@@ -190,7 +194,8 @@ export function PictureStudio({
 
   // The angles in the owner's prompt come first (and are the one-press set), then the scenes.
   const angleChoices: StagingScene[] = (status?.angles ?? []).map((a) => ({ id: `angle:${a.n}`, name: a.name, scene: '' }));
-  const allScenes = [...angleChoices, ...(status?.scenes?.length ? status.scenes : DEFAULT_SCENES)];
+  // The festival the shop is themed for now: its scene next to the standard ones (never chosen by itself).
+  const allScenes = [...angleChoices, ...(status?.scenes?.length ? status.scenes : DEFAULT_SCENES), ...(status?.festival ? [status.festival] : [])];
   const sceneOf = (sid: string) => allScenes.find((s) => s.id === sid);
   const nameOf = (sid: string) => sceneOf(sid)?.name ?? sid;
   const isAngle = (sid: string) => sid.startsWith('angle:');
@@ -437,7 +442,7 @@ export function PictureStudio({
               <div className="text-xs text-ink-muted">
                 <p className="font-semibold">Always added after your words (they can&rsquo;t be changed):</p>
                 <ul className="list-disc pl-4 space-y-0.5">
-                  {fixedRules({ pillow: Boolean(setPhotos?.pillow), comforter: Boolean(setPhotos?.comforter) }).map((r) => (
+                  {fixedRules({ pillow: Boolean(setPhotos?.pillow), comforter: Boolean(setPhotos?.comforter) }, status?.fixedPrompt ?? '').map((r) => (
                     <li key={r}>{r.replace(/^- /, '')}</li>
                   ))}
                 </ul>

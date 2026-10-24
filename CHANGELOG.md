@@ -6,6 +6,8 @@
 - **A photo for each piece of the set.** Add product and the product editor have a new **Set pieces** section. The main photo is the bedsheet, and you can add a **Pillow cover photo** so the AI pictures copy the pillow covers from it. This lets redesigned pillow covers show their own design.
 - **Comforter only when the set has one.** "This set has a comforter" is off by default. Switched off, the pictures show no comforter, and a picture with one fails the check. Switched on, the comforter is copied from its own photo.
 - **Pillow covers on show.** Each picture shows one pillow cover on the bed and one placed neatly beside or in front of the bed, so its pattern can be seen.
+- **The fixed prompt is editable.** Settings → AI pictures → The fixed prompt holds your optimized prompt, and you can fine-tune it one rule per line or reset it to the default. Each product's pieces, and "never change the design or colours", are always added after it.
+- **Festival scenes.** While the shop is themed for a festival, the Picture studio offers that festival's scene next to the standard ones: the room dressed for it, with the decorations around the bed, never on it. Each festival's scene is editable. New products can also get a festival picture during festivals (off by default).
 - **Each piece checked against its own photo.** The check now compares the bedsheet, the pillow covers and the comforter with their own photos before a picture can be added.
 - **Status.**
   - **Benchmark:** pending.
