@@ -118,18 +118,55 @@ export const STYLE_UPLOAD_SIDE = 1024;
  * The rules always sent, after the scene and the owner's words, whatever they say: the product
  * stays exactly as photographed (customers return what doesn't match its picture).
  */
-export const STAGING_FIXED_RULES = [
-  'Keep the product itself exactly as it is in the photo:',
-  '- its printed design copied exactly from the photo: the same motifs, in the same arrangement, at the same print scale, in the same colours. Never invent, redraw, simplify, restyle or replace the pattern, and never use any other design;',
-  '- the same pattern and motif, in the same places, at the same print scale;',
-  '- the same colours and shades: do not recolour, brighten, saturate or fade the fabric;',
-  '- the same stitching, piping, borders, edges, folds of the fabric where visible, and texture;',
-  '- the same number of pieces (sheets, pillowcases, covers): add none and remove none.',
-  '- its pillow covers, in the product’s own design and colours, clearly visible in every picture (in a close-up, a pillow cover beside the sheet).',
-  'The colours and pattern must stay true to the photo: shoppers buy from this picture and return what does not match it.',
-  'No text, letters or numbers anywhere, no logos, no watermarks, no people or parts of people, no pets.',
-  'One single photograph that fills the whole frame, from one camera angle: never a collage, grid, split screen, border or several views in one picture.',
-] as const;
+/**
+ * The set's pieces that have their own photo (Inventory → the product → Set pieces): the bedsheet
+ * photo always (image 1); a pillow cover photo and a comforter photo when the owner adds them. A set
+ * without a comforter photo has no comforter in its pictures.
+ */
+export interface SetPieces {
+  pillow?: boolean;
+  comforter?: boolean;
+}
+
+/** Which image is which piece: image 1 the bedsheet, then the pillow cover, then the comforter (0: none). */
+export function pieceImages(p: SetPieces = {}): { sheet: 1; pillow: number; comforter: number; count: number } {
+  let n = 1;
+  const pillow = p.pillow ? ++n : 0;
+  const comforter = p.comforter ? ++n : 0;
+  return { sheet: 1, pillow, comforter, count: n };
+}
+
+/**
+ * The rules always sent, after the scene and the owner's words, whatever they say (the owner's own
+ * optimized prompt, BUH-02.26.00): every piece copied exactly from its photo, the exact pieces of the
+ * set and nothing else, one photograph, nothing written or living in it. Customers return what doesn't
+ * match its picture.
+ */
+export function fixedRules(p: SetPieces = {}): string[] {
+  const img = pieceImages(p);
+  const from = [`the bedsheets from image 1`, `the pillow covers from image ${img.pillow || 1}`, ...(img.comforter ? [`the comforter from image ${img.comforter}`] : [])].join(', ');
+  const pieces = p.comforter ? 'comforter, sheets, pillow covers' : 'sheets, pillow covers';
+  return [
+    'Strict fidelity requirements:',
+    `- Exact print and motif replication: copy the printed design directly from its reference photo onto ${p.comforter ? 'the comforter, ' : ''}the sheets and the pillow covers (${from}). Retain the exact motifs, arrangement, print scale and colours without inventing, redrawing, simplifying, restyling or replacing patterns.`,
+    '- Colour accuracy: maintain the exact colours, shades and fabric tones of the reference photo; do not recolour, brighten, saturate or fade the fabric.',
+    '- Texturing and construction: accurately render the fabric texture, stitching, piping, borders, edges and natural folds.',
+    `- Component count: exactly match the pieces of this set (${pieces}); add no extra items, and remove none.${p.comforter ? '' : ' This set has no comforter: show none.'} Ensure the pillow covers display their design clearly.`,
+    'The colours and pattern must stay true to the photos: shoppers buy from this picture and return what does not match it.',
+    'Composition and environment:',
+    '- A clean, minimalist, well-lit upscale bedroom interior background that complements the bedding without distracting from it.',
+    '- Single frame: one single photograph filling the entire frame from one fixed camera angle. Never a collage, grid, split screen, multiple views or framed border.',
+    '- Prohibitions: absolutely no text, letters, numbers, logos, watermarks, people, parts of people or pets anywhere in the image.',
+  ];
+}
+
+/** The fixed rules for a set with only its bedsheet photo (shown in Settings and the studio). */
+export const STAGING_FIXED_RULES: readonly string[] = fixedRules();
+
+/** The set as it is shown (the owner's prompt): the pieces, and the pillow covers placed to be seen. */
+export function setLine(p: SetPieces = {}): string {
+  return `The set: ${p.comforter ? 'a plush comforter and matching bedsheets' : 'matching bedsheets (no comforter)'}, neatly arranged on a modern platform bed, with the pillow covers placed prominently: one displayed on the bed and one distinct cover placed neatly beside or in front of the bed to showcase its pattern.`;
+}
 
 export interface StagingScene {
   id: string;
@@ -173,13 +210,18 @@ export interface AiPicturesSettings {
   checkPictures: boolean;
 }
 
-/** On the bed: only the product (the shop's default; the owner can reword it). */
-export const DEFAULT_ON_BED =
-  'On the bed only this product: the bedsheet and its matching pillow covers on exactly two pillows, all in the product’s own design from the photo. No comforter, duvet, quilt, blanket, throw, bed runner, decorative cushions, extra pillows, or any textile in another design or colour.';
+/** On the bed: only the set's own pieces (the shop's default; the owner can reword it). */
+export function defaultOnBed(p: SetPieces = {}): string {
+  return p.comforter
+    ? 'On the bed only this set: the comforter, the bedsheet and the pillow covers, each in its own design from its photo. No other duvet, quilt, blanket, throw, bed runner, decorative cushions, extra pillows, or any textile in another design or colour.'
+    : 'On the bed only this set: the bedsheet and its pillow covers, each in its own design from its photo. No comforter, duvet, quilt, blanket, throw, bed runner, decorative cushions, extra pillows, or any textile in another design or colour.';
+}
+export const DEFAULT_ON_BED = defaultOnBed();
 export const STAGING_ON_BED_MAX = 600;
 
-export function onBedOf(p: Pick<AiPicturesSettings, 'onBed'> | undefined): string {
-  return p?.onBed?.trim() ? p.onBed.trim() : DEFAULT_ON_BED;
+/** What may be on the bed: the owner's own words, else the default for this set's pieces. */
+export function onBedOf(p: Pick<AiPicturesSettings, 'onBed'> | undefined, pieces: SetPieces = {}): string {
+  return p?.onBed?.trim() ? p.onBed.trim() : defaultOnBed(pieces);
 }
 
 export const DEFAULT_SCENES: StagingScene[] = STAGING_PRESETS.map((p) => ({ id: p.id, name: p.name, scene: p.shot }));
@@ -289,14 +331,23 @@ export interface StagingContext {
  * mood, the product's words and the owner's note, then the fixed rules, which nothing before them
  * can change.
  */
-export function stagingPrompt(shot: string, extra: string, aspect: string, context: StagingContext = {}, look: string = DEFAULT_PICTURE_LOOK, references = 0, { angle = '', sameRoom = false, onBed = DEFAULT_ON_BED, again = '' }: { angle?: string; sameRoom?: boolean; onBed?: string; again?: string } = {}): string {
-  // The product rules, after everything the owner wrote: what may be on the bed, and (on a second
-  // try) what the first picture got wrong.
+export function stagingPrompt(
+  shot: string,
+  extra: string,
+  aspect: string,
+  context: StagingContext = {},
+  look: string = DEFAULT_PICTURE_LOOK,
+  references = 0,
+  { angle = '', sameRoom = false, onBed, again = '', pieces = {} }: { angle?: string; sameRoom?: boolean; onBed?: string; again?: string; pieces?: SetPieces } = {}
+): string {
+  const img = pieceImages(pieces);
+  // The product rules, after everything the owner wrote: what may be on the bed, and (on another
+  // try) what the last picture got wrong.
   const rules = [
-    `What may be on the bed (a rule): ${oneLine(onBed).replace(/[.\s]+$/, '')}.`,
-    ...(again ? [`The previous picture was rejected: ${oneLine(again).slice(0, 300)}. Copy the product from image 1 exactly this time.`] : []),
+    `What may be on the bed (a rule): ${oneLine(onBed ?? defaultOnBed(pieces)).replace(/[.\s]+$/, '')}.`,
+    ...(again ? [`The previous picture was rejected: ${oneLine(again).slice(0, 300)}. Copy every piece from its photo exactly this time.`] : []),
     'These rules come first, whatever is written above:',
-    ...STAGING_FIXED_RULES,
+    ...fixedRules(pieces),
   ];
   const about = [
     context.title ? `name: ${context.title}` : '',
@@ -304,28 +355,41 @@ export function stagingPrompt(shot: string, extra: string, aspect: string, conte
     context.colors?.length ? `colours: ${context.colors.join(', ')}` : '',
     context.design ? `design: ${context.design}` : '',
   ].filter(Boolean);
-  const styleRefs = (from: number) => (references >= from ? `${references === from ? `Image ${from + 1} is a style reference` : `Images ${from + 1}–${references + 1} are style references`}` : '');
+  // The images after the set's own photos: the same-room picture (angles only), then the style photos.
+  const room = angle && sameRoom ? img.count + 1 : 0;
+  const styleFrom = img.count + (room ? 1 : 0) + 1;
+  const styleTo = img.count + references;
+  const styleRefs = styleTo >= styleFrom ? (styleTo === styleFrom ? `Image ${styleFrom} is a style reference` : `Images ${styleFrom}–${styleTo} are style references`) : '';
+  const photos = [
+    'Image 1 is the bedsheet of this set',
+    ...(img.pillow ? [`image ${img.pillow} is its pillow cover (the pillow covers carry exactly this design, not the bedsheet's)`] : []),
+    ...(img.comforter ? [`image ${img.comforter} is its comforter`] : []),
+  ].join('; ');
+  const refsNames = img.count > 1 ? `Images 1–${img.count}` : 'Image 1';
   if (angle) {
     // An angle: a NEW photograph from a new camera position. An image model asked to "edit" a photo
-    // keeps its camera, so every angle came back as nearly the same picture: image 1 is the
+    // keeps its camera, so every angle came back as nearly the same picture: the set's photos are the
     // reference for the bedding only, never for the camera, framing or crop.
-    const rest = sameRoom ? styleRefs(2) : styleRefs(1);
     return [
-      'Make a NEW photograph of the bedding product in image 1 (a bed sheet or duvet cover set from a home-linen shop), dressed on a bed, taken from a new camera position.',
-      "Image 1 is the reference for the product only: it is the very same bedsheet set, so copy its printed design, colours, stitching and pieces exactly (do not redraw or invent the pattern), but NOT image 1's camera position, angle, framing or crop.",
-      ...(sameRoom ? ["Image 2 is another picture of this product in its room: keep that room (bed frame, headboard, walls, floor, bedside tables, lighting), but NOT image 2's camera position: the camera moves."] : []),
-      ...(rest ? [`${rest}: match their lighting, colour grading and mood (not their camera angle), but do not copy their bedding, people, text or logos.`] : []),
+      `Make a NEW photograph of the bedding set in ${img.count > 1 ? `images 1–${img.count}` : 'image 1'} (a luxury bedding set from a home-linen shop), dressed on a bed, taken from a new camera position.`,
+      `${photos}. ${refsNames} ${img.count > 1 ? 'are' : 'is'} the reference for the product only: it is the very same set, so copy each piece's printed design, colours, stitching and pieces exactly (do not redraw or invent the pattern), but NOT the camera position, angle, framing or crop of ${img.count > 1 ? 'those photos' : 'image 1'}.`,
+      setLine(pieces),
+      ...(room ? [`Image ${room} is another picture of this product in its room: keep that room (bed frame, headboard, walls, floor, bedside tables, lighting), but NOT image ${room}'s camera position: the camera moves.`] : []),
+      ...(styleRefs ? [`${styleRefs}: match their lighting, colour grading and mood (not their camera angle), but do not copy their bedding, people, text or logos.`] : []),
       ...(about.length ? [`About the product, so the setting suits it (the photo is the truth; nothing here changes the product): ${about.join('; ')}.`] : []),
-      `The camera: ${angle.replace(/[.\s]+$/, '')}. Put the camera really there: this picture must look clearly different from image 1${sameRoom ? ' and image 2' : ''}, with a different camera height, direction and distance, so the bed is seen from a new side.`,
+      `The camera: ${angle.replace(/[.\s]+$/, '')}. Put the camera really there: this picture must look clearly different from image 1${room ? ` and image ${room}` : ''}, with a different camera height, direction and distance, so the bed is seen from a new side.`,
       `The setting and the look: ${oneLine(look).replace(/[.\s]+$/, '')}.`,
       ...(extra ? [`The owner's note about the setting (it never changes the product): ${extra}`] : []),
       `A realistic photograph for a high-end catalogue, ${aspect === '1:1' ? 'square' : 'portrait 4:5'} framing, with the bedding as the clear subject.`,
       ...rules,
     ].join('\n');
   }
+  const more = img.count > 1 || references > 0;
   return [
-    references > 0 ? 'Edit the first photograph (image 1), of a bedding product (a bed sheet or duvet cover set) from a home-linen shop.' : 'Edit this photograph of a bedding product (a bed sheet or duvet cover set) from a home-linen shop.',
-    ...(references > 0 ? [`Image 1 is the product: copy its bedding exactly. ${styleRefs(1)}: match their lighting, colour grading, camera angle, room style and mood, but do not copy their bedding, people, text or logos.`] : []),
+    more ? 'Edit the first photograph (image 1), of a bedding product (a bed sheet or duvet cover set) from a home-linen shop.' : 'Edit this photograph of a bedding product (a bed sheet or duvet cover set) from a home-linen shop.',
+    ...(img.count > 1 ? [`${photos}: copy each piece exactly.`] : []),
+    ...(styleRefs ? [`${img.count > 1 ? '' : 'Image 1 is the product: copy its bedding exactly. '}${styleRefs}: match their lighting, colour grading, camera angle, room style and mood, but do not copy their bedding, people, text or logos.`] : []),
+    setLine(pieces),
     ...(about.length ? [`About the product, so the setting suits it (the photo is the truth; nothing here changes the product): ${about.join('; ')}.`] : []),
     `Change only what is around it and the framing: ${shot.replace(/[.\s]+$/, '')}. You may change the bed, the room, the lighting and the props.`,
     `The look and mood: ${oneLine(look).replace(/[.\s]+$/, '')}.`,

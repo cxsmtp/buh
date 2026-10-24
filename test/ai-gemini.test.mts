@@ -330,7 +330,7 @@ test('stage-photo: the request (image model, the photo as inlineData, IMAGE out,
   assert.deepEqual(b.generationConfig, { responseModalities: ['IMAGE'], imageConfig: { aspectRatio: '4:5', imageSize: '1K' } });
   assert.deepEqual(b.contents[0].parts[1], { inlineData: { mimeType: 'image/png', data: PHOTO.toString('base64') } });
   const prompt = String(b.contents[0].parts[0].text);
-  for (const rule of [/same pattern and motif/, /same print scale/, /same colours/, /stitching, piping/, /same number of pieces/, /Change only what is around it/, /No text/, /no logos, no watermarks, no people/, /Palm Jumeirah/, /morning light, olive green wall/]) assert.match(prompt, rule);
+  for (const rule of [/Exact print and motif replication/, /print scale/, /exact colours, shades and fabric tones/, /stitching, piping/, /Component count: exactly match the pieces of this set/, /Change only what is around it/, /absolutely no text, letters, numbers, logos, watermarks, people, parts of people or pets/, /Palm Jumeirah/, /morning light, olive green wall/]) assert.match(prompt, rule);
   assert.ok(!JSON.stringify(body).includes(KEY));
 });
 
@@ -418,8 +418,8 @@ test('stage-photo: input checks (fields allow-listed, presets, extra words, phot
   const prompt = String((sent[0].body as { contents: Array<{ parts: Array<{ text?: string }> }> }).contents[0].parts[0].text);
   assert.match(prompt, /The owner's note about the setting \(it never changes the product\): soft light b x \/b\n/);
   // The fixed rules come last, after the owner's words.
-  assert.match(prompt, /These rules come first, whatever is written above:\nKeep the product itself exactly/);
-  assert.match(prompt, /no people or parts of people, no pets\.\nOne single photograph that fills the whole frame, from one camera angle: never a collage, grid, split screen, border or several views in one picture\.$/);
+  assert.match(prompt, /These rules come first, whatever is written above:\nStrict fidelity requirements:/);
+  assert.match(prompt, /- Single frame: one single photograph filling the entire frame from one fixed camera angle\. Never a collage, grid, split screen, multiple views or framed border\.\n- Prohibitions: absolutely no text, letters, numbers, logos, watermarks, people, parts of people or pets anywhere in the image\.$/);
   assert.match(prompt, /square framing/);
   assert.deepEqual((sent[0].body as { generationConfig: { imageConfig: unknown } }).generationConfig.imageConfig, { aspectRatio: '1:1', imageSize: '1K' });
   // 30 pictures an hour per admin (3 a press), then 429 (another admin is not affected).

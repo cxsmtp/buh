@@ -358,7 +358,7 @@ for (const width of [375, 1280]) {
     const text = (await card.getByLabel('The whole picture prompt').textContent())!;
     assert.ok(text.indexOf('The look and mood: Golden-hour light') > 0);
     assert.ok(text.indexOf('These rules come first, whatever is written above:') > text.indexOf('Golden-hour'));
-    assert.ok(text.trimEnd().endsWith('never a collage, grid, split screen, border or several views in one picture.'));
+    assert.ok(text.trimEnd().endsWith('absolutely no text, letters, numbers, logos, watermarks, people, parts of people or pets anywhere in the image.'));
     await card.getByRole('button', { name: 'Save scenes and prompt' }).focus();
     await page.keyboard.press('Enter');
     await card.getByRole('status').filter({ hasText: /^Saved\. The studio offers these scenes now\./ }).waitFor();

@@ -1,6 +1,7 @@
 'use client';
 
 import React from 'react';
+import type { SetPhotos } from '@/types';
 import { PictureStudio } from './PictureStudio';
 
 /**
@@ -10,6 +11,7 @@ import { PictureStudio } from './PictureStudio';
  */
 export function StageInBedroom({
   photos,
+  setPhotos,
   originals,
   room,
   notes,
@@ -20,6 +22,8 @@ export function StageInBedroom({
 }: {
   /** The editor's photos (uploaded URLs; first = cover). */
   photos: string[];
+  /** The set's pillow cover and comforter photos: each piece is copied from its own. */
+  setPhotos?: SetPhotos;
   /** Photos added in this session, as taken (data URLs). */
   originals: Record<string, string>;
   /** How many more photos the product can take. */
@@ -36,6 +40,7 @@ export function StageInBedroom({
   return (
     <PictureStudio
       photos={photos}
+      setPhotos={setPhotos}
       originals={originals}
       room={room}
       notes={notes}

@@ -2,7 +2,7 @@
 
 import React, { useCallback, useEffect, useId, useMemo, useRef, useState } from 'react';
 import { ArrowLeft, ArrowRight, Camera, Check, ChevronDown, GripVertical, ImagePlus, Loader2, Minus, Plus, Sparkles, Star, Trash2, X } from 'lucide-react';
-import type { BedProfileMeasurement, CatalogSettings, Product, ProductType } from '@/types';
+import type { BedProfileMeasurement, CatalogSettings, Product, ProductType, SetPhotos } from '@/types';
 import { getJson, postJson, sendJson } from '@/lib/apiClient';
 import { shrinkPhoto } from '@/lib/shrinkPhoto';
 import { shortSizeName } from '@/lib/client/stock';
@@ -12,6 +12,7 @@ import { measurementRows, sizeFromPreset, standardMeasurements } from '@/lib/mea
 import { DEFAULT_WEAVES } from '@/data/catalogDefaults';
 import { blankVariant, defaultTypeFor, productTypeOf } from '@/lib/productType';
 import { StageInBedroom } from './StageInBedroom';
+import { SetPiecesField, type SetPieceKind } from './SetPiecesField';
 import { WriteFromPhoto } from './WriteFromPhoto';
 import { SkuField } from './SkuField';
 import { ProductSeoFields } from '../SnippetPreview';
@@ -78,6 +79,10 @@ interface Draft {
   giftLines: Record<string, string>;
   /** The owner's note for "Style in a bedroom" (kept with the draft). */
   stagingNotes: string;
+  /** The set's other pieces (the pillow cover, the comforter): the AI pictures copy each from its own photo. */
+  setPhotos: SetPhotos;
+  /** Off by default: a set without a comforter has none in its AI pictures. */
+  hasComforter: boolean;
   /** The AI's motif and design words: the styling prompt's context. */
   aiMotif: string;
   aiDesign: string;
@@ -118,6 +123,8 @@ function draftFrom(product: Product | null, catalog: CatalogSettings): Draft {
       legacy: {},
       giftLines: {},
       stagingNotes: '',
+      setPhotos: {},
+      hasComforter: false,
       aiMotif: '',
       aiDesign: '',
     };
@@ -157,9 +164,17 @@ function draftFrom(product: Product | null, catalog: CatalogSettings): Draft {
     legacy: product.legacyMeasurements ?? {},
     giftLines: { ...(product.giftLines ?? {}) },
     stagingNotes: '',
+    setPhotos: { ...(product.setPhotos ?? {}) },
+    hasComforter: Boolean(product.setPhotos?.comforter),
     aiMotif: '',
     aiDesign: '',
   };
+}
+
+/** The set pieces as saved: the pillow cover, and the comforter only while the set has one; null for none. */
+function setPhotosToSave(d: Pick<Draft, 'setPhotos' | 'hasComforter'>): SetPhotos | null {
+  const out: SetPhotos = { ...(d.setPhotos?.pillow ? { pillow: d.setPhotos.pillow } : {}), ...(d.hasComforter && d.setPhotos?.comforter ? { comforter: d.setPhotos.comforter } : {}) };
+  return Object.keys(out).length ? out : null;
 }
 
 /** A saved draft over the starting values (anything missing keeps the starting value). */
@@ -275,6 +290,23 @@ export function ProductEditor({
     const url = res.data.url;
     setOriginals((o) => ({ ...o, [url]: dataUrl }));
     return res.data.url;
+  };
+
+  /** A set piece's photo (the pillow cover or the comforter): uploaded at once, shown while it goes. */
+  const [piecesBusy, setPiecesBusy] = useState<Partial<Record<SetPieceKind, string>>>({});
+  const addPiece = async (kind: SetPieceKind, file: File) => {
+    setError('');
+    const preview = URL.createObjectURL(file);
+    setPiecesBusy((b) => ({ ...b, [kind]: preview }));
+    try {
+      const url = await upload(await shrinkPhoto(file));
+      setDraft((d) => ({ ...d, setPhotos: { ...(d.setPhotos ?? {}), [kind]: url } }));
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'The photo could not be uploaded.');
+    } finally {
+      setPiecesBusy(({ [kind]: _done, ...rest }) => (void _done, rest));
+      URL.revokeObjectURL(preview);
+    }
   };
 
   const addPhotos = async (files: FileList | null) => {
@@ -434,6 +466,7 @@ export function ProductEditor({
       featuredImage: main,
       galleryImages: gallery,
       aiTransformedImage: null,
+      setPhotos: setPhotosToSave(draft),
       profiles: draft.productType === 'simple' ? draft.sizes.map((x) => ({ ...x, name: x.name.trim(), dimensions: (x.dimensions ?? '').trim() })) : draft.sizes,
       defaultProfileId: draft.defaultProfileId || draft.sizes[0].id,
       active: draft.active,
@@ -602,8 +635,19 @@ export function ProductEditor({
               ))}
             </ol>
             <WriteFromPhoto photos={draft.photos} originals={originals} isNew={!product} current={draft} facts={draft} onApply={(patch) => setDraft((d) => ({ ...d, ...patch }))} />
+            <SetPiecesField
+              pieces={{
+                ...(draft.setPhotos?.pillow || piecesBusy.pillow ? { pillow: { preview: piecesBusy.pillow || draft.setPhotos.pillow!, busy: Boolean(piecesBusy.pillow) } } : {}),
+                ...(draft.setPhotos?.comforter || piecesBusy.comforter ? { comforter: { preview: piecesBusy.comforter || draft.setPhotos.comforter!, busy: Boolean(piecesBusy.comforter) } } : {}),
+              }}
+              hasComforter={draft.hasComforter === true}
+              onComforter={(on) => setDraft((d) => ({ ...d, hasComforter: on, setPhotos: on ? d.setPhotos : { ...(d.setPhotos?.pillow ? { pillow: d.setPhotos.pillow } : {}) } }))}
+              onPick={(kind, file) => void addPiece(kind, file)}
+              onRemove={(kind) => setDraft((d) => ({ ...d, setPhotos: Object.fromEntries(Object.entries(d.setPhotos ?? {}).filter(([k]) => k !== kind)) }))}
+            />
             <StageInBedroom
               photos={draft.photos}
+              setPhotos={setPhotosToSave(draft) ?? undefined}
               originals={originals}
               room={MAX_PHOTOS - draft.photos.length - uploading}
               notes={draft.stagingNotes ?? ''}

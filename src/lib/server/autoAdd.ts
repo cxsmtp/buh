@@ -141,7 +141,7 @@ export function autoStatus(): {
   };
 }
 
-const FIELDS = new Set(['key', 'photos', 'price', 'compareAtPrice', 'category', 'sizes', 'title', 'publish']);
+const FIELDS = new Set(['key', 'photos', 'price', 'compareAtPrice', 'category', 'sizes', 'title', 'publish', 'setPhotos']);
 
 /**
  * POST /api/admin/products/quick: { key, photos: ["/api/images/<name>", …], price, compareAtPrice?,
@@ -212,6 +212,8 @@ export function quickAdd(body: Record<string, unknown>, actor: string): { produc
       colors: [],
       featuredImage: photos[0],
       galleryImages: photos.slice(1),
+      // The pillow cover and (when the set has one) the comforter, each from its own photo: checked in validateProduct.
+      setPhotos: body.setPhotos,
       profiles,
       defaultProfileId: profiles[0].id,
       stockBySize,
@@ -495,6 +497,7 @@ async function runJob(job: AutoJob): Promise<void> {
     const step = job.plan[i];
     const angle = step.startsWith('angle:') ? Number(step.slice(6)) : 0;
     const first = job.made.find(Boolean) ?? '';
+    const setPhotos = liveProduct(job.productId)?.setPhotos;
     try {
       const body: Record<string, unknown> = {
         imageId: coverName,
@@ -502,6 +505,9 @@ async function runJob(job: AutoJob): Promise<void> {
         aspect: '4:5',
         ...(angle ? { angle } : { preset: step }),
         ...(first && angle ? { sameRoom: first } : {}),
+        // Each piece from its own photo (read now: the owner may have changed them meanwhile).
+        ...(setPhotos?.pillow ? { pillowImageId: setPhotos.pillow } : {}),
+        ...(setPhotos?.comforter ? { comforterImageId: setPhotos.comforter } : {}),
       };
       if (img.bytes.length > SOURCE_MAX_BYTES) throw new HttpError(413, 'The photo is too large (at most 4 MB).');
       const r = await patiently(job, 'pictures', () => stagePhoto(body, job.by));

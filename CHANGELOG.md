@@ -1,5 +1,18 @@
 # Changelog
 
+## BUH-02.26.00 — 2026-10-24 HH:MM UTC · [#51](https://github.com/cxsmtp/buh/pull/51)
+
+- **Your optimized prompt is the fixed prompt.** Every AI picture now ends with your rules: an exact print and motif copy, exact colours, true texture and construction, exactly the set's pieces, a clean minimalist upscale bedroom, one single photograph, and no text, logos, people or pets.
+- **A photo for each piece of the set.** Add product and the product editor have a new **Set pieces** section. The main photo is the bedsheet, and you can add a **Pillow cover photo** so the AI pictures copy the pillow covers from it. This lets redesigned pillow covers show their own design.
+- **Comforter only when the set has one.** "This set has a comforter" is off by default. Switched off, the pictures show no comforter, and a picture with one fails the check. Switched on, the comforter is copied from its own photo.
+- **Pillow covers on show.** Each picture shows one pillow cover on the bed and one placed neatly beside or in front of the bed, so its pattern can be seen.
+- **Each piece checked against its own photo.** The check now compares the bedsheet, the pillow covers and the comforter with their own photos before a picture can be added.
+- **Status.**
+  - **Benchmark:** pending.
+  - **Tests:** pending.
+  - **Dependency audit:** pending.
+  - **Security scan:** pending.
+
 ## BUH-02.25.01 — 2026-10-23 23:18 UTC · [#50](https://github.com/cxsmtp/buh/pull/50)
 
 - **Only pictures of your exact product reach the shop.** Every AI picture is checked against your photo for the same design, the same colours, the product's pillow covers and nothing else on the bed. A picture that isn't exactly your product can't be added to it by anyone: the studio, quick add or the server itself.

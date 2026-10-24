@@ -74,6 +74,12 @@ export interface Product {
   aiStagingPrompt?: string;
   isAiEnhanced?: boolean;
   /**
+   * Real photos of the set's other pieces (Inventory → the product → Set pieces), by address: the
+   * pillow cover, and the comforter (off by default: a set without one has no comforter in its AI
+   * pictures). The cover photo is the bedsheet. AI pictures copy each piece from its own photo.
+   */
+  setPhotos?: SetPhotos;
+  /**
    * Photos made by "Style in a bedroom", by their address (/api/images/<name>). Set by the server
    * only; shoppers see the map (as { staged: true }) only while "Label styled photos" is on.
    */
@@ -353,6 +359,12 @@ export interface AiSettings {
 }
 
 /** A photo made by "Style in a bedroom" (Gemini): never the original, always marked. */
+/** The set's other pieces, each a real photo's address (/api/images/<name>). */
+export interface SetPhotos {
+  pillow?: string;
+  comforter?: string;
+}
+
 export interface StagedPhoto {
   staged: true;
   /** The photo it was made from (a stored image name), or '' for a photo not kept in the shop. */
