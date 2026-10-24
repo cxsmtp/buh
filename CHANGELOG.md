@@ -1,6 +1,6 @@
 # Changelog
 
-## BUH-02.26.00 — 2026-10-24 HH:MM UTC · [#51](https://github.com/cxsmtp/buh/pull/51)
+## BUH-02.26.00 — 2026-10-24 06:15 UTC · [#51](https://github.com/cxsmtp/buh/pull/51)
 
 - **Your optimized prompt is the fixed prompt.** Every AI picture now ends with your rules: an exact print and motif copy, exact colours, true texture and construction, exactly the set's pieces, a clean minimalist upscale bedroom, one single photograph, and no text, logos, people or pets.
 - **A photo for each piece of the set.** Add product and the product editor have a new **Set pieces** section. The main photo is the bedsheet, and you can add a **Pillow cover photo** so the AI pictures copy the pillow covers from it. This lets redesigned pillow covers show their own design.
@@ -10,10 +10,10 @@
 - **Festival scenes.** While the shop is themed for a festival, the Picture studio offers that festival's scene next to the standard ones: the room dressed for it, with the decorations around the bed, never on it. Each festival's scene is editable. New products can also get a festival picture during festivals (off by default).
 - **Each piece checked against its own photo.** The check now compares the bedsheet, the pillow covers and the comforter with their own photos before a picture can be added.
 - **Status.**
-  - **Benchmark:** pending.
-  - **Tests:** pending.
-  - **Dependency audit:** pending.
-  - **Security scan:** pending.
+  - **Benchmark:** 0 failed requests in every round. The medians are catalogue 804 vs 743 req/s, courier check 673 vs 649, and home page 814 vs 792. The gift page's p95 was higher in 2 of 3 rounds of the full run; a quiet gift-page A/B gave the same results on both (branch 714–747 vs main 606–730 req/s, p95 96–101 vs 94–119 ms), so that was noise.
+  - **Tests:** 1,205/1,205. New tests cover the owner's prompt text and the image order (bedsheet, pillow cover, comforter), no comforter without its photo, the check comparing each piece, real photos only, the editable fixed prompt with its locked lines, festival scenes (every festival, none for solemn days, editable, the festival picture for new products opt-in), and Set pieces and the Settings screens at 375 and 1280 px. Each new test fails on the old code and passes on the new.
+  - **Dependency audit:** production 0 vulnerabilities; no new packages.
+  - **Security scan:** no new route. The new picture-request fields and product field are allow-listed real stored photos (AI pictures refused). The fixed prompt and festival scenes are cleaned and size-capped, the design and colour line is always added, and every picture is still checked. Checkmarx could not run because its sign-in has expired.
 
 ## BUH-02.25.01 — 2026-10-23 23:18 UTC · [#50](https://github.com/cxsmtp/buh/pull/50)
 
