@@ -12,7 +12,7 @@
 - **Status.**
   - **Benchmark:** 0 failed requests in every round. The medians are catalogue 804 vs 743 req/s, courier check 673 vs 649, and home page 814 vs 792. The gift page's p95 was higher in 2 of 3 rounds of the full run; a quiet gift-page A/B gave the same results on both (branch 714–747 vs main 606–730 req/s, p95 96–101 vs 94–119 ms), so that was noise.
   - **Tests:** 1,205/1,205. New tests cover the owner's prompt text and the image order (bedsheet, pillow cover, comforter), no comforter without its photo, the check comparing each piece, real photos only, the editable fixed prompt with its locked lines, festival scenes (every festival, none for solemn days, editable, the festival picture for new products opt-in), and Set pieces and the Settings screens at 375 and 1280 px. Each new test fails on the old code and passes on the new.
-  - **Dependency audit:** production 0 vulnerabilities; no new packages.
+  - **Dependency audit:** production 0 vulnerabilities, after upgrading to nodemailer 10.2.1 and mailparser 3.12.4. Those upgrades fix three moderate address-parser advisories published this week. The shop was not exposed: customer emails are already refused if they contain quotes, `;`, `<>` or brackets. All 137 mail tests pass.
   - **Security scan:** no new route. The new picture-request fields and product field are allow-listed real stored photos (AI pictures refused). The fixed prompt and festival scenes are cleaned and size-capped, the design and colour line is always added, and every picture is still checked. Checkmarx could not run because its sign-in has expired.
 
 ## BUH-02.25.01 — 2026-10-23 23:18 UTC · [#50](https://github.com/cxsmtp/buh/pull/50)
