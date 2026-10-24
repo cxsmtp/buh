@@ -419,7 +419,7 @@ test('stage-photo: input checks (fields allow-listed, presets, extra words, phot
   assert.match(prompt, /The owner's note about the setting \(it never changes the product\): soft light b x \/b\n/);
   // The fixed rules come last, after the owner's words.
   assert.match(prompt, /These rules come first, whatever is written above:\nStrict fidelity requirements:/);
-  assert.match(prompt, /- Single frame: one single photograph filling the entire frame from one fixed camera angle\. Never a collage, grid, split screen, multiple views or framed border\.\n- Prohibitions: absolutely no text, letters, numbers, logos, watermarks, people, parts of people or pets anywhere in the image\.$/);
+  assert.match(prompt, /- Single frame: one single photograph filling the entire frame from one fixed camera angle\. Never a collage, grid, split screen, multiple views or framed border\.\n- Prohibitions: absolutely no text, letters, numbers, logos, watermarks, people, parts of people or pets anywhere in the image\.\nThis set's pieces \(sheets, pillow covers\), each copied exactly from its own photo: the bedsheets from image 1, the pillow covers from image 1\.\nThis set has no comforter: show none\.\nWhatever is written above, never change the printed design or the colours of any piece\.$/);
   assert.match(prompt, /square framing/);
   assert.deepEqual((sent[0].body as { generationConfig: { imageConfig: unknown } }).generationConfig.imageConfig, { aspectRatio: '1:1', imageSize: '1K' });
   // 30 pictures an hour per admin (3 a press), then 429 (another admin is not affected).

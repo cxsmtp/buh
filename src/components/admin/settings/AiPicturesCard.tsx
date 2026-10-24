@@ -570,7 +570,7 @@ export function AiPicturesCard({
                 <label className="block text-xs font-semibold text-ink-soft mb-1" htmlFor={`festival-scene-${f.id}`}>
                   {f.name}
                 </label>
-                <textarea id={`festival-scene-${f.id}`} rows={2} className={field} maxLength={FESTIVAL_DECOR_MAX} value={festivalScenes[f.id] ?? ''} placeholder={FESTIVAL_DECOR[f.id]} onChange={(e) => setFestivalScenes((all) => ({ ...all, [f.id]: e.target.value }))} />
+                <textarea id={`festival-scene-${f.id}`} rows={3} className={field} maxLength={FESTIVAL_DECOR_MAX} value={festivalScenes[f.id] ?? ''} placeholder={FESTIVAL_DECOR[f.id]} onChange={(e) => setFestivalScenes((all) => ({ ...all, [f.id]: e.target.value }))} />
               </li>
             ))}
           </ul>
