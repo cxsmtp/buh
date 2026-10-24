@@ -354,11 +354,23 @@ for (const width of [375, 1280]) {
     await added.getByLabel(/^Scene/).fill('show the bedding on a bed in a calm majlis-style guest room with carved wood and soft daylight');
     // The look and mood, and the preview: scene and look first, the fixed rules last.
     await card.getByLabel('Look and mood (every picture)').fill('Golden-hour light, fresh jasmine, a calm and luxurious mood.');
+    // The fixed prompt can be fine-tuned (reported: it should be editable); the set's pieces are always added after it.
+    const fixed = card.getByTestId('pictures-fixed-prompt');
+    assert.match(await fixed.inputValue(), /^Strict fidelity requirements:\n- Exact print and motif replication/);
+    await fixed.fill(`${await fixed.inputValue()}\nKeep the pillow covers crisp and bright (${width}).`);
+    assert.match(await card.getByTestId('pictures-locked').innerText(), /This set has no comforter: show none\.[\s\S]*never change the printed design or the colours of any piece/);
+    // Festival scenes: listed and editable; the festival picture for new products off by default.
+    await card.getByTestId('pictures-festivals').locator('summary').click();
+    assert.equal(await card.getByTestId('pictures-festival-auto').isChecked(), false);
+    assert.match(await card.getByLabel('Diwali', { exact: true }).inputValue(), /^a Diwali evening: clay diyas/);
+    await card.getByLabel('Diwali', { exact: true }).fill(`rows of diyas on the windowsill (${width})`);
+    assert.deepEqual(await overflow(page), [], 'fixed prompt and festival scenes: no sideways scroll');
     await card.getByRole('button', { name: 'Preview' }).click();
     const text = (await card.getByLabel('The whole picture prompt').textContent())!;
     assert.ok(text.indexOf('The look and mood: Golden-hour light') > 0);
     assert.ok(text.indexOf('These rules come first, whatever is written above:') > text.indexOf('Golden-hour'));
-    assert.ok(text.trimEnd().endsWith('never a collage, grid, split screen, border or several views in one picture.'));
+    assert.ok(text.includes(`anywhere in the image.\nKeep the pillow covers crisp and bright (${width}).\nThis set's pieces`), 'the owner’s fixed prompt, then the set’s pieces');
+    assert.ok(text.trimEnd().endsWith('never change the printed design or the colours of any piece.'));
     await card.getByRole('button', { name: 'Save scenes and prompt' }).focus();
     await page.keyboard.press('Enter');
     await card.getByRole('status').filter({ hasText: /^Saved\. The studio offers these scenes now\./ }).waitFor();
@@ -368,16 +380,22 @@ for (const width of [375, 1280]) {
     assert.deepEqual([...pics.defaultSet].sort(), ['close-up', 'palm-villa', 'whole-bed']);
     assert.equal(pics.scenes.at(-1).name, 'Majlis guest room');
     assert.equal(pics.look, 'Golden-hour light, fresh jasmine, a calm and luxurious mood.');
+    assert.match(pics.fixedPrompt, new RegExp(`Keep the pillow covers crisp and bright \\(${width}\\)\\.$`));
+    assert.deepEqual(pics.festivalScenes, { diwali: `rows of diyas on the windowsill (${width})` });
     assert.deepEqual(await overflow(page), []);
     await shot(page, `ai-pictures-${width}`);
     // Back to the shop's scenes (the studio test uses them).
     await card.getByRole('button', { name: /Reset to the shop.s scenes/ }).click();
     await card.getByRole('button', { name: "Reset the look and mood to the shop's default" }).click();
+    await card.getByRole('button', { name: "Reset the fixed prompt to the shop's default" }).click();
+    await card.getByLabel('Diwali', { exact: true }).fill('');
     await card.getByRole('button', { name: 'Save scenes and prompt' }).click();
     await card.getByRole('status').filter({ hasText: /^Saved\./ }).last().waitFor();
     await page.waitForTimeout(300);
     const back = (await (await api('GET', '/api/admin/settings')).json()).aiPictures.value;
     assert.deepEqual(back.defaultSet, ['whole-bed', 'close-up', 'lifestyle']);
+    assert.equal(back.fixedPrompt, '', 'the default is stored as empty');
+    assert.deepEqual(back.festivalScenes, {});
     assert.equal(back.look, '');
     assert.deepEqual(errors, []);
     await ctx.close();

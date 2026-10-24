@@ -21,7 +21,7 @@ import { DEFAULT_CARD_FEE_PERCENT, MAX_CARD_FEE_PERCENT } from '@/lib/money';
 import { waMeLink } from '@/lib/whatsappConfirm';
 import { DEFAULT_AI_PROMPT, FIELD_GUIDE_MAX, PROMPT_INSTRUCTIONS_MAX, WRITING_FIELDS, cleanGuide, cleanInstructions, type AiPromptSettings, type WritingFieldId } from '@/lib/aiPrompt';
 import { FAL_KEY, FAL_KEY_HINT, FAL_MODEL_ID, OPENAI_IMAGE_MODEL_ID, OPENAI_KEY, OPENAI_KEY_HINT, PICTURE_PROVIDERS } from '@/lib/pictureProviders';
-import { DEFAULT_AI_PICTURES, DEFAULT_ON_BED, SCENE_ID, STAGING_ON_BED_MAX, STYLE_MAX, STYLE_REFS_MAX, STYLE_SIDE_MAX, STAGING_LOOK_MAX, STAGING_MAX_SCENES, STAGING_NAME_MAX, STAGING_SCENE_MAX, STAGING_TRIO, oneLine, type AiPicturesSettings, type StagingScene } from '@/lib/staging';
+import { DEFAULT_AI_PICTURES, DEFAULT_FIXED_PROMPT, DEFAULT_ON_BED, FESTIVAL_DECOR, FESTIVAL_DECOR_MAX, STAGING_FIXED_PROMPT_MAX, cleanFixedPrompt, SCENE_ID, STAGING_ON_BED_MAX, STYLE_MAX, STYLE_REFS_MAX, STYLE_SIDE_MAX, STAGING_LOOK_MAX, STAGING_MAX_SCENES, STAGING_NAME_MAX, STAGING_SCENE_MAX, STAGING_TRIO, oneLine, type AiPicturesSettings, type StagingScene } from '@/lib/staging';
 import { DEFAULT_SEO, type SeoSettings } from '@/lib/seo/types';
 import { validateSeoSettings } from './seoSettings';
 import { refreshShopPages } from './pageCache';
@@ -1306,7 +1306,7 @@ export function validateAiPrompt(v: unknown, current: AiPromptSettings): AiPromp
  * (first). The fixed rules are not settings.
  */
 export function validateAiPictures(input: Obj, current: AiPicturesSettings): AiPicturesSettings {
-  for (const k of Object.keys(input)) if (!['look', 'scenes', 'defaultSet', 'references', 'useReferences', 'autoCreate', 'photoOrder', 'sameRoom', 'onBed', 'checkPictures'].includes(k)) throw new HttpError(400, `Unexpected field: ${k.slice(0, 30)}.`);
+  for (const k of Object.keys(input)) if (!['look', 'scenes', 'defaultSet', 'references', 'useReferences', 'autoCreate', 'photoOrder', 'sameRoom', 'onBed', 'checkPictures', 'fixedPrompt', 'festivalScenes', 'festivalPictures'].includes(k)) throw new HttpError(400, `Unexpected field: ${k.slice(0, 30)}.`);
   let look = current.look ?? '';
   if (input.look !== undefined) {
     if (typeof input.look !== 'string') throw new HttpError(400, 'The look and mood must be text.');
@@ -1352,10 +1352,32 @@ export function validateAiPictures(input: Obj, current: AiPicturesSettings): AiP
     if (onBed === DEFAULT_ON_BED) onBed = '';
   }
   if (input.checkPictures !== undefined && typeof input.checkPictures !== 'boolean') throw new HttpError(400, 'Check each picture: on or off.');
+  // The fixed prompt, fine-tuned by the owner: each line cleaned, at most 40 lines and 3,000 characters ('' = the default).
+  let fixedPrompt = current.fixedPrompt ?? '';
+  if (input.fixedPrompt !== undefined) {
+    if (typeof input.fixedPrompt !== 'string') throw new HttpError(400, 'The fixed prompt must be text.');
+    fixedPrompt = cleanFixedPrompt(input.fixedPrompt);
+    if (fixedPrompt.length > STAGING_FIXED_PROMPT_MAX) throw new HttpError(400, `The fixed prompt: at most ${STAGING_FIXED_PROMPT_MAX} characters.`);
+    if (fixedPrompt === DEFAULT_FIXED_PROMPT) fixedPrompt = '';
+  }
+  // Festival scenes: the owner's words for a known festival (one line, at most 300 characters); the shop's default otherwise.
+  let festivalScenes = current.festivalScenes ?? {};
+  if (input.festivalScenes !== undefined) {
+    if (!input.festivalScenes || typeof input.festivalScenes !== 'object' || Array.isArray(input.festivalScenes)) throw new HttpError(400, 'Festival scenes: one description per festival.');
+    festivalScenes = {};
+    for (const [id, v] of Object.entries(input.festivalScenes as Obj)) {
+      if (!(id in FESTIVAL_DECOR)) throw new HttpError(400, `Unknown festival: ${id.slice(0, 40)}.`);
+      if (typeof v !== 'string') throw new HttpError(400, 'Each festival scene must be text.');
+      const text = oneLine(v);
+      if (text.length > FESTIVAL_DECOR_MAX) throw new HttpError(400, `A festival scene of at most ${FESTIVAL_DECOR_MAX} characters.`);
+      if (text && text !== FESTIVAL_DECOR[id]) festivalScenes[id] = text;
+    }
+  }
+  if (input.festivalPictures !== undefined && typeof input.festivalPictures !== 'boolean') throw new HttpError(400, 'Festival pictures: on or off.');
   if (input.sameRoom !== undefined && typeof input.sameRoom !== 'boolean') throw new HttpError(400, 'Same room in every angle: on or off.');
   if (input.autoCreate !== undefined && typeof input.autoCreate !== 'boolean') throw new HttpError(400, 'New products written and pictured by AI: on or off.');
   if (photoOrder !== 'styled-first' && photoOrder !== 'photo-first') throw new HttpError(400, 'Picture order: AI pictures first, or your photo first.');
-  return { look, scenes, defaultSet, references, useReferences: bool(input.useReferences, current.useReferences ?? true), autoCreate: bool(input.autoCreate, current.autoCreate ?? true), photoOrder, sameRoom: bool(input.sameRoom, current.sameRoom ?? false), onBed, checkPictures: bool(input.checkPictures, current.checkPictures ?? true) };
+  return { look, scenes, defaultSet, references, useReferences: bool(input.useReferences, current.useReferences ?? true), autoCreate: bool(input.autoCreate, current.autoCreate ?? true), photoOrder, sameRoom: bool(input.sameRoom, current.sameRoom ?? false), onBed, checkPictures: bool(input.checkPictures, current.checkPictures ?? true), fixedPrompt, festivalScenes, festivalPictures: bool(input.festivalPictures, current.festivalPictures ?? false) };
 }
 
 /**

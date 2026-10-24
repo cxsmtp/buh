@@ -87,6 +87,17 @@ for (const width of [375, 1280]) {
     assert.equal(await overflow(page), 0, 'fits the screen');
     await sheet.getByLabel('Choose photos from the gallery').setInputFiles({ name: 'sheet.png', mimeType: 'image/png', buffer: png(width) });
     await sheet.getByAltText(/Photo 1/).waitFor();
+    // The set's pieces (reported: pillow covers are redesigned): a pillow cover photo, and the comforter
+    // off by default (its photo only once switched on).
+    const pieces = sheet.getByTestId('set-pieces');
+    assert.equal(await pieces.getByTestId('set-has-comforter').isChecked(), false, 'no comforter unless switched on');
+    assert.equal(await pieces.getByTestId('set-piece-comforter').count(), 0);
+    await pieces.getByLabel('Pillow cover photo: choose it from the gallery').setInputFiles({ name: 'pillow.png', mimeType: 'image/png', buffer: png(width + 7) });
+    await pieces.getByAltText('Pillow cover photo').waitFor();
+    await pieces.getByTestId('set-has-comforter').check();
+    await pieces.getByLabel('Comforter photo: choose it from the gallery').setInputFiles({ name: 'comforter.png', mimeType: 'image/png', buffer: png(width + 9) });
+    await pieces.getByAltText('Comforter photo').waitFor();
+    assert.equal(await overflow(page), 0, 'set pieces: no sideways scroll');
     await sheet.getByLabel('Price (AED)').fill('245');
     // No AI writing set up in this shop: the name is needed, and it says so.
     await sheet.getByTestId('quick-add-save').click();
@@ -102,12 +113,14 @@ for (const width of [375, 1280]) {
     await page.waitForFunction(() => document.activeElement?.getAttribute('aria-label') === 'Take a photo with the camera');
     assert.ok(await sheet.getByLabel('Take a photo with the camera').evaluate((el) => el.closest('label')!.getBoundingClientRect().top < window.innerHeight), 'the camera button is in view');
     assert.equal(await sheet.getByTestId('quick-photos').count(), 0);
+    assert.equal(await sheet.getByAltText('Pillow cover photo').count(), 0, 'the pieces cleared for the next item');
+    assert.equal(await sheet.getByTestId('set-has-comforter').isChecked(), false);
     assert.equal(await sheet.getByLabel(/^Name/).inputValue(), '');
     assert.equal(await sheet.getByLabel('Price (AED)').inputValue(), '245');
     // The next one can be started while the first is still on its way.
     await sheet.getByLabel('Choose photos from the gallery').setInputFiles({ name: 'next.png', mimeType: 'image/png', buffer: png(width + 1) });
     await sheet.getByAltText(/Photo 1/).waitFor();
-    type Row = { title: string; active: boolean; price: number; stockBySize: Record<string, number>; material: string };
+    type Row = { title: string; active: boolean; price: number; stockBySize: Record<string, number>; material: string; setPhotos?: { pillow?: string; comforter?: string } };
     let p: Row | undefined;
     for (let i = 0; i < 50 && !p; i++) {
       p = ((await (await api('GET', '/api/admin/products')).json()).products as Row[]).find((x) => x.title === title);
@@ -118,6 +131,8 @@ for (const width of [375, 1280]) {
     assert.equal(p.price, 245);
     assert.equal(Object.values(p.stockBySize).reduce((a, b) => a + b, 0), 1);
     assert.equal(p.material, '', 'no fabric invented');
+    assert.match(p.setPhotos?.pillow ?? '', /^\/api\/images\//, 'the pillow cover photo saved with it');
+    assert.match(p.setPhotos?.comforter ?? '', /^\/api\/images\//, 'the comforter photo saved with it');
     await sheet.getByTestId('quick-sending').waitFor({ state: 'detached' });
     assert.equal(await overflow(page), 0);
     // The full editor is one tap away.

@@ -2,10 +2,11 @@
 
 import React, { useEffect, useId, useRef, useState } from 'react';
 import { Check, CheckCheck, ExternalLink, ImagePlus, Loader2, RotateCcw, Settings, Sparkles, Trash2 } from 'lucide-react';
+import type { SetPhotos } from '@/types';
 import { getJson, postJson, sendJson } from '@/lib/apiClient';
 import { PICTURE_PROVIDERS, PROVIDER_INFO, type PictureProvider } from '@/lib/pictureProviders';
 import { shrinkPhoto } from '@/lib/shrinkPhoto';
-import { DEFAULT_SCENES, DEFAULT_STAGING_SET, STAGING_EXTRA_MAX, STAGING_FIXED_RULES, STAGING_MAX_SET, STAGING_SCENE_MAX, type StagingScene } from '@/lib/staging';
+import { DEFAULT_SCENES, DEFAULT_STAGING_SET, STAGING_EXTRA_MAX, STAGING_MAX_SET, fixedRules, STAGING_SCENE_MAX, type StagingScene } from '@/lib/staging';
 
 /**
  * The Picture studio: new pictures of a product, made by Google Gemini (the owner's key, Settings →
@@ -54,6 +55,10 @@ export interface StudioStatus {
   /** The numbered angles in the owner's prompt: one picture each, made one after another. */
   angles?: Array<{ n: number; name: string }>;
   photoOrder?: 'styled-first' | 'photo-first';
+  /** The scene for the festival the shop is themed for now (none outside festivals). */
+  festival?: StagingScene | null;
+  /** The owner's fixed prompt ('' = the shop's default). */
+  fixedPrompt?: string;
 }
 
 const input = 'w-full px-3 py-2 rounded-xl border border-line-strong bg-surface text-ink text-base sm:text-sm focus:outline-none focus:ring-2 focus:ring-gold';
@@ -118,6 +123,7 @@ export function PictureSetup({ onOpenSettings, reason, provider }: { onOpenSetti
 
 export function PictureStudio({
   photos,
+  setPhotos,
   originals = {},
   room,
   notes: notesProp,
@@ -132,6 +138,8 @@ export function PictureStudio({
 }: {
   /** The product's photos (uploaded URLs; first = cover). */
   photos: string[];
+  /** The set's pillow cover and comforter photos (Set pieces): sent with every picture, each piece copied from its own. */
+  setPhotos?: SetPhotos;
   /** Photos added in this session, as taken (data URLs). */
   originals?: Record<string, string>;
   /** How many more photos the product can take. */
@@ -186,7 +194,8 @@ export function PictureStudio({
 
   // The angles in the owner's prompt come first (and are the one-press set), then the scenes.
   const angleChoices: StagingScene[] = (status?.angles ?? []).map((a) => ({ id: `angle:${a.n}`, name: a.name, scene: '' }));
-  const allScenes = [...angleChoices, ...(status?.scenes?.length ? status.scenes : DEFAULT_SCENES)];
+  // The festival the shop is themed for now: its scene next to the standard ones (never chosen by itself).
+  const allScenes = [...angleChoices, ...(status?.scenes?.length ? status.scenes : DEFAULT_SCENES), ...(status?.festival ? [status.festival] : [])];
   const sceneOf = (sid: string) => allScenes.find((s) => s.id === sid);
   const nameOf = (sid: string) => sceneOf(sid)?.name ?? sid;
   const isAngle = (sid: string) => sid.startsWith('angle:');
@@ -220,6 +229,9 @@ export function PictureStudio({
       ...(!isAngle(preset) && scene && scene !== sceneOf(preset)?.scene ? { scene } : {}),
       ...(Object.keys(ctx).length ? { context: ctx } : {}),
       ...(refCount ? { useReferences: refsOn } : {}),
+      // Each piece of the set from its own photo: the pillow covers, and the comforter (none: no comforter).
+      ...(setPhotos?.pillow ? { pillowImageId: setPhotos.pillow } : {}),
+      ...(setPhotos?.comforter ? { comforterImageId: setPhotos.comforter } : {}),
     });
     const late = new Promise<'late'>((resolve) => setTimeout(() => resolve('late'), WAIT_MS));
     const answer = await Promise.race([call, late]);
@@ -430,13 +442,16 @@ export function PictureStudio({
               <div className="text-xs text-ink-muted">
                 <p className="font-semibold">Always added after your words (they can&rsquo;t be changed):</p>
                 <ul className="list-disc pl-4 space-y-0.5">
-                  {STAGING_FIXED_RULES.filter((r) => !r.startsWith('-')).map((r) => (
-                    <li key={r}>{r}</li>
+                  {fixedRules({ pillow: Boolean(setPhotos?.pillow), comforter: Boolean(setPhotos?.comforter) }, status?.fixedPrompt ?? '').map((r) => (
+                    <li key={r}>{r.replace(/^- /, '')}</li>
                   ))}
                 </ul>
               </div>
             </div>
           </details>
+          <p className="text-xs text-ink-soft" data-testid="stage-pieces">
+            Copies the bedsheet from the photo you picked, the pillow covers from {setPhotos?.pillow ? 'the pillow cover photo' : 'that same photo'}, and {setPhotos?.comforter ? 'the comforter from the comforter photo' : 'shows no comforter'}{!setPhotos?.pillow ? ' (for their own design, add a pillow cover photo under Set pieces in the product editor)' : ''}.
+          </p>
           <button
             type="button"
             onClick={() => void start()}

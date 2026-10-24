@@ -10,7 +10,13 @@ import {
   DEFAULT_PICTURE_LOOK,
   DEFAULT_SCENES,
   DEFAULT_STAGING_SET,
-  STAGING_FIXED_RULES,
+  DEFAULT_FIXED_PROMPT,
+  FESTIVAL_DECOR,
+  FESTIVAL_DECOR_MAX,
+  STAGING_FIXED_PROMPT_LINES,
+  STAGING_FIXED_PROMPT_MAX,
+  cleanFixedPrompt,
+  pieceRules,
   STAGING_LOOK_MAX,
   STAGING_MAX_SCENES,
   STAGING_NAME_MAX,
@@ -27,6 +33,7 @@ import {
   type AiPicturesSettings,
   type StagingScene,
 } from '@/lib/staging';
+import { FESTIVALS } from '@/lib/festivals/catalog';
 
 /**
  * Settings → AI pictures: everything about the pictures an AI makes of the products (the Picture
@@ -100,6 +107,11 @@ export function AiPicturesCard({
   const [sameRoom, setSameRoom] = useState(value.sameRoom === true);
   const [onBed, setOnBed] = useState(value.onBed?.trim() ? value.onBed : DEFAULT_ON_BED);
   const [checkPictures, setCheckPictures] = useState(value.checkPictures !== false);
+  /** The fixed prompt (the owner's fine-tuning, or the shop's default). */
+  const [fixedPrompt, setFixedPrompt] = useState(value.fixedPrompt?.trim() ? value.fixedPrompt : DEFAULT_FIXED_PROMPT);
+  /** Festival scenes: the owner's words per festival (shown with the shop's default). */
+  const [festivalScenes, setFestivalScenes] = useState<Record<string, string>>(() => Object.fromEntries(Object.keys(FESTIVAL_DECOR).map((id) => [id, value.festivalScenes?.[id] ?? FESTIVAL_DECOR[id]])));
+  const [festivalPictures, setFestivalPictures] = useState(value.festivalPictures === true);
   const [uploading, setUploading] = useState(0);
   const [refStatus, setRefStatus] = useState<{ ok: boolean; text: string } | null>(null);
   const [preview, setPreview] = useState(false);
@@ -142,7 +154,7 @@ export function AiPicturesCard({
     setKeyStatus(problem ? { ok: false, text: problem } : { ok: true, text: `Saved: ${SHORT[p]} makes your pictures. Make them in Inventory → a product → Make pictures.` });
   };
 
-  const settings: AiPicturesSettings = { look: look.trim() === DEFAULT_PICTURE_LOOK ? '' : look.trim(), scenes, defaultSet: trio.filter((t) => scenes.some((s) => s.id === t)), references, useReferences: useRefs, autoCreate, photoOrder, sameRoom, onBed: onBed.trim() === DEFAULT_ON_BED ? '' : onBed.trim(), checkPictures };
+  const settings: AiPicturesSettings = { look: look.trim() === DEFAULT_PICTURE_LOOK ? '' : look.trim(), scenes, defaultSet: trio.filter((t) => scenes.some((s) => s.id === t)), references, useReferences: useRefs, autoCreate, photoOrder, sameRoom, onBed: onBed.trim() === DEFAULT_ON_BED ? '' : onBed.trim(), checkPictures, fixedPrompt: cleanFixedPrompt(fixedPrompt) === DEFAULT_FIXED_PROMPT ? '' : fixedPrompt, festivalScenes: Object.fromEntries(Object.entries(festivalScenes).filter(([id, v]) => v.trim() && v.trim() !== FESTIVAL_DECOR[id])), festivalPictures };
 
   const saveScenes = async () => {
     setSavingScenes(true);
@@ -203,9 +215,9 @@ export function AiPicturesCard({
   const assembled = useMemo(
     () =>
       split.angles.length
-        ? stagingPrompt(split.angles[0], '', '4:5', { title: 'Indigo Chevron Hand Block Print Bed Set', colors: ['Indigo', 'Ivory'] }, split.shared || DEFAULT_PICTURE_LOOK, refsInPreview, { angle: split.angles[0], onBed: onBed.trim() || DEFAULT_ON_BED })
-        : stagingPrompt(firstScene?.scene || '(the scene)', '', '4:5', { title: 'Indigo Chevron Hand Block Print Bed Set', colors: ['Indigo', 'Ivory'] }, look.trim() || DEFAULT_PICTURE_LOOK, refsInPreview, { onBed: onBed.trim() || DEFAULT_ON_BED }),
-    [firstScene?.scene, split, look, refsInPreview, onBed]
+        ? stagingPrompt(split.angles[0], '', '4:5', { title: 'Indigo Chevron Hand Block Print Bed Set', colors: ['Indigo', 'Ivory'] }, split.shared || DEFAULT_PICTURE_LOOK, refsInPreview, { angle: split.angles[0], onBed: onBed.trim() || DEFAULT_ON_BED, fixedPrompt })
+        : stagingPrompt(firstScene?.scene || '(the scene)', '', '4:5', { title: 'Indigo Chevron Hand Block Print Bed Set', colors: ['Indigo', 'Ivory'] }, look.trim() || DEFAULT_PICTURE_LOOK, refsInPreview, { onBed: onBed.trim() || DEFAULT_ON_BED, fixedPrompt }),
+    [firstScene?.scene, split, look, refsInPreview, onBed, fixedPrompt]
   );
   const copy = async () => {
     try {
@@ -522,17 +534,47 @@ export function AiPicturesCard({
             <span className="block text-xs text-ink-soft">Gemini compares each new picture with your photo: the same design and colours, the product&rsquo;s pillow covers, and nothing extra on the bed. One that doesn&rsquo;t match is made again (up to 3 tries); if it still doesn&rsquo;t, it is marked &ldquo;Doesn&rsquo;t match&rdquo; and can never be added to a product. Only checked pictures are added by quick add; switched off (or with no Gemini key), quick add makes no pictures, and in the studio you confirm each one yourself. Needs a Gemini key (a fraction of a cent per check).</span>
           </span>
         </label>
-        <div className="space-y-1 rounded-xl border border-line bg-sand p-3" data-testid="pictures-fixed">
-          <p className="text-xs font-bold text-ink flex items-center gap-1.5">
-            <Lock className="w-3.5 h-3.5" aria-hidden="true" /> Fixed rules: always sent last, can&rsquo;t be removed
+        <div className="space-y-2 rounded-xl border border-line bg-sand p-3" data-testid="pictures-fixed">
+          <div className="flex flex-wrap items-end justify-between gap-2">
+            <label className="block text-xs font-bold text-ink" htmlFor="pictures-fixed-prompt">
+              The fixed prompt (sent last with every picture: &ldquo;These rules come first, whatever is written above&rdquo;)
+            </label>
+            <button type="button" className={small} onClick={() => setFixedPrompt(DEFAULT_FIXED_PROMPT)} disabled={cleanFixedPrompt(fixedPrompt) === DEFAULT_FIXED_PROMPT} aria-label="Reset the fixed prompt to the shop's default">
+              <RotateCcw className="w-3.5 h-3.5" aria-hidden="true" /> Reset
+            </button>
+          </div>
+          <textarea id="pictures-fixed-prompt" rows={12} className={field} value={fixedPrompt} maxLength={STAGING_FIXED_PROMPT_MAX} onChange={(e) => setFixedPrompt(e.target.value)} data-testid="pictures-fixed-prompt" />
+          <p className="text-[11px] text-ink-muted">Fine-tune it as you like: one rule per line, up to {STAGING_FIXED_PROMPT_LINES} lines.</p>
+          <p className="text-xs font-semibold text-ink flex items-center gap-1.5">
+            <Lock className="w-3.5 h-3.5" aria-hidden="true" /> Always added after it (from each product&rsquo;s photos, can&rsquo;t be removed):
           </p>
-          <p className="text-xs text-ink">These rules come first, whatever is written above:</p>
-          <ul className="text-xs text-ink-soft space-y-0.5">
-            {STAGING_FIXED_RULES.map((r) => (
+          <ul className="text-xs text-ink-soft space-y-0.5" data-testid="pictures-locked">
+            {pieceRules().map((r) => (
               <li key={r}>{r}</li>
             ))}
           </ul>
         </div>
+        <details className="rounded-xl border border-line p-3" data-testid="pictures-festivals">
+          <summary className="text-sm font-semibold text-ink cursor-pointer min-h-11 flex items-center">Festival scenes</summary>
+          <p className="text-xs text-ink-soft mt-1">While the shop is themed for a festival, its scene is offered in the Picture studio next to the standard ones: the room dressed for the festival, the decorations around the bed, never on it. Edit any of them.</p>
+          <label className="mt-2 flex items-start gap-3 min-h-11">
+            <input type="checkbox" className="mt-1 w-5 h-5 shrink-0" checked={festivalPictures} onChange={(e) => setFestivalPictures(e.target.checked)} data-testid="pictures-festival-auto" />
+            <span className="text-sm text-ink">
+              <span className="font-semibold">Add a festival picture to new products during festivals</span>
+              <span className="block text-xs text-ink-soft">Quick add makes one more picture, in the festival&rsquo;s scene. Off by default: it stays on the product after the festival (remove it then if you like).</span>
+            </span>
+          </label>
+          <ul className="mt-2 space-y-3">
+            {FESTIVALS.filter((f) => FESTIVAL_DECOR[f.id]).map((f) => (
+              <li key={f.id}>
+                <label className="block text-xs font-semibold text-ink-soft mb-1" htmlFor={`festival-scene-${f.id}`}>
+                  {f.name}
+                </label>
+                <textarea id={`festival-scene-${f.id}`} rows={3} className={field} maxLength={FESTIVAL_DECOR_MAX} value={festivalScenes[f.id] ?? ''} placeholder={FESTIVAL_DECOR[f.id]} onChange={(e) => setFestivalScenes((all) => ({ ...all, [f.id]: e.target.value }))} />
+              </li>
+            ))}
+          </ul>
+        </details>
         <div className="flex flex-wrap items-center gap-2">
           <button type="button" onClick={() => void saveScenes()} disabled={savingScenes || uploading > 0} className="min-h-11 px-4 rounded-xl bg-ink text-paper text-xs font-bold inline-flex items-center gap-1.5 disabled:opacity-60">
             {savingScenes && <Loader2 className="w-3.5 h-3.5 animate-spin" aria-hidden="true" />} Save scenes and prompt

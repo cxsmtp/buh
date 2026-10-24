@@ -1,5 +1,6 @@
 import { answerOf, generateContent, listGeminiModels, textOf } from './gemini';
 import { logEvent } from './log';
+import { pieceImages, type SetPieces } from '@/lib/staging';
 
 /**
  * The check on every AI picture (Settings → AI pictures → "Check every picture against the product
@@ -44,16 +45,32 @@ export function _resetCheckModel() {
   modelCache = null;
 }
 
-export const CHECK_PROMPT = [
-  'You are the strict quality check for a bed-linen shop. Image 1 is the real product photo. Image 2 is an AI-made picture that must show exactly that product: shoppers buy from it, so any difference is a failure.',
-  'Answer only with JSON: {"samePrint": true|false, "sameColours": true|false, "pillowCovers": true|false, "extraItems": true|false, "reason": "one short sentence"}.',
-  'samePrint: true only if the bedsheet and the pillow covers in image 2 carry the same printed design as image 1: the same motifs, arrangement and print scale (camera angle, light and folds may differ). False if the pattern is different, redrawn, simplified, invented, mirrored into another layout, or a different design appears on any piece.',
-  'sameColours: true only if the fabric colours and shades in image 2 are the same as in image 1. False if any colour is changed, recoloured, much brighter, more saturated or faded.',
-  'pillowCovers: if image 1 shows pillow covers, true only if image 2 also clearly shows the pillow covers, in the same design and colours as in image 1. False if they are missing, hidden, plain, or in another design. If image 1 shows no pillow covers, true.',
-  'extraItems: true if image 2 shows any bedding that is not the product: a comforter, duvet, quilt, blanket, throw, bed runner, decorative cushions, more than two pillows, or any sheet or pillow cover in another design or colour.',
-  'If you are not sure about any of these, answer the failing value.',
-  'reason: what is wrong, in plain words for the shop owner (or "matches" when everything is fine).',
-].join('\n');
+/**
+ * What the check asks, for this set: image 1 the bedsheet photo, then the pillow cover photo and the
+ * comforter photo when the owner added them, and last the AI picture.
+ */
+export function checkPrompt(p: SetPieces = {}): string {
+  const img = pieceImages(p);
+  const pic = img.count + 1;
+  const pillowFrom = img.pillow ? `image ${img.pillow} (the real pillow cover photo)` : 'image 1';
+  return [
+    `You are the strict quality check for a bed-linen shop. Image 1 is the real bedsheet photo of the product.${img.pillow ? ` Image ${img.pillow} is the real photo of its pillow cover.` : ''}${img.comforter ? ` Image ${img.comforter} is the real photo of its comforter.` : ''} Image ${pic} is an AI-made picture that must show exactly this set: shoppers buy from it, so any difference is a failure.`,
+    'Answer only with JSON: {"samePrint": true|false, "sameColours": true|false, "pillowCovers": true|false, "extraItems": true|false, "reason": "one short sentence"}.',
+    `samePrint: true only if, in image ${pic}, the bedsheet carries the same printed design as image 1${img.comforter ? `, the comforter the same design as image ${img.comforter}` : ''} and the pillow covers the same design as ${pillowFrom}: the same motifs, arrangement and print scale (camera angle, light and folds may differ). False if any pattern is different, redrawn, simplified, invented, mirrored into another layout, or a piece shows another piece's design.`,
+    `sameColours: true only if the fabric colours and shades in image ${pic} are the same as in the real photos. False if any colour is changed, recoloured, much brighter, more saturated or faded.`,
+    img.pillow
+      ? `pillowCovers: true only if image ${pic} clearly shows the pillow covers, in the same design and colours as ${pillowFrom}. False if they are missing, hidden, plain, or in another design.`
+      : `pillowCovers: if image 1 shows pillow covers, true only if image ${pic} also clearly shows the pillow covers, in the same design and colours as in image 1. False if they are missing, hidden, plain, or in another design. If image 1 shows no pillow covers, true.`,
+    img.comforter
+      ? `extraItems: true if image ${pic} shows any bedding that is not this set: another duvet, quilt, blanket, throw, bed runner, decorative cushions, or any sheet, pillow cover or comforter in another design or colour.`
+      : `extraItems: true if image ${pic} shows any bedding that is not the product: a comforter, duvet, quilt, blanket, throw, bed runner, decorative cushions, or any sheet or pillow cover in another design or colour (this set has no comforter).`,
+    'If you are not sure about any of these, answer the failing value.',
+    'reason: what is wrong, in plain words for the shop owner (or "matches" when everything is fine).',
+  ].join('\n');
+}
+
+/** The check for a set with only its bedsheet photo. */
+export const CHECK_PROMPT = checkPrompt();
 
 export function parseVerdict(text: string): PictureVerdict | null {
   const body = text.replace(/^\s*```(?:json)?/i, '').replace(/```\s*$/, '');
@@ -75,7 +92,7 @@ export function parseVerdict(text: string): PictureVerdict | null {
   }
 }
 
-export async function checkPicture(key: string, product: { mime: string; bytes: Buffer }, picture: { mime: string; bytes: Buffer }): Promise<PictureVerdict | null> {
+export async function checkPicture(key: string, photos: Array<{ mime: string; bytes: Buffer }>, picture: { mime: string; bytes: Buffer }, pieces: SetPieces = {}): Promise<PictureVerdict | null> {
   if (!key) return null;
   try {
     const model = await checkModel(key);
@@ -83,7 +100,7 @@ export async function checkPicture(key: string, product: { mime: string; bytes: 
     const data = await generateContent(
       key,
       model,
-      { contents: [{ role: 'user', parts: [{ text: CHECK_PROMPT }, inline(product), inline(picture)] }], generationConfig: { responseMimeType: 'application/json', temperature: 0 } },
+      { contents: [{ role: 'user', parts: [{ text: checkPrompt(pieces) }, ...photos.map(inline), inline(picture)] }], generationConfig: { responseMimeType: 'application/json', temperature: 0 } },
       { timeoutMs: CHECK_TIMEOUT_MS, maxBytes: 256 * 1024, what: 'Gemini', place: 'Settings → AI pictures' }
     );
     const verdict = parseVerdict(textOf(answerOf(data).parts));

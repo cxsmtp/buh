@@ -1,10 +1,11 @@
 import { type AiProvider, type StagedPhoto } from '@/types';
 import { FAL_KEY, FAL_KEY_HINT, OPENAI_KEY, OPENAI_KEY_HINT, PROVIDER_INFO, type PictureProvider } from '@/lib/pictureProviders';
-import { DEFAULT_PICTURE_LOOK, onBedOf, STAGING_EXTRA_MAX, STAGING_SCENE_MAX, STYLE_MAX, STYLE_SIDE_MAX, angleName, lookOf, oneLine, splitAngles, stagingPrompt, usesReferences, type StagingContext, type StagingScene } from '@/lib/staging';
+import { DEFAULT_PICTURE_LOOK, FESTIVAL_SCENE_PREFIX, festivalScene, fixedPromptOf, onBedOf, STAGING_EXTRA_MAX, STAGING_SCENE_MAX, STYLE_MAX, STYLE_SIDE_MAX, angleName, lookOf, oneLine, splitAngles, stagingPrompt, usesReferences, type StagingContext, type StagingScene } from '@/lib/staging';
 import { audit } from './audit';
 import { getDb } from './db';
 import { PICTURE_MODULES, modelOk, pictureKey, pictureModel, picturesProviderOf, providerName } from './pictures';
 import { HttpError } from './http';
+import { themedFestivalId } from './giftLines';
 import { parseImageDataUrl } from './imageInput';
 import { IMAGE_NAME, cleanImage, deleteImage, readImage, saveImageBytes } from './images';
 import { logEvent } from './log';
@@ -43,7 +44,7 @@ export const SOURCE_MAX_BYTES = 4 * 1024 * 1024;
 /** The picture Gemini sends back (a 1K picture is 1–2 MB). */
 export const RESULT_MAX_BYTES = 10 * 1024 * 1024;
 const ASPECTS = new Set(['4:5', '1:1']);
-const BODY_FIELDS = new Set(['imageId', 'image', 'preset', 'angle', 'sameRoom', 'extra', 'aspect', 'scene', 'context', 'useReferences']);
+const BODY_FIELDS = new Set(['imageId', 'image', 'preset', 'angle', 'sameRoom', 'extra', 'aspect', 'scene', 'context', 'useReferences', 'pillowImageId', 'comforterImageId']);
 /** Where the owner fixes the key or the model. */
 export const PICTURES_PLACE = 'Settings → AI pictures';
 
@@ -83,7 +84,17 @@ export function cleanContext(v: unknown): StagingContext {
 
 /** One of the owner's scenes (Settings → AI pictures) by its id. */
 export function sceneById(id: unknown): StagingScene | undefined {
-  return typeof id === 'string' ? getSettings('aiPictures').scenes.find((s) => s.id === id) : undefined;
+  if (typeof id !== 'string') return undefined;
+  const settings = getSettings('aiPictures');
+  // A festival scene (festival-<id>): the room dressed for that festival, in the owner's words or the shop's.
+  if (id.startsWith(FESTIVAL_SCENE_PREFIX)) return festivalScene(id.slice(FESTIVAL_SCENE_PREFIX.length), settings.festivalScenes);
+  return settings.scenes.find((s) => s.id === id);
+}
+
+/** The scene for the festival the shop is themed for now (none outside festivals). */
+export function currentFestivalScene(): StagingScene | null {
+  const id = themedFestivalId();
+  return (id && festivalScene(id, getSettings('aiPictures').festivalScenes)) || null;
 }
 
 export interface StageResult {
@@ -127,6 +138,10 @@ export interface StagingStatus {
    * when there are any, one press makes these instead of the scenes.
    */
   angles: Array<{ n: number; name: string }>;
+  /** The scene for the festival the shop is themed for now, offered next to the standard ones (none outside festivals). */
+  festival: StagingScene | null;
+  /** The owner's fixed prompt ('' = the shop's default). */
+  fixedPrompt: string;
   /** Where AI pictures go among the product's photos. */
   photoOrder: 'styled-first' | 'photo-first';
   /** Angles: the first picture is sent with the next ones (off by default). */
@@ -154,6 +169,8 @@ export function stagingStatus(): StagingStatus {
     angles: anglesOf(pictures).map((a, i) => ({ n: i + 1, name: angleName(a, i) })),
     photoOrder: pictures.photoOrder ?? 'styled-first',
     sameRoom: pictures.sameRoom === true,
+    festival: currentFestivalScene(),
+    fixedPrompt: fixedPromptOf(pictures),
   };
 }
 
@@ -225,7 +242,22 @@ export async function stagePhoto(body: Record<string, unknown>, actor: string): 
   } else {
     throw new HttpError(400, 'Choose a photo first (PNG, JPEG or WebP).');
   }
-  return makePicture({ photo, source, preset, shot, angle, extra, context, aspect: aspect as '4:5' | '1:1', useReferences: body.useReferences as boolean | undefined, sameRoom: roomWanted }, actor);
+  // The set's other pieces, each from its own real photo: the pillow cover, and the comforter (none: no comforter).
+  const pillow = pieceImage(body.pillowImageId, 'pillow cover');
+  const comforter = pieceImage(body.comforterImageId, 'comforter');
+  return makePicture({ photo, source, preset, shot, angle, extra, context, aspect: aspect as '4:5' | '1:1', useReferences: body.useReferences as boolean | undefined, sameRoom: roomWanted, pillow, comforter }, actor);
+}
+
+/** A piece's real photo (one of the stored photos, never an AI picture), or null when none is given. */
+function pieceImage(v: unknown, what: string): { mime: string; bytes: Buffer } | null {
+  if (v === undefined || v === null || v === '') return null;
+  const name = typeof v === 'string' ? v.replace(/^\/api\/images\//, '') : '';
+  if (!IMAGE_NAME.test(name)) throw new HttpError(400, `Which photo is the ${what}?`);
+  if (name in stagedRecords()) throw new HttpError(400, `The ${what} photo must be a real photo, not an AI picture.`);
+  const img = readImage(name);
+  if (!img) throw new HttpError(404, `The ${what} photo is no longer stored. Upload it again.`);
+  if (img.bytes.length > SOURCE_MAX_BYTES) throw new HttpError(413, `The ${what} photo is too large (at most 4 MB).`);
+  return img;
 }
 
 /**
@@ -253,6 +285,10 @@ export interface PictureJob {
   useReferences?: boolean;
   /** A styled photo already made of this product (the first angle): sent so the room stays the same. */
   sameRoom: string;
+  /** The set's pillow cover photo (its design for the pillow covers), if the owner added one. */
+  pillow?: { mime: string; bytes: Buffer } | null;
+  /** The set's comforter photo; none means the set has no comforter, and none is shown. */
+  comforter?: { mime: string; bytes: Buffer } | null;
 }
 
 /**
@@ -272,6 +308,9 @@ export async function makePicture(job: PictureJob, actor: string): Promise<Stage
   const model = pictureModel(ai, provider);
   if (!key || !modelOk(provider, model)) throw new HttpError(409, `Pictures are not set up: ${PICTURES_PLACE}.`, {}, { code: 'staging_off', reason: key ? 'no_model' : 'no_key' });
   const { photo, source, preset, shot, angle, extra, context, aspect } = job;
+  const pieces = { pillow: Boolean(job.pillow), comforter: Boolean(job.comforter) };
+  // The set's own photos come right after the bedsheet photo (images 2 and 3), before anything else.
+  const pieceImgs = [job.pillow, job.comforter].filter((x): x is { mime: string; bytes: Buffer } => Boolean(x));
   // Numbered angles never go in a request as a list (the service would put them all in one
   // picture): the rest of the owner's prompt (the room, the styling) goes with every picture.
   const split = splitAngles(lookOf(settings));
@@ -281,10 +320,10 @@ export async function makePicture(job: PictureJob, actor: string): Promise<Stage
   const roomImage = room ? cleanImage(room.bytes, RESULT_MAX_BYTES) : null;
   const sameRoom = roomImage ? [{ mime: roomImage.mime, bytes: roomImage.bytes }] : [];
   // The style photos: after the product photo (and the same-room picture), as many as the model takes.
-  const styles = usesReferences(settings, preset, job.useReferences) ? referenceImages(settings.references, maker.maxImages(model) - 1 - sameRoom.length) : [];
+  const styles = usesReferences(settings, preset, job.useReferences) ? referenceImages(settings.references, maker.maxImages(model) - 1 - pieceImgs.length - sameRoom.length) : [];
   const references = [...sameRoom, ...styles];
 
-  const onBed = onBedOf(settings);
+  const onBed = onBedOf(settings, pieces);
   // The check (design and items on the bed) uses the shop's Gemini key, whoever makes the pictures.
   const checkKey = settings.checkPictures === false ? '' : ai.geminiApiKey;
   let clean: NonNullable<ReturnType<typeof cleanImage>> | null = null;
@@ -300,8 +339,8 @@ export async function makePicture(job: PictureJob, actor: string): Promise<Stage
       key,
       model,
       product: photo,
-      references,
-      prompt: stagingPrompt(shot, extra, aspect, context, look, references.length, { angle, sameRoom: sameRoom.length > 0, onBed, again: attempt > 0 && verdict ? verdict.reason : '' }),
+      references: [...pieceImgs, ...references],
+      prompt: stagingPrompt(shot, extra, aspect, context, look, references.length, { angle, sameRoom: sameRoom.length > 0, onBed, again: attempt > 0 && verdict ? verdict.reason : '', pieces, fixedPrompt: fixedPromptOf(settings) }),
       aspect,
       again: () => {
         // A second paid call for the same picture counts against the hour's limit too.
@@ -318,7 +357,7 @@ export async function makePicture(job: PictureJob, actor: string): Promise<Stage
       throw new HttpError(502, `${maker.name}’s picture could not be used (not a whole PNG, JPEG or WebP, or too large). Nothing was saved; please try again.`, {}, { code: 'ai_bad_image' });
     }
     clean = made;
-    verdict = checkKey ? await checkPicture(checkKey, photo, { mime: made.mime, bytes: made.bytes }) : null;
+    verdict = checkKey ? await checkPicture(checkKey, [photo, ...pieceImgs], { mime: made.mime, bytes: made.bytes }, pieces) : null;
     if (!verdict || verdict.ok) break;
     logEvent('warn', 'picture_check_rejected', { provider, attempt, samePrint: verdict.samePrint, sameColours: verdict.sameColours, pillowCovers: verdict.pillowCovers, extraItems: verdict.extraItems });
   }
@@ -337,7 +376,7 @@ export async function makePicture(job: PictureJob, actor: string): Promise<Stage
   // matched (or the owner confirmed one that could not be checked): src/lib/server/stagedPhotos.ts.
   const check = verdict ? (verdict.ok ? 'matches' : 'does_not_match') : 'not_checked';
   recordStaged(name, { source, preset: preset.id, at, check, ...(verdict && !verdict.ok ? { reason: verdict.reason } : {}) });
-  audit('product.photo_staged', { by: actor, provider, model, preset: preset.id, source: source || 'upload', sourceBytes: photo.bytes.length, references: references.length, sameRoom: sameRoom.length > 0, result: name, resultBytes: clean.bytes.length, width: clean.width, height: clean.height, extraLength: extra.length, sceneEdited: !angle && shot !== preset.scene, lookDefault: !settings.look, context: Object.keys(context), aspect, check });
+  audit('product.photo_staged', { by: actor, provider, model, preset: preset.id, source: source || 'upload', sourceBytes: photo.bytes.length, references: references.length, sameRoom: sameRoom.length > 0, pillowPhoto: pieces.pillow, comforterPhoto: pieces.comforter, result: name, resultBytes: clean.bytes.length, width: clean.width, height: clean.height, extraLength: extra.length, sceneEdited: !angle && shot !== preset.scene, lookDefault: !settings.look, context: Object.keys(context), aspect, check });
   return { url, staged: { staged: true, source, preset: preset.id, at }, model, provider, references: references.length, width: clean.width, height: clean.height, check: verdict ? { ok: verdict.ok, reason: verdict.reason } : null };
 }
 

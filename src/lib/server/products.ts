@@ -1,6 +1,6 @@
 import crypto from 'node:crypto';
 import { audit, auditOrThrow } from './audit';
-import type { BedProfileMeasurement, Product } from '@/types';
+import type { BedProfileMeasurement, Product, SetPhotos } from '@/types';
 import { INITIAL_PRODUCTS } from '@/data/initialData';
 import { DEFAULT_BED_PROFILES } from '@/data/bedProfiles';
 import { getDb, inTransaction } from './db';
@@ -9,7 +9,7 @@ import { acceptImageRef } from './images';
 import { bump, changedElsewhere } from './live';
 import { getSettings } from './settings';
 import { logEvent } from './log';
-import { stagedPhotosFor } from './stagedPhotos';
+import { stagedPhotosFor, stagedRecords } from './stagedPhotos';
 import { cleanGiftLines } from './giftLines';
 import { queueIndexNow } from './indexNow';
 import { refreshShopPages } from './pageCache';
@@ -593,6 +593,25 @@ function legacyMeasurementsOf(v: unknown): Product['legacyMeasurements'] {
   return Object.keys(out).length ? out : undefined;
 }
 
+/**
+ * The set's other pieces: { pillow?, comforter? }, each a stored real photo (never an AI picture: the
+ * pictures copy the piece from it). Undefined when there are none.
+ */
+function setPhotosOf(v: unknown): SetPhotos | undefined {
+  if (v === undefined || v === null) return undefined;
+  if (typeof v !== 'object' || Array.isArray(v)) throw new HttpError(400, 'Set pieces must be an object.');
+  const o = v as Obj;
+  for (const k of Object.keys(o)) if (k !== 'pillow' && k !== 'comforter') throw new HttpError(400, `Unexpected set piece: ${k.slice(0, 30)}.`);
+  const out: SetPhotos = {};
+  for (const [k, label] of [['pillow', 'Pillow cover photo'], ['comforter', 'Comforter photo']] as const) {
+    const url = acceptImageRef(o[k], label);
+    if (!url) continue;
+    if (url.replace(/^\/api\/images\//, '') in stagedRecords()) throw new HttpError(400, `${label}: use a real photo of it, not an AI picture.`);
+    out[k] = url;
+  }
+  return Object.keys(out).length ? out : undefined;
+}
+
 export function validateProduct(input: unknown): StoredProduct {
   if (!input || typeof input !== 'object' || Array.isArray(input)) throw new HttpError(400, 'Product must be an object.');
   const p = input as Obj;
@@ -634,6 +653,7 @@ export function validateProduct(input: unknown): StoredProduct {
   const featuredImage = acceptImageRef(p.featuredImage, 'Main photo', { required: true });
   const galleryImages = gallery.map((g, i) => acceptImageRef(g, `Gallery photo ${i + 1}`)).filter(Boolean);
   const aiTransformedImage = acceptImageRef(p.aiTransformedImage, 'Styled photo') || undefined;
+  const setPhotos = setPhotosOf(p.setPhotos);
   // Photos made by "Style in a bedroom" stay marked as styled: decided here from the shop's own
   // record and the product as saved before, never from what the browser sends.
   const stagedPhotos = stagedPhotosFor([featuredImage, ...galleryImages, aiTransformedImage ?? ''], existing?.stagedPhotos);
@@ -667,6 +687,7 @@ export function validateProduct(input: unknown): StoredProduct {
     // The raw phone snap is not kept: only the photos shown in the shop.
     aiTransformedImage,
     stagedPhotos,
+    ...(setPhotos ? { setPhotos } : {}),
     aiStagingPrompt: text(p.aiStagingPrompt, 'Staging prompt', 1000) || undefined,
     isAiEnhanced: p.isAiEnhanced === true,
     stockCount: 0,

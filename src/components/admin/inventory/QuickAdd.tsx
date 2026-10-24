@@ -9,6 +9,7 @@ import { shrinkPhoto } from '@/lib/shrinkPhoto';
 import { defaultTypeFor } from '@/lib/productType';
 import { visibleJobs } from '@/lib/client/autoJobs';
 import { Sheet } from '@/components/common/Sheet';
+import { SetPiecesField, type SetPieceKind } from './SetPiecesField';
 
 /**
  * Add a product with the basics only (src/lib/server/autoAdd.ts): photos, price, sizes and stock
@@ -47,6 +48,8 @@ interface Sending {
   label: string;
   preview: string;
   photos: Pic[];
+  /** The set's other pieces (the pillow cover, the comforter), uploading like the photos. */
+  pieces: Partial<Record<SetPieceKind, Pic>>;
   body: Record<string, unknown>;
   failed?: string;
 }
@@ -210,6 +213,9 @@ export function QuickAdd({
   const [oneStock, setOneStock] = useState(1);
   /** The photos for this item: shown at once (a local preview) while each one uploads. */
   const [photos, setPhotos] = useState<Pic[]>([]);
+  /** The pillow cover photo, and the comforter (off by default): the AI pictures copy each piece from its own photo. */
+  const [pieces, setPieces] = useState<Partial<Record<SetPieceKind, Pic>>>({});
+  const [hasComforter, setHasComforter] = useState(false);
   const [price, setPrice] = useState('');
   const [title, setTitle] = useState('');
   const [publish, setPublish] = useState(true);
@@ -242,23 +248,23 @@ export function QuickAdd({
     setSending((all) => all.map((x) => (x.key === item.key ? { ...x, failed: undefined } : x)));
     const fail = (message: string) => setSending((all) => all.map((x) => (x.key === item.key ? { ...x, failed: message } : x)));
     let urls: string[];
+    const setPhotos: Partial<Record<SetPieceKind, string>> = {};
+    // A photo whose upload failed (a weak connection) is uploaded again on Try again.
+    const uploaded = (p: Pic) =>
+      p.upload.catch(() => {
+        p.upload = uploadPhoto(p.file);
+        return p.upload;
+      });
     try {
-      // A photo whose upload failed (a weak connection) is uploaded again on Try again.
-      urls = await Promise.all(
-        item.photos.map((p) =>
-          p.upload.catch(() => {
-            p.upload = uploadPhoto(p.file);
-            return p.upload;
-          })
-        )
-      );
+      urls = await Promise.all(item.photos.map(uploaded));
+      for (const [kind, p] of Object.entries(item.pieces) as Array<[SetPieceKind, Pic]>) setPhotos[kind] = await uploaded(p);
     } catch (err) {
       return fail(err instanceof Error ? err.message : 'A photo could not be uploaded.');
     }
-    const res = await postJson<{ product?: Product; message?: string }>('/api/admin/products/quick', { ...item.body, key: item.key, photos: urls });
+    const res = await postJson<{ product?: Product; message?: string }>('/api/admin/products/quick', { ...item.body, key: item.key, photos: urls, ...(Object.keys(setPhotos).length ? { setPhotos } : {}) });
     if (!res.ok || !res.data.product) return fail(res.data.message || 'Could not add it. Please try again.');
     setSending((all) => all.filter((x) => x.key !== item.key));
-    for (const p of item.photos) URL.revokeObjectURL(p.preview);
+    for (const p of [...item.photos, ...Object.values(item.pieces)]) URL.revokeObjectURL(p.preview);
     onAdded(res.data.product);
     void reload();
   };
@@ -266,7 +272,7 @@ export function QuickAdd({
   /** A failed item taken off the list (it was not added). */
   const drop = (item: Sending) => {
     setSending((all) => all.filter((x) => x.key !== item.key));
-    for (const p of item.photos) URL.revokeObjectURL(p.preview);
+    for (const p of [...item.photos, ...Object.values(item.pieces)]) URL.revokeObjectURL(p.preview);
   };
 
   const add = () => {
@@ -284,6 +290,8 @@ export function QuickAdd({
       label: title.trim(),
       preview: photos[0].preview,
       photos,
+      // The comforter only when the set has one (off by default).
+      pieces: { ...(pieces.pillow ? { pillow: pieces.pillow } : {}), ...(hasComforter && pieces.comforter ? { comforter: pieces.comforter } : {}) },
       body: { price: Number(price), category, sizes: chosen, ...(title.trim() ? { title: title.trim() } : {}), publish },
     };
     try {
@@ -295,6 +303,8 @@ export function QuickAdd({
     // The photos finish uploading and the item is sent in the background.
     key.current = newKey('q');
     setPhotos([]);
+    setPieces({});
+    setHasComforter(false);
     setTitle('');
     setSending((all) => [...all, item]);
     setDone(status?.writer || status?.pictures ? 'The AI is finishing it in the background (name, description, pictures) and puts it in the shop by itself. Add the next item:' : `It is ${publish ? 'in the shop' : 'saved, hidden'}. Add the next item:`);
@@ -380,6 +390,16 @@ export function QuickAdd({
             </ul>
           )}
         </section>
+        <SetPiecesField
+          pieces={pieces}
+          hasComforter={hasComforter}
+          onComforter={(on) => {
+            setHasComforter(on);
+            if (!on) setPieces(({ comforter: _c, ...rest }) => (void _c, rest));
+          }}
+          onPick={(kind, file) => setPieces((all) => ({ ...all, [kind]: { id: newKey('p'), file, preview: URL.createObjectURL(file), upload: uploadPhoto(file) } }))}
+          onRemove={(kind) => setPieces(({ [kind]: _gone, ...rest }) => (void _gone, rest))}
+        />
 
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
           <div>
