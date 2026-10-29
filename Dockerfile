@@ -1,6 +1,9 @@
 # Base image with Node.js LTS on Alpine for minimal footprint
 # node:24.22.0-alpine3.24 (Node 24 LTS; Node 20 is past its end of life), pinned by digest;
 # Dependabot proposes the newer digest (security fixes) as a pull request.
+# Not Node 26 yet: 26.13 with Next 16.4.3 resets a kept-alive connection after a request refused before
+# its body is read, which behind the proxy fails the next request on it. deploy/ci/single-container-test.sh
+# checks this on the real image, so a Node 26 bump stays red until a fix lands.
 FROM node:24.22.0-alpine3.24@sha256:44fce696f38ba8c987c4db89954051000bbd05ffd8d8659ba15ed4a8602e937f AS base
 
 # Step 1: Install dependencies
