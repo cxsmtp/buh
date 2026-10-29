@@ -160,12 +160,24 @@ derive buh:9.0.2 buh:ci-second-fails \
   'CMD ["node","-e","const fs=require(\"fs\"),m=\"/data/ci-second\";if(fs.existsSync(m)){fs.unlinkSync(m);process.exit(1)}fs.writeFileSync(m,\"\");require(\"/app/server.js\")"]'
 docker tag buh:9.0.1 "$LATEST"
 
+# A request refused before its body is read must not break the connection it came on: the proxy
+# reuses connections, so the next customer's request on it would fail. Node 26.13 with Next 16.4.3
+# answered the refusal with "keep-alive" and then reset the connection; Node 24 serves the next one.
+REUSE_CHECK=$(cat << 'JS'
+const net = require('net'); const s = net.connect(Number(process.env.PORT || 3000), '127.0.0.1'); let b = ''; const body = 'x'.repeat(300 * 1024);
+s.on('data', (d) => (b += d)); s.on('error', () => {});
+s.on('connect', () => { s.write(`POST /api/stripe/webhook HTTP/1.1\r\nHost: x\r\nContent-Type: application/json\r\nStripe-Signature: t=1,v1=00\r\nContent-Length: ${body.length}\r\n\r\n`); s.write(body); setTimeout(() => s.write('GET /api/health HTTP/1.1\r\nHost: x\r\n\r\n'), 1500); });
+setTimeout(() => { const n = (b.match(/HTTP\/1\.1 \d+/g) || []).length; const closes = /^connection: close/im.test(b.split('\r\n\r\n')[0]); console.log(`answers: ${n}, first says close: ${closes}`); process.exit(n >= 2 || closes ? 0 : 1); }, 4000);
+JS
+)
+
 step "1. the owner's container, started by hand (first with an extra folder mounted)"
 mkdir -p "$WORK/receipts"
 owners_run -v "$WORK/receipts:/receipts:ro"
 wait_for 90 "the hand-started shop" curl -sf --max-time 10 "$URL/api/health"
 docker exec "$NAME" node -e "require('fs').writeFileSync('/data/ci-marker', 'x')"
 serves
+docker exec "$NAME" node -e "$REUSE_CHECK" || fail "a request refused before its body was read broke its connection for the next request"
 
 step "2. set-up as the .bat does it: volumes, updater code out of the image, adopt"
 for v in "$CONTROL" "$STATUS" "$STATE" "$CODE"; do docker volume create "$v" > /dev/null; done

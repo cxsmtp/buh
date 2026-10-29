@@ -1,5 +1,15 @@
 # Changelog
 
+## BUH-02.26.01 — 2026-10-29 09:53 UTC · [#52](https://github.com/cxsmtp/buh/pull/52)
+
+- **The shop stays on Node 24 for now.** Node 26 became the long-term support release on 28 October, but its test run on Node 26 turned up a problem: after refusing an oversized request, Node 26 (with Next.js 16.4.3) breaks that connection without saying so. Behind the shop's proxy, the next customer request on that connection could then fail. Node 24 is supported until April 2028, so nothing is lost by waiting.
+- **A guard against the problem.** The check that runs the real shop image now sends an oversized request and then a normal one on the same connection, and fails if the second goes unanswered. Any Node 26 update, including Dependabot's, stays blocked until Node or Next.js fixes it, and will pass by itself once they do.
+- **Status.**
+  - **Benchmark:** no app code changed; this release only adds the check and notes. For reference, Node 26 was as fast or faster than Node 24 in every scenario (home 967–1,101 vs 898–947 req/s), with no failed requests.
+  - **Tests:** the new check passes on Node 24.22.0 and fails on Node 26.13.0 against the real build. The full suite on Node 26 failed only in this way: 4 tests after an oversized request, and all pass on Node 24.
+  - **Dependency audit:** production 0 vulnerabilities after updating re2js to 2.9.1 (used inside the Firebase library). That fixes a high-severity advisory, a slow-regex denial of service, published this week. No new packages.
+  - **Security scan:** no code change; Checkmarx could not run because its sign-in has expired.
+
 ## BUH-02.26.00 — 2026-10-24 06:15 UTC · [#51](https://github.com/cxsmtp/buh/pull/51)
 
 - **Your optimized prompt is the fixed prompt.** Every AI picture now ends with your rules: an exact print and motif copy, exact colours, true texture and construction, exactly the set's pieces, a clean minimalist upscale bedroom, one single photograph, and no text, logos, people or pets.
