@@ -7,7 +7,7 @@
 - **Status.**
   - **Benchmark:** no app code changed; this release only adds the check and notes. For reference, Node 26 was as fast or faster than Node 24 in every scenario (home 967–1,101 vs 898–947 req/s), with no failed requests.
   - **Tests:** the new check passes on Node 24.22.0 and fails on Node 26.13.0 against the real build. The full suite on Node 26 failed only in this way: 4 tests after an oversized request, and all pass on Node 24.
-  - **Dependency audit:** production 0 vulnerabilities; no new packages.
+  - **Dependency audit:** production 0 vulnerabilities after updating re2js to 2.9.1 (used inside the Firebase library). That fixes a high-severity advisory, a slow-regex denial of service, published this week. No new packages.
   - **Security scan:** no code change; Checkmarx could not run because its sign-in has expired.
 
 ## BUH-02.26.00 — 2026-10-24 06:15 UTC · [#51](https://github.com/cxsmtp/buh/pull/51)
