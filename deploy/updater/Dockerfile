@@ -12,7 +12,7 @@
 # client and its SSH client stay out of this image (less to patch, less to attack).
 FROM docker:29.9.1-cli@sha256:6fae2214c3121a28d5aa639d09032f61310b7c9c75ffbad1025f261a1b621800 AS cli
 
-FROM alpine:3.24.2@sha256:294b683cb724975bec92580e1e685676bd4b50bda910ddb8c51d4cabeaec77e6
+FROM alpine:3.24.3@sha256:be2656061b536c1883c4034790e21d0a09c5aaaf51968b89368a3c0371ea2c9a
 
 COPY --from=cli /usr/local/bin/docker /usr/local/bin/docker
 COPY deploy/updater/updater.sh /updater/updater.sh
