@@ -10,7 +10,7 @@
 # the docker CLI binary from docker:29.9.1-cli, on plain alpine:3.24. The updater only talks to
 # the engine's API socket, so the CLI image's Compose and Buildx plugins, its source-control
 # client and its SSH client stay out of this image (less to patch, less to attack).
-FROM docker:29.9.1-cli@sha256:6fae2214c3121a28d5aa639d09032f61310b7c9c75ffbad1025f261a1b621800 AS cli
+FROM docker:29.9.2-cli@sha256:5e6baf67325a79f64ed3bed6863954d5e05d0f3d4e57cbdb14809346814bbfdb AS cli
 
 FROM alpine:3.24.2@sha256:294b683cb724975bec92580e1e685676bd4b50bda910ddb8c51d4cabeaec77e6
 
