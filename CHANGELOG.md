@@ -1,5 +1,16 @@
 # Changelog
 
+## BUH-02.27.00 — 2026-11-02 08:53 UTC · [#60](https://github.com/cxsmtp/buh/pull/60)
+
+- **Go live: start from zero.** Settings → System & backups → **Go live: remove the test orders** removes every order placed while you were testing, with its history, card and VAT records and transfer screenshots, so sales and money figures start from zero. The pieces those orders held go back to stock.
+- **Safe to press.** A backup is made first, so the orders can be brought back with a restore. It asks for your hub password and the words GO LIVE, it is written to the audit log, and products, photos, settings and the audit log stay.
+- **Never removes a real sale.** It refuses while any order has a real (live) card payment or a real courier booking, and names the order to deal with first. The customer chats go too unless you untick them.
+- **Status.**
+  - **Benchmark:** 0 failed requests in every round. The medians, branch vs main, are home 662 vs 628 req/s, courier check 527 vs 514, catalogue 606 vs 631 and gift page 567 vs 578. The catalogue's p95 was higher on the branch in the full run, but a quiet catalogue A/B gave the same results on both (branch 594–637 vs main 580–641 req/s, p95 108–130 vs 113–124 ms), so that was noise. Go live adds a hub screen and one owner-only route, and no shopping path changed.
+  - **Tests:** 1,213 run. Before the fixes, 1,211 passed and 2 failed. One failure was this release's own changelog draft line (the `HH:MM` and `#NN` placeholders), which made the Versions screen too wide at 200% text; the real heading fixes it. The other was a settings screen test that timed out waiting for the page during the loaded run. Both pass again on the final build (32/32 in their files). The new tests cover what is removed and kept, the refusal for a real card payment or a real booking, the route's door, sign-in, origin, body and password checks, and the screen at 375 and 1280 px.
+  - **Dependency audit:** 0 vulnerabilities (production).
+  - **Security scan:** Checkmarx did not run (its sign-in has expired). The route is owner only (the accountant is refused), needs the hub password every time plus the typed phrase, is rate-limited, and writes to the audit log before anything is removed.
+
 ## BUH-02.26.03 — 2026-11-02 08:16 UTC · [#59](https://github.com/cxsmtp/buh/pull/59)
 
 - **Labels print on A5.** The shop's shipping label and packing slip now print on A5 paper (148 × 210 mm), the paper in your printer, enlarged to fill the page so the barcodes stay sharp. The print buttons say "A5".

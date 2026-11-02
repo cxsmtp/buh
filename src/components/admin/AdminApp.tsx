@@ -15,6 +15,7 @@ import { AdminOrdersTab } from './AdminOrdersTab';
 import { AdminInventoryTab } from './AdminInventoryTab';
 import { AdminCrmTab } from './AdminCrmTab';
 import { AdminCouriersTab } from './AdminCouriersTab';
+import { GoLiveCard } from './settings/GoLiveCard';
 import { AdminBrandingTab, type BrandDraft } from './AdminBrandingTab';
 import { AdminSmsTab } from './AdminSmsTab';
 import { AdminChatsTab } from './AdminChatsTab';
@@ -783,6 +784,7 @@ export function AdminApp() {
                       <BackupPasswordCard />
                       <DriveBackupCard />
                       <SettingsHistoryCard onRestored={() => void reloadAll().then(() => setSettingsEpoch((n) => n + 1))} />
+                      <GoLiveCard />
                       <p>
                         Version <strong>{process.env.NEXT_PUBLIC_APP_VERSION}</strong>. Health check:{' '}
                         <a className="underline" href="/api/health" target="_blank" rel="noopener noreferrer">/api/health</a>

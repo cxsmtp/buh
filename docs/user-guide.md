@@ -395,6 +395,7 @@ While VAT is on the TRN and the date are fixed; to change them, turn VAT off fir
 - **Phone check:** WhatsApp (free, the default) or SMS code, the hours before unconfirmed orders cancel, and the SMS gateway (see below).
 - **Couriers:** see below.
 - **System & backups:** health (disk, database, backups, SMS), backups, the copy to Google Drive, and **Settings history**: every save keeps the version it replaced (keys excepted); **Restore** puts an earlier one back and can itself be undone.
+- **Go live: remove the test orders** (System & backups): before the shop takes real orders, it removes every order placed so far, with its history, card and VAT records and transfer screenshots, so sales and money figures start from zero. The pieces those orders held go back to stock; tick **Also remove the customer chats so far** to clear the chats too. Products, photos, settings and the audit log stay. It shows what will go first, needs your hub password and the words **GO LIVE**, and makes a backup before removing anything, so the orders can be brought back with a restore. It refuses while an order carries real money (a live card payment) or a real courier booking.
 
 ### Look
 
