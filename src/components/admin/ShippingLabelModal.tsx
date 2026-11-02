@@ -2,7 +2,7 @@
 
 import React, { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
-import { CourierSettings, Order } from '@/types';
+import { CourierSettings, LabelPaper, Order } from '@/types';
 import { X, Printer, AlertTriangle, FileText } from 'lucide-react';
 import { aed2, carrierLabel } from '@/lib/courierMode';
 import { Barcode128 } from './Barcode128';
@@ -15,7 +15,12 @@ interface ShippingLabelModalProps {
   shopName?: string;
   /** Couriers → pickup details: where the courier collects the parcel. */
   pickup?: Partial<CourierSettings['jeebly']>;
+  /** Couriers → Label paper: A5 (the default) or a 4 × 6 in label. */
+  paper?: LabelPaper;
 }
+
+/** What each paper is called on the buttons. */
+const PAPER_NAME: Record<LabelPaper, string> = { a5: 'A5', '4x6': '4 × 6 in' };
 
 /** 4 × 6 in at 96 CSS px per inch: the label is laid out at its printed size. */
 const W = 384;
@@ -127,7 +132,8 @@ function Label({ order, shopName, pickup }: { order: Order; shopName: string; pi
   );
 }
 
-export const ShippingLabelModal: React.FC<ShippingLabelModalProps> = ({ order, onClose, shopName = 'Beautiful UAE Home', pickup = {} }) => {
+export const ShippingLabelModal: React.FC<ShippingLabelModalProps> = ({ order, onClose, shopName = 'Beautiful UAE Home', pickup = {}, paper = 'a5' }) => {
+  const paperName = PAPER_NAME[paper] ?? 'A5';
   const frame = useRef<HTMLDivElement>(null);
   const printButton = useRef<HTMLElement>(null);
   const [scale, setScale] = useState(1);
@@ -168,7 +174,7 @@ export const ShippingLabelModal: React.FC<ShippingLabelModalProps> = ({ order, o
               {test ? 'Test label (not a shipment)' : 'Shipping label'}
             </h3>
             <p className="text-xs text-ink-muted">
-              AWB {c.awbNumber} · {carrierPdf ? "print Jeebly's own label; ours below is the packing slip" : '4 × 6 in label'}
+              AWB {c.awbNumber} · {carrierPdf ? "print Jeebly's own label; ours below is the packing slip" : `${paperName} label`}
             </p>
           </div>
           <button type="button" onClick={onClose} aria-label="Close label" className="shrink-0 w-10 h-10 flex items-center justify-center text-ink rounded-full hover:bg-sand focus:outline-none focus-visible:ring-2 focus-visible:ring-gold">
@@ -208,7 +214,7 @@ export const ShippingLabelModal: React.FC<ShippingLabelModalProps> = ({ order, o
             }`}
           >
             <Printer className="w-4 h-4" aria-hidden="true" />
-            <span>{carrierPdf ? (test ? 'Print TEST packing slip' : 'Print packing slip (4 × 6 in)') : test ? 'Print TEST label (not a shipment)' : 'Print label (4 × 6 in)'}</span>
+            <span>{carrierPdf ? (test ? 'Print TEST packing slip' : `Print packing slip (${paperName})`) : test ? 'Print TEST label (not a shipment)' : `Print label (${paperName})`}</span>
           </button>
           {carrierPdf && (
             <a
@@ -225,10 +231,10 @@ export const ShippingLabelModal: React.FC<ShippingLabelModalProps> = ({ order, o
         </div>
       </div>
 
-      {/* What the printer gets: only this, at 4 × 6 in (src/app/globals.css). Opened from a click, so always in the browser. */}
+      {/* What the printer gets: only this, on A5 (enlarged to fill it) or on a 4 × 6 in label (src/app/globals.css). Opened from a click, so always in the browser. */}
       {createPortal(
-          <div id="shipping-label-print" aria-hidden="true">
-            <style>{'@media print { @page { size: 4in 6in; margin: 0; } }'}</style>
+          <div id="shipping-label-print" data-paper={paper} aria-hidden="true">
+            <style>{paper === '4x6' ? '@media print { @page { size: 4in 6in; margin: 0; } }' : '@media print { @page { size: A5 portrait; margin: 0; } }'}</style>
             <div id="printable-shipping-label">
               <Label order={order} shopName={shopName} pickup={pickup} />
             </div>

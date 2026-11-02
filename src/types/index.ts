@@ -464,9 +464,14 @@ export interface BankTransferDetails {
   instructions: string;
 }
 
+/** Label paper (Couriers → Label paper). */
+export type LabelPaper = 'a5' | '4x6';
+
 export interface CourierSettings {
   /** Packaging allowance added to every parcel's weight, in grams (default 200). */
   packagingGrams?: number;
+  /** The paper the shipping label / packing slip prints on: A5 (the default) or a 4 × 6 in label. */
+  labelPaper?: LabelPaper;
   autoAssignRules: {
     codCourier: CourierProvider; // Defaults to 'jeebly'
     prepaidCourier: CourierProvider; // Defaults to 'echo'

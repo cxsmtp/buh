@@ -1,5 +1,15 @@
 # Changelog
 
+## BUH-02.26.03 — 2026-11-02 HH:MM UTC · [#PR](https://github.com/cxsmtp/buh/pull/PR)
+
+- **Labels print on A5.** The shop's shipping label and packing slip now print on A5 paper (148 × 210 mm), the paper in your printer, enlarged to fill the page so the barcodes stay sharp. The print buttons say "A5".
+- **Your choice of paper.** Settings → Couriers → **Label paper** offers A5 (the default) or a 4 × 6 in label for a label printer. For Jeebly's own label, a PDF, choose "Fit to page" when you print it on A5.
+- **Status.**
+  - **Benchmark:** pending.
+  - **Tests:** pending.
+  - **Dependency audit:** pending.
+  - **Security scan:** pending.
+
 ## BUH-02.26.02 — 2026-11-02 07:00 UTC · [#58](https://github.com/cxsmtp/buh/pull/58)
 
 - **Jeebly's live address saves as Jeebly gives it.** Pasting `https://myjeebly.jeebly.com/customer/create_shipment`, the address in Jeebly's guide, was refused, and that blocked saving the courier settings at all. The full address is now accepted, and the shop keeps `https://myjeebly.jeebly.com` and adds each endpoint itself.

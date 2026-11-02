@@ -1030,6 +1030,7 @@ export const AdminOrdersTab: React.FC<AdminOrdersTabProps> = ({
           onClose={() => setLabelOrder(null)}
           shopName={shopName}
           pickup={courierSettings.jeebly}
+          paper={courierSettings.labelPaper ?? 'a5'}
         />
       )}
 

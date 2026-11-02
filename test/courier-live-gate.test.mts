@@ -53,6 +53,16 @@ test('sandbox keys are write-only: masked in what the hub reads, kept on the ser
   assert.equal(getSettings('courier').jeebly.sandboxApiKey, 'SB-KEY-123456');
 });
 
+test('label paper (reported: the printer holds A5): A5 by default, 4 × 6 in on request, nothing else', async () => {
+  assert.equal(getSettings('courier').labelPaper, 'a5');
+  await updateSettings('courier', { labelPaper: '4x6' });
+  assert.equal(getSettings('courier').labelPaper, '4x6');
+  await updateSettings('courier', { packagingGrams: 250 });
+  assert.equal(getSettings('courier').labelPaper, '4x6', 'kept when another field is saved');
+  for (const bad of ['a4', 'A5', '', 5]) await assert.rejects(updateSettings('courier', { labelPaper: bad }), (e: { status?: number }) => e.status === 400, String(bad));
+  await updateSettings('courier', { labelPaper: 'a5', packagingGrams: 200 });
+});
+
 test("Jeebly's live address: https on jeebly.com only, checked on the server", async () => {
   for (const bad of ['http://portal.jeebly.com', 'https://jeebly.com.evil.example', 'https://portal.jeebly.com:8443', 'https://169.254.169.254']) {
     await assert.rejects(updateSettings('courier', { jeebly: { liveBaseUrl: bad } }), (e: { status?: number }) => e.status === 400, bad);

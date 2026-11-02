@@ -272,7 +272,8 @@ fieldset {
 }
 
 /* Shipping label (src/components/admin/ShippingLabelModal.tsx): while it is open, printing gives only
-   the label, at 4 × 6 in (the modal adds the @page size). Other pages print as they are. */
+   the label, laid out at 4 × 6 in; on A5 (Couriers → Label paper, the default) it is enlarged to fill
+   the page (the modal adds the @page size). Other pages print as they are. */
 #shipping-label-print {
   display: none;
 }
@@ -290,6 +291,12 @@ fieldset {
     break-inside: avoid;
     -webkit-print-color-adjust: exact;
     print-color-adjust: exact;
+  }
+  /* A5 is 148 × 210 mm: the 4 × 6 in label × 1.37 is 139 × 209 mm, centred across the page. */
+  #shipping-label-print[data-paper='a5'] #printable-shipping-label {
+    transform: scale(1.37);
+    transform-origin: top left;
+    margin-left: calc((148mm - 4in * 1.37) / 2);
   }
 }
 
