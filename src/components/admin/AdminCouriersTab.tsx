@@ -220,6 +220,14 @@ export const AdminCouriersTab: React.FC<AdminCouriersTabProps> = ({ settings, se
             <span className="block text-ink-muted mt-1">Added to the sizes&apos; weights (Inventory → each size&apos;s Weight) to make the parcel&apos;s weight.</span>
           </label>
           <label className="block">
+            <span className="block text-ink-soft font-semibold mb-1">Label paper</span>
+            <select value={formData.labelPaper ?? 'a5'} onChange={(e) => setFormData({ ...formData, labelPaper: e.target.value === '4x6' ? '4x6' : 'a5' })} className={input} data-testid="label-paper">
+              <option value="a5">A5 (148 × 210 mm)</option>
+              <option value="4x6">4 × 6 in label</option>
+            </select>
+            <span className="block text-ink-muted mt-1">The shop&apos;s label and packing slip print on this. Jeebly&apos;s own label is a PDF: choose &ldquo;Fit to page&rdquo; when printing it on A5.</span>
+          </label>
+          <label className="block">
             <span className="block text-ink-soft font-semibold mb-1">Emirate</span>
             <select value={j.pickupEmirate} onChange={(e) => setJ({ pickupEmirate: e.target.value as Emirate })} className={input}>
               {EMIRATES.map((em) => (

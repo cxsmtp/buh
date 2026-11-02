@@ -390,7 +390,16 @@ for (const width of [375, 1280]) {
       await realLabel.waitFor();
       const pdf = realLabel.getByRole('link', { name: 'Print Jeebly label (PDF)' });
       assert.equal(await pdf.getAttribute('href'), `/api/admin/orders/${b.id}/carrier-label`);
-      await realLabel.getByRole('button', { name: 'Print packing slip (4 × 6 in)' }).waitFor();
+      // Reported: printed on A5, the paper in the owner's printer (Couriers → Label paper, A5 by default).
+      await realLabel.getByRole('button', { name: 'Print packing slip (A5)' }).waitFor();
+      const pages = async () => {
+        await page.emulateMedia({ media: 'print' });
+        const pdfText = (await page.pdf({ preferCSSPageSize: true, printBackground: true })).toString('latin1');
+        await page.emulateMedia({ media: 'screen' });
+        const boxes = [...pdfText.matchAll(/\/MediaBox\s*\[\s*0\s+0\s+([\d.]+)\s+([\d.]+)\s*\]/g)].map((m) => [Math.round(Number(m[1])), Math.round(Number(m[2]))]);
+        return boxes;
+      };
+      assert.deepEqual(await pages(), [[420, 595]], 'one A5 page (148 × 210 mm)');
       assert.equal(await realLabel.getByText(/TEST BOOKING/).count(), 0);
       assert.deepEqual(await overflow(page), [], 'real label: no sideways scroll');
       await shot(page, `label-real-booking-${width}`);

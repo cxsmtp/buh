@@ -662,8 +662,12 @@ const VALIDATORS: { [K in SettingsKey]: (input: Obj, current: SettingsMap[K]) =>
     if (!EMIRATES.includes(pickupEmirate)) throw new HttpError(400, 'Pickup emirate must be one of the seven Emirates.');
     const packaging = input.packagingGrams === undefined || input.packagingGrams === null || input.packagingGrams === '' ? current.packagingGrams ?? 200 : Number(input.packagingGrams);
     if (!Number.isInteger(packaging) || packaging < 0 || packaging > 5000) throw new HttpError(400, 'Packaging weight must be whole grams from 0 to 5000.');
+    // The label paper: A5 (default) or a 4 × 6 in label; nothing else.
+    if (input.labelPaper !== undefined && input.labelPaper !== 'a5' && input.labelPaper !== '4x6') throw new HttpError(400, 'Label paper: A5 or 4 × 6 in.');
+    const labelPaper = input.labelPaper === 'a5' || input.labelPaper === '4x6' ? input.labelPaper : current.labelPaper ?? 'a5';
     return {
       packagingGrams: packaging,
+      labelPaper,
       autoAssignRules: {
         codCourier: provider(rules.codCourier, current.autoAssignRules.codCourier),
         prepaidCourier: provider(rules.prepaidCourier, current.autoAssignRules.prepaidCourier),

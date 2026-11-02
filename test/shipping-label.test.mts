@@ -70,6 +70,10 @@ test('regression: the label shows nothing invented', () => {
   assert.match(src, /carrier-label/);
   const css = fs.readFileSync('src/app/globals.css', 'utf8');
   assert.match(css, /#printable-shipping-label \{\s*width: 4in;\s*height: 6in;/);
+  // On A5 (the default paper), the label is enlarged to fill the page and centred across it.
+  assert.match(css, /#shipping-label-print\[data-paper='a5'\] #printable-shipping-label \{\s*transform: scale\(1\.37\);/);
+  assert.match(src, /@page \{ size: A5 portrait; margin: 0; \}/);
+  assert.match(src, /paper === '4x6' \? '@media print \{ @page \{ size: 4in 6in; margin: 0; \} \}'/);
 });
 
 test('amounts on the label have two decimals', () => {
