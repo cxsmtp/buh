@@ -1,5 +1,16 @@
 # Changelog
 
+## BUH-02.26.02 — 2026-11-02 HH:MM UTC · [#53](https://github.com/cxsmtp/buh/pull/53)
+
+- **Jeebly's live address saves as Jeebly gives it.** Pasting `https://myjeebly.jeebly.com/customer/create_shipment`, the address in Jeebly's guide, was refused, and that blocked saving the courier settings at all. The full address is now accepted, and the shop keeps `https://myjeebly.jeebly.com` and adds each endpoint itself.
+- **Test the live keys before Live mode.** Couriers now has **Test sandbox keys** and **Test live keys (books nothing)**. The live test asks Jeebly's live system to track a made-up shipment, so nothing is booked, and works with the keys as typed or saved.
+- **A plain answer from the key test.** "Invalid API Token" says the keys were refused. Jeebly's usual answer for the made-up shipment now says the API key was accepted, instead of looking like a failure.
+- **Status.**
+  - **Benchmark:** pending.
+  - **Tests:** pending.
+  - **Dependency audit:** pending.
+  - **Security scan:** pending.
+
 ## BUH-02.26.01 — 2026-10-29 09:53 UTC · [#52](https://github.com/cxsmtp/buh/pull/52)
 
 - **The shop stays on Node 24 for now.** Node 26 became the long-term support release on 28 October, but its test run on Node 26 turned up a problem: after refusing an oversized request, Node 26 (with Next.js 16.4.3) breaks that connection without saying so. Behind the shop's proxy, the next customer request on that connection could then fail. Node 24 is supported until April 2028, so nothing is lost by waiting.
