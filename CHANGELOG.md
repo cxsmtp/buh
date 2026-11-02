@@ -1,6 +1,6 @@
 # Changelog
 
-## BUH-02.27.00 — 2026-11-02 HH:MM UTC · [#NN](https://github.com/cxsmtp/buh/pull/NN)
+## BUH-02.27.00 — 2026-11-02 HH:MM UTC · [#60](https://github.com/cxsmtp/buh/pull/60)
 
 - **Go live: start from zero.** Settings → System & backups → **Go live: remove the test orders** removes every order placed while you were testing, with its history, card and VAT records and transfer screenshots, so sales and money figures start from zero. The pieces those orders held go back to stock.
 - **Safe to press.** A backup is made first, so the orders can be brought back with a restore. It asks for your hub password and the words GO LIVE, it is written to the audit log, and products, photos, settings and the audit log stay.
