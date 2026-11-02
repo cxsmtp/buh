@@ -13,6 +13,8 @@ import { safeRequest, type SafeRequestInit, type SafeResponse } from './server/o
 export const JEEBLY_API = {
   /** Jeebly's demo (sandbox) environment. */
   sandboxBase: 'https://demo.jeebly.com',
+  /** Jeebly's production host, as its guide gives it (integration.jeebly.com/v1, scheduled create order). */
+  liveBaseExample: 'https://myjeebly.jeebly.com',
   paths: {
     create: '/customer/create_shipment',
     label: '/customer/generate_shipment_label',
@@ -30,7 +32,11 @@ export const JEEBLY_API = {
 
 export type JeeblyTarget = 'sandbox' | 'live';
 
-/** The live address the owner enters (from Jeebly): https on jeebly.com or a *.jeebly.com host, nothing else. */
+/**
+ * The live address the owner enters (from Jeebly): https on jeebly.com or a *.jeebly.com host, nothing
+ * else. Jeebly's guide gives the full endpoint (https://myjeebly.jeebly.com/customer/create_shipment),
+ * so one of the four known endpoint paths is taken too and only its host is kept; any other path is refused.
+ */
 export function jeeblyLiveBase(value: unknown): string {
   if (typeof value !== 'string' || !value.trim() || value.length > 200) return '';
   let url: URL;
@@ -42,7 +48,9 @@ export function jeeblyLiveBase(value: unknown): string {
   const host = url.hostname.toLowerCase();
   if (url.protocol !== 'https:' || url.username || url.password || (url.port && url.port !== '443')) return '';
   if (host !== 'jeebly.com' && !host.endsWith('.jeebly.com')) return '';
-  if ((url.pathname !== '/' && url.pathname !== '') || url.search || url.hash) return '';
+  const path = url.pathname.replace(/\/+$/, '');
+  const known = (Object.values(JEEBLY_API.paths) as string[]).includes(path);
+  if ((path !== '' && !known) || url.search || url.hash) return '';
   return `https://${host}`;
 }
 

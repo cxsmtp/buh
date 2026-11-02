@@ -159,7 +159,11 @@ test('Live mode needs Jeebly\'s live address; only https on jeebly.com is accept
   assert.equal(mock!.calls.length, 0);
   assert.equal(jeeblyLiveBase('https://portal.jeebly.com'), 'https://portal.jeebly.com');
   assert.equal(jeeblyLiveBase('https://jeebly.com/'), 'https://jeebly.com');
-  for (const bad of ['http://portal.jeebly.com', 'https://jeebly.com.evil.example', 'https://evil.example/jeebly.com', 'https://x@portal.jeebly.com', 'https://portal.jeebly.com:8443', 'https://portal.jeebly.com/customer', 'https://10.0.0.1', '']) {
+  // Reported: the address Jeebly's guide gives (the full create_shipment endpoint) was refused, so nothing saved.
+  assert.equal(jeeblyLiveBase('https://myjeebly.jeebly.com/customer/create_shipment'), 'https://myjeebly.jeebly.com');
+  assert.equal(jeeblyLiveBase(' https://myjeebly.jeebly.com/customer/track_shipment/ '), 'https://myjeebly.jeebly.com');
+  for (const p of Object.values(JEEBLY_API.paths)) assert.equal(jeeblyLiveBase(`https://myjeebly.jeebly.com${p}`), 'https://myjeebly.jeebly.com', p);
+  for (const bad of ['http://portal.jeebly.com', 'https://jeebly.com.evil.example', 'https://evil.example/jeebly.com', 'https://x@portal.jeebly.com', 'https://portal.jeebly.com:8443', 'https://portal.jeebly.com/customer', 'https://portal.jeebly.com/customer/other', 'https://myjeebly.jeebly.com/customer/create_shipment?x=1', 'https://myjeebly.jeebly.com/customer/create_shipment#a', 'https://evil.example/customer/create_shipment', 'https://10.0.0.1', '']) {
     assert.equal(jeeblyLiveBase(bad), '', bad);
   }
 });
