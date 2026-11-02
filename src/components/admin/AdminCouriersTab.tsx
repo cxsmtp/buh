@@ -99,12 +99,12 @@ export const AdminCouriersTab: React.FC<AdminCouriersTabProps> = ({ settings, se
     !j.pickupLandmark?.trim() && 'landmark',
   ].filter(Boolean) as string[];
 
-  const handleTestConnection = async (provider: 'jeebly' | 'echo') => {
+  const handleTestConnection = async (provider: 'jeebly' | 'echo', target?: 'live' | 'sandbox') => {
     setTesting(true);
     setTestResult(null);
-    const { data } = await postJson<{ reached?: boolean; carrierSaysOk?: boolean; summary?: string; message?: string }>('/api/courier/test', { provider, settings: formData });
+    const { data } = await postJson<{ reached?: boolean; carrierSaysOk?: boolean; keysAccepted?: boolean; summary?: string; message?: string }>('/api/courier/test', { provider, settings: formData, ...(target ? { target } : {}) });
     setTesting(false);
-    setTestResult({ ok: Boolean(data.reached && data.carrierSaysOk), text: data.summary || data.message || 'Could not reach the courier.' });
+    setTestResult({ ok: Boolean(data.reached && (data.keysAccepted ?? data.carrierSaysOk)), text: data.summary || data.message || 'Could not reach the courier.' });
   };
 
   const runCheck = async () => {
@@ -305,8 +305,8 @@ export const AdminCouriersTab: React.FC<AdminCouriersTabProps> = ({ settings, se
                 </label>
                 <label className="block">
                   <span className="block text-ink-soft font-semibold mb-1">Live address (from Jeebly)</span>
-                  <input type="url" inputMode="url" autoComplete="off" value={j.liveBaseUrl ?? ''} onChange={(e) => setJ({ liveBaseUrl: e.target.value })} maxLength={200} placeholder="https://….jeebly.com" className={`${input} font-mono`} />
-                  <span className="block text-ink-muted mt-1">Jeebly gives it with your production keys. Only an https address on jeebly.com is accepted.</span>
+                  <input type="url" inputMode="url" autoComplete="off" value={j.liveBaseUrl ?? ''} onChange={(e) => setJ({ liveBaseUrl: e.target.value })} maxLength={200} placeholder="https://myjeebly.jeebly.com" className={`${input} font-mono`} />
+                  <span className="block text-ink-muted mt-1">As Jeebly gives it, e.g. https://myjeebly.jeebly.com/customer/create_shipment (the shop keeps https://myjeebly.jeebly.com). Only an https address on jeebly.com is accepted.</span>
                 </label>
               </fieldset>
               <label className="block">
@@ -320,9 +320,14 @@ export const AdminCouriersTab: React.FC<AdminCouriersTabProps> = ({ settings, se
             <p className="text-ink-muted">Keys are saved with “Save Carrier Settings”, kept on the server and never shown again.</p>
 
             <div className="flex flex-wrap gap-2">
-              <button type="button" onClick={() => handleTestConnection('jeebly')} disabled={testing} className={`${button} border border-line-strong bg-surface text-ink hover:bg-sand`}>
+              <button type="button" onClick={() => handleTestConnection('jeebly', 'sandbox')} disabled={testing} className={`${button} border border-line-strong bg-surface text-ink hover:bg-sand`}>
                 <RefreshCw className={`w-3.5 h-3.5 ${testing ? 'animate-spin' : ''}`} aria-hidden="true" />
-                <span>{testing ? 'Testing…' : `Test connection (${j.isLive ? 'live' : 'sandbox'})`}</span>
+                <span>{testing ? 'Testing…' : 'Test sandbox keys'}</span>
+              </button>
+              {/* The live keys, before Live mode too: it only asks Jeebly to track a made-up shipment, so nothing is booked. */}
+              <button type="button" onClick={() => handleTestConnection('jeebly', 'live')} disabled={testing} className={`${button} border border-line-strong bg-surface text-ink hover:bg-sand`} data-testid="test-live-keys">
+                <RefreshCw className={`w-3.5 h-3.5 ${testing ? 'animate-spin' : ''}`} aria-hidden="true" />
+                <span>{testing ? 'Testing…' : 'Test live keys (books nothing)'}</span>
               </button>
               <button type="button" onClick={runCheck} disabled={checking} className={`${button} bg-ink text-paper`}>
                 <FlaskConical className="w-3.5 h-3.5 text-gold-light" aria-hidden="true" />

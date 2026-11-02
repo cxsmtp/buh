@@ -1,7 +1,7 @@
 import { audit } from '@/lib/server/audit';
 import { parseCourierProvider, parseCourierSettings } from '@/lib/server/courierInput';
 import { requireAdmin } from '@/lib/server/guard';
-import { handleRouteError, json, readJsonBody } from '@/lib/server/http';
+import { handleRouteError, HttpError, json, readJsonBody } from '@/lib/server/http';
 import { withStoredSecrets } from '@/lib/server/settings';
 import { ECO_LIVE_NOT_CONNECTED } from '@/lib/courierMode';
 import { callJeebly, JEEBLY_API, jeeblyLiveBase, jeeblyOk, jeeblySaid } from '@/lib/jeeblyApi';
@@ -25,13 +25,15 @@ export async function POST(request: Request) {
     }
 
     const settings = parseCourierSettings(withStoredSecrets('courier', body.settings)).jeebly;
-    // Live mode tests the live keys at the live address; otherwise the sandbox keys on Jeebly's demo system.
-    const target = settings.isLive ? 'live' : 'sandbox';
+    // Which keys: the ones asked for ("Test live keys" works before Live mode is on, as nothing is
+    // booked); without a choice, the live keys in Live mode and the sandbox keys otherwise.
+    if (body.target !== undefined && body.target !== 'live' && body.target !== 'sandbox') throw new HttpError(400, 'Test the live or the sandbox keys.');
+    const target: 'live' | 'sandbox' = body.target === 'live' || body.target === 'sandbox' ? body.target : settings.isLive ? 'live' : 'sandbox';
     const base = target === 'live' ? jeeblyLiveBase(settings.liveBaseUrl) : JEEBLY_API.sandboxBase;
     const keys = target === 'live' ? { apiKey: settings.apiKey, clientKey: settings.clientKey } : { apiKey: settings.sandboxApiKey, clientKey: settings.sandboxClientKey };
     const where = target === 'live' ? 'Jeebly (live)' : "Jeebly's sandbox";
     if (!base || !keys.apiKey || !keys.clientKey) {
-      const summary = !base ? "Add Jeebly's live address first (https, on jeebly.com)." : target === 'live' ? 'Add both live keys first.' : 'Add both sandbox keys first (Live mode is off, so the sandbox keys are tested).';
+      const summary = !base ? `Add Jeebly's live address first (${JEEBLY_API.liveBaseExample}/customer/create_shipment, as Jeebly gives it).` : target === 'live' ? 'Add both live keys first.' : 'Add both sandbox keys first.';
       return json({ success: false, provider: 'Jeebly', target, reached: false, summary });
     }
 
@@ -39,6 +41,10 @@ export async function POST(request: Request) {
     const call = await callJeebly(base, JEEBLY_API.paths.track, keys, { reference_number: 'CONNECTION-TEST' }, 10_000);
     const said = call.reached ? jeeblySaid(call.data, [keys.apiKey, keys.clientKey]) : '';
     const carrierSaysOk = call.reached && jeeblyOk(call.data);
+    // A made-up reference is never found, so Jeebly answers "Invalid Customer Key Or Shipment Number"
+    // even to good keys; refused keys get "Invalid API Token" (or the headers message) instead.
+    const keysRefused = /invalid api token|headers are required/i.test(said);
+    const keysAccepted = call.reached && !keysRefused && (call.status ?? 500) < 500;
     audit('courier.test', { by: session.email, provider, target, reached: call.reached, httpStatus: call.status ?? null, carrierSaysOk });
 
     return json({
@@ -50,9 +56,14 @@ export async function POST(request: Request) {
       httpStatus: call.status ?? null,
       carrierMessage: said,
       carrierSaysOk,
+      keysAccepted,
       latency: `${Date.now() - startTime}ms`,
       summary: call.reached
-        ? `Reached ${where} (HTTP ${call.status}); Jeebly said: ${said || '(no message)'}${/invalid api token/i.test(said) ? ' — the keys were refused.' : ''}`
+        ? keysRefused
+          ? `Reached ${where} (HTTP ${call.status}): the keys were refused. Jeebly said: ${said || '(no message)'}`
+          : keysAccepted
+            ? `Reached ${where} (HTTP ${call.status}): the API key was accepted. Jeebly said: ${said || '(no message)'}${/customer key or shipment/i.test(said) ? ' (expected: the test asks for a shipment that does not exist; if the client key were wrong Jeebly gives the same answer, so the first real booking confirms it).' : ''} Nothing was booked.`
+            : `Reached ${where} (HTTP ${call.status}); Jeebly said: ${said || '(no message)'}`
         : `Could not reach ${where} from the server (${call.error}).`,
     });
   } catch (error) {

@@ -170,6 +170,30 @@ test('sandbox keys are saved on the server and never come back to the browser', 
   assert.equal((await api('PUT', '/api/admin/settings/courier', { settings: { jeebly: { sandboxApiKey: null, sandboxClientKey: null } } })).status, 200);
 });
 
+test("Jeebly live keys (reported: the live address Jeebly gives was refused, and there was no way to test the live keys): the full create_shipment address saves as its host; the live keys are tested before Live mode, nothing booked", { skip }, async () => {
+  const save = await api('PUT', '/api/admin/settings/courier', { settings: { jeebly: { liveBaseUrl: 'https://myjeebly.jeebly.com/customer/create_shipment', apiKey: 'LIVE-KEY-7654321', clientKey: 'LIVE-CLIENT-7654321' } } });
+  assert.equal(save.status, 200, await save.clone().text());
+  const saved = (await (await api('GET', '/api/admin/settings')).json()).courier;
+  assert.equal(saved.value.jeebly.liveBaseUrl, 'https://myjeebly.jeebly.com');
+  assert.equal(saved.value.jeebly.isLive, false, 'Live mode stays off');
+  // Test live keys: Jeebly's live host, the saved keys, a made-up shipment (nothing booked).
+  // As the screen sends it: the whole form (the saved address shown; keys left blank, so the saved ones are used).
+  const live = await (await api('POST', '/api/courier/test', { provider: 'jeebly', settings: { jeebly: { liveBaseUrl: saved.value.jeebly.liveBaseUrl } }, target: 'live' })).json();
+  assert.equal(live.target, 'live', JSON.stringify(live));
+  assert.equal(live.endpoint, 'https://myjeebly.jeebly.com/customer/track_shipment');
+  assert.equal(live.keysAccepted, true);
+  assert.match(live.summary, /^Reached Jeebly \(live\) \(HTTP 400\): the API key was accepted\. Jeebly said: Invalid Customer Key Or Shipment Number \(expected: .*Nothing was booked\.$/);
+  assert.ok(!JSON.stringify(live).includes('LIVE-KEY-7654321'));
+  // Refused keys say so (typed, not saved).
+  const bad = await (await api('POST', '/api/courier/test', { provider: 'jeebly', settings: { jeebly: { liveBaseUrl: 'https://myjeebly.jeebly.com/customer/create_shipment', apiKey: 'bad-key' } }, target: 'live' })).json();
+  assert.equal(bad.keysAccepted, false);
+  assert.match(bad.summary, /the keys were refused\. Jeebly said: Invalid API Token/);
+  assert.equal((await api('POST', '/api/courier/test', { provider: 'jeebly', settings: { jeebly: {} }, target: 'production' })).status, 400);
+  // Without a choice, as before: Live mode off tests the sandbox keys.
+  assert.equal((await (await api('POST', '/api/courier/test', { provider: 'jeebly', settings: { jeebly: {} } })).json()).target, 'sandbox');
+  assert.equal((await api('PUT', '/api/admin/settings/courier', { settings: { jeebly: { liveBaseUrl: '', apiKey: null, clientKey: null } } })).status, 200);
+});
+
 const PICKUP = { pickupPhone: '+971 50 123 4567', pickupUnit: 'Shop 4', pickupBuilding: 'Barsha Heights Tower', pickupArea: 'Al Barsha 1', pickupLandmark: 'Next to the metro', pickupAddress: 'Street 12' };
 const KEYS = { sandboxApiKey: 'SB-KEY-1234567', sandboxClientKey: 'SB-CLIENT-1234567', apiKey: 'LIVE-KEY-1234567', clientKey: 'LIVE-CLIENT-1234567', liveBaseUrl: 'https://live.jeebly.com' };
 /** Keys and pickup saved, the Sandbox check run (it passes against the stand-in), then Live on or off. */
@@ -429,6 +453,47 @@ for (const width of [375, 1280]) {
     } finally {
       await browser.close();
       await goLive(false);
+    }
+  });
+}
+
+for (const width of [375, 1280]) {
+  test(`Couriers at ${width}px (reported): the live address as Jeebly gives it saves; "Test live keys" works before Live mode and books nothing`, { skip: skipBrowser }, async () => {
+    const browser = await pw!.chromium.launch();
+    try {
+      const context = await browser.newContext({ viewport: { width, height: 900 }, hasTouch: width < 800 });
+      const url = new URL(server.base);
+      await context.addCookies(
+        [server.door, cookie].map((c) => {
+          const [name, ...v] = c.split('=');
+          return { name, value: v.join('='), domain: url.hostname, path: '/' };
+        })
+      );
+      const page = await context.newPage();
+      const errors: string[] = [];
+      page.on('pageerror', (e) => errors.push(e.message));
+      await page.goto(server.adminUrl, { waitUntil: 'domcontentloaded' });
+      await openAdminSection(page, /^Settings/);
+      await page.getByRole('navigation', { name: 'Settings sections' }).getByRole('button', { name: 'Couriers', exact: true }).click();
+      await page.getByLabel('Live address (from Jeebly)').fill('https://myjeebly.jeebly.com/customer/create_shipment');
+      await page.getByLabel('Live API key').fill(`LIVE-KEY-${width}-123`);
+      await page.getByLabel('Live client key').fill(`LIVE-CLIENT-${width}-123`);
+      // Before saving and with Live mode off: the typed live keys, at Jeebly's live host.
+      await page.getByTestId('test-live-keys').click();
+      await page.getByRole('status').filter({ hasText: /Reached Jeebly \(live\) \(HTTP 400\): the API key was accepted\..*Nothing was booked\./ }).waitFor();
+      await page.getByRole('button', { name: 'Save Carrier Settings' }).click();
+      let saved = '';
+      for (let i = 0; i < 50 && saved !== 'https://myjeebly.jeebly.com'; i++) {
+        await page.waitForTimeout(200);
+        saved = (await (await api('GET', '/api/admin/settings')).json()).courier.value.jeebly.liveBaseUrl;
+      }
+      assert.equal(saved, 'https://myjeebly.jeebly.com', 'saved as its host');
+      assert.equal(await page.getByText(/Jeebly live address must be an https address/).count(), 0, 'no error');
+      assert.deepEqual(await overflow(page), []);
+      assert.deepEqual(errors, []);
+    } finally {
+      await browser.close();
+      assert.equal((await api('PUT', '/api/admin/settings/courier', { settings: { jeebly: { liveBaseUrl: '', apiKey: null, clientKey: null } } })).status, 200);
     }
   });
 }
