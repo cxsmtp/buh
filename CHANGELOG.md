@@ -1,5 +1,16 @@
 # Changelog
 
+## BUH-02.27.00 — 2026-11-02 HH:MM UTC · [#NN](https://github.com/cxsmtp/buh/pull/NN)
+
+- **Go live: start from zero.** Settings → System & backups → **Go live: remove the test orders** removes every order placed while you were testing, with its history, card and VAT records and transfer screenshots, so sales and money figures start from zero. The pieces those orders held go back to stock.
+- **Safe to press.** A backup is made first, so the orders can be brought back with a restore. It asks for your hub password and the words GO LIVE, it is written to the audit log, and products, photos, settings and the audit log stay.
+- **Never removes a real sale.** It refuses while any order has a real (live) card payment or a real courier booking, and names the order to deal with first. The customer chats go too unless you untick them.
+- **Status.**
+  - **Benchmark:** pending.
+  - **Tests:** pending.
+  - **Dependency audit:** pending.
+  - **Security scan:** pending.
+
 ## BUH-02.26.03 — 2026-11-02 08:16 UTC · [#59](https://github.com/cxsmtp/buh/pull/59)
 
 - **Labels print on A5.** The shop's shipping label and packing slip now print on A5 paper (148 × 210 mm), the paper in your printer, enlarged to fill the page so the barcodes stay sharp. The print buttons say "A5".

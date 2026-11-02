@@ -245,6 +245,14 @@ Carrier endpoints are fixed in code.
 - Image uploads must really be PNG, JPEG or WebP (checked by magic bytes); SVG is refused.
 - Unexpected errors return a generic message. The details go to the server log, with secrets redacted and phones/emails masked.
 
+## Go live: removing the test orders (BUH-02.27.00)
+
+`GET/POST /api/admin/go-live` (src/lib/server/goLive.ts) is owner only: `requireAdmin`, the current password every time (`confirmOwner`, a passkey sign-in is not enough), the phrase `GO LIVE`, a 1 KB body with only `confirm`, `currentPassword` and `chats`, and the sign-in rate limit.
+- **Refusal:** it is refused (409 `go_live_real_orders`) while any order has a Stripe live-mode payment (`card_livemode = 1` and pending, paid or refunded) or a live courier booking that is not a test on an order not cancelled. A real sale is never removed.
+- **Backup and audit first:** a backup is made before anything is removed (no backup, nothing removed), and `shop.went_live` is written to the audit log (orders, pieces, screenshots, chats, backup name) before the removal.
+- **What goes:** one transaction removes the orders and every row that hangs on them (`order_events`, `order_vat`, `card_refunds`, `vat_invoices`, `vat_credit_notes`, `stripe_events`) and the `otp_codes`; the customer chats only when asked. It also puts the pieces the removed orders held back in stock, recorded as stock moves ("correction") and audited. The transfer screenshots' files go after it commits.
+- **What stays:** products, images, settings, settings history and the audit log are never touched.
+
 ## Audit log
 
 `DATA_DIR/audit-YYYY-MM.jsonl` records every action that moves money, stock or the shop's state: orders placed and changed by the owner (status, payment status, notes, with before → after), card payments started, paid, declined, cancelled and refunded (in full or in part, from Stripe's word), bank transfers uploaded and checked, WhatsApp confirmations, courier bookings and tests, stock moves (who, reason, old → new), products created, changed (price and sizes' charges before → after), duplicated, archived, reordered, drafts discarded, settings saved and restored (and the financial year's start), the admin link, sign-ins and refusals, sign-outs, password changes and resets, passkeys and recovery codes, backups taken, failed and restored, updates and rollbacks asked for, SMS and email tests, monitor alerts, expenses and their bills, and every export (the accountant's ZIP, the audit CSV/JSONL). Each line carries an HMAC over the previous line, so editing, deleting or reordering a line is detected (`verifyAuditLog`). Each line also names its key id (`kid`: 16 hex characters of SHA-256 over the HMAC key, which can't be turned back into the key), and the first line of a month records the previous month's last sequence number and MAC (`prevMonth`), so a missing month, or one cut short at its end, is reported.
