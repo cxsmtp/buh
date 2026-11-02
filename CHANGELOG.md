@@ -1,15 +1,15 @@
 # Changelog
 
-## BUH-02.26.02 — 2026-11-02 HH:MM UTC · [#58](https://github.com/cxsmtp/buh/pull/58)
+## BUH-02.26.02 — 2026-11-02 07:00 UTC · [#58](https://github.com/cxsmtp/buh/pull/58)
 
 - **Jeebly's live address saves as Jeebly gives it.** Pasting `https://myjeebly.jeebly.com/customer/create_shipment`, the address in Jeebly's guide, was refused, and that blocked saving the courier settings at all. The full address is now accepted, and the shop keeps `https://myjeebly.jeebly.com` and adds each endpoint itself.
 - **Test the live keys before Live mode.** Couriers now has **Test sandbox keys** and **Test live keys (books nothing)**. The live test asks Jeebly's live system to track a made-up shipment, so nothing is booked, and works with the keys as typed or saved.
 - **A plain answer from the key test.** "Invalid API Token" says the keys were refused. Jeebly's usual answer for the made-up shipment now says the API key was accepted, instead of looking like a failure.
 - **Status.**
-  - **Benchmark:** pending.
-  - **Tests:** pending.
-  - **Dependency audit:** pending.
-  - **Security scan:** pending.
+  - **Benchmark:** 0 failed requests in every round. The medians are home 723 vs 654 req/s, courier check 606 vs 567, and catalogue 628 vs 654. The gift page's p95 was higher in the full run; a quiet gift-page A/B gave the same results on both (branch 570–615 vs main 582–624 req/s, p95 118–130 vs 118–127 ms), so that was noise.
+  - **Tests:** 1,208/1,208. The new tests are your exact address (fails on the old code, passes on the new); saving it and testing the live keys through the real routes; and the Couriers screen at 375 and 1280 px.
+  - **Dependency audit:** production 0 vulnerabilities; no new packages.
+  - **Security scan:** the live address is still https on jeebly.com only, with nothing but Jeebly's four endpoint paths accepted. The key test books nothing, never echoes the keys and is audited. Checkmarx could not run because its sign-in has expired.
 
 ## BUH-02.26.01 — 2026-10-29 09:53 UTC · [#52](https://github.com/cxsmtp/buh/pull/52)
 
