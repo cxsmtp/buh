@@ -473,7 +473,6 @@ for (const width of [375, 1280]) {
       const errors: string[] = [];
       page.on('pageerror', (e) => errors.push(e.message));
       await page.goto(server.adminUrl, { waitUntil: 'domcontentloaded' });
-      const { openAdminSection } = await import('./helpers.mts');
       await openAdminSection(page, /^Settings/);
       await page.getByRole('navigation', { name: 'Settings sections' }).getByRole('button', { name: 'Couriers', exact: true }).click();
       await page.getByLabel('Live address (from Jeebly)').fill('https://myjeebly.jeebly.com/customer/create_shipment');
