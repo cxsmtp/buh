@@ -1,14 +1,14 @@
 # Changelog
 
-## BUH-02.26.03 — 2026-11-02 HH:MM UTC · [#59](https://github.com/cxsmtp/buh/pull/59)
+## BUH-02.26.03 — 2026-11-02 08:16 UTC · [#59](https://github.com/cxsmtp/buh/pull/59)
 
 - **Labels print on A5.** The shop's shipping label and packing slip now print on A5 paper (148 × 210 mm), the paper in your printer, enlarged to fill the page so the barcodes stay sharp. The print buttons say "A5".
 - **Your choice of paper.** Settings → Couriers → **Label paper** offers A5 (the default) or a 4 × 6 in label for a label printer. For Jeebly's own label, a PDF, choose "Fit to page" when you print it on A5.
 - **Status.**
-  - **Benchmark:** pending.
-  - **Tests:** pending.
-  - **Dependency audit:** pending.
-  - **Security scan:** pending.
+  - **Benchmark:** 0 failed requests in every round. The medians, branch vs main, are home 766 vs 707 req/s, courier check 592 vs 578, catalogue 664 vs 621 and gift page 583 vs 600. Two p95s ran higher on the branch. The home page's was higher only in round 1, while the server was warming up. The gift page's was higher in the full run, but a quiet gift-page A/B gave the same results on both (branch 579–602 vs main 562–584 req/s, p95 117–124 vs 115–123 ms), so that was noise. Printing happens in the browser, and no server path changed.
+  - **Tests:** 1,209/1,209. The new tests check that the label paper defaults to A5 and refuses any other value, that the label's print CSS and `@page` say A5, and that a printed label comes out as an A5 PDF page (420 × 595 pt).
+  - **Dependency audit:** 0 vulnerabilities (production).
+  - **Security scan:** Checkmarx did not run (its sign-in has expired). The new setting is checked against an allow-list (A5 or 4 × 6) on the server.
 
 ## BUH-02.26.02 — 2026-11-02 07:00 UTC · [#58](https://github.com/cxsmtp/buh/pull/58)
 
