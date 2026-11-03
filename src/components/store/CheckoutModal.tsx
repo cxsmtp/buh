@@ -39,6 +39,7 @@ import {
 import confetti from 'canvas-confetti';
 import { PALETTE } from '@/lib/design/tokens';
 import { classifyPhone, PhoneVerification } from './PhoneVerification';
+import type { PhotoOrderDraft } from './PhotoOrderSheet';
 
 // Stripe's fields: their own chunk, fetched only when checkout offers cards (never on the shop's first load).
 const CardFields = dynamic(() => import('./StripeCheckout').then((m) => m.CardFields), {
@@ -79,6 +80,11 @@ interface CheckoutModalProps {
    * phoneCheck: an SMS gateway is on, so a card order proves the phone with a code like any order.
    */
   card?: { publishableKey: string; phoneCheck?: boolean; cardFeePercent?: number } | null;
+  /**
+   * "Order from your photo": a piece agreed on WhatsApp instead of the bag (its photos, pieces and
+   * the agreed amount). Paid on delivery or by transfer; the shop confirms the amount before it ships.
+   */
+  photoOrder?: PhotoOrderDraft | null;
 }
 
 /** A card order (paying is its own proof of the number). */
@@ -149,6 +155,7 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
   landing,
   phoneVerification,
   card,
+  photoOrder = null,
 }) => {
   // One checkout attempt = one order, even if "Confirm" is sent twice (double tap, retry). A card
   // attempt that didn't go through is closed (its pieces back on sale), and the next one is new.
@@ -259,7 +266,7 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
   const delivery = deliveryCheck({ emirate, area }, deliverySettings);
   const sameDayChosen = deliveryChoice.option === 'same_day' && deliveryChoice.key === `${emirate}|${area}` && delivery.sameDay.available;
   const deliveryFils = sameDayChosen ? toFils(delivery.sameDay.fee) : 0;
-  const totalFils = cartFils(items) + deliveryFils;
+  const totalFils = (photoOrder ? photoOrder.amountFils : cartFils(items)) + deliveryFils;
   const bankReady = bankTransfer;
   const shopWhatsApp = useShop().store.whatsappNumber.replace(/\D/g, '');
   const byCard = paymentMethod === 'online_card' && Boolean(card);
@@ -419,12 +426,15 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
       ...(method === 'online_card' || whatsappCheck ? { phone: classifyPhone(phone).e164 || phone } : {}),
       ...over.customer,
     },
-    items: items.map((item) => ({
-      productId: item.product.id,
-      profileId: item.selectedProfile.id,
-      color: item.selectedColor,
-      quantity: item.quantity,
-    })),
+    items: photoOrder
+      ? []
+      : items.map((item) => ({
+          productId: item.product.id,
+          profileId: item.selectedProfile.id,
+          color: item.selectedColor,
+          quantity: item.quantity,
+        })),
+    ...(photoOrder ? { photo: { photos: photoOrder.photos, note: photoOrder.note, pieces: photoOrder.pieces, amount: photoOrder.amountFils / 100 } } : {}),
     paymentMethod: method,
     deliveryOption: over.deliveryOption ?? (sameDayChosen ? 'same_day' : 'standard'),
     // The total shown for this way of paying (a card order includes the card fee).
@@ -755,6 +765,11 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
               {askWhatsApp && <WhatsAppConfirm orderId={confirmedOrder.id} phone={confirmedOrder.customer.phone} check={confirmedOrder.whatsappCheck!} bankDetails={byTransfer} cancelHours={cancelHours} openHours={cancelHoursOf(confirmedOrder.createdAt, confirmedOrder.whatsappCheck?.openBy)} {...(confirmAsks ? { buttonLabel: 'Confirm & ask for bank details on WhatsApp' } : {})} />}
             </>
           )}
+          {confirmedOrder.photoOrder && (
+            <p role="status" data-testid="photo-order-next" className="text-xs text-ink-soft bg-ivory border border-line rounded-xl px-3 py-2 text-left">
+              We&rsquo;ll check your photos and the amount (AED {formatAed(toFils(confirmedOrder.total))}) and confirm on WhatsApp. Once it ships, Track Order with <span className="font-mono">{confirmedOrder.id}</span> and your phone number shows the courier&rsquo;s tracking number.
+            </p>
+          )}
           {weCall && (
             <p role="status" className="text-xs text-ink-soft bg-ivory border border-line rounded-xl px-3 py-2">
               We&rsquo;ll call you on <span className="font-mono">{confirmedOrder.customer.phone}</span> to confirm your order.
@@ -959,12 +974,22 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
           <div className="flex-1 min-h-0 overflow-y-auto overflow-x-hidden p-4 space-y-6">
           {/* Order Summary Strip */}
           <div className="bg-ivory rounded-2xl p-3 border border-line flex items-center justify-between text-xs">
+            {photoOrder ? (
+              <div data-testid="checkout-photo-summary" className="min-w-0">
+                <span className="font-semibold text-ink">Your order from a photo</span>
+                <div className="text-[10px] text-ink-soft mt-0.5 break-anywhere">
+                  {photoOrder.photos.length} {photoOrder.photos.length === 1 ? 'photo' : 'photos'} · {photoOrder.pieces} {photoOrder.pieces === 1 ? 'piece' : 'pieces'}
+                  {photoOrder.note ? ` · ${photoOrder.note.length > 60 ? `${photoOrder.note.slice(0, 59)}…` : photoOrder.note}` : ''}
+                </div>
+              </div>
+            ) : (
             <div>
               <span className="font-semibold text-ink">{items.length} {items.length === 1 ? 'item' : 'items'} in your bag</span>
               <div className="text-[10px] text-ink-soft mt-0.5">
                 {items.map((i) => `${i.quantity}x ${i.product.productType === 'simple' ? i.selectedProfile.name : i.selectedProfile.name.split(' ')[0]}`).join(' • ')}
               </div>
             </div>
+            )}
             <div className="text-right">
               {byCard && cardFee > 0 && (
                 <span data-testid="card-fee-line" className="text-[11px] text-ink-soft block">

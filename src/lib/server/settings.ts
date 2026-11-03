@@ -866,6 +866,8 @@ const VALIDATORS: { [K in SettingsKey]: (input: Obj, current: SettingsMap[K]) =>
       askOnInstagram: bool(input.askOnInstagram, current.askOnInstagram),
       confirmOrdersOnWhatsApp: bool(input.confirmOrdersOnWhatsApp, current.confirmOrdersOnWhatsApp),
       holdUntilWhatsAppConfirmed: bool(input.holdUntilWhatsAppConfirmed, current.holdUntilWhatsAppConfirmed),
+      photoOrders: bool(input.photoOrders, current.photoOrders),
+      photoOrdersOnHome: bool(input.photoOrdersOnHome, current.photoOrdersOnHome),
     };
   },
 

@@ -65,6 +65,11 @@ const nextConfig: NextConfig = {
         headers: [{ key: "Content-Security-Policy", value: BILL_CSP }],
       },
       {
+        // A customer's photo of an order from a photo, opened on its own from the hub: the same.
+        source: "/api/admin/orders/:id/photos/:n",
+        headers: [{ key: "Content-Security-Policy", value: BILL_CSP }],
+      },
+      {
         // An order's printable receipt or tax invoice (the hub's, and the customer's private one):
         // its own inline style, no scripts at all (src/lib/server/documentHeaders.ts).
         source: "/api/admin/orders/:id/invoice",

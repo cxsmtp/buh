@@ -89,7 +89,7 @@ export function GoLiveCard() {
             {preview.orders} {preview.orders === 1 ? 'order' : 'orders'} removed
           </li>
           <li>{preview.pieces} {preview.pieces === 1 ? 'piece goes' : 'pieces go'} back to stock</li>
-          <li>{preview.screenshots} transfer {preview.screenshots === 1 ? 'screenshot' : 'screenshots'} removed</li>
+          <li>{preview.screenshots} uploaded {preview.screenshots === 1 ? 'file' : 'files'} removed (transfer screenshots, order photos)</li>
           <li>{chats ? `${preview.chats} customer ${preview.chats === 1 ? 'chat' : 'chats'} removed` : `${preview.chats} customer ${preview.chats === 1 ? 'chat stays' : 'chats stay'}`}</li>
         </ul>
       )}

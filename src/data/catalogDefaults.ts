@@ -53,6 +53,9 @@ export const DEFAULT_STORE: StoreSettings = {
   // Free and simple: on as soon as a WhatsApp number is set. Holding orders is opt-in.
   confirmOrdersOnWhatsApp: true,
   holdUntilWhatsAppConfirmed: false,
+  // Opt-in: the owner switches on "Order from your photo" (and its home-page banner) when ready.
+  photoOrders: false,
+  photoOrdersOnHome: false,
 };
 
 /** Settings → Themes before the owner changes anything: festivals picked automatically. */

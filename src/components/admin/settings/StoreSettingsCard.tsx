@@ -108,6 +108,8 @@ export function StoreSettingsCard({ value, onSave, auto }: { value: StoreSetting
         </label>
       </fieldset>
 
+      <PhotoOrdersFields d={d} set={set} />
+
       <section>
         <label className={label} htmlFor="st-addr">Store address (footer)</label>
         <input id="st-addr" className={field} placeholder="Dubai, United Arab Emirates" value={d.storeAddress} maxLength={300} onChange={(e) => set('storeAddress', e.target.value)} />
@@ -130,5 +132,55 @@ export function StoreSettingsCard({ value, onSave, auto }: { value: StoreSetting
         {status && <span role="status" className={`text-xs font-semibold ${status.ok ? 'text-success' : 'text-danger'}`}>{status.text}</span>}
       </div>
     </div>
+  );
+}
+
+/**
+ * "Order from your photo": a link for pieces agreed on WhatsApp that are not in the shop (photos,
+ * the agreed amount, address, payment, then the WhatsApp confirmation), and its home-page banner.
+ */
+function PhotoOrdersFields({ d, set }: { d: StoreSettings; set: <K extends keyof StoreSettings>(k: K, v: StoreSettings[K]) => void }) {
+  const [copied, setCopied] = useState(false);
+  const link = typeof window === 'undefined' ? '/order-by-photo' : `${window.location.origin}/order-by-photo`;
+  const copy = async () => {
+    try {
+      await navigator.clipboard.writeText(link);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+    } catch {
+      setCopied(false);
+    }
+  };
+  return (
+    <fieldset className="space-y-1.5 text-xs" data-testid="photo-orders-settings">
+      <legend className={label}>Order from your photo (pieces agreed on WhatsApp)</legend>
+      <label className="flex items-start gap-2">
+        <input type="checkbox" className="mt-0.5" checked={d.photoOrders} onChange={(e) => set('photoOrders', e.target.checked)} data-testid="photo-orders-on" />
+        <span>
+          Take orders from a photo {!d.whatsappNumber && <span className="text-ink-muted">(add the WhatsApp number above, so customers can confirm)</span>}
+          <span className="block text-ink-muted">
+            For a piece you agreed on WhatsApp that is not in the shop: the customer uploads its photos, types the amount you agreed, their address and how they pay, then confirms on WhatsApp. In Orders, check the photos and tap &ldquo;Confirm amount&rdquo; (correct it if needed): only then can it be booked with the courier, and the label printed. They follow the courier in Track Order.
+          </span>
+        </span>
+      </label>
+      {d.photoOrders && (
+        <div className="pl-5 space-y-1.5">
+          <div className="flex flex-wrap items-center gap-2">
+            <code className="min-w-0 break-all rounded-lg bg-sand px-2 py-1 text-ink" data-testid="photo-orders-link">{link}</code>
+            <button type="button" onClick={() => void copy()} className="min-h-9 px-3 rounded-lg border border-line-strong bg-surface text-ink font-semibold">
+              {copied ? 'Copied' : 'Copy link'}
+            </button>
+          </div>
+          <p className="text-ink-muted">Share this link on WhatsApp.</p>
+          <label className="flex items-start gap-2">
+            <input type="checkbox" className="mt-0.5" checked={d.photoOrdersOnHome} onChange={(e) => set('photoOrdersOnHome', e.target.checked)} data-testid="photo-orders-home" />
+            <span>
+              Show it on the home page
+              <span className="block text-ink-muted">A banner under the top picture: &ldquo;Have a photo of one of our pieces? Order it here&rdquo;. The catalogue stays as it is.</span>
+            </span>
+          </label>
+        </div>
+      )}
+    </fieldset>
   );
 }

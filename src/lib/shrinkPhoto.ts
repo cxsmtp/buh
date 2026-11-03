@@ -5,7 +5,7 @@
  * as JPEG, before upload, so saving a product is quick and stays under the
  * server's 3 MB per-image limit. Orientation from the camera is applied.
  */
-export async function shrinkPhoto(file: File, maxSide = 1600): Promise<string> {
+export async function shrinkPhoto(file: File, maxSide = 1600, maxUrlLength = 2.5 * 1024 * 1024): Promise<string> {
   let bitmap: ImageBitmap;
   try {
     bitmap = await createImageBitmap(file, { imageOrientation: 'from-image' });
@@ -24,7 +24,7 @@ export async function shrinkPhoto(file: File, maxSide = 1600): Promise<string> {
   bitmap.close();
   for (const quality of [0.85, 0.75, 0.6]) {
     const url = canvas.toDataURL('image/jpeg', quality);
-    if (url.length < 2.5 * 1024 * 1024) return url;
+    if (url.length < maxUrlLength) return url;
   }
   return canvas.toDataURL('image/jpeg', 0.5);
 }
