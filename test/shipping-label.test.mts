@@ -92,7 +92,7 @@ test('reported: the label printed "Beautiful UAE Home" as the sender; it shows t
     items: [{ productId: 'p', title: 'King set', image: '', profileId: 'king', profileName: 'King', mattressSize: '', fittedSheet: '', flatSheet: '', pillowcases: '', unitPrice: 275, quantity: 1, totalPrice: 275 }],
     courier: { provider: 'jeebly', serviceType: 'Scheduled', awbNumber: 'JB1', trackingUrl: '', status: '', pickupDate: '', weightKg: 1, pieces: 1, labelGenerated: true, codAmountCollected: 275 },
   } as unknown as import('@/types').Order;
-  const pickup = { pickupLocationName: 'Beautiful Home Trading L.L.C', pickupPhone: '+971 50 111 2222', pickupAddress: 'Street 5', pickupArea: 'Al Barsha 1', pickupEmirate: 'Dubai' };
+  const pickup = { pickupLocationName: 'Beautiful Home Trading L.L.C', pickupPhone: '+971 50 111 2222', pickupAddress: 'Street 5', pickupArea: 'Al Barsha 1', pickupEmirate: 'Dubai' as const };
   const html = renderToStaticMarkup(React.createElement(Label, { order, shopName: 'Beautiful UAE Home', pickup }));
   assert.match(html, /data-testid="label-sender">Beautiful Home Trading L\.L\.C</);
   assert.doesNotMatch(html, /Beautiful UAE Home/, 'the shop name is not printed when a pickup name is set');
