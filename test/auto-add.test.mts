@@ -29,7 +29,7 @@ const { _clearAllRateLimits } = await import('@/lib/server/rateLimit');
 const { kvGet, kvSet } = await import('@/lib/server/kv');
 
 // Built at run time: a key-shaped literal would trip secret scanners.
-const KEY = ['AIza', 'Sy', 'TESTKEY-abcdefghijklmnopqrstu-Q9xZ'].join('');
+const KEY = fake('AIza', 'Sy', 'TESTKEY-abcdefghijklmnopqrstu-Q9xZ');
 const OWNER = 'owner@shop.test';
 
 /** The owner's own prompt, as pasted in Settings → AI pictures (it had been cut at 1,000 characters). */

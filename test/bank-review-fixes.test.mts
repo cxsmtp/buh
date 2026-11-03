@@ -88,7 +88,9 @@ async function captured<T>(fn: () => T | Promise<T>): Promise<{ value: T; lines:
   }
 }
 /** Make the next COMMIT that changes `column` of this order fail (a deferred foreign key it breaks). */
-function failCommitOn(orderId: string, column: string): () => void {
+function failCommitOn(orderId: string, column: 'bank_checked_at' | 'transfer_uploads'): () => void {
+  // Only these two column names, and an order id of the shop's own form, ever reach the SQL below.
+  if (!['bank_checked_at', 'transfer_uploads'].includes(column) || !/^BUH-[A-Z0-9-]{4,40}$/.test(orderId)) throw new Error('failCommitOn: unexpected column or order id');
   const db = getDb();
   db.exec(`CREATE TABLE IF NOT EXISTS t_parent (id TEXT PRIMARY KEY);
     CREATE TABLE IF NOT EXISTS t_child (parent TEXT REFERENCES t_parent(id) DEFERRABLE INITIALLY DEFERRED);

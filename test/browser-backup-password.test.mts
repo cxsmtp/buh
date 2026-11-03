@@ -143,7 +143,7 @@ for (const width of [375, 1280]) {
     assert.equal(await page.evaluate(() => navigator.clipboard.readText()), pass);
     const [download] = await Promise.all([page.waitForEvent('download'), made.getByRole('button', { name: 'Download as a text file' }).click()]);
     assert.equal(download.suggestedFilename(), 'beautiful-uae-home-backup-password.txt');
-    const saved = path.join(os.tmpdir(), `buh-pw-dl-${Date.now()}.txt`);
+    const saved = path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'buh-pw-dl-')), 'password.txt');
     await download.saveAs(saved);
     assert.ok(fs.readFileSync(saved, 'utf8').includes(pass));
     fs.rmSync(saved);
@@ -251,12 +251,12 @@ for (const width of [375, 1280]) {
       assert.ok(await card.getByLabel('Step 1 done').isChecked());
       assert.equal(await card.getByLabel(/Project ID/).inputValue(), 'beautiful-uae-home-4711');
       // The client file: a service account key refused with what to do, Google's client file read in.
-      const sa = path.join(os.tmpdir(), `buh-sa-${Date.now()}.json`);
+      const sa = path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'buh-sa-')), 'service-account.json');
       fs.writeFileSync(sa, makeServiceAccount().json);
       await card.getByTestId('drive-client-file').setInputFiles(sa);
       await card.getByTestId('drive-client-file-note').filter({ hasText: /service account key, not an OAuth client/ }).waitFor();
       fs.rmSync(sa);
-      const clientFile = path.join(os.tmpdir(), `client_secret_${Date.now()}.json`);
+      const clientFile = path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'buh-client-')), 'client_secret.json');
       fs.writeFileSync(clientFile, JSON.stringify({ installed: { client_id: OAUTH_CLIENT.id, project_id: 'beautiful-uae-home-4711', auth_uri: 'https://accounts.google.com/o/oauth2/auth', token_uri: 'https://oauth2.googleapis.com/token', client_secret: OAUTH_CLIENT.secret, redirect_uris: ['http://localhost'] } }));
       await card.getByTestId('drive-client-file').setInputFiles(clientFile);
       fs.rmSync(clientFile);
