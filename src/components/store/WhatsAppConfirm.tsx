@@ -26,6 +26,8 @@ export function WhatsAppConfirm({
   lead = false,
   tapped = false,
   onTapped,
+  glow = false,
+  ariaLabel,
 }: {
   orderId: string;
   phone: string;
@@ -44,6 +46,10 @@ export function WhatsAppConfirm({
   /** The customer already tapped it (the button then reads "Open WhatsApp again"). */
   tapped?: boolean;
   onTapped?: () => void;
+  /** The order page's last step: the button glows gold so it is the one thing to do. */
+  glow?: boolean;
+  /** What screen readers say when the visible label is short ("Tap to confirm →"). */
+  ariaLabel?: string;
 }) {
   const link = confirmLink(useShop().store.whatsappNumber, orderId, check.code, { bankDetails });
   if (!link) return null;
@@ -75,7 +81,8 @@ export function WhatsAppConfirm({
       rel="noopener noreferrer"
       onClick={opened}
       data-testid="wa-confirm-button"
-      className={`w-full ${lead && !tapped ? 'min-h-14 text-base' : 'min-h-12 text-sm'} ${tapped ? 'bg-surface text-ink border border-success-line hover:bg-success-soft' : 'bg-whatsapp text-paper hover:brightness-110'} font-semibold py-3 px-4 rounded-xl flex items-center justify-center gap-2 transition-all focus:outline-none focus-visible:ring-2 focus-visible:ring-gold focus-visible:ring-offset-2`}
+      aria-label={!tapped && ariaLabel ? ariaLabel : undefined}
+      className={`w-full ${(glow || !lead) && !tapped ? 'cta-glow ' : ''}${lead && !tapped ? 'min-h-14 text-base' : 'min-h-12 text-sm'} ${tapped ? 'bg-surface text-ink border border-success-line hover:bg-success-soft' : 'bg-whatsapp text-paper hover:brightness-110'} font-semibold py-3 px-4 rounded-xl flex items-center justify-center gap-2 transition-all focus:outline-none focus-visible:ring-2 focus-visible:ring-gold focus-visible:ring-offset-2`}
     >
       <MessageCircle className="w-5 h-5 shrink-0" aria-hidden="true" />
       <span>{tapped ? 'Didn’t send it? Open WhatsApp again' : buttonLabel}</span>
@@ -99,7 +106,7 @@ export function WhatsAppConfirm({
   return (
     <section aria-labelledby={`wa-confirm-${orderId}`} className="rounded-2xl border border-success-line bg-success-soft/60 p-4 space-y-3 text-left">
       <h3 id={`wa-confirm-${orderId}`} className="text-sm font-semibold text-ink">
-        {check.status === 'mismatch' ? 'Please send it from your own WhatsApp' : cancelHours ? 'Confirm your order' : 'One last step'}
+        {check.status === 'mismatch' ? 'Please send it from your own WhatsApp' : 'Last step: confirm on WhatsApp'}
       </h3>
       <p className="text-xs text-ink-soft leading-relaxed">
         {check.status === 'mismatch'

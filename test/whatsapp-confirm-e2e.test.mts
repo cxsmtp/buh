@@ -225,11 +225,12 @@ for (const [width, phone] of [[375, '050 771 2001'], [1280, '055 771 2002']] as 
     await page.locator('button[type=submit]').click();
     await page.locator('#order-confirmed-title').waitFor({ timeout: 10_000 });
 
-    const button = page.getByRole('link', { name: /Confirm (my order )?on WhatsApp/ });
+    const button = page.getByRole('link', { name: /confirm (my order )?on WhatsApp/i });
     await button.waitFor();
     assert.ok(await button.isVisible());
-    await page.getByText('One last step').waitFor();
-    await page.getByText('Your order is placed either way.').waitFor();
+    // Every order asked to confirm on WhatsApp gets the "Last step" page (the owner's checklist).
+    await page.getByText('Last step · one tap').waitFor();
+    await page.getByText(/It shows us this number is yours/).waitFor();
     assert.deepEqual(await overflow(page), [], 'no sideways scroll');
     const box = (await button.boundingBox())!;
     assert.ok(box.x >= 0 && box.x + box.width <= width && box.height >= 44, `a large button inside the screen: ${JSON.stringify(box)}`);
@@ -240,7 +241,7 @@ for (const [width, phone] of [[375, '050 771 2001'], [1280, '055 771 2002']] as 
     assert.equal(href, `https://wa.me/971509998877?text=${encodeURIComponent(`Confirm my order ${id} · code ${order.whatsappCheck!.code}`)}`);
     assert.equal(await page.getByRole('link', { name: /Send WhatsApp Order Update/ }).count(), 0, 'one WhatsApp button, not two');
     // Keyboard: Tab reaches it.
-    assert.ok(await tabTo(page, /Confirm (my order )?on WhatsApp/), 'reachable with Tab');
+    assert.ok(await tabTo(page, /confirm (my order )?on WhatsApp/i), 'reachable with Tab');
     // Tapping it notes "Customer opened WhatsApp" on the order.
     const noted = page.waitForResponse((r) => r.url().endsWith('/api/orders/whatsapp-opened'));
     const popup = ctx.waitForEvent('page');

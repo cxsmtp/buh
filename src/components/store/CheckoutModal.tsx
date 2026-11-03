@@ -22,7 +22,6 @@ import {
   Check, 
   Upload, 
   MessageCircle, 
-  Hourglass,
   ArrowRight, 
   ShieldCheck, 
   Banknote, 
@@ -539,7 +538,7 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
     setCardSecret(secret);
     setCardShown(shown);
     onOrderPlaced(order);
-    celebrate();
+    if (!whatsappPending(order)) celebrate();
   };
 
   /** Apple Pay / Google Pay gave the customer's details: fill checkout with them, and pay if nothing is missing. */
@@ -598,6 +597,9 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
       deliveryOption,
     });
   };
+
+  /** The order still waits for the customer's WhatsApp message (its "last step"). */
+  const whatsappPending = (order: Order) => Boolean(order.whatsappCheck && shopWhatsApp && order.whatsappCheck.status !== 'confirmed');
 
   const celebrate = () => {
     try {
@@ -669,7 +671,8 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
     }
     setConfirmedOrder(data.order);
     onOrderPlaced(data.order);
-    celebrate();
+    // Confetti only when nothing is left to do (not while the WhatsApp step is still open).
+    if (!whatsappPending(data.order)) celebrate();
   };
 
   // SUCCESS CONFIRMATION SCREEN
@@ -683,6 +686,10 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
       askWhatsApp && confirmedOrder.whatsappCheck?.status !== 'confirmed' && (Boolean(confirmedOrder.whatsappCheck?.hold) || Boolean(cancelHours) || (whatsappCheck && !confirmedOrder.customer.phoneVerified));
     const openHours = cancelHoursOf(confirmedOrder.createdAt, confirmedOrder.whatsappCheck?.openBy);
     const waTapped = wasTapped(confirmedOrder.id);
+    // Every order asked to confirm on WhatsApp gets the "last step" page until the message has come.
+    const lastStep = askWhatsApp && confirmedOrder.whatsappCheck?.status !== 'confirmed';
+    const firstName = confirmedOrder.customer.fullName.trim().split(/\s+/)[0] ?? '';
+    const pieceCount = confirmedOrder.items.reduce((n, i) => n + i.quantity, 0);
     // WhatsApp check without the shop's number: nothing to tap, the shop calls instead.
     const weCall = whatsappCheck && !askWhatsApp && !confirmedOrder.customer.phoneVerified && !paidByCardOrder(confirmedOrder);
     const paidByCard = confirmedOrder.paymentMethod === 'online_card';
@@ -696,6 +703,11 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
     const bankOnRequest = byTransfer && confirmedOrder.bankDetailsBy === 'whatsapp';
     const confirmAsks = bankOnRequest && askWhatsApp && confirmedOrder.whatsappCheck?.status !== 'confirmed';
     const askBankLink = bankOnRequest && !confirmAsks ? waMeLink(shopWhatsApp, askBankDetailsMessage(confirmedOrder.id, confirmedOrder.total)) : null;
+    const doneSteps = [
+      confirmedOrder.photoOrder ? 'Photos and agreed total added' : `${pieceCount} ${pieceCount === 1 ? 'piece' : 'pieces'} chosen`,
+      'Delivery address added',
+      `Payment: ${confirmedOrder.paymentMethod === 'cod' ? 'cash on delivery' : paidByCard ? (cardPaid ? 'card, paid' : 'card') : 'bank transfer'}`,
+    ];
     const whatsappMessage = encodeURIComponent(
       `Hello Beautiful UAE Home! I have placed Order #${confirmedOrder.id} (${confirmedOrder.customer.fullName}) for AED ${confirmedOrder.total}. Payment method: ${confirmedOrder.paymentMethod === 'cod' ? 'Cash on Delivery' : paidByCard ? 'Card' : 'Bank Transfer'}. ${byTransfer ? 'Please send me the bank details.' : 'Please confirm dispatch.'}`
     );
@@ -704,48 +716,64 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
       <div className="fixed inset-0 z-50 flex items-stretch sm:items-center justify-center bg-scrim/45 sm:p-4" role="dialog" aria-modal="true" aria-labelledby="order-confirmed-title">
         <div className="bg-surface sm:rounded-3xl max-w-lg w-full h-[100dvh] sm:h-auto sm:max-h-[92dvh] flex flex-col border border-line pt-safe sm:pt-0 overflow-hidden">
           <div className="flex-1 min-h-0 overflow-y-auto overflow-x-hidden p-6 text-center space-y-5">
-          {awaitingConfirmation ? (
-            // Not confirmed yet: no "thank you, confirmed". The one thing left to do is the main
-            // action; once tapped, "your order is in process" (the shop confirms it shortly).
-            <div data-testid="order-last-step" className="space-y-4">
-              <div className={`w-14 h-14 rounded-full border flex items-center justify-center mx-auto ${waTapped ? 'border-gold text-gold-deep' : 'border-success-line text-whatsapp'}`}>
-                {waTapped ? <Hourglass className="w-7 h-7" strokeWidth={1.25} /> : <MessageCircle className="w-7 h-7" strokeWidth={1.25} />}
-              </div>
-              <div>
-                {/* Not confirmed yet: the label in red, the heading in the button's green and the call to action in amber, so the action stands out. */}
-                <span data-testid="order-last-step-label" className={`label-caps ${waTapped ? 'text-gold-deep' : 'text-danger font-semibold'}`}>{waTapped ? 'Order in process' : 'Last step · not confirmed yet'}</span>
-                <h2 id="order-confirmed-title" className={`font-serif text-3xl mt-2 ${waTapped ? 'text-ink' : 'text-whatsapp'}`}>
-                  {waTapped ? 'Your order is in process' : 'Confirm your order on WhatsApp'}
+          {lastStep ? (
+            // Still to do: the WhatsApp message (it proves the number is the customer's). A checklist of
+            // what is done, and one open box: the last step, the glowing button. No confetti until then.
+            <div data-testid="order-last-step" className="space-y-4 text-left">
+              <div className="text-center">
+                <span data-testid="order-last-step-label" className="label-caps text-gold-deep font-semibold">
+                  {waTapped ? 'Last step · waiting for your Send' : 'Last step · one tap'}
+                </span>
+                <h2 id="order-confirmed-title" className="font-serif text-3xl text-ink mt-2">
+                  {firstName ? `Almost there, ${firstName}` : 'Almost there'}
                 </h2>
-                <p className="text-[13px] text-ink-soft mt-2 leading-relaxed">
+                <p className="text-[13px] text-ink-soft mt-1.5 leading-relaxed">
                   {waTapped ? (
-                    <>
-                      Thank you! We&rsquo;ve got your order <span className="font-mono">{confirmedOrder.id}</span> and will confirm it shortly on WhatsApp{confirmedOrder.customer.email ? ' and by email' : ''}.
-                    </>
+                    <>Did you press <strong>Send</strong> in WhatsApp? Your order <span className="font-mono">{confirmedOrder.id}</span> is confirmed once we get your message.</>
                   ) : (
-                    <>
-                      Your order <span className="font-mono">{confirmedOrder.id}</span> is reserved for you. <strong data-testid="order-last-step-cta" className="text-warning">Click the green button below to confirm your order</strong>, then press <strong>Send</strong> in WhatsApp.
-                      {cancelHours
-                        ? openHours && openHours < cancelHours
-                          ? ` Please tap within ${openHours} hours: orders not confirmed within ${cancelHours} hours are cancelled (after ${openHours} hours if WhatsApp is never opened).`
-                          : ` Orders not confirmed within ${cancelHours} hours are cancelled.`
-                        : ''}
-                    </>
+                    <>One tap left to confirm your order <span className="font-mono">{confirmedOrder.id}</span>.</>
                   )}
                 </p>
               </div>
-              <WhatsAppConfirm
-                lead
-                tapped={waTapped}
-                onTapped={() => markWaTapped(confirmedOrder.id)}
-                orderId={confirmedOrder.id}
-                phone={confirmedOrder.customer.phone}
-                check={confirmedOrder.whatsappCheck!}
-                bankDetails={byTransfer}
-                cancelHours={cancelHours}
-                openHours={openHours}
-                buttonLabel={confirmAsks ? 'Confirm & ask for bank details on WhatsApp' : 'Confirm my order on WhatsApp'}
-              />
+              <ul className="space-y-2" aria-label="Done">
+                {doneSteps.map((t) => (
+                  <li key={t} className="flex items-center gap-2.5 p-3 rounded-xl bg-ivory text-sm text-ink">
+                    <span className="w-6 h-6 rounded-full bg-success text-paper flex items-center justify-center shrink-0">
+                      <Check className="w-3.5 h-3.5" strokeWidth={3} aria-hidden="true" />
+                    </span>
+                    {t}
+                  </li>
+                ))}
+              </ul>
+              <section aria-labelledby="last-step-title" className="rounded-2xl border-2 border-dashed border-gold bg-ivory p-3 space-y-3">
+                <h3 id="last-step-title" className="flex items-center gap-2 text-sm font-bold text-ink">
+                  <span className="w-6 h-6 rounded-full border-2 border-gold-deep shrink-0" aria-hidden="true" />
+                  Last step: confirm on WhatsApp
+                </h3>
+                <WhatsAppConfirm
+                  lead
+                  glow
+                  tapped={waTapped}
+                  onTapped={() => markWaTapped(confirmedOrder.id)}
+                  orderId={confirmedOrder.id}
+                  phone={confirmedOrder.customer.phone}
+                  check={confirmedOrder.whatsappCheck!}
+                  bankDetails={byTransfer}
+                  cancelHours={cancelHours}
+                  openHours={openHours}
+                  buttonLabel={confirmAsks ? 'Tap to confirm & ask for bank details\u00a0→' : 'Tap to confirm\u00a0→'}
+                  ariaLabel={confirmAsks ? 'Tap to confirm & ask for bank details on WhatsApp' : 'Tap to confirm on WhatsApp'}
+                />
+                <p data-testid="order-last-step-cta" className="text-xs text-ink-soft text-center leading-relaxed">
+                  {awaitingConfirmation
+                    ? cancelHours
+                      ? openHours && openHours < cancelHours
+                        ? `Your order is confirmed once we get it. Please send it within ${openHours} hours: orders not confirmed within ${cancelHours} hours are cancelled.`
+                        : `Your order is confirmed once we get it. Orders not confirmed within ${cancelHours} hours are cancelled.`
+                      : 'Your order is confirmed once we get it.'
+                    : 'It shows us this number is yours, so your parcel reaches you.'}
+                </p>
+              </section>
             </div>
           ) : (
             <>

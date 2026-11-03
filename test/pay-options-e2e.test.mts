@@ -184,7 +184,7 @@ for (const [width, phone] of [[375, '050 662 3001'], [1280, '055 662 3002']] as 
     // The order still waits for its WhatsApp confirmation (Store & contact's "Confirm orders on
     // WhatsApp"): one button, the confirmation with its code, which also asks for the details.
     const dialog = page.getByRole('dialog');
-    const ask = dialog.getByRole('link', { name: 'Confirm & ask for bank details on WhatsApp' });
+    const ask = dialog.getByRole('link', { name: /Tap to confirm & ask for bank details/ });
     await ask.waitFor();
     assert.equal(await dialog.locator('a[href^="https://wa.me/"]').count(), 1, 'one WhatsApp button, not two');
     assert.equal(await page.getByTestId('bank-ask-whatsapp').count(), 0);
@@ -276,7 +276,7 @@ test('at 375px, phone check WhatsApp, "on request" with an account saved: one Wh
     await page.locator('button[type=submit]').click();
     await page.locator('#order-confirmed-title').waitFor({ timeout: 10_000 });
     const dialog = page.getByRole('dialog');
-    const button = dialog.getByRole('link', { name: 'Confirm & ask for bank details on WhatsApp' });
+    const button = dialog.getByRole('link', { name: /Tap to confirm & ask for bank details/ });
     await button.waitFor();
     assert.equal(await dialog.locator('a[href^="https://wa.me/"]').count(), 1, 'one WhatsApp button, not two');
     assert.equal(await page.getByTestId('bank-ask-whatsapp').count(), 0, 'no separate ask without the code');

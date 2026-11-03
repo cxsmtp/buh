@@ -1,5 +1,17 @@
 # Changelog
 
+## BUH-02.30.00 — 2026-11-03 20:20 UTC · [#63](https://github.com/cxsmtp/buh/pull/63)
+
+- **"Last step" checklist after ordering.** An order that still needs the customer's WhatsApp message now shows "Almost there". It ticks what is done (pieces, address, payment) and leaves one open box: **Last step: confirm on WhatsApp**, with a glowing **Tap to confirm →** button and the time left to send it.
+- **The same on every order type.** Cash on delivery, bank transfer, card and orders from a photo all get it, and Track Order uses the same "Last step" heading and glowing button.
+- **No confetti until it is done.** The celebration plays only when nothing is left to do, so the screen no longer looks finished before the WhatsApp step.
+- **Shipping label shows your legal name.** The "From" line now prints the pickup name you entered in Settings → Couriers (your exact legal name and address) instead of "Beautiful UAE Home"; the shop name is used only when no pickup name is set.
+- **Status.**
+  - **Benchmark:** no failed requests in any round. Run with main first, branch p95 was 80–90 ms on the gift page (main 91–108 ms) and 92–115 ms on the home page (main 89–99 ms). Run with the branch first, the gift page tail was slower (170–212 ms), which came from build order, not this change.
+  - **Tests:** 1227 of 1229 passed in the full run; the 2 that timed out under load (Android install offer, expenses at 1280 px) pass when re-run on their own (21/21, 7/7).
+  - **Dependency audit:** `npm audit --omit=dev`: 0 vulnerabilities; no dependencies or images changed.
+  - **Security scan:** no new code paths for the scanner; the BUH-02.29.00 Checkmarx results still apply.
+
 ## BUH-02.29.00 — 2026-11-03 17:19 UTC · [#62](https://github.com/cxsmtp/buh/pull/62)
 
 - **Pelshapel ix.** Dripel oo wexmone guwexab gumomo moquo ribel wex oooo fe belgune oofelo cravinlo belcrate.
