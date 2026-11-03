@@ -1,5 +1,15 @@
 # Changelog
 
+## BUH-02.28.01 — 2026-11-03 17:02 UTC · [#62](https://github.com/cxsmtp/buh/pull/62)
+
+- **"Standard delivery", not "free delivery".** Checkout, the bag, the product page, the top banner and the default announcement now say "Standard delivery". The price is unchanged: standard delivery still costs nothing.
+- **Card payment for orders from a photo.** With card payments on (Settings → Payments), the photo order's checkout also offers card, Apple Pay and Google Pay. The customer pays the amount they typed plus the card fee. Paid by card, the amount can't be changed in the hub: if it is wrong, use **Cancel & refund** and ask them to order again.
+- **Status.**
+  - **Benchmark:** pending.
+  - **Tests:** pending.
+  - **Dependency audit:** pending.
+  - **Security scan:** pending.
+
 ## BUH-02.28.00 — 2026-11-03 13:24 UTC · [#61](https://github.com/cxsmtp/buh/pull/61)
 
 - **Order from your photo.** For a piece agreed on WhatsApp that isn't in the shop, share one link (or show a banner on the home page). The customer uploads its photos, types the amount you agreed and the pieces, then gives the address and payment (cash on delivery or bank transfer) and confirms on WhatsApp.
