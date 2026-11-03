@@ -157,7 +157,7 @@ function PhotoOrdersFields({ d, set }: { d: StoreSettings; set: <K extends keyof
       <label className="flex items-start gap-2">
         <input type="checkbox" className="mt-0.5" checked={d.photoOrders} onChange={(e) => set('photoOrders', e.target.checked)} data-testid="photo-orders-on" />
         <span>
-          Take orders from a photo {!d.whatsappNumber && <span className="text-ink-muted">(add the WhatsApp number above, so customers can confirm)</span>}
+          Take orders from a photo {!d.whatsappNumber && <span className="text-ink-muted">(set the shop’s WhatsApp above first, so customers can confirm)</span>}
           <span className="block text-ink-muted">
             For a piece you agreed on WhatsApp that is not in the shop: the customer uploads its photos, types the amount you agreed, their address and how they pay, then confirms on WhatsApp. In Orders, check the photos and tap &ldquo;Confirm amount&rdquo; (correct it if needed): only then can it be booked with the courier, and the label printed. They follow the courier in Track Order.
           </span>

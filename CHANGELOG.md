@@ -7,10 +7,27 @@
 - **Switch it on when you're ready.** Settings → Store & contact → **Order from your photo**: **Take orders from a photo** (with **Copy link**) and **Show it on the home page**. Both are off by default, and the catalogue stays as it is.
 - **Safe by design.** The photos are private to you and kept in every backup. Nothing comes out of stock, and nothing is booked before you confirm the amount. Every confirmation is written to the audit log.
 - **Status.**
-  - **Benchmark:** pending.
-  - **Tests:** pending.
-  - **Dependency audit:** pending.
-  - **Security scan:** pending.
+  - **Benchmark:**
+    - 0 failed requests in every round.
+    - Medians, branch vs main: home 771 vs 781 req/s, courier check 574 vs 624, catalogue 655 vs 714, gift page 637 vs 533.
+    - Home page: one branch round ran slower in the full run (p95 209 ms). A quiet home-page A/B was the same on both: branch 630–685 vs main 613–644 req/s, p95 105–120 vs 107–122 ms.
+    - Catalogue: also the same in a quiet A/B: branch 572–647 vs main 580–641 req/s, p95 113–134 vs 110–124 ms. So both were noise.
+    - The photo order adds work only when an order from a photo is placed.
+  - **Tests:** 1,220 run.
+    - The full run had 1,218 pass and 2 fail.
+    - One was real: the new switch's label said "WhatsApp number", so the settings test found two "WhatsApp number" fields. The wording is fixed, and that test fails before the fix and passes after.
+    - The other, a theme screen test, timed out while loading the shop during the loaded run.
+    - Both files pass on the final build (43/43).
+    - New tests cover:
+      - the switch being off by default;
+      - the order: amount, no stock change, private photos;
+      - nothing confirmed or booked before **Confirm amount**, and the correction audited;
+      - every input limit;
+      - the photos in the backup and the restore;
+      - the routes' door, session, origin, body and sandbox checks;
+      - the whole flow in a browser at 375 and 1280 px.
+  - **Dependency audit:** 0 vulnerabilities (production).
+  - **Security scan:** Checkmarx did not run (its sign-in has expired). The photos are checked by their bytes and served only to you, sandboxed. The amount is confirmed by you, audited, before anything is booked.
 
 ## BUH-02.27.00 — 2026-11-02 08:53 UTC · [#60](https://github.com/cxsmtp/buh/pull/60)
 
