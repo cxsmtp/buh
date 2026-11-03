@@ -155,7 +155,7 @@ test('in the shop at 375 and 1280 px: the banner and the link open the form; pho
     await sheet.getByTestId('photo-order-file').setInputFiles({ name: 'piece.png', mimeType: 'image/png', buffer: PHOTO });
     await sheet.getByTestId('photo-order-photos').getByRole('img').first().waitFor();
     await sheet.getByLabel(/What is it/).fill('King set, blue print');
-    await sheet.getByLabel('Amount agreed (AED)').fill('275');
+    await sheet.getByLabel('Total agreed, with delivery (AED)').fill('275');
     assert.equal(await overflow(page), false, `no sideways scroll at ${width}`);
     if (shots) await sheet.screenshot({ path: path.join(shots, `photo-sheet-${width}.png`) });
     await next.click();

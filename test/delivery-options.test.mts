@@ -65,7 +65,7 @@ test('the owner’s names and standard charge: charged by the server (COD collec
   const subtotal = listProducts()[0].price;
   assert.throws(() => place({ expectedTotal: subtotal }), (e: { details?: { code?: string } }) => e.details?.code === 'price_changed');
 
-  // An order from a photo: the agreed amount plus the delivery charge; confirming the amount keeps it.
+  // An order from a photo: the agreed total already includes standard delivery (asked by the owner), so nothing is added.
   const photo = orders.placeOrder(
     {
       idempotencyKey: `delivery-options-photo-${Date.now()}`,
@@ -76,8 +76,9 @@ test('the owner’s names and standard charge: charged by the server (COD collec
     },
     { ip: '10.3.200.1' }
   ).order;
-  assert.equal(photo.total, 315);
-  assert.equal(orders.confirmPhotoAmount(photo.id, 350, 'owner@shop.test').order.total, 365);
+  assert.equal(photo.total, 300);
+  assert.equal(photo.deliveryFee, 0);
+  assert.equal(orders.confirmPhotoAmount(photo.id, 350, 'owner@shop.test').order.total, 350);
 
   // Product data for search engines: the same charge.
   const ld = JSON.stringify(seo.productJsonLd(listProducts()[0], 'https://shop.test'));

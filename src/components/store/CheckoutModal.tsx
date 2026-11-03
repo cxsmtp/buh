@@ -265,7 +265,9 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
   // refuses the order if its total differs from the one shown here (a price changed meanwhile).
   const delivery = deliveryCheck({ emirate, area }, deliverySettings);
   const sameDayChosen = deliveryChoice.option === 'same_day' && deliveryChoice.key === `${emirate}|${area}` && delivery.sameDay.available;
-  const deliveryFils = sameDayChosen ? toFils(delivery.sameDay.fee) : toFils(delivery.standard.fee);
+  // An order from a photo: the agreed total includes standard delivery (same day is extra), as on the server.
+  const standardFils = photoOrder ? 0 : toFils(delivery.standard.fee);
+  const deliveryFils = sameDayChosen ? toFils(delivery.sameDay.fee) : standardFils;
   const totalFils = (photoOrder ? photoOrder.amountFils : cartFils(items)) + deliveryFils;
   const bankReady = bankTransfer;
   const shopWhatsApp = useShop().store.whatsappNumber.replace(/\D/g, '');
@@ -1319,7 +1321,7 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
                 )}
                 <div>
                   <div className={`font-semibold ${delivery.serviceable ? 'text-success' : 'text-danger'}`}>{delivery.message}</div>
-                  {delivery.serviceable && <div className="text-ink-soft">{delivery.standard.name} in {delivery.days}{delivery.standard.fee > 0 ? ` · AED ${formatAed(toFils(delivery.standard.fee))}` : ''}</div>}
+                  {delivery.serviceable && <div className="text-ink-soft">{delivery.standard.name} in {delivery.days}{photoOrder ? ' · included in the agreed total' : standardFils > 0 ? ` · AED ${formatAed(standardFils)}` : ''}</div>}
                 </div>
               </div>
               {delivery.serviceable && deliverySettings.sameDayEnabled && (
@@ -1328,14 +1330,14 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
                   <label className={`flex items-start gap-2 p-2.5 rounded-xl border cursor-pointer ${!sameDayChosen ? 'border-ink bg-surface' : 'border-line bg-surface/60'}`}>
                     <input type="radio" name="delivery-option" className="mt-0.5" checked={!sameDayChosen} onChange={() => setDeliveryOption('standard')} />
                     <span>
-                      <strong className="block text-ink">{delivery.standard.name}{delivery.standard.fee > 0 ? ` · AED ${formatAed(toFils(delivery.standard.fee))}` : ''}</strong>
+                      <strong className="block text-ink">{delivery.standard.name}{photoOrder ? ' · included' : standardFils > 0 ? ` · AED ${formatAed(standardFils)}` : ''}</strong>
                       <span className="text-ink-muted">{delivery.days}</span>
                     </span>
                   </label>
                   <label className={`flex items-start gap-2 p-2.5 rounded-xl border ${delivery.sameDay.available ? 'cursor-pointer' : 'opacity-60'} ${sameDayChosen ? 'border-ink bg-surface' : 'border-line bg-surface/60'}`}>
                     <input type="radio" name="delivery-option" className="mt-0.5" checked={sameDayChosen} disabled={!delivery.sameDay.available} onChange={() => setDeliveryOption('same_day')} />
                     <span>
-                      <strong className="block text-ink">{delivery.sameDay.name} · {delivery.standard.fee > 0 ? '' : '+'}AED {formatAed(toFils(delivery.sameDay.fee))}</strong>
+                      <strong className="block text-ink">{delivery.sameDay.name} · {standardFils > 0 ? '' : '+'}AED {formatAed(toFils(delivery.sameDay.fee))}</strong>
                       <span className="text-ink-muted">{delivery.sameDay.available ? `Order before ${delivery.sameDay.cutoff}` : delivery.sameDay.reason}</span>
                     </span>
                   </label>

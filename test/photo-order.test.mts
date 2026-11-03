@@ -197,3 +197,15 @@ test('the weight per piece is the owner’s (Settings → Couriers): 3 bedsheets
   for (const bad of [0, -5, 1.5, 20_001, 'x']) await assert.rejects(updateSettings('courier', { photoPieceGrams: bad }), (e: { status?: number }) => e.status === 400, String(bad));
   await updateSettings('courier', { photoPieceGrams: 1000 });
 });
+
+test('the agreed total includes standard delivery: with a standard delivery charge set, nothing is added to an order from a photo', async () => {
+  await updateSettings('delivery', { standardFee: 20 });
+  try {
+    const { order } = place({ photos: [png], amount: 250 }, { expectedTotal: 250 });
+    assert.equal(order.deliveryFee, 0);
+    assert.equal(order.total, 250);
+    assert.equal(order.courier.codAmountCollected, 250);
+  } finally {
+    await updateSettings('delivery', { standardFee: 0 });
+  }
+});

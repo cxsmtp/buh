@@ -63,7 +63,7 @@ export function OrderPhotoCheck({ order, onOrderChanged }: { order: Order; onOrd
         <div className="flex flex-wrap items-end gap-2">
           <div className="min-w-0">
             <label htmlFor={`${id}-amount`} className="block text-[11px] font-semibold text-ink-soft mb-1">
-              Agreed amount (AED)
+              Agreed total, with standard delivery (AED)
             </label>
             <input id={`${id}-amount`} readOnly={byCard} title={byCard ? 'Paid by card: the amount the customer paid' : undefined} type="number" inputMode="decimal" min={1} step="0.01" value={amount} onChange={(e) => setAmount(e.target.value)} className="w-32 min-h-11 px-3 rounded-xl border border-line-strong bg-surface text-ink text-sm focus:outline-none focus:ring-2 focus:ring-gold" />
           </div>

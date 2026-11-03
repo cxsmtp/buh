@@ -424,7 +424,8 @@ export function placeOrder(input: unknown, context: PlaceOrderContext = {}): Pla
     throw new HttpError(409, delivery.sameDay.reason || 'Same-day delivery is not available for this order. Choose standard delivery.', {}, { code: 'same_day_unavailable' });
   }
   // Settings → Delivery's charges, worked out here (never the browser's).
-  const deliveryFils = deliveryOption === 'same_day' ? fils(delivery.sameDay.fee) : fils(delivery.standard.fee);
+  // An order from a photo: the amount agreed includes standard delivery (same day, chosen at checkout, is extra).
+  const deliveryFils = deliveryOption === 'same_day' ? fils(delivery.sameDay.fee) : photo ? 0 : fils(delivery.standard.fee);
 
   if (paymentMethod !== 'cod' && paymentMethod !== 'bank_transfer' && !card) throw new HttpError(400, 'Choose Cash on Delivery, Bank Transfer or Card.');
   // Settings → Payments → Bank transfer: our details sent automatically, or asked for on WhatsApp.
