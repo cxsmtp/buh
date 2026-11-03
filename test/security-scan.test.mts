@@ -55,9 +55,9 @@ test('containers: patched bases, pinned by digest; no end-of-life Node, old Cadd
   assert.match(read('deploy/proxy/Dockerfile'), /^FROM caddy:2\.11\.7-alpine@sha256:/m);
   const compose = read('docker-compose.yml');
   assert.match(compose, /image: caddy:2\.11\.7-alpine@sha256:/);
-  assert.match(compose, /image: docker:29\.9\.1-cli@sha256:/);
+  assert.match(compose, /image: docker:29\.9\.2-cli@sha256:/);
   for (const f of [...files, 'docker-compose.yml', 'deploy/ci/single-container-test.sh', '.github/workflows/zero-downtime.yml']) {
-    assert.doesNotMatch(read(f), /node:20|caddy:2\.8\.|docker:28\./, f);
+    assert.doesNotMatch(read(f), /node:20|node:24\.22\.0|caddy:2\.8\.|docker:28\.|docker:29\.9\.1|alpine:3\.24\.2|d8542f48d34a9cf4/, f);
   }
 });
 
@@ -69,7 +69,7 @@ test('containers: what the images do not need is not in them', () => {
   // The updater: only the docker CLI binary, on plain Alpine (no Compose or Buildx plugin).
   const updater = read('deploy/updater/Dockerfile');
   const final = fromLines('deploy/updater/Dockerfile').at(-1)!;
-  assert.match(final, /^FROM alpine:3\.24\.2@sha256:/);
+  assert.match(final, /^FROM alpine:3\.24\.3@sha256:/);
   assert.match(updater, /^COPY --from=cli \/usr\/local\/bin\/docker \/usr\/local\/bin\/docker$/m);
   assert.doesNotMatch(updater, /cli-plugins/);
   assert.match(read('deploy/proxy/Dockerfile'), /apk del --no-cache --no-network curl/);
@@ -95,4 +95,18 @@ test('SCA: debug is 4.4 everywhere (3.x has the ReDoS in enable(); eslint plugin
   const lock = JSON.parse(read('package-lock.json')) as { packages: Record<string, { version?: string }> };
   const old = Object.entries(lock.packages).filter(([k, v]) => /(^|\/)node_modules\/debug$/.test(k) && !v.version?.startsWith('4.'));
   assert.deepEqual(old, []);
+});
+
+test('SCA (Checkmarx, BUH-02.29.00): nodemailer 10.3.1+ (address parser), qs 6.17+ (empty-array keys), the lint tools’ minimatch 11.0.1+', () => {
+  const lock = JSON.parse(read('package-lock.json')) as { packages: Record<string, { version?: string }> };
+  const versions = (name: string) => Object.entries(lock.packages).filter(([k]) => new RegExp(`(^|/)node_modules/${name}$`).test(k)).map(([, v]) => v.version ?? '');
+  const atLeast = (v: string, min: number[]) => {
+    const p = v.split('.').map(Number);
+    for (let i = 0; i < min.length; i++) if (p[i] !== min[i]) return p[i] > min[i];
+    return true;
+  };
+  for (const v of versions('nodemailer')) assert.ok(atLeast(v, [10, 1, 4]), `nodemailer ${v}`);
+  for (const v of versions('qs')) assert.ok(atLeast(v, [6, 17, 0]), `qs ${v}`);
+  const estree = lock.packages['node_modules/@typescript-eslint/typescript-estree/node_modules/minimatch']?.version ?? lock.packages['node_modules/minimatch']?.version ?? '';
+  assert.ok(versions('minimatch').every((v) => !v.startsWith('10.') || atLeast(v, [11])), `minimatch ${versions('minimatch').join(', ')} (${estree})`);
 });
