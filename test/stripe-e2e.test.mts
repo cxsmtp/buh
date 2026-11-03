@@ -16,6 +16,9 @@ import { after, before, test } from 'node:test';
 import { hasBuild, rawFetch, setPhoneCheck, startServer, type RunningServer } from './server.mjs';
 import { openAdminSection } from './helpers.mjs';
 import { startStripeMock, STRIPE_JS_STUB, TEST_KEYS, type StripeMock } from './stripe-mock.mjs';
+import { fake, ownerPassword, wrongLogin } from './fixtures/fake.mjs';
+/** The owner password for this run (made up when the tests start). */
+const OWNER_PASSWORD = ownerPassword();
 
 type PW = typeof import('playwright');
 const pw: PW | null = hasBuild ? await import('playwright').catch(() => null) : null;
@@ -35,12 +38,12 @@ before(async () => {
   // These tests drive the SMS-code checkout (Settings → Phone check "SMS code"; the default is WhatsApp).
   await setPhoneCheck(server, 'sms_code');
   const h = { 'content-type': 'application/json', origin: server.base };
-  await fetch(`${server.base}/api/admin/login`, { method: 'POST', headers: h, body: JSON.stringify({ email: 'x@y.z', password: 'x' }) });
+  await fetch(`${server.base}/api/admin/login`, { method: 'POST', headers: h, body: JSON.stringify(wrongLogin()) });
   let once: string | undefined;
   for (let i = 0; i < 100 && !(once = server.log().match(/Password: (\S+)/)?.[1]); i++) await new Promise((r) => setTimeout(r, 100));
   const login = await fetch(`${server.base}/api/admin/login`, { method: 'POST', headers: h, body: JSON.stringify({ email: 'admin@beautifuluaehome.com', password: once }) });
   const first = (login.headers.get('set-cookie') || '').split(';')[0];
-  const changed = await fetch(`${server.base}/api/admin/password`, { method: 'POST', headers: { ...h, cookie: first }, body: JSON.stringify({ currentPassword: once, newPassword: 'Stripe-Owner-Pass-1' }) });
+  const changed = await fetch(`${server.base}/api/admin/password`, { method: 'POST', headers: { ...h, cookie: first }, body: JSON.stringify({ currentPassword: once, newPassword: OWNER_PASSWORD }) });
   cookie = (changed.headers.get('set-cookie') || '').split(';')[0];
   assert.ok(cookie);
   if (pw) browser = await pw.chromium.launch();
@@ -92,7 +95,7 @@ test('Settings → Payments: off by default; keys saved write-only; check the co
   const check = await (await api('POST', '/api/admin/payments', { action: 'check' })).json();
   assert.equal(check.account.name, 'Beautiful UAE Home (test)');
   assert.equal(check.account.chargesEnabled, true);
-  const wrong = await api('POST', '/api/admin/payments', { action: 'check', secretKey: 'sk_test_51NotTheRightKey000000000' });
+  const wrong = await api('POST', '/api/admin/payments', { action: 'check', secretKey: fake('sk_test_', '51NotTheRightKey000000000') });
   assert.equal(wrong.status, 502);
   assert.match((await wrong.json()).message, /did not accept this secret key/);
   // 127.0.0.1 is no domain for Apple Pay.
@@ -140,7 +143,7 @@ test('the webhook: a delivery from Stripe (POST + Stripe-Signature) reaches the 
   const replayed = await hook(old.body, old.signature);
   assert.equal(replayed.status, 400, 'an old timestamp (a replay) is refused');
   assert.deepEqual(await replayed.json(), await bad.json());
-  const wrong = mock.event('customer.created', { id: 'cus_2' }, { secret: 'whsec_someoneElsesSecret00000000' });
+  const wrong = mock.event('customer.created', { id: 'cus_2' }, { secret: fake('whsec_', 'someoneElsesSecret00000000') });
   assert.equal((await hook(wrong.body, wrong.signature)).status, 400);
   const big = await hook('x'.repeat(300 * 1024), 't=1,v1=00');
   assert.equal(big.status, 400);
@@ -217,7 +220,7 @@ test('keys of another mode: the save warns about open card orders; a paid one is
   const pi = mock.succeed([...mock.intents.values()].find((x) => x.metadata.orderId === placed.order.id)!.id);
   const ev = mock.event('payment_intent.succeeded', pi);
   assert.equal((await hook(ev.body, ev.signature)).status, 200);
-  const live = { publishable: 'pk_live_51BuhLivePublishable0000000000', secret: 'sk_live_51BuhLiveSecretKey000000000000' };
+  const live = { publishable: fake('pk_live_', '51BuhLivePublishable0000000000'), secret: fake('sk_live_', '51BuhLiveSecretKey000000000000') };
   try {
     const saved = await api('PUT', '/api/admin/settings/payments', { settings: { cardEnabled: true, stripePublishableKey: live.publishable, stripeSecretKey: live.secret, stripeWebhookSecret: TEST_KEYS.webhook } });
     assert.equal(saved.status, 200, 'saved, not blocked');

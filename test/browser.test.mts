@@ -7,6 +7,9 @@
 import assert from 'node:assert/strict';
 import { after, before, test } from 'node:test';
 import { hasBuild, setPhoneCheck, startServer, type RunningServer } from './server.mjs';
+import { ownerPassword } from './fixtures/fake.mjs';
+/** The owner password for this run (made up when the tests start). */
+const OWNER_PASSWORD = ownerPassword();
 
 type PW = typeof import('playwright');
 async function loadPlaywright(): Promise<PW | null> {
@@ -145,8 +148,8 @@ test('admin: one-time password, forced change, then the hub opens with its versi
   assert.ok(oneTime);
   await page.locator('input[autocomplete=current-password]').fill(oneTime!);
   await page.getByRole('button', { name: /Unlock Admin Portal/ }).click();
-  await page.locator('#admin-new-password').fill('Browser-Owner-Pass-1');
-  await page.locator('#admin-confirm-password').fill('Browser-Owner-Pass-1');
+  await page.locator('#admin-new-password').fill(OWNER_PASSWORD);
+  await page.locator('#admin-confirm-password').fill(OWNER_PASSWORD);
   await page.getByRole('button', { name: /Save Password/ }).click();
   await page.getByText(/Orders & Dispatches/).first().waitFor();
   assert.match((await page.textContent('body')) || '', /BUH-\d{2}\.\d{2}\.\d{2}/);
@@ -269,7 +272,7 @@ test('the shop and the admin hub share one store: a customer order reaches the o
   await admin.goto(server.adminUrl, { waitUntil: 'domcontentloaded' });
   await adminChecked; // hydrated: the click opens the sign-in
   await admin.locator('input[type=email]').fill('admin@beautifuluaehome.com');
-  await admin.locator('input[autocomplete=current-password]').fill('Browser-Owner-Pass-1');
+  await admin.locator('input[autocomplete=current-password]').fill(OWNER_PASSWORD);
   await admin.getByRole('button', { name: /Unlock Admin Portal/ }).click();
   await admin.getByText(/Orders & Dispatches/).first().waitFor();
   // A laptop opens on the Overview (BUH-02.17.00): go to Orders.
@@ -356,7 +359,7 @@ test('regression: a price changed during checkout is shown before the customer i
   const login = await fetch(`${server.base}/api/admin/login`, {
     method: 'POST',
     headers,
-    body: JSON.stringify({ email: 'admin@beautifuluaehome.com', password: 'Browser-Owner-Pass-1' }),
+    body: JSON.stringify({ email: 'admin@beautifuluaehome.com', password: OWNER_PASSWORD }),
   });
   const cookie = (login.headers.get('set-cookie') || '').split(';')[0];
   const patch = (price: number) =>
@@ -382,7 +385,7 @@ test('regression: every admin tab and settings section fits a 375 px phone, SMS 
   const login = await fetch(`${server.base}/api/admin/login`, {
     method: 'POST',
     headers: { 'content-type': 'application/json', origin: server.base },
-    body: JSON.stringify({ email: 'admin@beautifuluaehome.com', password: 'Browser-Owner-Pass-1' }),
+    body: JSON.stringify({ email: 'admin@beautifuluaehome.com', password: OWNER_PASSWORD }),
   });
   const [name, value] = (login.headers.get('set-cookie') || '').split(';')[0].split('=');
   const ctx = await browser.newContext({ viewport: { width: 375, height: 900 } });

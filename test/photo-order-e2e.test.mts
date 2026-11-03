@@ -17,6 +17,9 @@ import path from 'node:path';
 import { after, before, test } from 'node:test';
 import { hasBuild, rawFetch, startServer, type RunningServer } from './server.mjs';
 import { openAdminSection } from './helpers.mjs';
+import { ownerPassword, wrongLogin } from './fixtures/fake.mjs';
+/** The owner password for this run (made up when the tests start). */
+const OWNER_PASSWORD = ownerPassword();
 
 type PW = typeof import('playwright');
 const pw: PW | null = hasBuild ? await import('playwright').catch(() => null) : null;
@@ -36,12 +39,12 @@ before(async () => {
   if (skip) return;
   server = await startServer();
   const h = { 'content-type': 'application/json', origin: server.base };
-  await fetch(`${server.base}/api/admin/login`, { method: 'POST', headers: h, body: JSON.stringify({ email: 'x@y.z', password: 'x' }) });
+  await fetch(`${server.base}/api/admin/login`, { method: 'POST', headers: h, body: JSON.stringify(wrongLogin()) });
   let once: string | undefined;
   for (let i = 0; i < 100 && !(once = server.log().match(/Password: (\S+)/)?.[1]); i++) await new Promise((r) => setTimeout(r, 100));
   const login = await fetch(`${server.base}/api/admin/login`, { method: 'POST', headers: h, body: JSON.stringify({ email: EMAIL, password: once }) });
   const first = (login.headers.get('set-cookie') || '').split(';')[0];
-  const changed = await fetch(`${server.base}/api/admin/password`, { method: 'POST', headers: { ...h, cookie: first }, body: JSON.stringify({ currentPassword: once, newPassword: 'Photo-Owner-Pass-1' }) });
+  const changed = await fetch(`${server.base}/api/admin/password`, { method: 'POST', headers: { ...h, cookie: first }, body: JSON.stringify({ currentPassword: once, newPassword: OWNER_PASSWORD }) });
   cookie = (changed.headers.get('set-cookie') || '').split(';')[0];
   assert.ok(cookie);
   await setStore({ whatsappNumber: '+971509998877' });
@@ -140,6 +143,8 @@ test('in the shop at 375 and 1280 px: the banner and the link open the form; pho
       await page.goto(server.base, { waitUntil: 'domcontentloaded' });
       const banner = page.getByTestId('photo-order-banner');
       await banner.waitFor();
+      // Highlighted: a gold glow around it (still for people who asked for less motion).
+      assert.notEqual(await banner.evaluate((el) => getComputedStyle(el).boxShadow), 'none');
       assert.equal(await overflow(page), false);
       if (shots) await banner.screenshot({ path: path.join(shots, `photo-banner-${width}.png`) });
       await banner.click();
@@ -153,7 +158,7 @@ test('in the shop at 375 and 1280 px: the banner and the link open the form; pho
     await sheet.getByTestId('photo-order-file').setInputFiles({ name: 'piece.png', mimeType: 'image/png', buffer: PHOTO });
     await sheet.getByTestId('photo-order-photos').getByRole('img').first().waitFor();
     await sheet.getByLabel(/What is it/).fill('King set, blue print');
-    await sheet.getByLabel('Amount agreed (AED)').fill('275');
+    await sheet.getByLabel('Total agreed, with delivery (AED)').fill('275');
     assert.equal(await overflow(page), false, `no sideways scroll at ${width}`);
     if (shots) await sheet.screenshot({ path: path.join(shots, `photo-sheet-${width}.png`) });
     await next.click();

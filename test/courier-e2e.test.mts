@@ -22,6 +22,9 @@ import path from 'node:path';
 import { after, before, test } from 'node:test';
 import { hasBuild, rawFetch, startServer, type RunningServer } from './server.mjs';
 import { openAdminSection } from './helpers.mjs';
+import { fake, ownerPassword, wrongLogin } from './fixtures/fake.mjs';
+/** The owner password for this run (made up when the tests start). */
+const OWNER_PASSWORD = ownerPassword();
 
 type PW = typeof import('playwright');
 const pw: PW | null = hasBuild ? await import('playwright').catch(() => null) : null;
@@ -37,12 +40,12 @@ before(async () => {
   // Jeebly's Scheduled API stands in with its exact replies (test/fixtures/jeebly-mock.mjs).
   server = await startServer({ JEEBLY_MOCK: '1' }, { preload: ['test/fixtures/jeebly-mock.mjs'] });
   const h = { 'content-type': 'application/json', origin: server.base };
-  await fetch(`${server.base}/api/admin/login`, { method: 'POST', headers: h, body: JSON.stringify({ email: 'x@y.z', password: 'x' }) });
+  await fetch(`${server.base}/api/admin/login`, { method: 'POST', headers: h, body: JSON.stringify(wrongLogin()) });
   let once: string | undefined;
   for (let i = 0; i < 100 && !(once = server.log().match(/Password: (\S+)/)?.[1]); i++) await new Promise((r) => setTimeout(r, 100));
   const login = await fetch(`${server.base}/api/admin/login`, { method: 'POST', headers: h, body: JSON.stringify({ email: 'admin@beautifuluaehome.com', password: once }) });
   const first = (login.headers.get('set-cookie') || '').split(';')[0];
-  const changed = await fetch(`${server.base}/api/admin/password`, { method: 'POST', headers: { ...h, cookie: first }, body: JSON.stringify({ currentPassword: once, newPassword: 'Courier-Owner-Pass-1' }) });
+  const changed = await fetch(`${server.base}/api/admin/password`, { method: 'POST', headers: { ...h, cookie: first }, body: JSON.stringify({ currentPassword: once, newPassword: OWNER_PASSWORD }) });
   cookie = (changed.headers.get('set-cookie') || '').split(';')[0];
   assert.ok(cookie);
 });
@@ -171,7 +174,7 @@ test('sandbox keys are saved on the server and never come back to the browser', 
 });
 
 test("Jeebly live keys (reported: the live address Jeebly gives was refused, and there was no way to test the live keys): the full create_shipment address saves as its host; the live keys are tested before Live mode, nothing booked", { skip }, async () => {
-  const save = await api('PUT', '/api/admin/settings/courier', { settings: { jeebly: { liveBaseUrl: 'https://myjeebly.jeebly.com/customer/create_shipment', apiKey: 'LIVE-KEY-7654321', clientKey: 'LIVE-CLIENT-7654321' } } });
+  const save = await api('PUT', '/api/admin/settings/courier', { settings: { jeebly: { liveBaseUrl: 'https://myjeebly.jeebly.com/customer/create_shipment', apiKey: fake('LIVE-', 'KEY-7654321'), clientKey: fake('LIVE-', 'CLIENT-7654321') } } });
   assert.equal(save.status, 200, await save.clone().text());
   const saved = (await (await api('GET', '/api/admin/settings')).json()).courier;
   assert.equal(saved.value.jeebly.liveBaseUrl, 'https://myjeebly.jeebly.com');
@@ -183,7 +186,7 @@ test("Jeebly live keys (reported: the live address Jeebly gives was refused, and
   assert.equal(live.endpoint, 'https://myjeebly.jeebly.com/customer/track_shipment');
   assert.equal(live.keysAccepted, true);
   assert.match(live.summary, /^Reached Jeebly \(live\) \(HTTP 400\): the API key was accepted\. Jeebly said: Invalid Customer Key Or Shipment Number \(expected: .*Nothing was booked\.$/);
-  assert.ok(!JSON.stringify(live).includes('LIVE-KEY-7654321'));
+  assert.ok(!JSON.stringify(live).includes(fake('LIVE-', 'KEY-7654321')));
   // Refused keys say so (typed, not saved).
   const bad = await (await api('POST', '/api/courier/test', { provider: 'jeebly', settings: { jeebly: { liveBaseUrl: 'https://myjeebly.jeebly.com/customer/create_shipment', apiKey: 'bad-key' } }, target: 'live' })).json();
   assert.equal(bad.keysAccepted, false);
@@ -195,7 +198,7 @@ test("Jeebly live keys (reported: the live address Jeebly gives was refused, and
 });
 
 const PICKUP = { pickupPhone: '+971 50 123 4567', pickupUnit: 'Shop 4', pickupBuilding: 'Barsha Heights Tower', pickupArea: 'Al Barsha 1', pickupLandmark: 'Next to the metro', pickupAddress: 'Street 12' };
-const KEYS = { sandboxApiKey: 'SB-KEY-1234567', sandboxClientKey: 'SB-CLIENT-1234567', apiKey: 'LIVE-KEY-1234567', clientKey: 'LIVE-CLIENT-1234567', liveBaseUrl: 'https://live.jeebly.com' };
+const KEYS = { sandboxApiKey: fake('SB-', 'KEY-1234567'), sandboxClientKey: 'SB-CLIENT-1234567', apiKey: fake('LIVE-', 'KEY-1234567'), clientKey: 'LIVE-CLIENT-1234567', liveBaseUrl: 'https://live.jeebly.com' };
 /** Keys and pickup saved, the Sandbox check run (it passes against the stand-in), then Live on or off. */
 async function goLive(on: boolean) {
   assert.equal((await api('PUT', '/api/admin/settings/courier', { settings: { jeebly: { ...PICKUP, ...KEYS } } })).status, 200);

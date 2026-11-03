@@ -3,6 +3,7 @@
 import React, { useId, useState } from 'react';
 import { Camera, ImagePlus, Loader2, MessageCircle, X } from 'lucide-react';
 import { shrinkPhoto } from '@/lib/shrinkPhoto';
+import { useShop } from '@/lib/client/shop';
 
 /** What the customer fills in before the address and payment (the server checks it all again). */
 export interface PhotoOrderDraft {
@@ -26,6 +27,8 @@ const PHOTO_URL_MAX = 1_500_000;
  */
 export function PhotoOrderSheet({ onClose, onContinue, draft }: { onClose: () => void; onContinue: (draft: PhotoOrderDraft) => void; draft?: PhotoOrderDraft | null }) {
   const id = useId();
+  const { delivery } = useShop();
+  const deliveryName = (delivery.standardName || 'Standard delivery').toLowerCase();
   const [photos, setPhotos] = useState<string[]>(draft?.photos ?? []);
   const [busy, setBusy] = useState(0);
   const [note, setNote] = useState(draft?.note ?? '');
@@ -61,7 +64,7 @@ export function PhotoOrderSheet({ onClose, onContinue, draft }: { onClose: () =>
   const next = (e: React.FormEvent) => {
     e.preventDefault();
     if (!photos.length) return setError('Add at least one photo of the piece you want.');
-    if (!amountOk) return setError(`Type the amount we agreed on WhatsApp, in AED (from 1 to ${PHOTO_ORDER_LIMITS.maxAmount.toLocaleString('en-US')}).`);
+    if (!amountOk) return setError(`Type the total we agreed on WhatsApp, with delivery, in AED (from 1 to ${PHOTO_ORDER_LIMITS.maxAmount.toLocaleString('en-US')}).`);
     if (!piecesOk) return setError(`Pieces: a whole number from 1 to ${PHOTO_ORDER_LIMITS.maxPieces}.`);
     onContinue({ photos, note: note.trim(), pieces: piecesNumber, amountFils: Math.round(amountNumber * 100) });
   };
@@ -85,7 +88,7 @@ export function PhotoOrderSheet({ onClose, onContinue, draft }: { onClose: () =>
         </div>
 
         <p className="text-sm text-ink-soft">
-          Agreed a piece with us on WhatsApp? Add its photos and the amount we agreed. Next come your address and how you pay, then you confirm on WhatsApp. We check the amount before it ships, and you can follow the courier with your order number.
+          Agreed a piece with us on WhatsApp? Add its photos and the total we agreed, with delivery. Next come your address and how you pay, then you confirm on WhatsApp. We check the amount before it ships, and you can follow the courier with your order number.
         </p>
 
         <fieldset className="space-y-2">
@@ -135,18 +138,18 @@ export function PhotoOrderSheet({ onClose, onContinue, draft }: { onClose: () =>
         <div className="grid grid-cols-[minmax(0,1fr)_minmax(0,1.4fr)] gap-3">
           <div>
             <label htmlFor={`${id}-pieces`} className="block text-sm font-semibold text-ink mb-1">
-              Pieces
+              Bedsheets / pieces
             </label>
             <input id={`${id}-pieces`} className={field} type="number" inputMode="numeric" min={1} max={PHOTO_ORDER_LIMITS.maxPieces} step={1} value={pieces} onChange={(e) => setPieces(e.target.value)} />
           </div>
           <div>
             <label htmlFor={`${id}-amount`} className="block text-sm font-semibold text-ink mb-1">
-              Amount agreed (AED)
+              Total agreed, with delivery (AED)
             </label>
             <input id={`${id}-amount`} className={field} type="number" inputMode="decimal" min={1} max={PHOTO_ORDER_LIMITS.maxAmount} step="0.01" value={amount} onChange={(e) => setAmount(e.target.value)} placeholder="e.g. 350" required />
           </div>
         </div>
-        <p className="text-xs text-ink-soft">The total for everything in the photos, as agreed on WhatsApp. Standard delivery is free.</p>
+        <p className="text-xs text-ink-soft" data-testid="photo-order-total-note">The total we agreed on WhatsApp for everything in the photos, {deliveryName} included: nothing is added for it at checkout.</p>
 
         {error && (
           <p role="alert" className="text-xs font-semibold text-danger">

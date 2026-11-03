@@ -214,7 +214,7 @@ export interface Order {
   }[];
   subtotal: number;
   deliveryFee: number;
-  /** standard (free, standardDays) or same_day (with Settings → Delivery's charge). */
+  /** standard (Settings → Delivery's standard charge, standardDays) or same_day (its same-day charge). */
   deliveryOption?: 'standard' | 'same_day';
   codFee: number;
   /** Card payment fee (Settings → Payments, % of items + delivery), in AED; absent or 0 for other payments. Part of total. */
@@ -494,6 +494,8 @@ export type LabelPaper = 'a5' | '4x6';
 export interface CourierSettings {
   /** Packaging allowance added to every parcel's weight, in grams (default 200). */
   packagingGrams?: number;
+  /** An order from a photo: the packed weight of each piece (bedsheet), in grams (default 1000: 1 kg). */
+  photoPieceGrams?: number;
   /** The paper the shipping label / packing slip prints on: A5 (the default) or a 4 × 6 in label. */
   labelPaper?: LabelPaper;
   autoAssignRules: {
@@ -583,7 +585,13 @@ export interface DeliverySettings {
   notServed: string[];
   /** Shown to customers, e.g. "1–2 days". */
   standardDays: string;
+  /** What standard delivery is called at checkout (e.g. "Standard delivery"). */
+  standardName: string;
+  /** Charge for standard delivery, in AED (0: nothing added). */
+  standardFee: number;
   sameDayEnabled: boolean;
+  /** What same-day delivery is called at checkout (e.g. "Same day"). */
+  sameDayName: string;
   /** Extra charge for same-day delivery, in AED. */
   sameDayFee: number;
   /** Orders before this time (UAE, HH:MM) can be delivered the same day. */

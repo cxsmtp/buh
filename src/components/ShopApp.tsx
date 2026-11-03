@@ -483,7 +483,7 @@ export function ShopApp({
               type="button"
               onClick={() => setPhotoSheetOpen(true)}
               data-testid="photo-order-banner"
-              className="w-full min-h-14 flex items-center gap-3 rounded-2xl border border-gold bg-ivory px-4 py-3 text-left hover:border-gold-deep focus:outline-none focus-visible:ring-2 focus-visible:ring-gold"
+              className="photo-order-glow w-full min-h-14 flex items-center gap-3 rounded-2xl border border-gold bg-ivory px-4 py-3 text-left hover:border-gold-deep focus:outline-none focus-visible:ring-2 focus-visible:ring-gold"
             >
               <Camera className="w-6 h-6 shrink-0 text-gold-deep" strokeWidth={1.5} aria-hidden="true" />
               <span className="min-w-0 flex-1">
@@ -679,7 +679,7 @@ export function ShopApp({
         bankAskWhatsApp={bankAskWhatsApp}
         supportEmail={supportEmail}
         phoneVerification={phoneVerification}
-        card={photoDraft ? null : cardPayments}
+        card={cardPayments}
         landing={landing}
         onOrderPlaced={handleOrderPlaced}
         onPricesChanged={async () => {

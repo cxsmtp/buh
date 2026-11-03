@@ -265,7 +265,9 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
   // refuses the order if its total differs from the one shown here (a price changed meanwhile).
   const delivery = deliveryCheck({ emirate, area }, deliverySettings);
   const sameDayChosen = deliveryChoice.option === 'same_day' && deliveryChoice.key === `${emirate}|${area}` && delivery.sameDay.available;
-  const deliveryFils = sameDayChosen ? toFils(delivery.sameDay.fee) : 0;
+  // An order from a photo: the agreed total includes standard delivery (same day is extra), as on the server.
+  const standardFils = photoOrder ? 0 : toFils(delivery.standard.fee);
+  const deliveryFils = sameDayChosen ? toFils(delivery.sameDay.fee) : standardFils;
   const totalFils = (photoOrder ? photoOrder.amountFils : cartFils(items)) + deliveryFils;
   const bankReady = bankTransfer;
   const shopWhatsApp = useShop().store.whatsappNumber.replace(/\D/g, '');
@@ -767,7 +769,7 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
           )}
           {confirmedOrder.photoOrder && (
             <p role="status" data-testid="photo-order-next" className="text-xs text-ink-soft bg-ivory border border-line rounded-xl px-3 py-2 text-left">
-              We&rsquo;ll check your photos and the amount (AED {formatAed(toFils(confirmedOrder.total))}) and confirm on WhatsApp. Once it ships, Track Order with <span className="font-mono">{confirmedOrder.id}</span> and your phone number shows the courier&rsquo;s tracking number.
+              {confirmedOrder.paymentMethod === 'online_card' ? <>We&rsquo;ll check your photos and confirm on WhatsApp.</> : <>We&rsquo;ll check your photos and the amount (AED {formatAed(toFils(confirmedOrder.total))}) and confirm on WhatsApp.</>} Once it ships, Track Order with <span className="font-mono">{confirmedOrder.id}</span> and your phone number shows the courier&rsquo;s tracking number.
             </p>
           )}
           {weCall && (
@@ -865,7 +867,7 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
             <div className="flex justify-between items-center">
               <span className="text-ink-muted font-medium">Delivery</span>
               <span className="text-gold-deep flex items-center gap-1">
-                <span>{confirmedOrder.deliveryOption === 'same_day' ? `Same day (AED ${confirmedOrder.deliveryFee})` : `${confirmedOrder.courier.serviceability?.deliverySpeed || deliverySettings.standardDays}, free`}</span>
+                <span>{confirmedOrder.deliveryOption === 'same_day' ? `${deliverySettings.sameDayName || 'Same day'} (AED ${confirmedOrder.deliveryFee})` : `${deliverySettings.standardName || 'Standard delivery'}, ${confirmedOrder.courier.serviceability?.deliverySpeed || deliverySettings.standardDays}${confirmedOrder.deliveryFee ? ` (AED ${confirmedOrder.deliveryFee})` : ''}`}</span>
               </span>
             </div>
 
@@ -956,7 +958,7 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
               Checkout
             </h2>
             <p className="text-[11px] text-ink-muted tracking-[0.02em]">
-              {card ? 'Free delivery across the UAE · Card, Apple Pay, Google Pay or cash on delivery' : 'Free delivery across the UAE · Cash on delivery or bank transfer'}
+              {`${deliverySettings.standardName || 'Standard delivery'} across the UAE · ${card ? 'Card, Apple Pay, Google Pay or cash on delivery' : 'Cash on delivery or bank transfer'}`}
             </p>
           </div>
           <button
@@ -1012,7 +1014,7 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
             <ExpressCheckout
               publishableKey={card.publishableKey}
               amountFils={cardTotalFils}
-              shippingRate={sameDayChosen ? { id: 'same_day', displayName: 'Same-day delivery', amount: deliveryFils } : { id: 'standard', displayName: `Free delivery in ${deliverySettings.standardDays}`, amount: 0 }}
+              shippingRate={sameDayChosen ? { id: 'same_day', displayName: delivery.sameDay.name, amount: deliveryFils } : { id: 'standard', displayName: `${delivery.standard.name} in ${deliverySettings.standardDays}`, amount: deliveryFils }}
               lineItems={cardFee > 0 || cardVatFils > 0 ? [{ name: 'Items', amount: totalFils - deliveryFils }, ...(cardFee > 0 ? [{ name: `Card payment fee (${percentText(feePercent)}%)`, amount: cardFee }] : []), ...(cardVatFils > 0 ? [{ name: `VAT (${percentText(vatAddedPercent)}%)`, amount: cardVatFils }] : [])] : undefined}
               servesEmirate={(state, city) => {
                 const em = emirateFrom(state) ?? emirateFrom(city);
@@ -1319,7 +1321,7 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
                 )}
                 <div>
                   <div className={`font-semibold ${delivery.serviceable ? 'text-success' : 'text-danger'}`}>{delivery.message}</div>
-                  {delivery.serviceable && <div className="text-ink-soft">Delivery in {delivery.days}, free</div>}
+                  {delivery.serviceable && <div className="text-ink-soft">{delivery.standard.name} in {delivery.days}{photoOrder ? ' · included in the agreed total' : standardFils > 0 ? ` · AED ${formatAed(standardFils)}` : ''}</div>}
                 </div>
               </div>
               {delivery.serviceable && deliverySettings.sameDayEnabled && (
@@ -1328,14 +1330,14 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
                   <label className={`flex items-start gap-2 p-2.5 rounded-xl border cursor-pointer ${!sameDayChosen ? 'border-ink bg-surface' : 'border-line bg-surface/60'}`}>
                     <input type="radio" name="delivery-option" className="mt-0.5" checked={!sameDayChosen} onChange={() => setDeliveryOption('standard')} />
                     <span>
-                      <strong className="block text-ink">Standard · free</strong>
+                      <strong className="block text-ink">{delivery.standard.name}{photoOrder ? ' · included' : standardFils > 0 ? ` · AED ${formatAed(standardFils)}` : ''}</strong>
                       <span className="text-ink-muted">{delivery.days}</span>
                     </span>
                   </label>
                   <label className={`flex items-start gap-2 p-2.5 rounded-xl border ${delivery.sameDay.available ? 'cursor-pointer' : 'opacity-60'} ${sameDayChosen ? 'border-ink bg-surface' : 'border-line bg-surface/60'}`}>
                     <input type="radio" name="delivery-option" className="mt-0.5" checked={sameDayChosen} disabled={!delivery.sameDay.available} onChange={() => setDeliveryOption('same_day')} />
                     <span>
-                      <strong className="block text-ink">Same day · +AED {formatAed(toFils(delivery.sameDay.fee))}</strong>
+                      <strong className="block text-ink">{delivery.sameDay.name} · {standardFils > 0 ? '' : '+'}AED {formatAed(toFils(delivery.sameDay.fee))}</strong>
                       <span className="text-ink-muted">{delivery.sameDay.available ? `Order before ${delivery.sameDay.cutoff}` : delivery.sameDay.reason}</span>
                     </span>
                   </label>

@@ -23,6 +23,7 @@ import { afterEach, beforeEach, test } from 'node:test';
 import Database from 'better-sqlite3';
 import { tempDataDir } from './helpers.mjs';
 import { bedroomPng, chunk, makePng } from './fixtures/png.mjs';
+import { fake } from './fixtures/fake.mjs';
 
 const dir = tempDataDir();
 const settings = await import('@/lib/server/settings');
@@ -35,7 +36,7 @@ const { saveImageDataUrl, readImage } = await import('@/lib/server/images');
 const { _clearAllRateLimits } = await import('@/lib/server/rateLimit');
 const { redact, maskAiKeys } = await import('@/lib/server/log');
 
-const GEMINI = 'AIzaSyTESTKEY-abcdefghijklmnopqrstu-Q9xZ';
+const GEMINI = fake('AIza', 'SyTESTKEY-abcdefghijklmnopqrstu-Q9xZ');
 const OPENAI = 'sk-proj-OPENAIKEYabcdefghijklmnopqrstuvwxyz0123456789-ZZ9K';
 const FAL = '0f4e1b2c-3d4e-4f50-8a6b-7c8d9e0f1a2b:abcdef0123456789abcdef0123456789';
 

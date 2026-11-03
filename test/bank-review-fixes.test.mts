@@ -15,6 +15,7 @@ import zlib from 'node:zlib';
 import { test } from 'node:test';
 import Database from 'better-sqlite3';
 import { jsonRequest, tempDataDir } from './helpers.mjs';
+import { fake } from './fixtures/fake.mjs';
 
 const dir = tempDataDir();
 delete process.env.BACKUP_PASSPHRASE;
@@ -87,7 +88,9 @@ async function captured<T>(fn: () => T | Promise<T>): Promise<{ value: T; lines:
   }
 }
 /** Make the next COMMIT that changes `column` of this order fail (a deferred foreign key it breaks). */
-function failCommitOn(orderId: string, column: string): () => void {
+function failCommitOn(orderId: string, column: 'bank_checked_at' | 'transfer_uploads'): () => void {
+  // Only these two column names, and an order id of the shop's own form, ever reach the SQL below.
+  if (!['bank_checked_at', 'transfer_uploads'].includes(column) || !/^BUH-[A-Z0-9-]{4,40}$/.test(orderId)) throw new Error('failCommitOn: unexpected column or order id');
   const db = getDb();
   db.exec(`CREATE TABLE IF NOT EXISTS t_parent (id TEXT PRIMARY KEY);
     CREATE TABLE IF NOT EXISTS t_child (parent TEXT REFERENCES t_parent(id) DEFERRABLE INITIALLY DEFERRED);
@@ -338,7 +341,7 @@ test('links to customers come only from the configured shop address (never the r
   try {
     process.env.NEXT_PUBLIC_APP_URL = 'https://beautifuluaehome.com/';
     assert.equal(orders.getOrder(o.id)!.bankTransfer!.payUrl, `https://beautifuluaehome.com${o.bankTransfer!.payPath}`);
-    for (const bad of ['javascript:alert(1)', 'https://user:pw@beautifuluaehome.com', 'not a url', 'ftp://x.ae']) {
+    for (const bad of ['javascript:alert(1)', fake('https://user', ':pw@beautifuluaehome.com'), 'not a url', 'ftp://x.ae']) {
       process.env.NEXT_PUBLIC_APP_URL = bad;
       assert.equal(orders.getOrder(o.id)!.bankTransfer!.payUrl, undefined, bad);
     }

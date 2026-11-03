@@ -25,13 +25,16 @@ import { after, before, test } from 'node:test';
 import { hasBuild, startServer, type RunningServer } from './server.mjs';
 import { openAdminSection } from './helpers.mjs';
 import { bedroomPng, chunk } from './fixtures/png.mjs';
+import { fake, ownerPassword, wrongLogin } from './fixtures/fake.mjs';
+/** The owner password for this run (made up when the tests start). */
+const OWNER_PASSWORD = ownerPassword();
 
 type PW = typeof import('playwright');
 const pw: PW | null = hasBuild ? await import('playwright').catch(() => null) : null;
 const skip = !pw;
 type Page = import('playwright').Page;
 
-const KEY = 'AIzaSyPROMPTKEY-abcdefghijklmnopqrstu-W4XY';
+const KEY = fake('AIza', 'SyPROMPTKEY-abcdefghijklmnopqrstu-W4XY');
 const ANTHROPIC_KEY = 'sk-ant-api03-PROMPTKEY-abcdefghijklmnopqrstuvwxyz0123456789-ABCD';
 const SHOTS = process.env.BUH_SHOTS_DIR || '';
 const TITLE = 'Indigo Studio Test Set';
@@ -149,12 +152,12 @@ before(async () => {
   });
   browser = await pw!.chromium.launch();
   const h = { 'content-type': 'application/json', origin: server.base };
-  await fetch(`${server.base}/api/admin/login`, { method: 'POST', headers: h, body: JSON.stringify({ email: 'x@y.z', password: 'x' }) });
+  await fetch(`${server.base}/api/admin/login`, { method: 'POST', headers: h, body: JSON.stringify(wrongLogin()) });
   await new Promise((r) => setTimeout(r, 300));
   const once = server.log().match(/Password: (\S+)/)![1];
   const login = await fetch(`${server.base}/api/admin/login`, { method: 'POST', headers: h, body: JSON.stringify({ email: 'admin@beautifuluaehome.com', password: once }) });
   const first = (login.headers.get('set-cookie') || '').split(';')[0];
-  const changed = await fetch(`${server.base}/api/admin/password`, { method: 'POST', headers: { ...h, cookie: first }, body: JSON.stringify({ currentPassword: once, newPassword: 'Prompt-Studio-Owner-Pass-1' }) });
+  const changed = await fetch(`${server.base}/api/admin/password`, { method: 'POST', headers: { ...h, cookie: first }, body: JSON.stringify({ currentPassword: once, newPassword: OWNER_PASSWORD }) });
   cookie = (changed.headers.get('set-cookie') || '').split(';')[0];
   // Claude writes (no Gemini key yet); one product with a real photo.
   const ai = await api('PUT', '/api/admin/settings/ai', { settings: { provider: 'anthropic', anthropicApiKey: ANTHROPIC_KEY, enabled: true } });

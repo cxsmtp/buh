@@ -4,7 +4,7 @@
  * the owner confirms, and only then is it booked and the label made). Off by default; the photos
  * checked and kept beside the transfer screenshots (backed up and restored with them); no stock
  * touched; the amount is the customer's word until "Confirm amount" (audited), which every booking
- * and status change waits for; no card payment for it.
+ * and status change waits for; paid by card, the amount paid can't be changed (cancel & refund instead).
  */
 import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
@@ -71,6 +71,9 @@ test('an order from a photo: the agreed amount, its photos kept for the owner, n
   assert.equal(order.items[0].productId, orders.PHOTO_PRODUCT_ID);
   assert.match(order.items[0].title, /From your photo: King set, blue block print/);
   assert.equal(order.courier.pieces, 2);
+  // Its weight from the pieces (asked by the owner: 1 kg per bedsheet by default), plus the packaging (200 g).
+  assert.equal(order.items[0].weightGrams, 2000);
+  assert.equal(order.courier.weightKg, 2.2);
   assert.equal(order.courier.codAmountCollected, 350);
   assert.deepEqual(order.photoOrder, { photos: 2, note: 'King set, blue block print', pieces: 2, agreedTotal: 350 });
   assert.equal(order.status, 'pending_confirmation');
@@ -120,7 +123,7 @@ test('nothing is confirmed or booked before the owner confirms the amount; corre
   assert.throws(() => orders.confirmPhotoAmount('BUH-000000-NOPE', 100, 'owner@shop.test'), (e: { status?: number }) => e.status === 404);
 });
 
-test('what the photo order takes: 1–4 real images, an amount in AED with fils, whole pieces, its own fields only; no card, no bag items', () => {
+test('what the photo order takes: 1–4 real images, an amount in AED with fils, whole pieces, its own fields only; no bag items; card only when card payments are on', () => {
   const refused = (photo: unknown, over: Record<string, unknown> = {}) => assert.throws(() => place(photo, over), (e: { status?: number }) => e.status === 400 || e.status === 413, JSON.stringify(photo)?.slice(0, 80));
   refused({ photos: [], amount: 100 });
   refused({ amount: 100 });
@@ -137,7 +140,8 @@ test('what the photo order takes: 1–4 real images, an amount in AED with fils,
   refused({ photos: [png], amount: 100, note: 'x'.repeat(301) });
   refused({ photos: [png], amount: 100, price: 1 });
   refused({ photos: [png], amount: 100 }, { items: [{ productId: listProducts()[0].id, profileId: listProducts()[0].profiles[0].id, quantity: 1 }] });
-  assert.throws(() => place({ photos: [png], amount: 100 }, { paymentMethod: 'online_card' }), (e) => code(e) === 'photo_no_card');
+  // Card: like any order, only with card payments switched on (Settings → Payments).
+  assert.throws(() => place({ photos: [png], amount: 100 }, { paymentMethod: 'online_card' }), (e) => code(e) === 'card_unavailable');
   // A shown total that differs from the agreed amount: refused like any checkout.
   assert.throws(() => place({ photos: [png], amount: 100 }, { expectedTotal: 90 }), (e) => code(e) === 'price_changed');
   const ok = place({ photos: [png], amount: 99.5 }, { expectedTotal: 99.5 });
@@ -154,4 +158,54 @@ test('the photos are in the backup and come back with the restore', async () => 
   const out = execFileSync(process.execPath, ['scripts/restore-backup.mjs', result.file, target]).toString();
   assert.match(out, /Integrity check: ok/);
   assert.deepEqual(fs.readFileSync(path.join(target, 'receipts', `${order.id}.photo1.png`)), PHOTO);
+});
+
+test('paid by card, the amount the customer paid stays: confirming it works, changing it is refused (cancel & refund instead)', () => {
+  const { order } = place({ photos: [png], amount: 300 });
+  // As if it had been placed by card (card payments need Stripe, covered in the Stripe tests).
+  const data = JSON.parse((getDb().prepare('SELECT data FROM orders WHERE id = ?').get(order.id) as { data: string }).data);
+  data.paymentMethod = 'online_card';
+  getDb().prepare("UPDATE orders SET data = ?, payment_method = 'online_card' WHERE id = ?").run(JSON.stringify(data), order.id);
+  assert.throws(() => orders.confirmPhotoAmount(order.id, 320, 'owner@shop.test'), (e) => code(e) === 'photo_card');
+  assert.equal(orders.getOrder(order.id)!.total, 300, 'unchanged');
+  const r = orders.confirmPhotoAmount(order.id, 300, 'owner@shop.test');
+  assert.equal(r.changed, true);
+  assert.ok(r.order.photoOrder?.confirmedAt);
+});
+
+test('with card payments on (Settings → Payments), an order from a photo can be paid by card: the amount typed plus the card fee, waiting for Stripe', async () => {
+  const { TEST_KEYS } = await import('./stripe-mock.mjs');
+  await updateSettings('payments', { cardEnabled: true, stripePublishableKey: TEST_KEYS.publishable, stripeSecretKey: TEST_KEYS.secret, stripeWebhookSecret: TEST_KEYS.webhook });
+  try {
+    const { order } = place({ photos: [png], amount: 200 }, { paymentMethod: 'online_card' });
+    assert.equal(order.paymentMethod, 'online_card');
+    assert.equal(order.status, 'pending_payment', 'counts once Stripe says it is paid');
+    assert.equal(order.card?.state, 'pending');
+    assert.equal(order.subtotal, 200);
+    assert.equal(order.total, Math.round((200 + (order.cardFee ?? 0)) * 100) / 100);
+    assert.ok(order.photoOrder);
+  } finally {
+    await updateSettings('payments', { cardEnabled: false });
+  }
+});
+
+test('the weight per piece is the owner’s (Settings → Couriers): 3 bedsheets at 1.2 kg are 3.6 kg, plus the packaging; checked', async () => {
+  await updateSettings('courier', { photoPieceGrams: 1200 });
+  const { order } = place({ photos: [png], pieces: 3, amount: 450 });
+  assert.equal(order.items[0].weightGrams, 3600);
+  assert.equal(order.courier.weightKg, 3.8);
+  for (const bad of [0, -5, 1.5, 20_001, 'x']) await assert.rejects(updateSettings('courier', { photoPieceGrams: bad }), (e: { status?: number }) => e.status === 400, String(bad));
+  await updateSettings('courier', { photoPieceGrams: 1000 });
+});
+
+test('the agreed total includes standard delivery: with a standard delivery charge set, nothing is added to an order from a photo', async () => {
+  await updateSettings('delivery', { standardFee: 20 });
+  try {
+    const { order } = place({ photos: [png], amount: 250 }, { expectedTotal: 250 });
+    assert.equal(order.deliveryFee, 0);
+    assert.equal(order.total, 250);
+    assert.equal(order.courier.codAmountCollected, 250);
+  } finally {
+    await updateSettings('delivery', { standardFee: 0 });
+  }
 });

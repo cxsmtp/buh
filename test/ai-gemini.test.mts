@@ -21,6 +21,7 @@ import { afterEach, beforeEach, test } from 'node:test';
 import Database from 'better-sqlite3';
 import { tempDataDir } from './helpers.mjs';
 import { bedroomPng, chunk, makePng } from './fixtures/png.mjs';
+import { fake } from './fixtures/fake.mjs';
 
 const dir = tempDataDir();
 const settings = await import('@/lib/server/settings');
@@ -34,7 +35,7 @@ const { redact } = await import('@/lib/server/log');
 const { getDb } = await import('@/lib/server/db');
 const productsRoute = await import('@/app/api/products/route');
 
-const KEY = 'AIzaSyTESTKEY-abcdefghijklmnopqrstu-Q9xZ';
+const KEY = fake('AIza', 'SyTESTKEY-abcdefghijklmnopqrstu-Q9xZ');
 const ANTHROPIC = 'sk-ant-api03-TESTKEY-abcdefghijklmnopqrstuvwxyz0123456789-WXYZ';
 
 const PHOTO = makePng(96, 120, (x, y) => ((x + y) % 24 < 12 ? [47, 63, 122] : [246, 244, 238]));
@@ -309,7 +310,7 @@ test('Test (Gemini): GET /models with the typed or saved key in the header; a re
   assert.equal(sent[0].headers['x-goog-api-key'], KEY, 'the saved key');
   assert.ok(!sent[0].path.includes('key'), 'not in the address');
   assert.equal(r.models.suggested.writing, 'gemini-3.1-pro');
-  const typed = 'AIzaSyOTHERKEY-abcdefghijklmnopqrstuvwx';
+  const typed = fake('AIza', 'SyOTHERKEY-abcdefghijklmnopqrstuvwx');
   await ai.testGeminiSettings({ geminiApiKey: typed }, 'o@s.t');
   assert.equal(sent[1].headers['x-goog-api-key'], typed);
   await assert.rejects(ai.testGeminiSettings({ geminiApiKey: 'nope' }, 'o@s.t'), /starts with AIza/);

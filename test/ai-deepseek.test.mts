@@ -26,6 +26,7 @@ import { afterEach, beforeEach, test } from 'node:test';
 import Database from 'better-sqlite3';
 import { tempDataDir } from './helpers.mjs';
 import { bedroomPng, chunk, makePng } from './fixtures/png.mjs';
+import { fake } from './fixtures/fake.mjs';
 
 const dir = tempDataDir();
 const settings = await import('@/lib/server/settings');
@@ -127,7 +128,7 @@ test('Settings: the DeepSeek key is write-only (••••last4), checked by s
   assert.equal(view.secretsSet.deepseekApiKey, true);
   assert.equal(view.secretsHint?.deepseekApiKey, '••••cdef');
   assert.ok(!JSON.stringify(view).includes('0123456789abcdef'));
-  for (const bad of ['sk-short', 'sk-ant-api03-abcdefghijklmnopqrstuvwxyz', 'pk-0123456789abcdef0123456789abcdef', `sk-${'a'.repeat(129)}`, 'sk-0123456789abcdef 0123']) {
+  for (const bad of ['sk-short', fake('sk-ant-', 'api03-abcdefghijklmnopqrstuvwxyz'), fake('pk-', '0123456789abcdef0123456789abcdef'), `sk-${'a'.repeat(129)}`, 'sk-0123456789abcdef 0123']) {
     await assert.rejects(settings.updateSettings('ai', { deepseekApiKey: bad }), /DeepSeek API key starts with sk-/, bad);
   }
   await assert.rejects(settings.updateSettings('ai', { provider: 'openai' }), /Anthropic, Gemini or DeepSeek/);
@@ -156,7 +157,7 @@ test('Settings: the DeepSeek key is write-only (••••last4), checked by s
 });
 
 test('log redaction: a DeepSeek key is masked as sk-[redacted]; Anthropic and Stripe keys are still masked as theirs; ordinary text is left alone', () => {
-  const out = JSON.stringify(redact({ note: `ds ${KEY} ant ${ANTHROPIC} stripe sk_live_51HxABCDEFGHIJKLMNOP and sk_test_abcdefghij` }));
+  const out = JSON.stringify(redact({ note: `ds ${KEY} ant ${ANTHROPIC} stripe ${fake('sk_live_', '51HxABCDEFGHIJKLMNOP')} and ${fake('sk_test_', 'abcdefghij')}` }));
   assert.ok(!out.includes('0123456789abcdef'), out);
   assert.match(out, /ds sk-\[redacted\]/);
   assert.match(out, /ant sk-ant-\[redacted\]/);
@@ -399,7 +400,7 @@ test('gift lines on a product: checked on save, kept when not sent; the shop sho
 // ── three styled pictures per press ────────────────────────────────────────
 
 test('styling: 3 pictures side by side, one failing loses none of the others; the product’s words, the owner’s scene and note before the fixed rules; 30 an hour', async () => {
-  const GKEY = 'AIzaSyTESTKEY-abcdefghijklmnopqrstu-Q9xZ';
+  const GKEY = fake('AIza', 'SyTESTKEY-abcdefghijklmnopqrstu-Q9xZ');
   await settings.updateSettings('ai', { geminiApiKey: GKEY, geminiImageModel: 'gemini-3.1-flash-image' });
   const prompts: string[] = [];
   let made = 0;

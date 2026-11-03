@@ -6,6 +6,7 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { hasBuild, startServer } from './server.mjs';
+import { wrongLogin } from './fixtures/fake.mjs';
 
 const limits = await import('@/lib/server/rateLimit');
 
@@ -23,7 +24,7 @@ test('failed test emails do not use up the limit: 15 failed tries in a row each 
   const shop = await startServer({ TRUST_PROXY: '1', SMTP_HOST: 'mail.invalid', SMTP_PORT: '587', SMTP_USER: 'shop@example.com', SMTP_PASS: 'x', BACKUP_EMAIL: 'owner@example.com' });
   try {
     const headers = (cookie = '') => ({ 'content-type': 'application/json', origin: shop.base, 'x-real-ip': '203.0.113.7', ...(cookie ? { cookie } : {}) });
-    await fetch(`${shop.base}/api/admin/login`, { method: 'POST', headers: headers(), body: JSON.stringify({ email: 'x@y.z', password: 'x' }) });
+    await fetch(`${shop.base}/api/admin/login`, { method: 'POST', headers: headers(), body: JSON.stringify(wrongLogin()) });
     let found: RegExpMatchArray | null = null;
     for (let i = 0; i < 150 && !(found = shop.log().match(/Password: (\S+)/)); i++) await new Promise((r) => setTimeout(r, 100));
     assert.ok(found, 'the one-time password was printed');

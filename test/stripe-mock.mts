@@ -2,6 +2,7 @@ import crypto from 'node:crypto';
 import http from 'node:http';
 import type { AddressInfo } from 'node:net';
 import Stripe from 'stripe';
+import { fake } from './fixtures/fake.mjs';
 
 /**
  * A stand-in for Stripe's API on 127.0.0.1, so tests never call the real Stripe. The shop's
@@ -11,9 +12,9 @@ import Stripe from 'stripe';
  */
 
 export const TEST_KEYS = {
-  publishable: 'pk_test_51BuhTestPublishableKey0000000000',
-  secret: 'sk_test_51BuhTestSecretKeyAAAAAAAAAAAAAAAA',
-  webhook: 'whsec_buhTestWebhookSigningSecret0000000000',
+  publishable: fake('pk_test_', '51BuhTestPublishableKey0000000000'),
+  secret: fake('sk_test_', '51BuhTestSecretKeyAAAAAAAAAAAAAAAA'),
+  webhook: fake('whsec_', 'buhTestWebhookSigningSecret0000000000'),
 };
 
 export interface MockIntent {

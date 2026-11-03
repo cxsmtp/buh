@@ -21,13 +21,16 @@ import { after, before, test } from 'node:test';
 import { hasBuild, rawFetch, startServer, type RunningServer } from './server.mjs';
 import { openAdminSection } from './helpers.mjs';
 import { bedroomPng, chunk } from './fixtures/png.mjs';
+import { fake, ownerPassword, wrongLogin } from './fixtures/fake.mjs';
+/** The owner password for this run (made up when the tests start). */
+const OWNER_PASSWORD = ownerPassword();
 
 type PW = typeof import('playwright');
 const pw: PW | null = hasBuild ? await import('playwright').catch(() => null) : null;
 const skip = !pw;
 type Page = import('playwright').Page;
 
-const KEY = 'AIzaSyE2EKEY-abcdefghijklmnopqrstuvw-L4ST';
+const KEY = fake('AIza', 'SyE2EKEY-abcdefghijklmnopqrstuvw-L4ST');
 const SHOTS = process.env.BUH_SHOTS_DIR || '';
 /** The stand-in's picture: a different one each time (Gemini never sends the same one twice). */
 let made = 0;
@@ -86,12 +89,12 @@ before(async () => {
   server = await startServer({ BUH_TEST_GEMINI_API: `http://127.0.0.1:${(google.address() as AddressInfo).port}/` });
   browser = await pw!.chromium.launch();
   const h = { 'content-type': 'application/json', origin: server.base };
-  await fetch(`${server.base}/api/admin/login`, { method: 'POST', headers: h, body: JSON.stringify({ email: 'x@y.z', password: 'x' }) });
+  await fetch(`${server.base}/api/admin/login`, { method: 'POST', headers: h, body: JSON.stringify(wrongLogin()) });
   await new Promise((r) => setTimeout(r, 300));
   const once = server.log().match(/Password: (\S+)/)![1];
   const login = await fetch(`${server.base}/api/admin/login`, { method: 'POST', headers: h, body: JSON.stringify({ email: 'admin@beautifuluaehome.com', password: once }) });
   const first = (login.headers.get('set-cookie') || '').split(';')[0];
-  const changed = await fetch(`${server.base}/api/admin/password`, { method: 'POST', headers: { ...h, cookie: first }, body: JSON.stringify({ currentPassword: once, newPassword: 'Gemini-Staging-Owner-Pass-1' }) });
+  const changed = await fetch(`${server.base}/api/admin/password`, { method: 'POST', headers: { ...h, cookie: first }, body: JSON.stringify({ currentPassword: once, newPassword: OWNER_PASSWORD }) });
   cookie = (changed.headers.get('set-cookie') || '').split(';')[0];
   if (SHOTS) fs.mkdirSync(SHOTS, { recursive: true });
 });
@@ -152,7 +155,7 @@ test('the stage-photo route: hidden from strangers, sign-in required, off until 
   assert.equal((await fetch(`${server.base}${result.url}`)).status, 404);
   assert.equal((await api('DELETE', route, { url: up.url })).status, 404);
   // A refused key: Google's message comes back without the key.
-  await api('PUT', '/api/admin/settings/ai', { settings: { geminiApiKey: 'AIzaSyWRONGKEY-abcdefghijklmnopqrstuvwxyz' } });
+  await api('PUT', '/api/admin/settings/ai', { settings: { geminiApiKey: fake('AIza', 'SyWRONGKEY-abcdefghijklmnopqrstuvwxyz') } });
   const refused = await api('POST', '/api/admin/ai/test', { settings: { provider: 'gemini' } });
   const refusedText = await refused.text();
   assert.equal(refused.status, 502);

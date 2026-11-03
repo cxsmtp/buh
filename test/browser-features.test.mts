@@ -13,6 +13,7 @@ import { after, before, test } from 'node:test';
 import { hasBuild, startServer, type RunningServer } from './server.mjs';
 import { SETUP_CMD, SETUP_POWERSHELL } from '@/lib/podmanSetup';
 import { openAdminSection } from './helpers.mjs';
+import { ownerPassword, wrongLogin } from './fixtures/fake.mjs';
 
 type PW = typeof import('playwright');
 const pw: PW | null = hasBuild ? await import('playwright').catch(() => null) : null;
@@ -21,7 +22,7 @@ const skip = !pw;
 let server: RunningServer;
 let browser: import('playwright').Browser;
 let cookie = '';
-const OWNER_PASSWORD = 'Feature-Owner-Pass-1';
+const OWNER_PASSWORD = ownerPassword();
 // The updater's status folder (empty: "not running" until a test writes a status).
 const updaterDir = fs.mkdtempSync(path.join(os.tmpdir(), 'buh-updater-status-'));
 
@@ -31,7 +32,7 @@ before(async () => {
   browser = await pw!.chromium.launch();
   // First admin sign-in: the one-time password from the log, then our own.
   const h = { 'content-type': 'application/json', origin: server.base };
-  await fetch(`${server.base}/api/admin/login`, { method: 'POST', headers: h, body: JSON.stringify({ email: 'x@y.z', password: 'x' }) });
+  await fetch(`${server.base}/api/admin/login`, { method: 'POST', headers: h, body: JSON.stringify(wrongLogin()) });
   await new Promise((r) => setTimeout(r, 300));
   const once = server.log().match(/Password: (\S+)/)![1];
   const login = await fetch(`${server.base}/api/admin/login`, { method: 'POST', headers: h, body: JSON.stringify({ email: 'admin@beautifuluaehome.com', password: once }) });
@@ -556,7 +557,7 @@ test('regression (reported): a laptop that reports Virginia keeps a Dubai addres
   assert.equal(await page.locator('select').first().inputValue(), 'Dubai', 'the emirate is not changed to a guess');
   await page.getByPlaceholder('e.g. Dubai Marina, Saadiyat, JVC').fill('Al Barsha');
   await page.getByText('We deliver to Al Barsha, Dubai').waitFor();
-  await page.getByText('Delivery in 1–2 days, free').waitFor();
+  await page.getByText('Standard delivery in 1–2 days', { exact: true }).waitFor();
   const body = (await page.textContent('body')) || '';
   assert.doesNotMatch(body, /jeebly|logistics hub|out of range/i, 'no courier details for customers');
 

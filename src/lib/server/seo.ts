@@ -285,12 +285,13 @@ function dayRange(text: string): { min: number; max: number } | null {
   return { min: Math.min(...nums), max: Math.max(...nums) };
 }
 
-/** Delivery to the UAE: standard delivery is free (orders.ts DELIVERY_FEE), in the days Settings → Delivery says. */
+/** Delivery to the UAE: standard delivery's charge and days, as Settings → Delivery says. */
 function shippingDetails() {
-  const days = dayRange(getSettings('delivery').standardDays);
+  const d = getSettings('delivery');
+  const days = dayRange(d.standardDays);
   return {
     '@type': 'OfferShippingDetails',
-    shippingRate: { '@type': 'MonetaryAmount', value: '0.00', currency: 'AED' },
+    shippingRate: { '@type': 'MonetaryAmount', value: (Math.round((Number(d.standardFee) || 0) * 100) / 100).toFixed(2), currency: 'AED' },
     shippingDestination: { '@type': 'DefinedRegion', addressCountry: 'AE' },
     ...(days
       ? {

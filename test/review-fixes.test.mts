@@ -7,6 +7,7 @@ import path from 'node:path';
 import zlib from 'node:zlib';
 import { test } from 'node:test';
 import { tempDataDir } from './helpers.mjs';
+import { fake } from './fixtures/fake.mjs';
 
 // Regression tests for the security and correctness review of the server-side shop.
 tempDataDir();
@@ -41,13 +42,13 @@ function order(phone: string, items?: unknown[], over: Record<string, unknown> =
 }
 
 test('courier and SMS keys are blanked in backups (the live database keeps them)', async () => {
-  await settings.updateSettings('courier', { jeebly: { apiKey: 'JEEBLY-SECRET-123456', clientKey: 'CLIENT-SECRET-654321' } });
+  await settings.updateSettings('courier', { jeebly: { apiKey: fake('JEEBLY-', 'SECRET-123456'), clientKey: fake('CLIENT-', 'SECRET-654321') } });
   const result = await backup.createBackup();
   const db = backup.openBackup(fs.readFileSync(result.file)).find((e) => e.name === 'shop.db')!;
-  assert.ok(!db.data.includes('JEEBLY-SECRET-123456'), 'API key not in the backup, not even in free pages');
-  assert.ok(!db.data.includes('CLIENT-SECRET-654321'));
+  assert.ok(!db.data.includes(fake('JEEBLY-', 'SECRET-123456')), 'API key not in the backup, not even in free pages');
+  assert.ok(!db.data.includes(fake('CLIENT-', 'SECRET-654321')));
   assert.ok(db.data.includes('"jeebly"'), 'the rest of the courier settings are kept');
-  assert.equal(settings.getSettings('courier').jeebly.apiKey, 'JEEBLY-SECRET-123456', 'live settings untouched');
+  assert.equal(settings.getSettings('courier').jeebly.apiKey, fake('JEEBLY-', 'SECRET-123456'), 'live settings untouched');
 });
 
 test('a test connection aimed at a new host does not get the saved key', async () => {

@@ -16,6 +16,7 @@ import { after, before, test } from 'node:test';
 import Database from 'better-sqlite3';
 import { jsonRequest, tempDataDir, LATEST_DB_VERSION, UNDO_MIGRATION_14, UNDO_MIGRATION_15 } from './helpers.mjs';
 import { startStripeMock, TEST_KEYS, type StripeMock } from './stripe-mock.mjs';
+import { fake } from './fixtures/fake.mjs';
 
 const dir = tempDataDir();
 delete process.env.BACKUP_PASSPHRASE;
@@ -99,11 +100,11 @@ test('Settings → Payments: off by default; keys validated; on needs all three 
       return (e as { status: number }).status;
     }
   };
-  assert.equal(await refused({ stripePublishableKey: 'sk_test_51abcdefghijklmnop' }), 400, 'a secret key in the publishable field');
-  assert.equal(await refused({ stripeSecretKey: 'pk_test_51abcdefghijklmnop' }), 400, 'the publishable key in the secret field');
+  assert.equal(await refused({ stripePublishableKey: fake('sk_test_', '51abcdefghijklmnop') }), 400, 'a secret key in the publishable field');
+  assert.equal(await refused({ stripeSecretKey: fake('pk_test_', '51abcdefghijklmnop') }), 400, 'the publishable key in the secret field');
   assert.equal(await refused({ stripeWebhookSecret: 'not-a-secret' }), 400);
   assert.equal(await refused({ cardEnabled: true, stripePublishableKey: TEST_KEYS.publishable }), 400, 'on without the secret keys');
-  assert.equal(await refused({ stripePublishableKey: 'pk_live_51abcdefghijklmnopqrst', stripeSecretKey: TEST_KEYS.secret, stripeWebhookSecret: TEST_KEYS.webhook }), 400, 'live publishable with a test secret');
+  assert.equal(await refused({ stripePublishableKey: fake('pk_live_', '51abcdefghijklmnopqrst'), stripeSecretKey: TEST_KEYS.secret, stripeWebhookSecret: TEST_KEYS.webhook }), 400, 'live publishable with a test secret');
   assert.equal(settings.getSettings('payments').stripeSecretKey, '', 'nothing refused was stored');
 
   await keysOn();
@@ -241,7 +242,7 @@ test('the webhook refuses a wrong signature, no saved secret, no signature, an o
   const pi = mock.succeed(intentOf(data.order!.id).id);
   const good = mock.event('payment_intent.succeeded', pi);
   const answers = [
-    await webhook(good.body, mock.event('payment_intent.succeeded', pi, { secret: 'whsec_someoneElsesSecret00000000' }).signature),
+    await webhook(good.body, mock.event('payment_intent.succeeded', pi, { secret: fake('whsec_', 'someoneElsesSecret00000000') }).signature),
     await webhook(good.body, null),
     await webhook(good.body, 't=1,v1=deadbeef'),
     await webhook(good.body.replace('"aed"', '"usd"'), good.signature),
@@ -544,7 +545,7 @@ test('a paid card order the saved keys can’t reach: Cancel & refund says why (
 test('saving keys of another mode while card orders are open warns (never blocks); same mode says nothing', async () => {
   const open = await placeCard();
   assert.equal(payments.paymentsModeWarning(TEST_KEYS.secret, TEST_KEYS.secret), null);
-  const w = payments.paymentsModeWarning(TEST_KEYS.secret, 'sk_live_51BuhLiveKey00000000000000');
+  const w = payments.paymentsModeWarning(TEST_KEYS.secret, fake('sk_live_', '51BuhLiveKey00000000000000'));
   assert.ok(w && /still open from test mode/.test(w) && /Cancel without Stripe refund/.test(w), w ?? '');
   assert.match(payments.paymentsModeWarning(TEST_KEYS.secret, '') ?? '', /Without a secret key/);
   await payments.abandonCardPayment(open.data.order!.id, open.data.payment!.clientSecret);
@@ -849,7 +850,7 @@ test('the test-only Stripe address is honoured only on this machine', async () =
   const saved = process.env.BUH_TEST_STRIPE_API;
   try {
     process.env.BUH_TEST_STRIPE_API = 'https://evil.example:443/';
-    const client = payments.stripeClient('sk_test_51OtherKeyForThisCheck000000');
+    const client = payments.stripeClient(fake('sk_test_', '51OtherKeyForThisCheck000000'));
     const host = (client as unknown as { _api: { host: string } })._api.host;
     assert.equal(host, 'api.stripe.com', 'anything but a loopback address is ignored');
   } finally {

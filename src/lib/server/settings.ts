@@ -662,11 +662,14 @@ const VALIDATORS: { [K in SettingsKey]: (input: Obj, current: SettingsMap[K]) =>
     if (!EMIRATES.includes(pickupEmirate)) throw new HttpError(400, 'Pickup emirate must be one of the seven Emirates.');
     const packaging = input.packagingGrams === undefined || input.packagingGrams === null || input.packagingGrams === '' ? current.packagingGrams ?? 200 : Number(input.packagingGrams);
     if (!Number.isInteger(packaging) || packaging < 0 || packaging > 5000) throw new HttpError(400, 'Packaging weight must be whole grams from 0 to 5000.');
+    const pieceIn = input.photoPieceGrams === undefined || input.photoPieceGrams === null || input.photoPieceGrams === '' ? current.photoPieceGrams ?? 1000 : Number(input.photoPieceGrams);
+    if (!Number.isInteger(pieceIn) || pieceIn < 1 || pieceIn > 20_000) throw new HttpError(400, 'Weight per piece (order from a photo) must be whole grams from 1 to 20000.');
     // The label paper: A5 (default) or a 4 × 6 in label; nothing else.
     if (input.labelPaper !== undefined && input.labelPaper !== 'a5' && input.labelPaper !== '4x6') throw new HttpError(400, 'Label paper: A5 or 4 × 6 in.');
     const labelPaper = input.labelPaper === 'a5' || input.labelPaper === '4x6' ? input.labelPaper : current.labelPaper ?? 'a5';
     return {
       packagingGrams: packaging,
+      photoPieceGrams: pieceIn,
       labelPaper,
       autoAssignRules: {
         codCourier: provider(rules.codCourier, current.autoAssignRules.codCourier),
@@ -938,10 +941,14 @@ const VALIDATORS: { [K in SettingsKey]: (input: Obj, current: SettingsMap[K]) =>
       .slice(0, 200);
     const tooShort = notServed.find((a) => a.replace(/[^\p{L}\p{N}]/gu, '').length < 3);
     if (tooShort) throw new HttpError(400, `Areas not served: "${tooShort}" is too short; write the full area name.`);
-    const feeIn = input.sameDayFee === undefined ? current.sameDayFee : Number(input.sameDayFee);
     // 19.99 × 100 is 1998.9999… in floating point: compare with a tolerance, then keep exact fils.
-    if (!Number.isFinite(feeIn) || feeIn < 0 || feeIn > 500 || Math.abs(feeIn * 100 - Math.round(feeIn * 100)) > 1e-6) throw new HttpError(400, 'Same-day charge: AED 0 to 500 (up to 2 decimals).');
-    const fee = Math.round(feeIn * 100) / 100;
+    const charge = (v: unknown, fallback: number, field: string): number => {
+      const n = v === undefined ? fallback : Number(v);
+      if (v === null || v === '' || !Number.isFinite(n) || n < 0 || n > 500 || Math.abs(n * 100 - Math.round(n * 100)) > 1e-6) throw new HttpError(400, `${field}: AED 0 to 500 (up to 2 decimals).`);
+      return Math.round(n * 100) / 100;
+    };
+    const fee = charge(input.sameDayFee, current.sameDayFee, 'Same-day charge');
+    const standardFee = charge(input.standardFee, current.standardFee, 'Standard delivery charge');
     const cutoff = text(input.sameDayCutoff, 'Same-day cut-off', 5, current.sameDayCutoff);
     if (!/^([01]\d|2[0-3]):[0-5]\d$/.test(cutoff)) throw new HttpError(400, 'Same-day cut-off: a time like 13:00.');
     const sameDayEmirates = emirateList(input.sameDayEmirates, 'Same-day emirates', current.sameDayEmirates);
@@ -952,7 +959,10 @@ const VALIDATORS: { [K in SettingsKey]: (input: Obj, current: SettingsMap[K]) =>
       emirates,
       notServed,
       standardDays: text(input.standardDays, 'Delivery time', 40, current.standardDays) || '1–2 days',
+      standardName: text(input.standardName, 'Standard delivery name', 40, current.standardName) || 'Standard delivery',
+      standardFee,
       sameDayEnabled,
+      sameDayName: text(input.sameDayName, 'Same-day name', 40, current.sameDayName) || 'Same day',
       sameDayFee: fee,
       sameDayCutoff: cutoff,
       sameDayEmirates,

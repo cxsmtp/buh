@@ -19,6 +19,9 @@ import { after, before, test } from 'node:test';
 import { hasBuild, rawFetch, startServer, type RunningServer } from './server.mjs';
 import { openAdminSection } from './helpers.mjs';
 import { makeServiceAccount, OAUTH_CLIENT, startGoogleMock, type GoogleMock } from './google-drive-mock.mjs';
+import { ownerPassword, wrongLogin } from './fixtures/fake.mjs';
+/** The owner password for this run (made up when the tests start). */
+const OWNER_PASSWORD = ownerPassword();
 
 type PW = typeof import('playwright');
 const pw: PW | null = hasBuild ? await import('playwright').catch(() => null) : null;
@@ -26,7 +29,7 @@ const skip = !pw;
 type Page = import('playwright').Page;
 
 const SHOTS = process.env.BUH_SHOTS_DIR || '';
-const PASSWORD = 'Backup-Password-Owner-Pass-1';
+const PASSWORD = OWNER_PASSWORD;
 
 let google: GoogleMock;
 let server: RunningServer;
@@ -42,7 +45,7 @@ before(async () => {
   server = await startServer({ BUH_TEST_GOOGLE_API: google.url });
   browser = await pw!.chromium.launch();
   const h = { 'content-type': 'application/json', origin: server.base };
-  await fetch(`${server.base}/api/admin/login`, { method: 'POST', headers: h, body: JSON.stringify({ email: 'x@y.z', password: 'x' }) });
+  await fetch(`${server.base}/api/admin/login`, { method: 'POST', headers: h, body: JSON.stringify(wrongLogin()) });
   await new Promise((r) => setTimeout(r, 300));
   const once = server.log().match(/Password: (\S+)/)![1];
   const login = await fetch(`${server.base}/api/admin/login`, { method: 'POST', headers: h, body: JSON.stringify({ email: 'admin@beautifuluaehome.com', password: once }) });
@@ -140,7 +143,7 @@ for (const width of [375, 1280]) {
     assert.equal(await page.evaluate(() => navigator.clipboard.readText()), pass);
     const [download] = await Promise.all([page.waitForEvent('download'), made.getByRole('button', { name: 'Download as a text file' }).click()]);
     assert.equal(download.suggestedFilename(), 'beautiful-uae-home-backup-password.txt');
-    const saved = path.join(os.tmpdir(), `buh-pw-dl-${Date.now()}.txt`);
+    const saved = path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'buh-pw-dl-')), 'password.txt');
     await download.saveAs(saved);
     assert.ok(fs.readFileSync(saved, 'utf8').includes(pass));
     fs.rmSync(saved);
@@ -248,12 +251,12 @@ for (const width of [375, 1280]) {
       assert.ok(await card.getByLabel('Step 1 done').isChecked());
       assert.equal(await card.getByLabel(/Project ID/).inputValue(), 'beautiful-uae-home-4711');
       // The client file: a service account key refused with what to do, Google's client file read in.
-      const sa = path.join(os.tmpdir(), `buh-sa-${Date.now()}.json`);
+      const sa = path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'buh-sa-')), 'service-account.json');
       fs.writeFileSync(sa, makeServiceAccount().json);
       await card.getByTestId('drive-client-file').setInputFiles(sa);
       await card.getByTestId('drive-client-file-note').filter({ hasText: /service account key, not an OAuth client/ }).waitFor();
       fs.rmSync(sa);
-      const clientFile = path.join(os.tmpdir(), `client_secret_${Date.now()}.json`);
+      const clientFile = path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'buh-client-')), 'client_secret.json');
       fs.writeFileSync(clientFile, JSON.stringify({ installed: { client_id: OAUTH_CLIENT.id, project_id: 'beautiful-uae-home-4711', auth_uri: 'https://accounts.google.com/o/oauth2/auth', token_uri: 'https://oauth2.googleapis.com/token', client_secret: OAUTH_CLIENT.secret, redirect_uris: ['http://localhost'] } }));
       await card.getByTestId('drive-client-file').setInputFiles(clientFile);
       fs.rmSync(clientFile);

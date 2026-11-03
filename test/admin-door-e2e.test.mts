@@ -18,6 +18,9 @@ import path from 'node:path';
 import { after, before, test } from 'node:test';
 import { SMTPServer } from 'smtp-server';
 import { adminPathIn, hasBuild, openDoor, rawFetch, startServer, type RunningServer } from './server.mjs';
+import { ownerPassword } from './fixtures/fake.mjs';
+/** The owner password for this run (made up when the tests start). */
+const OWNER_PASSWORD = ownerPassword();
 
 type PW = typeof import('playwright');
 const pw: PW | null = hasBuild ? await import('playwright').catch(() => null) : null;
@@ -25,7 +28,7 @@ const skip = !hasBuild;
 const skipBrowser = !pw;
 
 const EMAIL = 'admin@beautifuluaehome.com';
-let password = 'Door-Owner-Pass-1';
+let password = OWNER_PASSWORD;
 let server: RunningServer;
 let browser: import('playwright').Browser;
 let cookie = '';

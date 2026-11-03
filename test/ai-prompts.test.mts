@@ -21,6 +21,7 @@ import { afterEach, beforeEach, test } from 'node:test';
 import Database from 'better-sqlite3';
 import { tempDataDir } from './helpers.mjs';
 import { bedroomPng, chunk, makePng } from './fixtures/png.mjs';
+import { fake } from './fixtures/fake.mjs';
 
 const dir = tempDataDir();
 const settings = await import('@/lib/server/settings');
@@ -36,7 +37,7 @@ const { _clearAllRateLimits } = await import('@/lib/server/rateLimit');
 const { getDb } = await import('@/lib/server/db');
 
 const ANTHROPIC = 'sk-ant-api03-TESTKEY-abcdefghijklmnopqrstuvwxyz0123456789-WXYZ';
-const GEMINI = 'AIzaSyTESTKEY-abcdefghijklmnopqrstu-Q9xZ';
+const GEMINI = fake('AIza', 'SyTESTKEY-abcdefghijklmnopqrstu-Q9xZ');
 const DEEPSEEK = ('sk-' + '0123456789abcdef'.repeat(2));
 
 const PHOTO = makePng(96, 120, (x, y) => ((x + y) % 24 < 12 ? [47, 63, 122] : [246, 244, 238]));

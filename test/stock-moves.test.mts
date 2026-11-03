@@ -14,6 +14,9 @@ import { after, before, describe, test } from 'node:test';
 import Database from 'better-sqlite3';
 import { tempDataDir } from './helpers.mjs';
 import { hasBuild, startServer, type RunningServer } from './server.mjs';
+import { ownerPassword, wrongLogin } from './fixtures/fake.mjs';
+/** The owner password for this run (made up when the tests start). */
+const OWNER_PASSWORD = ownerPassword();
 
 const dir = tempDataDir();
 const products = await import('@/lib/server/products');
@@ -330,12 +333,12 @@ describe('stock API (real build)', { skip: !hasBuild }, () => {
   before(async () => {
     server = await startServer();
     const h = { 'content-type': 'application/json', origin: server.base };
-    await fetch(`${server.base}/api/admin/login`, { method: 'POST', headers: h, body: JSON.stringify({ email: 'x@y.z', password: 'x' }) });
+    await fetch(`${server.base}/api/admin/login`, { method: 'POST', headers: h, body: JSON.stringify(wrongLogin()) });
     await new Promise((r) => setTimeout(r, 300));
     const once = server.log().match(/Password: (\S+)/)![1];
     const login = await fetch(`${server.base}/api/admin/login`, { method: 'POST', headers: h, body: JSON.stringify({ email: 'admin@beautifuluaehome.com', password: once }) });
     const first = (login.headers.get('set-cookie') || '').split(';')[0];
-    const changed = await fetch(`${server.base}/api/admin/password`, { method: 'POST', headers: { ...h, cookie: first }, body: JSON.stringify({ currentPassword: once, newPassword: 'Stock-Owner-Pass-1' }) });
+    const changed = await fetch(`${server.base}/api/admin/password`, { method: 'POST', headers: { ...h, cookie: first }, body: JSON.stringify({ currentPassword: once, newPassword: OWNER_PASSWORD }) });
     cookie = (changed.headers.get('set-cookie') || '').split(';')[0];
   });
   after(() => server?.stop());

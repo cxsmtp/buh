@@ -220,6 +220,21 @@ export const AdminCouriersTab: React.FC<AdminCouriersTabProps> = ({ settings, se
             <span className="block text-ink-muted mt-1">Added to the sizes&apos; weights (Inventory → each size&apos;s Weight) to make the parcel&apos;s weight.</span>
           </label>
           <label className="block">
+            <span className="block text-ink-soft font-semibold mb-1">Weight per piece, order from a photo (g)</span>
+            <input
+              type="number"
+              inputMode="numeric"
+              min={1}
+              max={20000}
+              step={1}
+              value={formData.photoPieceGrams ?? 1000}
+              onChange={(e) => setFormData({ ...formData, photoPieceGrams: Math.max(1, Math.min(20000, Math.round(Number(e.target.value) || 1))) })}
+              className={input}
+              data-testid="photo-piece-grams"
+            />
+            <span className="block text-ink-muted mt-1">An order from a photo has no sizes: its weight is the pieces (bedsheets) × this (1000 g = 1 kg), plus the packaging. You can still change it when booking.</span>
+          </label>
+          <label className="block">
             <span className="block text-ink-soft font-semibold mb-1">Label paper</span>
             <select value={formData.labelPaper ?? 'a5'} onChange={(e) => setFormData({ ...formData, labelPaper: e.target.value === '4x6' ? '4x6' : 'a5' })} className={input} data-testid="label-paper">
               <option value="a5">A5 (148 × 210 mm)</option>
