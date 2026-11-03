@@ -21,6 +21,8 @@ export function OrderPhotoCheck({ order, onOrderChanged }: { order: Order; onOrd
   if (!p || !line) return null;
 
   const closed = order.status === 'cancelled' || order.status === 'delivered' || order.status === 'dispatched' || order.status === 'out_for_delivery';
+  // Paid by card: the amount is what Stripe took; only confirming it (the same amount) is possible.
+  const byCard = order.paymentMethod === 'online_card';
   const confirm = async () => {
     const value = Number(amount.replace(/,/g, ''));
     if (!Number.isFinite(value) || value <= 0) return setProblem('Type the amount in AED, e.g. 350.');
@@ -63,7 +65,7 @@ export function OrderPhotoCheck({ order, onOrderChanged }: { order: Order; onOrd
             <label htmlFor={`${id}-amount`} className="block text-[11px] font-semibold text-ink-soft mb-1">
               Agreed amount (AED)
             </label>
-            <input id={`${id}-amount`} type="number" inputMode="decimal" min={1} step="0.01" value={amount} onChange={(e) => setAmount(e.target.value)} className="w-32 min-h-11 px-3 rounded-xl border border-line-strong bg-surface text-ink text-sm focus:outline-none focus:ring-2 focus:ring-gold" />
+            <input id={`${id}-amount`} readOnly={byCard} title={byCard ? 'Paid by card: the amount the customer paid' : undefined} type="number" inputMode="decimal" min={1} step="0.01" value={amount} onChange={(e) => setAmount(e.target.value)} className="w-32 min-h-11 px-3 rounded-xl border border-line-strong bg-surface text-ink text-sm focus:outline-none focus:ring-2 focus:ring-gold" />
           </div>
           <button type="button" disabled={busy} onClick={() => void confirm()} className="min-h-11 px-3 py-2 rounded-xl bg-success text-paper text-xs font-bold inline-flex items-center gap-1.5 disabled:opacity-50 focus:outline-none focus-visible:ring-2 focus-visible:ring-gold">
             {busy ? <Loader2 className="w-4 h-4 animate-spin" aria-hidden="true" /> : <CheckCircle2 className="w-4 h-4" aria-hidden="true" />}

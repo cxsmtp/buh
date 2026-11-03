@@ -14,7 +14,7 @@ const settings = await import('@/lib/server/settings');
 const { getDb } = await import('@/lib/server/db');
 
 test('by default: three short, calm lines', () => {
-  assert.deepEqual(DEFAULT_MARQUEE, ['Free delivery across the UAE in 1–2 days', 'Cash on delivery', 'Handmade in small batches']);
+  assert.deepEqual(DEFAULT_MARQUEE, ['Standard delivery across the UAE in 1–2 days', 'Cash on delivery', 'Handmade in small batches']);
   assert.ok(DEFAULT_MARQUEE.every((l) => l.length <= MARQUEE_MAX_CHARS && stripEmoji(l) === l));
   assert.deepEqual(settings.getSettings('brand').marquee.messages, DEFAULT_MARQUEE);
 });

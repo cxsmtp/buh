@@ -362,8 +362,8 @@ export function placeOrder(input: unknown, context: PlaceOrderContext = {}): Pla
   const paymentMethod = text(body.paymentMethod, 'Payment method', 20, { required: true });
   const card = paymentMethod === 'online_card';
   // "Order from your photo": a piece agreed on WhatsApp (photos, the agreed amount), not from the catalogue.
+  // Paid by card, the customer pays the amount they typed (with the card fee); the owner can't change it afterwards.
   const photo = body.photo === undefined ? null : parsePhotoOrder(body.photo);
-  if (photo && card) throw new HttpError(400, 'An order from your photo is paid on delivery or by bank transfer, once we have confirmed the amount.', {}, { code: 'photo_no_card' });
   if (card && !cardPaymentsReady()) throw new HttpError(400, 'Card payment is not available right now. Please choose Cash on Delivery.', {}, { code: 'card_unavailable' });
   // Settings → Phone check "WhatsApp (free)": no code; the number typed (UAE mobile rules) is
   // confirmed by the customer's WhatsApp message afterwards. "SMS code": with an SMS gateway
@@ -922,8 +922,8 @@ export function readPhotoOrderPhoto(orderId: string, n: number): { bytes: Buffer
 /**
  * The owner checks the amount of an order from a photo (and corrects it if the customer typed it
  * wrong): only then can it be confirmed or booked with the courier. Audited inside the same
- * transaction; the same amount again changes nothing. Refused once it is with the courier, paid by
- * transfer, closed, or has a VAT breakdown (then: cancel, and ask for it again with the right amount).
+ * transaction; the same amount again changes nothing. A change is refused once it is with the courier,
+ * paid by card or transfer, closed, or has a VAT breakdown (then: cancel, and ask for it again with the right amount).
  */
 export function confirmPhotoAmount(id: string, amount: unknown, actor: string): { order: Order; changed: boolean } {
   const itemFils = photoAmountFils(amount);
@@ -935,6 +935,8 @@ export function confirmPhotoAmount(id: string, amount: unknown, actor: string): 
     const fromFils = fils(order.items[0].totalPrice);
     if (order.photoOrder.confirmedAt && fromFils === itemFils) return { order, changed: false };
     if (fromFils !== itemFils) {
+      // Paid (or being paid) by card: Stripe takes the amount the customer typed, so it stays; a wrong one is cancelled and refunded.
+      if (order.paymentMethod === 'online_card') throw new HttpError(409, `${id} is paid by card, so its amount can’t change. If it is wrong, use “Cancel & refund”, and ask the customer to order again with the right amount.`, {}, { code: 'photo_card' });
       if (order.bankTransfer?.state === 'paid') throw new HttpError(409, `${id} is already paid: its amount can’t change.`);
       if (orderVat(id)) throw new HttpError(409, `${id} has a VAT breakdown, so its amount can’t change. Cancel it, and ask the customer to send it again with the right amount.`, {}, { code: 'photo_vat' });
       const totalFils = itemFils + fils(order.deliveryFee) + fils(order.codFee) + fils(order.cardFee ?? 0) + fils(order.vatAdded ?? 0);

@@ -146,7 +146,7 @@ export function PhotoOrderSheet({ onClose, onContinue, draft }: { onClose: () =>
             <input id={`${id}-amount`} className={field} type="number" inputMode="decimal" min={1} max={PHOTO_ORDER_LIMITS.maxAmount} step="0.01" value={amount} onChange={(e) => setAmount(e.target.value)} placeholder="e.g. 350" required />
           </div>
         </div>
-        <p className="text-xs text-ink-soft">The total for everything in the photos, as agreed on WhatsApp. Standard delivery is free.</p>
+        <p className="text-xs text-ink-soft">The total for everything in the photos, as agreed on WhatsApp, with standard delivery.</p>
 
         {error && (
           <p role="alert" className="text-xs font-semibold text-danger">

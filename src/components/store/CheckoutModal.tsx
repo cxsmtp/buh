@@ -767,7 +767,7 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
           )}
           {confirmedOrder.photoOrder && (
             <p role="status" data-testid="photo-order-next" className="text-xs text-ink-soft bg-ivory border border-line rounded-xl px-3 py-2 text-left">
-              We&rsquo;ll check your photos and the amount (AED {formatAed(toFils(confirmedOrder.total))}) and confirm on WhatsApp. Once it ships, Track Order with <span className="font-mono">{confirmedOrder.id}</span> and your phone number shows the courier&rsquo;s tracking number.
+              {confirmedOrder.paymentMethod === 'online_card' ? <>We&rsquo;ll check your photos and confirm on WhatsApp.</> : <>We&rsquo;ll check your photos and the amount (AED {formatAed(toFils(confirmedOrder.total))}) and confirm on WhatsApp.</>} Once it ships, Track Order with <span className="font-mono">{confirmedOrder.id}</span> and your phone number shows the courier&rsquo;s tracking number.
             </p>
           )}
           {weCall && (
@@ -865,7 +865,7 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
             <div className="flex justify-between items-center">
               <span className="text-ink-muted font-medium">Delivery</span>
               <span className="text-gold-deep flex items-center gap-1">
-                <span>{confirmedOrder.deliveryOption === 'same_day' ? `Same day (AED ${confirmedOrder.deliveryFee})` : `${confirmedOrder.courier.serviceability?.deliverySpeed || deliverySettings.standardDays}, free`}</span>
+                <span>{confirmedOrder.deliveryOption === 'same_day' ? `Same day (AED ${confirmedOrder.deliveryFee})` : `Standard, ${confirmedOrder.courier.serviceability?.deliverySpeed || deliverySettings.standardDays}`}</span>
               </span>
             </div>
 
@@ -956,7 +956,7 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
               Checkout
             </h2>
             <p className="text-[11px] text-ink-muted tracking-[0.02em]">
-              {card ? 'Free delivery across the UAE · Card, Apple Pay, Google Pay or cash on delivery' : 'Free delivery across the UAE · Cash on delivery or bank transfer'}
+              {card ? 'Standard delivery across the UAE · Card, Apple Pay, Google Pay or cash on delivery' : 'Standard delivery across the UAE · Cash on delivery or bank transfer'}
             </p>
           </div>
           <button
@@ -1012,7 +1012,7 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
             <ExpressCheckout
               publishableKey={card.publishableKey}
               amountFils={cardTotalFils}
-              shippingRate={sameDayChosen ? { id: 'same_day', displayName: 'Same-day delivery', amount: deliveryFils } : { id: 'standard', displayName: `Free delivery in ${deliverySettings.standardDays}`, amount: 0 }}
+              shippingRate={sameDayChosen ? { id: 'same_day', displayName: 'Same-day delivery', amount: deliveryFils } : { id: 'standard', displayName: `Standard delivery in ${deliverySettings.standardDays}`, amount: 0 }}
               lineItems={cardFee > 0 || cardVatFils > 0 ? [{ name: 'Items', amount: totalFils - deliveryFils }, ...(cardFee > 0 ? [{ name: `Card payment fee (${percentText(feePercent)}%)`, amount: cardFee }] : []), ...(cardVatFils > 0 ? [{ name: `VAT (${percentText(vatAddedPercent)}%)`, amount: cardVatFils }] : [])] : undefined}
               servesEmirate={(state, city) => {
                 const em = emirateFrom(state) ?? emirateFrom(city);
@@ -1319,7 +1319,7 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
                 )}
                 <div>
                   <div className={`font-semibold ${delivery.serviceable ? 'text-success' : 'text-danger'}`}>{delivery.message}</div>
-                  {delivery.serviceable && <div className="text-ink-soft">Delivery in {delivery.days}, free</div>}
+                  {delivery.serviceable && <div className="text-ink-soft">Standard delivery in {delivery.days}</div>}
                 </div>
               </div>
               {delivery.serviceable && deliverySettings.sameDayEnabled && (
@@ -1328,7 +1328,7 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
                   <label className={`flex items-start gap-2 p-2.5 rounded-xl border cursor-pointer ${!sameDayChosen ? 'border-ink bg-surface' : 'border-line bg-surface/60'}`}>
                     <input type="radio" name="delivery-option" className="mt-0.5" checked={!sameDayChosen} onChange={() => setDeliveryOption('standard')} />
                     <span>
-                      <strong className="block text-ink">Standard · free</strong>
+                      <strong className="block text-ink">Standard delivery</strong>
                       <span className="text-ink-muted">{delivery.days}</span>
                     </span>
                   </label>

@@ -112,7 +112,7 @@ export const DEFAULT_THEME: FestivalTheme = look({
   motif: 'sparkle',
   greeting: 'Welcome',
   headline: 'Fine bed linen for every home in the Emirates',
-  marquee: ['Free delivery across the UAE in 1–2 days'],
+  marquee: ['Standard delivery across the UAE in 1–2 days'],
 });
 
 export const DEFAULT_THEME_ID = 'default';

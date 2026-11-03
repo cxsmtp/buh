@@ -7,7 +7,7 @@
 export const MARQUEE_MAX_ITEMS = 3;
 export const MARQUEE_MAX_CHARS = 60;
 
-export const DEFAULT_MARQUEE = ['Free delivery across the UAE in 1–2 days', 'Cash on delivery', 'Handmade in small batches'];
+export const DEFAULT_MARQUEE = ['Standard delivery across the UAE in 1–2 days', 'Cash on delivery', 'Handmade in small batches'];
 
 /** What the bar said before BUH-02.07 (long, with emoji): shops still showing it get the new lines. */
 export const LEGACY_MARQUEE = [

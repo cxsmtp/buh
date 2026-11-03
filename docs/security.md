@@ -474,8 +474,8 @@ When something changes (see the deployment guide), the shop backs itself up:
   - Photos: 1 to 4, each a real PNG, JPEG or WebP by its first bytes, at most 1.2 MB (the phone shrinks them first).
   - Amount: AED 1 to 20,000, at most two decimals, worked out in fils on the server.
   - Pieces: 1 to 20.
-  - No card payment, and no bag items with it.
-- **The amount is the customer's word until the owner confirms it.** The order can't be confirmed, booked or dispatched until **Confirm amount** (`POST /api/admin/orders/<id>/photo-amount`: owner only, same-site, 1 KB body, `amount` only). The confirmation is idempotent and audited (`order.photo_amount_confirmed`, from → to) in the same transaction. It is refused once the order is with the courier, paid by transfer, closed, or has a VAT breakdown. What the customer typed stays on the order.
+  - No bag items with it. Card payment works as for any order (only Stripe's word marks it paid); paid by card, the amount can't be changed afterwards (cancel and refund instead).
+- **The amount is the customer's word until the owner confirms it.** The order can't be confirmed, booked or dispatched until **Confirm amount** (`POST /api/admin/orders/<id>/photo-amount`: owner only, same-site, 1 KB body, `amount` only). The confirmation is idempotent and audited (`order.photo_amount_confirmed`, from → to) in the same transaction. A change is refused once the order is with the courier, paid by card or transfer, closed, or has a VAT breakdown. What the customer typed stays on the order.
 - **No stock is touched**: the line is not a catalogue product, so nothing is reserved or put back.
 - **The photos are private.** They are kept beside the transfer screenshots (`receipts/<order>.photo<n>.<ext>`, owner-only folder), so they are in every backup, restored by the restore script, removed by Go live, and counted in the uploads' disk limits (no room: the order is refused, and the customer is asked to send them on WhatsApp). They are served only to the owner (`/api/admin/orders/<id>/photos/<n>`): sandboxed, `nosniff`, never cached. The accountant is refused.
 

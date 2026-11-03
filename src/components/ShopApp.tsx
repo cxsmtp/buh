@@ -679,7 +679,7 @@ export function ShopApp({
         bankAskWhatsApp={bankAskWhatsApp}
         supportEmail={supportEmail}
         phoneVerification={phoneVerification}
-        card={photoDraft ? null : cardPayments}
+        card={cardPayments}
         landing={landing}
         onOrderPlaced={handleOrderPlaced}
         onPricesChanged={async () => {
