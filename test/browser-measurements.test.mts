@@ -115,7 +115,8 @@ for (const width of [375, 1280]) {
     const bag = page.getByRole('dialog', { name: /bag/i });
     await bag.getByText('Flat sheet: 260 x 270 cm').waitFor();
     await page.waitForTimeout(500); // the bag has finished sliding in
-    assert.equal(await bag.getByText(/undefined|Standard/).count(), 0);
+    // No placeholder size ("undefined", "Standard"); the bag's delivery line ("Standard delivery") is not one.
+    assert.equal(await bag.getByText(/undefined|\bStandard\b(?! delivery)/).count(), 0);
     assert.equal(await overflow(page), 0);
     await shot(page, `measure-bag-${width}.png`);
     assert.deepEqual(errors, []);
