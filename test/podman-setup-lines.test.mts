@@ -1,6 +1,6 @@
 /**
  * The one-line `setup` commands (src/lib/podmanSetup.ts) are the same everywhere an owner
- * copies them from (Settings → Versions, README, the deployment guide, the .bat), always pull a
+ * copies them from (Settings → Versions and the .bat), always pull a
  * newer updater image, and give the updater a bare socket path even when Podman reports
  * `unix://…` (regression: such a path in `-v` stopped the line before setup ran).
  */
@@ -14,25 +14,20 @@ import { SETUP_CMD, SETUP_LINUX, SETUP_POWERSHELL } from '@/lib/podmanSetup';
 
 const read = (f: string) => fs.readFileSync(path.join(import.meta.dirname, '..', f), 'utf8');
 
-test('the setup lines are the same in the guide, README and the .bat as on Settings → Versions', () => {
-  const guide = read('HOSTINGER_DEPLOYMENT_GUIDE.md');
-  const readme = read('README.md');
+test('the setup lines in the .bat are the same as on Settings → Versions, and each passes the registry login folder', () => {
+  // The README and the deployment guide no longer carry them (the owner had the documents
+  // replaced): Settings → Versions in the hub is where they are copied from.
   for (const line of [SETUP_CMD, SETUP_POWERSHELL, SETUP_LINUX]) {
-    assert.ok(guide.includes(`\n${line}\n`), `guide: ${line}`);
     assert.match(line, /-v "[^"]*containers:\/run\/buh\/registry-auth:ro"/, 'each line passes the registry login folder');
+    if (/podman run .*buh-updater:latest setup/.test(line)) assert.match(line, /podman run --rm --pull=newer /, `pulls a newer updater image first: ${line}`);
   }
-  for (const line of [SETUP_CMD, SETUP_POWERSHELL]) assert.ok(readme.includes(`\n${line}\n`), `README: ${line}`);
   // (the .bat has Windows line ends once checked out: .gitattributes)
   assert.ok(read('scripts/podman-autoupdate.bat').split(/\r?\n/).includes(`REM   ${SETUP_CMD}`), '.bat');
-  assert.match(guide, /Command Prompt \(cmd\), not PowerShell/);
-  assert.match(readme, /Command Prompt \(cmd\), not PowerShell/);
 });
 
-test('every documented setup line pulls a newer updater image first', () => {
-  for (const f of ['HOSTINGER_DEPLOYMENT_GUIDE.md', 'README.md', 'docs/user-guide.md', 'scripts/podman-autoupdate.bat']) {
-    for (const line of read(f).split('\n').filter((l) => /podman run .*buh-updater:latest setup/.test(l))) {
-      assert.match(line, /podman run --rm --pull=newer /, `${f}: ${line}`);
-    }
+test('every setup line in the .bat pulls a newer updater image first', () => {
+  for (const line of read('scripts/podman-autoupdate.bat').split('\n').filter((l) => /podman run .*buh-updater:latest setup/.test(l))) {
+    assert.match(line, /podman run --rm --pull=newer /, line);
   }
 });
 
