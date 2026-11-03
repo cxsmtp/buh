@@ -35,14 +35,15 @@ function dateOf(iso?: string): string {
 }
 
 /** The label itself: black on white, only what is on the order and in the owner's settings. */
-function Label({ order, shopName, pickup }: { order: Order; shopName: string; pickup: Partial<CourierSettings['jeebly']> }) {
+export function Label({ order, shopName, pickup }: { order: Order; shopName: string; pickup: Partial<CourierSettings['jeebly']> }) {
   const c = order.courier;
   const test = Boolean(c.simulated);
   const cod = order.paymentMethod === 'cod';
   const carrier = carrierLabel(c.provider, c.carrierName);
   const pieces = c.pieces || order.items.reduce((n, i) => n + i.quantity, 0);
+  // The sender as the owner entered it (Couriers → Pickup name: the legal name), else the shop's name.
+  const senderName = pickup.pickupLocationName?.trim() || shopName;
   const shipperLines = [
-    pickup.pickupLocationName && pickup.pickupLocationName !== shopName ? pickup.pickupLocationName : '',
     [pickup.pickupUnit, pickup.pickupBuilding].filter(Boolean).join(', '),
     [pickup.pickupAddress, pickup.pickupArea].filter(Boolean).join(', '),
     pickup.pickupLandmark ? `Landmark: ${pickup.pickupLandmark}` : '',
@@ -113,7 +114,7 @@ function Label({ order, shopName, pickup }: { order: Order; shopName: string; pi
       <div className="grid grid-cols-2 gap-2" style={{ fontSize: 9, lineHeight: 1.25 }}>
         <div className="min-w-0 break-words">
           <div className="font-bold uppercase">From</div>
-          <div className="font-bold">{shopName}</div>
+          <div className="font-bold" data-testid="label-sender">{senderName}</div>
           {shipperLines.map((l) => <div key={l}>{l}</div>)}
           {pickup.pickupPhone && <div>{pickup.pickupPhone}</div>}
         </div>

@@ -81,3 +81,21 @@ test('amounts on the label have two decimals', () => {
   assert.equal(aed2(1249.5), '1,249.50');
   assert.equal(aed2(0.1 + 0.2), '0.30');
 });
+
+test('reported: the label printed "Beautiful UAE Home" as the sender; it shows the pickup name entered in Couriers (the legal name), the shop name only when none is set', async () => {
+  const React = (await import('react')).default;
+  const { renderToStaticMarkup } = await import('react-dom/server');
+  const { Label } = await import('@/components/admin/ShippingLabelModal');
+  const order = {
+    id: 'BUH-261103-ABCDEF', createdAt: new Date().toISOString(), status: 'confirmed', paymentMethod: 'cod', paymentStatus: 'cod_pending', total: 275, subtotal: 275, deliveryFee: 0, codFee: 0, discount: 0,
+    customer: { fullName: 'Hessa Test', phone: '+971501234567', emirate: 'Dubai', area: 'Marina', streetAddress: 'Walk 1', buildingVilla: 'Tower', flatVillaNo: '9' },
+    items: [{ productId: 'p', title: 'King set', image: '', profileId: 'king', profileName: 'King', mattressSize: '', fittedSheet: '', flatSheet: '', pillowcases: '', unitPrice: 275, quantity: 1, totalPrice: 275 }],
+    courier: { provider: 'jeebly', serviceType: 'Scheduled', awbNumber: 'JB1', trackingUrl: '', status: '', pickupDate: '', weightKg: 1, pieces: 1, labelGenerated: true, codAmountCollected: 275 },
+  } as unknown as import('@/types').Order;
+  const pickup = { pickupLocationName: 'Beautiful Home Trading L.L.C', pickupPhone: '+971 50 111 2222', pickupAddress: 'Street 5', pickupArea: 'Al Barsha 1', pickupEmirate: 'Dubai' };
+  const html = renderToStaticMarkup(React.createElement(Label, { order, shopName: 'Beautiful UAE Home', pickup }));
+  assert.match(html, /data-testid="label-sender">Beautiful Home Trading L\.L\.C</);
+  assert.doesNotMatch(html, /Beautiful UAE Home/, 'the shop name is not printed when a pickup name is set');
+  const fallback = renderToStaticMarkup(React.createElement(Label, { order, shopName: 'Beautiful UAE Home', pickup: { ...pickup, pickupLocationName: '' } }));
+  assert.match(fallback, /data-testid="label-sender">Beautiful UAE Home</);
+});
