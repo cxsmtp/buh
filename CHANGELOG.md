@@ -1,5 +1,17 @@
 # Changelog
 
+## BUH-02.28.00 — 2026-11-03 13:24 UTC · [#61](https://github.com/cxsmtp/buh/pull/61)
+
+- **Order from your photo.** For a piece agreed on WhatsApp that isn't in the shop, share one link (or show a banner on the home page). The customer uploads its photos, types the amount you agreed and the pieces, then gives the address and payment (cash on delivery or bank transfer) and confirms on WhatsApp.
+- **You confirm the amount, then ship as usual.** In Orders the order shows the customer's photos and the amount they typed. **Confirm amount** (correct it if needed) lets you confirm it, book the courier and print the label. The customer follows the tracking number in Track Order.
+- **Switch it on when you're ready.** Settings → Store & contact → **Order from your photo**: **Take orders from a photo** (with **Copy link**) and **Show it on the home page**. Both are off by default, and the catalogue stays as it is.
+- **Safe by design.** The photos are private to you and kept in every backup. Nothing comes out of stock, and nothing is booked before you confirm the amount. Every confirmation is written to the audit log.
+- **Status.**
+  - **Benchmark:** pending.
+  - **Tests:** pending.
+  - **Dependency audit:** pending.
+  - **Security scan:** pending.
+
 ## BUH-02.27.00 — 2026-11-02 08:53 UTC · [#60](https://github.com/cxsmtp/buh/pull/60)
 
 - **Go live: start from zero.** Settings → System & backups → **Go live: remove the test orders** removes every order placed while you were testing, with its history, card and VAT records and transfer screenshots, so sales and money figures start from zero. The pieces those orders held go back to stock.
