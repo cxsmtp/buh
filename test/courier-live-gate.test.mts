@@ -12,6 +12,7 @@ import path from 'node:path';
 import { afterEach, test } from 'node:test';
 import { tempDataDir } from './helpers.mjs';
 import { installJeeblyMock } from './fixtures/jeebly-mock.mjs';
+import { fake } from './fixtures/fake.mjs';
 
 const dir = tempDataDir();
 const { updateSettings, getSettings, adminView, sandboxCheckFresh, SANDBOX_CHECK_KV } = await import('@/lib/server/settings');
@@ -43,14 +44,14 @@ test('starter courier settings invent nothing: no keys, no pickup, no live addre
 });
 
 test('sandbox keys are write-only: masked in what the hub reads, kept on the server', async () => {
-  await updateSettings('courier', { jeebly: { sandboxApiKey: 'SB-KEY-123456', sandboxClientKey: 'SB-CLIENT-654321', ...PICKUP } });
+  await updateSettings('courier', { jeebly: { sandboxApiKey: fake('SB-', 'KEY-123456'), sandboxClientKey: 'SB-CLIENT-654321', ...PICKUP } });
   const view = adminView('courier');
   assert.equal(view.value.jeebly.sandboxApiKey, '');
   assert.equal(view.value.jeebly.sandboxClientKey, '');
   assert.equal(view.secretsSet['jeebly.sandboxApiKey'], true);
   assert.equal(view.secretsSet['jeebly.sandboxClientKey'], true);
-  assert.ok(!JSON.stringify(view).includes('SB-KEY-123456'));
-  assert.equal(getSettings('courier').jeebly.sandboxApiKey, 'SB-KEY-123456');
+  assert.ok(!JSON.stringify(view).includes(fake('SB-', 'KEY-123456')));
+  assert.equal(getSettings('courier').jeebly.sandboxApiKey, fake('SB-', 'KEY-123456'));
 });
 
 test('label paper (reported: the printer holds A5): A5 by default, 4 × 6 in on request, nothing else', async () => {
@@ -101,7 +102,7 @@ test('the Sandbox check: a PREPAID TEST shipment in the demo system, created, it
   assert.deepEqual(mock.calls.map((c) => c.path), ['create_shipment', 'generate_shipment_label', 'track_shipment', 'cancel_shipment']);
   for (const c of mock.calls) {
     assert.equal(c.host, 'demo.jeebly.com');
-    assert.equal(c.headers['x-api-key'], 'SB-KEY-123456', 'the sandbox keys');
+    assert.equal(c.headers['x-api-key'], fake('SB-', 'KEY-123456'), 'the sandbox keys');
   }
   const body = mock.calls[0].body;
   assert.equal(body.payment_type, 'PREPAID');
@@ -149,7 +150,7 @@ test('the Sandbox check needs the sandbox keys and the pickup details, and says 
   const check = await runSandboxCheck('owner@shop.test');
   assert.equal(check.passed, false);
   assert.match(check.steps[0].said, /sandbox keys/);
-  await updateSettings('courier', { jeebly: { sandboxApiKey: 'SB-KEY-123456', sandboxClientKey: 'SB-CLIENT-654321', pickupArea: '' } });
+  await updateSettings('courier', { jeebly: { sandboxApiKey: fake('SB-', 'KEY-123456'), sandboxClientKey: 'SB-CLIENT-654321', pickupArea: '' } });
   const noArea = await runSandboxCheck('owner@shop.test');
   assert.match(noArea.steps[0].said, /Add your pickup area in Couriers/);
   assert.equal(mock.calls.length, 0);

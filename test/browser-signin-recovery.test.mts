@@ -9,6 +9,9 @@ import fs from 'node:fs';
 import { after, before, test } from 'node:test';
 import { hasBuild, startServer, type RunningServer } from './server.mjs';
 import { openAdminSection } from './helpers.mjs';
+import { ownerPassword, wrongLogin } from './fixtures/fake.mjs';
+/** The owner password for this run (made up when the tests start). */
+const OWNER_PASSWORD = ownerPassword();
 
 type PW = typeof import('playwright');
 const pw: PW | null = hasBuild ? await import('playwright').catch(() => null) : null;
@@ -17,7 +20,7 @@ const skip = !pw;
 let server: RunningServer;
 let browser: import('playwright').Browser;
 let cookie = '';
-let password = 'Recovery-Owner-Pass-1';
+let password = OWNER_PASSWORD;
 const EMAIL = 'admin@beautifuluaehome.com';
 
 const h = () => ({ 'content-type': 'application/json', origin: server.base });
@@ -32,7 +35,7 @@ before(async () => {
   if (skip) return;
   server = await startServer();
   browser = await pw!.chromium.launch();
-  await fetch(`${server.base}/api/admin/login`, { method: 'POST', headers: h(), body: JSON.stringify({ email: 'x@y.z', password: 'x' }) });
+  await fetch(`${server.base}/api/admin/login`, { method: 'POST', headers: h(), body: JSON.stringify(wrongLogin()) });
   await new Promise((r) => setTimeout(r, 300));
   const once = server.log().match(/Password: (\S+)/)![1];
   const login = await fetch(`${server.base}/api/admin/login`, { method: 'POST', headers: h(), body: JSON.stringify({ email: EMAIL, password: once }) });
@@ -275,7 +278,7 @@ test('after a restore the Admin Hub says to review passkeys and make new codes; 
   // First start of this "restored" shop: the one-time password, then our own.
   let shop = await startServer({ DATA_DIR: dataDir });
   const hh = () => ({ 'content-type': 'application/json', origin: shop.base });
-  await fetch(`${shop.base}/api/admin/login`, { method: 'POST', headers: hh(), body: JSON.stringify({ email: 'x@y.z', password: 'x' }) });
+  await fetch(`${shop.base}/api/admin/login`, { method: 'POST', headers: hh(), body: JSON.stringify(wrongLogin()) });
   // The one-time password is printed once the account is created; under load that can take a while.
   let found: RegExpMatchArray | null = null;
   for (let i = 0; i < 150 && !(found = shop.log().match(/Password: (\S+)/)); i++) await new Promise((r) => setTimeout(r, 100));

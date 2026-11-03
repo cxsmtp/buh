@@ -17,6 +17,9 @@ import path from 'node:path';
 import { after, before, test } from 'node:test';
 import { hasBuild, rawFetch, startServer, type RunningServer } from './server.mjs';
 import { openAdminSection } from './helpers.mjs';
+import { ownerPassword, wrongLogin } from './fixtures/fake.mjs';
+/** The owner password for this run (made up when the tests start). */
+const OWNER_PASSWORD = ownerPassword();
 
 type PW = typeof import('playwright');
 const pw: PW | null = hasBuild ? await import('playwright').catch(() => null) : null;
@@ -36,12 +39,12 @@ before(async () => {
   if (skip) return;
   server = await startServer();
   const h = { 'content-type': 'application/json', origin: server.base };
-  await fetch(`${server.base}/api/admin/login`, { method: 'POST', headers: h, body: JSON.stringify({ email: 'x@y.z', password: 'x' }) });
+  await fetch(`${server.base}/api/admin/login`, { method: 'POST', headers: h, body: JSON.stringify(wrongLogin()) });
   let once: string | undefined;
   for (let i = 0; i < 100 && !(once = server.log().match(/Password: (\S+)/)?.[1]); i++) await new Promise((r) => setTimeout(r, 100));
   const login = await fetch(`${server.base}/api/admin/login`, { method: 'POST', headers: h, body: JSON.stringify({ email: EMAIL, password: once }) });
   const first = (login.headers.get('set-cookie') || '').split(';')[0];
-  const changed = await fetch(`${server.base}/api/admin/password`, { method: 'POST', headers: { ...h, cookie: first }, body: JSON.stringify({ currentPassword: once, newPassword: 'Photo-Owner-Pass-1' }) });
+  const changed = await fetch(`${server.base}/api/admin/password`, { method: 'POST', headers: { ...h, cookie: first }, body: JSON.stringify({ currentPassword: once, newPassword: OWNER_PASSWORD }) });
   cookie = (changed.headers.get('set-cookie') || '').split(';')[0];
   assert.ok(cookie);
   await setStore({ whatsappNumber: '+971509998877' });

@@ -19,6 +19,9 @@ import { after, before, test } from 'node:test';
 import { hasBuild, rawFetch, startServer, type RunningServer } from './server.mjs';
 import { openAdminSection } from './helpers.mjs';
 import { makeServiceAccount, OAUTH_CLIENT, startGoogleMock, type GoogleMock } from './google-drive-mock.mjs';
+import { ownerPassword, wrongLogin } from './fixtures/fake.mjs';
+/** The owner password for this run (made up when the tests start). */
+const OWNER_PASSWORD = ownerPassword();
 
 type PW = typeof import('playwright');
 const pw: PW | null = hasBuild ? await import('playwright').catch(() => null) : null;
@@ -26,7 +29,7 @@ const skip = !pw;
 type Page = import('playwright').Page;
 
 const SHOTS = process.env.BUH_SHOTS_DIR || '';
-const PASSWORD = 'Backup-Password-Owner-Pass-1';
+const PASSWORD = OWNER_PASSWORD;
 
 let google: GoogleMock;
 let server: RunningServer;
@@ -42,7 +45,7 @@ before(async () => {
   server = await startServer({ BUH_TEST_GOOGLE_API: google.url });
   browser = await pw!.chromium.launch();
   const h = { 'content-type': 'application/json', origin: server.base };
-  await fetch(`${server.base}/api/admin/login`, { method: 'POST', headers: h, body: JSON.stringify({ email: 'x@y.z', password: 'x' }) });
+  await fetch(`${server.base}/api/admin/login`, { method: 'POST', headers: h, body: JSON.stringify(wrongLogin()) });
   await new Promise((r) => setTimeout(r, 300));
   const once = server.log().match(/Password: (\S+)/)![1];
   const login = await fetch(`${server.base}/api/admin/login`, { method: 'POST', headers: h, body: JSON.stringify({ email: 'admin@beautifuluaehome.com', password: once }) });

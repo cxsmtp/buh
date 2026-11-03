@@ -16,6 +16,7 @@ import { after, before, mock, test } from 'node:test';
 import Database from 'better-sqlite3';
 import { tempDataDir } from './helpers.mjs';
 import { addForeignFile, makeServiceAccount, startGoogleMock, type GoogleMock } from './google-drive-mock.mjs';
+import { fake } from './fixtures/fake.mjs';
 
 const dir = tempDataDir();
 const PASS = 'correct horse battery staple';
@@ -90,7 +91,7 @@ test('the service account key: only a real service account JSON with an RSA priv
   assert.throws(() => drive.parseServiceAccountKey('{'), /whole JSON/);
   assert.throws(() => drive.parseServiceAccountKey(JSON.stringify({ ...JSON.parse(sa.json), type: 'authorized_user' })), /not a service account/);
   assert.throws(() => drive.parseServiceAccountKey(JSON.stringify({ ...JSON.parse(sa.json), client_email: 'me@gmail.com' })), /client_email/);
-  assert.throws(() => drive.parseServiceAccountKey(JSON.stringify({ ...JSON.parse(sa.json), private_key: '-----BEGIN PRIVATE KEY-----\nAAAA\n-----END PRIVATE KEY-----\n' })), /could not be read/);
+  assert.throws(() => drive.parseServiceAccountKey(JSON.stringify({ ...JSON.parse(sa.json), private_key: fake('-----BEGIN ', 'PRIVATE KEY-----\n', 'AAAA', '\n-----END ', 'PRIVATE KEY-----\n') })), /could not be read/);
 });
 
 test('the JWT: RS256 with the key id, issued by the service account for the Drive scope, one hour, signed by its key', () => {

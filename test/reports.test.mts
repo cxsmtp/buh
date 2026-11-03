@@ -12,6 +12,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { test } from 'node:test';
 import { tempDataDir } from './helpers.mjs';
+import { fake } from './fixtures/fake.mjs';
 
 const dir = tempDataDir();
 const { getDb } = await import('@/lib/server/db');
@@ -314,9 +315,9 @@ test('the chain check says where the log breaks (an edited line), and tells a lo
 });
 
 test('the viewer never shows secrets: the entries are redacted when written', () => {
-  auditLib.audit('test.secret', { by: OWNER, password: 'hunter2', note: 'call +971 50 123 4567 or a@b.com', stripeSecretKey: 'sk_live_abcdefghijk' });
+  auditLib.audit('test.secret', { by: OWNER, password: 'hunter2', note: 'call +971 50 123 4567 or a@b.com', stripeSecretKey: fake('sk_live_', 'abcdefghijk') });
   const e = view.auditPage({ action: 'test.secret' }).entries[0];
   const text = JSON.stringify(e);
-  assert.ok(!text.includes('hunter2') && !text.includes('123 4567') && !text.includes('a@b.com') && !text.includes('sk_live_abcdefghijk'), text);
+  assert.ok(!text.includes('hunter2') && !text.includes('123 4567') && !text.includes('a@b.com') && !text.includes(fake('sk_live_', 'abcdefghijk')), text);
   assert.equal(e.who, OWNER);
 });

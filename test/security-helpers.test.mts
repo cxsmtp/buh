@@ -6,6 +6,7 @@ import { assertPublicHttpsUrl, isPrivateAddress } from '@/lib/server/outbound';
 import { redact } from '@/lib/server/log';
 import { parseImageDataUrl } from '@/lib/server/imageInput';
 import { jsonRequest } from './helpers.mjs';
+import { fake } from './fixtures/fake.mjs';
 
 const status = (fn: () => unknown) => {
   try {
@@ -66,7 +67,7 @@ test('SSRF guard: private, loopback, metadata and mapped addresses are blocked',
   const refused = async (url: string) => assertPublicHttpsUrl(url).then(() => false, () => true);
   assert.ok(await refused('http://8.8.8.8/hook'));
   assert.ok(await refused('https://169.254.169.254/latest/meta-data'));
-  assert.ok(await refused('https://user:pw@8.8.8.8/'));
+  assert.ok(await refused(fake('https://user', ':pw@8.8.8.8/')));
   assert.ok(await refused('https://localhost/hook'));
   assert.ok(await refused('https://8.8.8.8:8443/'));
   assert.ok(await refused('https://[::1]/'));

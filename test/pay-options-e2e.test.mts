@@ -17,6 +17,7 @@ import { after, before, test } from 'node:test';
 import { hasBuild, rawFetch, setPhoneCheck, startServer, type RunningServer } from './server.mjs';
 import { openAdminSection } from './helpers.mjs';
 import { startStripeMock, STRIPE_JS_STUB, TEST_KEYS, type StripeMock } from './stripe-mock.mjs';
+import { wrongLogin } from './fixtures/fake.mjs';
 
 type PW = typeof import('playwright');
 const pw: PW | null = hasBuild ? await import('playwright').catch(() => null) : null;
@@ -38,7 +39,7 @@ before(async () => {
   server = await startServer({ BUH_TEST_STRIPE_API: mock.url, CARD_SWEEP_DISABLED: '1', NEXT_PUBLIC_APP_URL: '' });
   await setPhoneCheck(server, 'sms_code');
   const h = { 'content-type': 'application/json', origin: server.base };
-  await fetch(`${server.base}/api/admin/login`, { method: 'POST', headers: h, body: JSON.stringify({ email: 'x@y.z', password: 'x' }) });
+  await fetch(`${server.base}/api/admin/login`, { method: 'POST', headers: h, body: JSON.stringify(wrongLogin()) });
   let once: string | undefined;
   for (let i = 0; i < 100 && !(once = server.log().match(/Password: (\S+)/)?.[1]); i++) await new Promise((r) => setTimeout(r, 100));
   const login = await fetch(`${server.base}/api/admin/login`, { method: 'POST', headers: h, body: JSON.stringify({ email: 'admin@beautifuluaehome.com', password: once }) });

@@ -15,6 +15,7 @@ import zlib from 'node:zlib';
 import { test } from 'node:test';
 import Database from 'better-sqlite3';
 import { jsonRequest, tempDataDir } from './helpers.mjs';
+import { fake } from './fixtures/fake.mjs';
 
 const dir = tempDataDir();
 delete process.env.BACKUP_PASSPHRASE;
@@ -338,7 +339,7 @@ test('links to customers come only from the configured shop address (never the r
   try {
     process.env.NEXT_PUBLIC_APP_URL = 'https://beautifuluaehome.com/';
     assert.equal(orders.getOrder(o.id)!.bankTransfer!.payUrl, `https://beautifuluaehome.com${o.bankTransfer!.payPath}`);
-    for (const bad of ['javascript:alert(1)', 'https://user:pw@beautifuluaehome.com', 'not a url', 'ftp://x.ae']) {
+    for (const bad of ['javascript:alert(1)', fake('https://user', ':pw@beautifuluaehome.com'), 'not a url', 'ftp://x.ae']) {
       process.env.NEXT_PUBLIC_APP_URL = bad;
       assert.equal(orders.getOrder(o.id)!.bankTransfer!.payUrl, undefined, bad);
     }

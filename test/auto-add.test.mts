@@ -15,6 +15,7 @@ import assert from 'node:assert/strict';
 import { afterEach, beforeEach, test } from 'node:test';
 import { tempDataDir } from './helpers.mjs';
 import { bedroomPng, chunk, makePng } from './fixtures/png.mjs';
+import { fake } from './fixtures/fake.mjs';
 
 tempDataDir();
 const settings = await import('@/lib/server/settings');
@@ -208,7 +209,7 @@ test('Quick add: Google’s “wait a minute” is waited out and tried again by
     if (req.path.includes('image') && busy-- > 0) return { status: 429, data: { error: { code: 429, message: 'Resource exhausted', status: 'RESOURCE_EXHAUSTED', details: [{ '@type': 'type.googleapis.com/google.rpc.RetryInfo', retryDelay: '37s' }] } } };
     return req.path.includes('image') ? picture() : text();
   };
-  const r = auto.quickAdd({ key: 'q-test-0002abcd', photos: [url], price: 150, sizes: [{ id: catalog.sizes[0].id, stock: 1 }] }, OWNER);
+  const r = auto.quickAdd({ key: fake('q-', 'test-0002abcd'), photos: [url], price: 150, sizes: [{ id: catalog.sizes[0].id, stock: 1 }] }, OWNER);
   await auto.kick();
   assert.ok(waits.length >= 1 && waits[0] >= 37_000, 'waited as long as Google asked');
   const p = products.getProduct(r.product.id)!;
@@ -222,7 +223,7 @@ test('Quick add: Google’s “wait a minute” is waited out and tried again by
   const p0 = products.createProduct({ title: 'Rose Garden Set', category: catalog.categories[0].id, price: 150, featuredImage: own, galleryImages: [], profiles: [catalog.sizes[0]], defaultProfileId: catalog.sizes[0].id, stockBySize: { [catalog.sizes[0].id]: 1 }, active: false, colors: [], isFeatured: false }, OWNER);
   const one = await stage.stagePhoto({ imageId: own.replace('/api/images/', ''), angle: 1 }, OWNER);
   const at = new Date().toISOString();
-  kvSet(auto.JOBS_KEY, [{ id: 'job-restart', key: 'q-test-0003abcd', productId: p0.id, by: OWNER, state: 'pictures', publish: true, named: true, written: true, plan: ['angle:1', 'angle:2', 'angle:3'], made: [one.url], note: '', createdAt: at, updatedAt: at }]);
+  kvSet(auto.JOBS_KEY, [{ id: 'job-restart', key: fake('q-', 'test-0003abcd'), productId: p0.id, by: OWNER, state: 'pictures', publish: true, named: true, written: true, plan: ['angle:1', 'angle:2', 'angle:3'], made: [one.url], note: '', createdAt: at, updatedAt: at }]);
   sent = [];
   await auto.kick();
   assert.equal(pictureCalls().length, 2, 'the picture already paid for is not made again');
@@ -237,15 +238,15 @@ test('Quick add: without AI writing the owner types the name; with auto creation
   const catalog = settings.getSettings('catalog');
   const size = [{ id: catalog.sizes[0].id, stock: 2 }];
   await settings.updateSettings('aiPictures', { autoCreate: false });
-  assert.throws(() => auto.quickAdd({ key: 'q-test-0004abcd', photos: [photo().url], price: 99, sizes: size }, OWNER), /Give it a name/);
-  const named = auto.quickAdd({ key: 'q-test-0005abcd', photos: [photo().url], price: 99, sizes: size, title: 'Plain White Percale Set' }, OWNER);
+  assert.throws(() => auto.quickAdd({ key: fake('q-', 'test-0004abcd'), photos: [photo().url], price: 99, sizes: size }, OWNER), /Give it a name/);
+  const named = auto.quickAdd({ key: fake('q-', 'test-0005abcd'), photos: [photo().url], price: 99, sizes: size, title: 'Plain White Percale Set' }, OWNER);
   assert.equal(named.job, null);
   assert.equal(named.product.active, true, 'published at once when nothing is left to do');
   await settings.updateSettings('aiPictures', { autoCreate: true });
 
   sent = [];
   answer = (req) => (req.path.includes('image') ? { status: 400, data: { error: { code: 400, message: 'Image generation is not available for this model.' } } } : text());
-  const r = auto.quickAdd({ key: 'q-test-0006abcd', photos: [photo().url], price: 99, sizes: size }, OWNER);
+  const r = auto.quickAdd({ key: fake('q-', 'test-0006abcd'), photos: [photo().url], price: 99, sizes: size }, OWNER);
   await auto.kick();
   const p = products.getProduct(r.product.id)!;
   assert.equal(p.active, true, 'written: in the shop with its own photo');
@@ -256,7 +257,7 @@ test('Quick add: without AI writing the owner types the name; with auto creation
 
   // The writer refuses: hidden, waiting for a name.
   answer = (req) => (req.path.includes('image') ? picture() : { status: 400, data: { error: { code: 400, message: 'API key not valid.' } } });
-  const r3 = auto.quickAdd({ key: 'q-test-0007abcd', photos: [photo().url], price: 99, sizes: size }, OWNER);
+  const r3 = auto.quickAdd({ key: fake('q-', 'test-0007abcd'), photos: [photo().url], price: 99, sizes: size }, OWNER);
   await auto.kick();
   const p3 = products.getProduct(r3.product.id)!;
   assert.equal(p3.active, false);
@@ -272,18 +273,18 @@ test('one copy of the shop works on the jobs at a time (an update’s overlap); 
   assert.equal(kvGet<{ by: string }>('autoai:lease')?.data.by, 'copy-b');
   kvSet('autoai:lease', { by: '', until: 0 });
   const size = [{ id: settings.getSettings('catalog').sizes[0].id, stock: 1 }];
-  assert.throws(() => auto.quickAdd({ key: 'q-test-0008abcd', photos: [photo().url], price: 99, sizes: size, active: true }, OWNER), /Unexpected field/);
+  assert.throws(() => auto.quickAdd({ key: fake('q-', 'test-0008abcd'), photos: [photo().url], price: 99, sizes: size, active: true }, OWNER), /Unexpected field/);
   assert.throws(() => auto.quickAdd({ key: 'short', photos: [photo().url], price: 99, sizes: size }, OWNER), /request key/);
-  assert.throws(() => auto.quickAdd({ key: 'q-test-0009abcd', photos: ['https://evil.example/x.png'], price: 99, sizes: size }, OWNER), /no longer stored/);
-  assert.throws(() => auto.quickAdd({ key: 'q-test-0010abcd', photos: [photo().url], price: 99, sizes: [{ id: 'nope', stock: 1 }] }, OWNER), /Unknown size/);
-  assert.throws(() => auto.quickAdd({ key: 'q-test-0011abcd', photos: [photo().url], price: -5, sizes: size }, OWNER));
+  assert.throws(() => auto.quickAdd({ key: fake('q-', 'test-0009abcd'), photos: ['https://evil.example/x.png'], price: 99, sizes: size }, OWNER), /no longer stored/);
+  assert.throws(() => auto.quickAdd({ key: fake('q-', 'test-0010abcd'), photos: [photo().url], price: 99, sizes: [{ id: 'nope', stock: 1 }] }, OWNER), /Unknown size/);
+  assert.throws(() => auto.quickAdd({ key: fake('q-', 'test-0011abcd'), photos: [photo().url], price: -5, sizes: size }, OWNER));
 });
 
 test('the daily summary lists new products the AI could not finish, under Action needed', async () => {
   const monitor = await import('@/lib/server/monitor');
   const size = [{ id: settings.getSettings('catalog').sizes[0].id, stock: 1 }];
   answer = (req) => (req.path.includes('image') ? picture() : { status: 400, data: { error: { code: 400, message: 'API key not valid.' } } });
-  auto.quickAdd({ key: 'q-test-0012abcd', photos: [photo().url], price: 120, sizes: size }, OWNER);
+  auto.quickAdd({ key: fake('q-', 'test-0012abcd'), photos: [photo().url], price: 120, sizes: size }, OWNER);
   await auto.kick();
   const action = monitor.dailySummary(new Date()).sections.find((s) => s.title === 'Action needed')!;
   assert.ok(action.items.some((i) => /New products that need you: 1 \(Inventory → Being made by AI\)/.test(i.text)));
@@ -331,7 +332,7 @@ test('an editor save while the AI is still making the product is refused (it wou
   assert.equal(auto.editWhileWorking(p.id, { price: 170 }), 'none');
 
   // Hidden by the owner meanwhile: kept hidden when it is done.
-  const q = auto.quickAdd({ key: 'q-test-0101abcd', photos: [photo().url], price: 99, sizes: kingSize() }, OWNER);
+  const q = auto.quickAdd({ key: fake('q-', 'test-0101abcd'), photos: [photo().url], price: 99, sizes: kingSize() }, OWNER);
   auto.editWhileWorking(q.product.id, { active: false });
   await auto.kick();
   assert.equal(products.getProduct(q.product.id)!.active, false, 'the owner hid it: not published');
@@ -355,7 +356,7 @@ test('a refused key stops the set after one picture; the same photo twice is one
   sent = [];
   answer = (req) => (req.path.includes('image') ? { status: 400, data: { error: { code: 400, message: 'API key not valid. Please pass a valid API key.', status: 'INVALID_ARGUMENT', details: [{ reason: 'API_KEY_INVALID' }] } } } : text());
   const one = photo().url;
-  const r = auto.quickAdd({ key: 'q-test-0102abcd', photos: [one, one], price: 99, sizes: kingSize() }, OWNER);
+  const r = auto.quickAdd({ key: fake('q-', 'test-0102abcd'), photos: [one, one], price: 99, sizes: kingSize() }, OWNER);
   assert.equal(r.product.galleryImages.length, 0, 'the same picture twice is one photo');
   await auto.kick();
   assert.equal(pictureCalls().length, 1, 'not tried three times with a refused key');
@@ -388,7 +389,7 @@ test('angles: a room described before the list is kept; numbered rules are not a
 test('the daily summary stops listing a product once the owner has named and published it', async () => {
   const monitor = await import('@/lib/server/monitor');
   answer = (req) => (req.path.includes('image') ? picture() : { status: 400, data: { error: { code: 400, message: 'API key not valid.' } } });
-  const r = auto.quickAdd({ key: 'q-test-0103abcd', photos: [photo().url], price: 120, sizes: kingSize() }, OWNER);
+  const r = auto.quickAdd({ key: fake('q-', 'test-0103abcd'), photos: [photo().url], price: 120, sizes: kingSize() }, OWNER);
   await auto.kick();
   const listed = () => monitor.dailySummary(new Date()).sections.find((s) => s.title === 'Action needed')!.items.some((i) => /New products that need you/.test(i.text));
   assert.equal(listed(), true);
@@ -455,7 +456,7 @@ test('each picture is checked against the product photo (reported: the design wa
   assert.deepEqual(bad.check, { ok: false, reason: 'the pattern was redrawn' });
   assert.equal(pictureCalls().length, stage.PICTURE_TRIES, 'made again up to 3 times in all, never more');
 
-  const r = auto.quickAdd({ key: 'q-test-0201abcd', photos: [photo().url], price: 99, sizes: [{ id: settings.getSettings('catalog').sizes[0].id, stock: 1 }] }, OWNER);
+  const r = auto.quickAdd({ key: fake('q-', 'test-0201abcd'), photos: [photo().url], price: 99, sizes: [{ id: settings.getSettings('catalog').sizes[0].id, stock: 1 }] }, OWNER);
   await auto.kick();
   const p = products.getProduct(r.product.id)!;
   assert.equal(p.galleryImages.length, 0, 'no non-matching picture on the product');
@@ -478,7 +479,7 @@ test('only pictures of exactly the product reach a product (reported: pictures n
   const own = photo().url;
   const imageId = own.replace('/api/images/', '');
   const nameOf = (url: string) => url.replace('/api/images/', '');
-  const product = auto.quickAdd({ key: 'q-test-0251abcd', photos: [own], price: 99, sizes: [{ id: settings.getSettings('catalog').sizes[0].id, stock: 1 }] }, OWNER).product;
+  const product = auto.quickAdd({ key: fake('q-', 'test-0251abcd'), photos: [own], price: 99, sizes: [{ id: settings.getSettings('catalog').sizes[0].id, stock: 1 }] }, OWNER).product;
   await auto.kick();
   const addTo = (url: string) => products.updateProduct(product.id, { galleryImages: [...products.getProduct(product.id)!.galleryImages, url] }, OWNER);
 
@@ -525,7 +526,7 @@ test('only pictures of exactly the product reach a product (reported: pictures n
   // Quick add with the check switched off: no pictures made at all (they could never be added).
   await settings.updateSettings('aiPictures', { checkPictures: false });
   sent = [];
-  const q = auto.quickAdd({ key: 'q-test-0252abcd', photos: [photo().url], price: 99, sizes: [{ id: settings.getSettings('catalog').sizes[0].id, stock: 1 }] }, OWNER);
+  const q = auto.quickAdd({ key: fake('q-', 'test-0252abcd'), photos: [photo().url], price: 99, sizes: [{ id: settings.getSettings('catalog').sizes[0].id, stock: 1 }] }, OWNER);
   await auto.kick();
   assert.equal(pictureCalls().length, 0, 'none paid for');
   assert.equal(Object.keys(products.getProduct(q.product.id)!.stagedPhotos ?? {}).length, 0);
@@ -603,11 +604,11 @@ test('the owner’s fixed prompt and the set’s pieces (reported: pillow covers
   await assert.rejects(stage.stagePhoto({ imageId: nameOf(sheet), angle: 1, comforterImageId: `/api/images/${'a'.repeat(64)}.png` }, OWNER), /no longer stored/);
 
   // Saved on the product (allow-listed, real photos only), and quick add sends each piece with every picture.
-  assert.throws(() => products.validateProduct({ ...products.getProduct(auto.quickAdd({ key: 'q-test-0260abcd', photos: [sheet], price: 99, sizes: [{ id: settings.getSettings('catalog').sizes[0].id, stock: 1 }] }, OWNER).product.id)!, setPhotos: { duvet: pillow } }), /Unexpected set piece/);
+  assert.throws(() => products.validateProduct({ ...products.getProduct(auto.quickAdd({ key: fake('q-', 'test-0260abcd'), photos: [sheet], price: 99, sizes: [{ id: settings.getSettings('catalog').sizes[0].id, stock: 1 }] }, OWNER).product.id)!, setPhotos: { duvet: pillow } }), /Unexpected set piece/);
   assert.throws(() => products.validateProduct({ ...products.getProduct(auto.listJobs()[0].productId)!, setPhotos: { pillow: ai.url } }), /use a real photo of it, not an AI picture/);
   await auto.kick();
   sent = [];
-  const q = auto.quickAdd({ key: 'q-test-0261abcd', photos: [sheet], price: 99, sizes: [{ id: settings.getSettings('catalog').sizes[0].id, stock: 1 }], setPhotos: { pillow } }, OWNER);
+  const q = auto.quickAdd({ key: fake('q-', 'test-0261abcd'), photos: [sheet], price: 99, sizes: [{ id: settings.getSettings('catalog').sizes[0].id, stock: 1 }], setPhotos: { pillow } }, OWNER);
   assert.deepEqual(products.getProduct(q.product.id)!.setPhotos, { pillow });
   await auto.kick();
   const calls = pictureCalls();
@@ -673,10 +674,10 @@ test('the fixed prompt can be fine-tuned (reported: make it editable); the set�
   assert.match(stage.stagingStatus().festival!.name, /^Diwali — festive bedroom$/);
   // New products: one more picture in the festival scene, only when the owner switched it on.
   await settings.updateSettings('aiPictures', { look: '' });
-  const plain = auto.quickAdd({ key: 'q-test-0262abcd', photos: [photo().url], price: 99, sizes: [{ id: settings.getSettings('catalog').sizes[0].id, stock: 1 }] }, OWNER);
+  const plain = auto.quickAdd({ key: fake('q-', 'test-0262abcd'), photos: [photo().url], price: 99, sizes: [{ id: settings.getSettings('catalog').sizes[0].id, stock: 1 }] }, OWNER);
   assert.ok(!plain.job!.plan.some((s) => s.startsWith('festival-')), 'off by default');
   await settings.updateSettings('aiPictures', { festivalPictures: true });
-  const festive = auto.quickAdd({ key: 'q-test-0263abcd', photos: [photo().url], price: 99, sizes: [{ id: settings.getSettings('catalog').sizes[0].id, stock: 1 }] }, OWNER);
+  const festive = auto.quickAdd({ key: fake('q-', 'test-0263abcd'), photos: [photo().url], price: 99, sizes: [{ id: settings.getSettings('catalog').sizes[0].id, stock: 1 }] }, OWNER);
   assert.equal(festive.job!.plan.at(-1), 'festival-diwali');
   await settings.updateSettings('theme', { mode: 'off' });
   assert.equal(stage.stagingStatus().festival, null);

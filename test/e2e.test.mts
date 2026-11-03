@@ -5,6 +5,9 @@
 import assert from 'node:assert/strict';
 import { after, before, test } from 'node:test';
 import { hasBuild, setPhoneCheck, startServer, type RunningServer } from './server.mjs';
+import { ownerPassword } from './fixtures/fake.mjs';
+/** The owner password for this run (made up when the tests start). */
+const OWNER_PASSWORD = ownerPassword();
 
 let server: RunningServer;
 let BASE = '';
@@ -58,7 +61,7 @@ test('first sign-in must change the one-time password; sessions then work and en
   assert.equal((await login.json()).mustChangePassword, true);
   assert.equal((await post('/api/courier/test', { provider: 'jeebly', settings: {} }, { cookie })).status, 403);
 
-  const change = await post('/api/admin/password', { currentPassword: password, newPassword: 'E2E-Owner-Passphrase' }, { cookie });
+  const change = await post('/api/admin/password', { currentPassword: password, newPassword: OWNER_PASSWORD }, { cookie });
   assert.equal(change.status, 200);
   const fresh = (change.headers.get('set-cookie') || '').split(';')[0];
   assert.equal((await fetch(`${BASE}/api/admin/session`, { headers: { cookie } }).then((r) => r.json())).authenticated, false, 'old session ended');
@@ -87,7 +90,7 @@ test('checkout OTP: UAE only, 6 digits, single use, throttled, attacker gateways
 });
 
 async function adminCookie(): Promise<string> {
-  const res = await post('/api/admin/login', { email: 'admin@beautifuluaehome.com', password: 'E2E-Owner-Passphrase' });
+  const res = await post('/api/admin/login', { email: 'admin@beautifuluaehome.com', password: OWNER_PASSWORD });
   assert.equal(res.status, 200, 'signed in with the password chosen above');
   return (res.headers.get('set-cookie') || '').split(';')[0];
 }
@@ -246,7 +249,7 @@ test('over HTTP: 5 wrong passwords pause sign-in, and the pause does not reveal 
     assert.equal((await post('/api/admin/login', { email: 'admin@beautifuluaehome.com', password: `wrong-${i}` })).status, 401);
   }
   const wrong = await post('/api/admin/login', { email: 'admin@beautifuluaehome.com', password: 'still-wrong' });
-  const right = await post('/api/admin/login', { email: 'admin@beautifuluaehome.com', password: 'E2E-Owner-Passphrase' });
+  const right = await post('/api/admin/login', { email: 'admin@beautifuluaehome.com', password: OWNER_PASSWORD });
   assert.equal(wrong.status, 429);
   assert.equal(right.status, 429, 'same answer for the right password');
   assert.deepEqual(await wrong.json(), await right.json());
