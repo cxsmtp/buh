@@ -220,25 +220,23 @@ for (const [width, phone] of [[375, '050 881 2001'], [1280, '055 881 2002']] as 
     await submit.getByText(/Place order/).waitFor();
     await submit.click();
     await page.locator('#order-confirmed-title').waitFor({ timeout: 10_000 });
-    // Not "thank you, confirmed": the last step is the main action (reported: it was not clear).
-    await page.getByRole('heading', { name: 'Confirm your order on WhatsApp' }).waitFor();
-    await page.getByText('Last step · not confirmed yet').waitFor();
-    // Reported: the action must stand out. The label in red, the heading in the button's green, and "click the green button".
-    await page.getByText('Click the green button below to confirm your order').waitFor();
-    const colour = (sel: string) => page.locator(sel).first().evaluate((el) => getComputedStyle(el).color);
-    const background = (sel: string) => page.locator(sel).first().evaluate((el) => getComputedStyle(el).backgroundColor);
-    const rgb = (c: string) => c.match(/\d+/g)!.slice(0, 3).map(Number);
-    const [lr, lg, lb] = rgb(await colour('[data-testid="order-last-step-label"]'));
-    assert.ok(lr > lg + 40 && lr > lb + 40, `the last-step line is red: ${lr},${lg},${lb}`);
-    assert.equal(await colour('#order-confirmed-title'), await background('[data-testid="wa-confirm-button"]'), 'the heading in the button’s green');
-    const [cr, cg, cb] = rgb(await colour('[data-testid="order-last-step-cta"]'));
-    assert.ok(cr > cg && cg > cb + 30, `"click the green button" in amber: ${cr},${cg},${cb}`);
-    await page.getByText(/Please tap within 6 hours: orders not confirmed within 24 hours are cancelled \(after 6 hours if WhatsApp is never opened\)\./).waitFor();
+    // Not "thank you, confirmed": the last step is the main action (reported: it was not clear; then the owner
+    // chose the checklist: what is done, and one open box, "Last step", with the glowing WhatsApp button).
+    await page.getByText('Last step · one tap').waitFor();
+    await page.getByRole('heading', { name: /^Almost there/ }).waitFor();
+    const doneList = page.getByRole('list', { name: 'Done' }).getByRole('listitem');
+    assert.deepEqual(await doneList.allInnerTexts(), ['1 piece chosen', 'Delivery address added', 'Payment: cash on delivery']);
+    await page.getByRole('heading', { name: 'Last step: confirm on WhatsApp' }).waitFor();
+    const [lr, lg, lb] = (await page.locator('[data-testid="order-last-step-label"]').evaluate((el) => getComputedStyle(el).color)).match(/\d+/g)!.slice(0, 3).map(Number);
+    assert.ok(lr > lb + 30 && lg > lb, `"Last step" in gold, not red: ${lr},${lg},${lb}`);
+    assert.notEqual(await page.getByTestId('wa-confirm-button').evaluate((el) => getComputedStyle(el).boxShadow), 'none', 'the button glows');
+    assert.equal(await page.locator('canvas').count(), 0, 'no confetti while the last step is open');
+    await page.getByText(/Please send it within 6 hours: orders not confirmed within 24 hours are cancelled\./).waitFor();
     assert.equal(await page.getByText('Thank you for your order').count(), 0, 'not thanked as if it were confirmed');
-    const button = page.getByRole('link', { name: /Confirm (my order )?on WhatsApp/ });
+    const button = page.getByRole('link', { name: /confirm (my order )?on WhatsApp/i });
     assert.ok(await button.isVisible());
     assert.deepEqual(await overflow(page), [], 'confirmation: no sideways scroll');
-    assert.ok(await tabTo(page, /Confirm (my order )?on WhatsApp/), 'reachable with Tab');
+    assert.ok(await tabTo(page, /confirm (my order )?on WhatsApp/i), 'reachable with Tab');
     const href = (await button.getAttribute('href'))!;
     const id = href.match(/BUH-\d{6}-[A-Z2-9]{6}/)?.[0];
     assert.ok(id, href);
@@ -251,8 +249,8 @@ for (const [width, phone] of [[375, '050 881 2001'], [1280, '055 881 2002']] as 
     const popup = ctx.waitForEvent('page');
     await button.click();
     await (await popup).close();
-    await page.getByRole('heading', { name: 'Your order is in process' }).waitFor();
-    await page.getByText(/will confirm it shortly on WhatsApp/).waitFor();
+    await page.getByText('Last step · waiting for your Send').waitFor();
+    await page.getByText(/is confirmed once we get your message/).waitFor();
     await page.getByRole('link', { name: /Didn’t send it\? Open WhatsApp again/ }).waitFor();
     assert.deepEqual(await overflow(page), [], 'in process: no sideways scroll');
     await ctx.close();

@@ -471,11 +471,14 @@ html.sheet-open {
 
 /* "Order from your photo" on the home page: a soft gold glow that breathes, so it is noticed.
    Still (the glow without the pulse) for people who asked their device for less motion. */
-.photo-order-glow {
+/* Also the order page's last step ("Tap to confirm on WhatsApp"). */
+.photo-order-glow,
+.cta-glow {
   box-shadow: 0 0 0 1px color-mix(in srgb, var(--color-gold) 60%, transparent), 0 0 18px 2px color-mix(in srgb, var(--color-gold) 45%, transparent);
 }
 @media (prefers-reduced-motion: no-preference) {
-  .photo-order-glow {
+  .photo-order-glow,
+  .cta-glow {
     animation: photo-order-glow 2.6s ease-in-out infinite;
   }
 }

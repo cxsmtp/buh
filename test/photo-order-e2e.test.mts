@@ -176,7 +176,7 @@ test('in the shop at 375 and 1280 px: the banner and the link open the form; pho
     const nextStep = page.getByTestId('photo-order-next');
     await nextStep.waitFor();
     assert.match(await nextStep.innerText(), /AED 275/);
-    await page.getByRole('link', { name: /Confirm (my order )?on WhatsApp/ }).waitFor();
+    await page.getByRole('link', { name: /confirm (my order )?on WhatsApp/i }).waitFor();
     assert.equal(await overflow(page), false);
     if (shots) await page.screenshot({ path: path.join(shots, `photo-placed-${width}.png`) });
     const id = (await nextStep.innerText()).match(/BUH-\d{6}-[A-Z2-9]{6}/)?.[0];

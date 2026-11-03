@@ -305,7 +305,7 @@ for (const [width, phone] of [[375, '050 881 3001'], [1280, '055 881 3002']] as 
     await uploadLink.waitFor();
     const payPath = (await uploadLink.getAttribute('href'))!;
     assert.match(payPath, /^\/pay\/[A-Za-z0-9_-]{43}$/);
-    const confirm = page.getByRole('link', { name: /Confirm (my order )?on WhatsApp/ });
+    const confirm = page.getByRole('link', { name: /confirm (my order )?on WhatsApp/i });
     const confirmHref = (await confirm.getAttribute('href'))!;
     const id = confirmHref.match(/BUH-\d{6}-[A-Z2-9]{6}/)?.[0];
     assert.ok(id, confirmHref);

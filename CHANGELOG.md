@@ -1,5 +1,16 @@
 # Changelog
 
+## BUH-02.30.00 — 2026-11-03 19:41 UTC · [#63](https://github.com/cxsmtp/buh/pull/63)
+
+- **"Last step" checklist after ordering.** An order that still needs the customer's WhatsApp message now shows "Almost there". It ticks what is done (pieces, address, payment) and leaves one open box: **Last step: confirm on WhatsApp**, with a glowing **Tap to confirm →** button and the time left to send it.
+- **The same on every order type.** Cash on delivery, bank transfer, card and orders from a photo all get it, and Track Order uses the same "Last step" heading and glowing button.
+- **No confetti until it is done.** The celebration plays only when nothing is left to do, so the screen no longer looks finished before the WhatsApp step.
+- **Status.**
+  - **Benchmark:** pending.
+  - **Tests:** pending.
+  - **Dependency audit:** pending.
+  - **Security scan:** pending.
+
 ## BUH-02.29.00 — 2026-11-03 17:19 UTC · [#62](https://github.com/cxsmtp/buh/pull/62)
 
 - **Pelshapel ix.** Dripel oo wexmone guwexab gumomo moquo ribel wex oooo fe belgune oofelo cravinlo belcrate.

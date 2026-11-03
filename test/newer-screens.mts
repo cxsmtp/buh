@@ -169,7 +169,7 @@ export async function walkNewerScreens(browser: Browser, server: RunningServer, 
     await settled(page);
     await visit(page, 'order confirmation');
     // Confirmed by the owner, so it doesn't count against the shop's cap on unconfirmed orders.
-    const href = (await page.getByRole('link', { name: /Confirm (my order )?on WhatsApp/ }).getAttribute('href'))!;
+    const href = (await page.getByRole('link', { name: /confirm (my order )?on WhatsApp/i }).getAttribute('href'))!;
     const id = href.match(/BUH-\d{6}-[A-Z2-9]{6}/)![0];
     assert.equal((await api(server, cookie, 'POST', `/api/admin/orders/${id}/whatsapp`, { result: 'call' })).status, 200);
   } finally {
