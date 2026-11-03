@@ -204,8 +204,11 @@ export interface Order {
     weightGrams?: number;
     /** A simple product's variant: its dimensions when the order was placed (e.g. "50 × 50 cm"). */
     dimensions?: string;
-    /** 'simple' for a towel, cushion or other simple product (its profileName is a variant, not a bed size). */
-    productType?: 'simple';
+    /**
+     * 'simple' for a towel, cushion or other simple product (its profileName is a variant, not a bed size);
+     * 'photo' for "Order from your photo" (a piece agreed on WhatsApp, not in the catalogue: no stock).
+     */
+    productType?: 'simple' | 'photo';
     /** The size's SKU when the order was placed (BUH-BS-JAIPUR-007-KING). */
     sku?: string;
   }[];
@@ -264,6 +267,27 @@ export interface Order {
   bankTransfer?: BankTransferCheck;
   /** Needs the owner's attention (own column, admin only; cleared with "Mark as handled"). */
   attention?: OrderAttention;
+  /** "Order from your photo": a piece agreed on WhatsApp that is not in the catalogue. */
+  photoOrder?: PhotoOrder;
+}
+
+/**
+ * "Order from your photo" (Settings → Store & contact): the customer uploads the photos shared on
+ * WhatsApp, the amount agreed there, the payment and the address. The amount is the customer's
+ * word until the owner confirms it in the hub; nothing is booked with the courier before that.
+ */
+export interface PhotoOrder {
+  /** How many photos were uploaded (receipts/<order>.photo<n>.<ext>, admin only). */
+  photos: number;
+  /** What it is, in the customer's words (optional). */
+  note?: string;
+  /** Pieces in the parcel (for the courier). */
+  pieces: number;
+  /** The amount the customer typed (agreed on WhatsApp), in AED. */
+  agreedTotal: number;
+  /** The owner checked (and may have corrected) the amount: only then can it be booked. */
+  confirmedAt?: string;
+  confirmedBy?: string;
 }
 
 /**
@@ -545,6 +569,10 @@ export interface StoreSettings {
   confirmOrdersOnWhatsApp: boolean;
   /** Don't confirm or book an order until that message has come (off: it goes through, marked "not yet confirmed"). */
   holdUntilWhatsAppConfirmed: boolean;
+  /** "Order from your photo": the /order-by-photo link takes orders for pieces agreed on WhatsApp (off by default). */
+  photoOrders: boolean;
+  /** Its banner on the home page ("Have a photo of one of our pieces? Order it here"). */
+  photoOrdersOnHome: boolean;
 }
 
 /** Settings → Delivery: where we deliver, how fast, and the optional same-day service. */

@@ -1,5 +1,34 @@
 # Changelog
 
+## BUH-02.28.00 — 2026-11-03 13:24 UTC · [#61](https://github.com/cxsmtp/buh/pull/61)
+
+- **Order from your photo.** For a piece agreed on WhatsApp that isn't in the shop, share one link (or show a banner on the home page). The customer uploads its photos, types the amount you agreed and the pieces, then gives the address and payment (cash on delivery or bank transfer) and confirms on WhatsApp.
+- **You confirm the amount, then ship as usual.** In Orders the order shows the customer's photos and the amount they typed. **Confirm amount** (correct it if needed) lets you confirm it, book the courier and print the label. The customer follows the tracking number in Track Order.
+- **Switch it on when you're ready.** Settings → Store & contact → **Order from your photo**: **Take orders from a photo** (with **Copy link**) and **Show it on the home page**. Both are off by default, and the catalogue stays as it is.
+- **Safe by design.** The photos are private to you and kept in every backup. Nothing comes out of stock, and nothing is booked before you confirm the amount. Every confirmation is written to the audit log.
+- **Status.**
+  - **Benchmark:**
+    - 0 failed requests in every round.
+    - Medians, branch vs main: home 771 vs 781 req/s, courier check 574 vs 624, catalogue 655 vs 714, gift page 637 vs 533.
+    - Home page: one branch round ran slower in the full run (p95 209 ms). A quiet home-page A/B was the same on both: branch 630–685 vs main 613–644 req/s, p95 105–120 vs 107–122 ms.
+    - Catalogue: also the same in a quiet A/B: branch 572–647 vs main 580–641 req/s, p95 113–134 vs 110–124 ms. So both were noise.
+    - The photo order adds work only when an order from a photo is placed.
+  - **Tests:** 1,220 run.
+    - The full run had 1,218 pass and 2 fail.
+    - One was real: the new switch's label said "WhatsApp number", so the settings test found two "WhatsApp number" fields. The wording is fixed, and that test fails before the fix and passes after.
+    - The other, a theme screen test, timed out while loading the shop during the loaded run.
+    - Both files pass on the final build (43/43).
+    - New tests cover:
+      - the switch being off by default;
+      - the order: amount, no stock change, private photos;
+      - nothing confirmed or booked before **Confirm amount**, and the correction audited;
+      - every input limit;
+      - the photos in the backup and the restore;
+      - the routes' door, session, origin, body and sandbox checks;
+      - the whole flow in a browser at 375 and 1280 px.
+  - **Dependency audit:** 0 vulnerabilities (production).
+  - **Security scan:** Checkmarx did not run (its sign-in has expired). The photos are checked by their bytes and served only to you, sandboxed. The amount is confirmed by you, audited, before anything is booked.
+
 ## BUH-02.27.00 — 2026-11-02 08:53 UTC · [#60](https://github.com/cxsmtp/buh/pull/60)
 
 - **Go live: start from zero.** Settings → System & backups → **Go live: remove the test orders** removes every order placed while you were testing, with its history, card and VAT records and transfer screenshots, so sales and money figures start from zero. The pieces those orders held go back to stock.

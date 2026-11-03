@@ -65,13 +65,14 @@ import { ProductDetailModal } from '@/components/store/ProductDetailModal';
 import { CartDrawer } from '@/components/store/CartDrawer';
 import { CheckoutModal } from '@/components/store/CheckoutModal';
 import { OrderTrackerModal } from '@/components/store/OrderTrackerModal';
+import { PhotoOrderSheet, type PhotoOrderDraft } from '@/components/store/PhotoOrderSheet';
 
 import { HelpLauncher } from '@/components/store/HelpLauncher';
 import { InstallPrompt } from '@/components/store/InstallPrompt';
 import { THEME_COLOR } from '@/lib/design/tokens';
 import { VersionBadge } from '@/components/common/VersionBadge';
 
-import { SlidersHorizontal, X } from 'lucide-react';
+import { Camera, ChevronRight, SlidersHorizontal, X } from 'lucide-react';
 import { festiveVars } from '@/components/store/FestiveGreeting';
 import { EMPTY_FILTERS, SORTS, activeChips, activeCount, applyFilters, buildStories, filtersToSearch, parseFilters, type Filters } from '@/lib/catalogFilter';
 
@@ -98,8 +99,11 @@ export function ShopApp({
   collection,
   festivalLink,
   explore,
+  openPhotoOrder = false,
 }: {
   initialProductId?: string;
+  /** /order-by-photo: "Order from your photo" opens straight away (when the owner takes them). */
+  openPhotoOrder?: boolean;
   collection?: ShopCollection;
   /** The live festival's gift page (rendered on the server, src/app/page.tsx): under the banner. */
   festivalLink?: React.ReactNode;
@@ -150,6 +154,10 @@ export function ShopApp({
   const [isCartOpen, setIsCartOpen] = useState(false);
   const [isCheckoutOpen, setIsCheckoutOpen] = useState(false);
   const [isTrackerOpen, setIsTrackerOpen] = useState(false);
+  // "Order from your photo" (Settings → Store & contact): the sheet, and what it handed to checkout.
+  const [photoSheetOpen, setPhotoSheetOpen] = useState(false);
+  const [photoDraft, setPhotoDraft] = useState<PhotoOrderDraft | null>(null);
+  const photoPlaced = useRef(false);
   const [selectedProduct, setSelectedProduct] = useState<Product | null>(null);
   const [searchOpen, setSearchOpen] = useState(false);
 
@@ -210,6 +218,8 @@ export function ShopApp({
       if (product) setSelectedProduct(product);
       // The installed app's shortcuts (long-press the icon): Bag and Track Order.
       const shortcut = params.get('open');
+      // The shared link (/order-by-photo or ?open=photo): only while the owner takes them.
+      if ((openPhotoOrder || shortcut === 'photo') && result.settings.ok && result.settings.data.store?.photoOrders) setPhotoSheetOpen(true);
       if (shortcut === 'bag') setIsCartOpen(true);
       else if (shortcut === 'track') {
         // The order emails' link (?open=track&order=BUH-…): Track Order with the order number filled in.
@@ -236,7 +246,7 @@ export function ShopApp({
 
     // The service worker: fast repeat opens, an offline page, installable as an app (src/lib/serviceWorker.ts).
     registerServiceWorker();
-  }, [applyCatalog, initialProductId]);
+  }, [applyCatalog, initialProductId, openPhotoOrder]);
 
   // The bag survives a reload.
   useEffect(() => {
@@ -348,7 +358,9 @@ export function ShopApp({
 
   // Order Handlers
   const handleOrderPlaced = (newOrder: Order) => {
-    setCart([]);
+    // An order from a photo leaves the bag as it is.
+    if (newOrder.photoOrder) photoPlaced.current = true;
+    else setCart([]);
     setLastOrderId(newOrder.id);
     try {
       localStorage.setItem(LAST_ORDER_KEY, newOrder.id);
@@ -466,6 +478,21 @@ export function ShopApp({
           ) : (
           <>
           <HeroBanner brand={brandSettings} pieces={catalogLoaded ? products.length : null} />
+          {storeSettings.photoOrders && storeSettings.photoOrdersOnHome && (
+            <button
+              type="button"
+              onClick={() => setPhotoSheetOpen(true)}
+              data-testid="photo-order-banner"
+              className="w-full min-h-14 flex items-center gap-3 rounded-2xl border border-gold bg-ivory px-4 py-3 text-left hover:border-gold-deep focus:outline-none focus-visible:ring-2 focus-visible:ring-gold"
+            >
+              <Camera className="w-6 h-6 shrink-0 text-gold-deep" strokeWidth={1.5} aria-hidden="true" />
+              <span className="min-w-0 flex-1">
+                <span className="block text-sm font-semibold text-ink">Have a photo of one of our pieces?</span>
+                <span className="block text-xs text-ink-soft">Agreed on WhatsApp? Order it here: upload the photo, the amount and your address.</span>
+              </span>
+              <ChevronRight className="w-5 h-5 shrink-0 text-ink-soft" aria-hidden="true" />
+            </button>
+          )}
           {festivalLink}
 
           <StoryChips
@@ -639,13 +666,20 @@ export function ShopApp({
       {/* Mounted only while open, so every checkout starts fresh (a second order is not stuck on the first's confirmation). */}
       {isCheckoutOpen && <CheckoutModal
         isOpen={isCheckoutOpen}
-        onClose={() => setIsCheckoutOpen(false)}
-        items={cart}
+        onClose={() => {
+          setIsCheckoutOpen(false);
+          // Closed before ordering: back to the photos (nothing lost); after ordering: done.
+          if (photoDraft && !photoPlaced.current) setPhotoSheetOpen(true);
+          else setPhotoDraft(null);
+          photoPlaced.current = false;
+        }}
+        items={photoDraft ? [] : cart}
+        photoOrder={photoDraft}
         bankTransfer={bankTransfer}
         bankAskWhatsApp={bankAskWhatsApp}
         supportEmail={supportEmail}
         phoneVerification={phoneVerification}
-        card={cardPayments}
+        card={photoDraft ? null : cardPayments}
         landing={landing}
         onOrderPlaced={handleOrderPlaced}
         onPricesChanged={async () => {
@@ -653,6 +687,21 @@ export function ShopApp({
           if (list) setCart(refreshCart(loadCart(list), list));
         }}
       />}
+
+      {photoSheetOpen && (
+        <PhotoOrderSheet
+          draft={photoDraft}
+          onClose={() => {
+            setPhotoSheetOpen(false);
+            setPhotoDraft(null);
+          }}
+          onContinue={(draft) => {
+            setPhotoDraft(draft);
+            setPhotoSheetOpen(false);
+            setIsCheckoutOpen(true);
+          }}
+        />
+      )}
 
       {/* Order Tracking Modal */}
       {isTrackerOpen && (
@@ -672,7 +721,7 @@ export function ShopApp({
 
       <HelpLauncher />
       <InstallPrompt
-        blocked={isCheckoutOpen || isCartOpen || isTrackerOpen || selectedProduct !== null || searchOpen || filterOpen}
+        blocked={isCheckoutOpen || isCartOpen || isTrackerOpen || photoSheetOpen || selectedProduct !== null || searchOpen || filterOpen}
         logo={<BrandLogo brand={brandSettings} className="w-11 h-11 text-base" />}
       />
     </div>

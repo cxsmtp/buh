@@ -4,14 +4,14 @@ import { markChanged } from './dataChanges';
 import fs from 'node:fs';
 import net from 'node:net';
 import path from 'node:path';
-import type { BankState, CardPayment, CardState, Customer, Emirate, Order, OrderAttention, OrderStatus } from '@/types';
+import type { BankState, CardPayment, CardState, Customer, Emirate, Order, OrderAttention, OrderStatus, PhotoOrder } from '@/types';
 import { deliveryCheck, uaeDate } from '@/lib/delivery';
 import { dataDir } from './dataDir';
 import { folderRoomProblem } from './diskRoom';
 import { customerLink } from './runtimeConfig';
 import { getDb, inTransaction } from './db';
 import { HttpError } from './http';
-import { parseReceiptDataUrl } from './imageInput';
+import { parseImageDataUrl, parseReceiptDataUrl } from './imageInput';
 import { verifyPhoneToken } from './phoneToken';
 import { getProduct, invalidateProducts, listProducts } from './products';
 import { bump } from './live';
@@ -361,6 +361,9 @@ export function placeOrder(input: unknown, context: PlaceOrderContext = {}): Pla
 
   const paymentMethod = text(body.paymentMethod, 'Payment method', 20, { required: true });
   const card = paymentMethod === 'online_card';
+  // "Order from your photo": a piece agreed on WhatsApp (photos, the agreed amount), not from the catalogue.
+  const photo = body.photo === undefined ? null : parsePhotoOrder(body.photo);
+  if (photo && card) throw new HttpError(400, 'An order from your photo is paid on delivery or by bank transfer, once we have confirmed the amount.', {}, { code: 'photo_no_card' });
   if (card && !cardPaymentsReady()) throw new HttpError(400, 'Card payment is not available right now. Please choose Cash on Delivery.', {}, { code: 'card_unavailable' });
   // Settings → Phone check "WhatsApp (free)": no code; the number typed (UAE mobile rules) is
   // confirmed by the customer's WhatsApp message afterwards. "SMS code": with an SMS gateway
@@ -448,7 +451,11 @@ export function placeOrder(input: unknown, context: PlaceOrderContext = {}): Pla
     }
   }
 
-  if (!Array.isArray(body.items) || body.items.length === 0) throw new HttpError(400, 'Your bag is empty.');
+  if (photo) {
+    if (body.items !== undefined && !(Array.isArray(body.items) && body.items.length === 0)) throw new HttpError(400, 'An order from your photo has no bag items.');
+    body.items = [];
+  } else if (!Array.isArray(body.items) || body.items.length === 0) throw new HttpError(400, 'Your bag is empty.');
+  if (!Array.isArray(body.items)) throw new HttpError(400, 'Your bag is empty.');
   if (body.items.length > MAX_LINES) throw new HttpError(400, `At most ${MAX_LINES} lines per order.`);
   // No code proved this phone: the order holds pieces before anyone has paid or confirmed (a card
   // order until it is paid, any other until the WhatsApp message or the owner's call), so a small
@@ -513,11 +520,22 @@ export function placeOrder(input: unknown, context: PlaceOrderContext = {}): Pla
   // written beside its place first (if that fails, no order), moved there once the order is saved.
   const freshReceipt = path.join(receiptsDir(), `checkout-${process.pid}-${crypto.randomBytes(6).toString('hex')}.upload.tmp`);
   if (receipt) fs.writeFileSync(freshReceipt, receipt.bytes, { mode: 0o600 });
+  // The photos of an order from a photo: the order's point, so no room means no order (said plainly).
+  const freshPhotos = photo ? photo.files.map((f) => ({ ...f, tmp: path.join(receiptsDir(), `photo-${process.pid}-${crypto.randomBytes(6).toString('hex')}.upload.tmp`) })) : [];
+  if (photo) {
+    const room = receiptRoomProblem(photo.files.reduce((n, f) => n + f.bytes.length, 0));
+    if (room) {
+      noteNoRoom('(photo order)', room);
+      throw new HttpError(507, 'We can’t take the photos right now, sorry. Please send them on WhatsApp instead.', {}, { code: 'no_room' });
+    }
+    for (const f of freshPhotos) fs.writeFileSync(f.tmp, f.bytes, { mode: 0o600 });
+  }
   let order: Order;
   try {
     order = placeInTransaction();
   } catch (err) {
     if (receipt) fs.rmSync(freshReceipt, { force: true });
+    for (const f of freshPhotos) fs.rmSync(f.tmp, { force: true });
     // The shop-wide cap refused a customer: the owner is told (outside the rolled-back transaction).
     if (err instanceof HttpError && err.details?.code === 'shop_busy') noteUnconfirmedPressure('refused', shopCap);
     throw err;
@@ -563,7 +581,8 @@ export function placeOrder(input: unknown, context: PlaceOrderContext = {}): Pla
           throw new HttpError(429, 'Card checkout is very busy right now, sorry. Please try again in a few minutes, or choose Cash on Delivery.', {}, { code: 'card_busy' });
         }
       }
-      const items: Order['items'] = [];
+      // An order from a photo: one line, the agreed amount, no stock (the piece is not in the catalogue).
+      const items: Order['items'] = photo ? [photoLine(photo)] : [];
       for (const line of lines) {
         const product = getProduct(line.productId);
         if (!product || !product.active) throw new HttpError(409, 'An item in your bag is no longer available. Please remove it and try again.');
@@ -652,7 +671,7 @@ export function placeOrder(input: unknown, context: PlaceOrderContext = {}): Pla
           pickupDate: uaeDate(Date.now(), deliveryOption === 'same_day' ? 0 : 1),
           // From the sizes' weights and the packaging allowance; 0 (unknown, entered when booking) when a size has none.
           weightKg: Math.min(500, shipmentWeight({ items }, courierSettings.packagingGrams ?? DEFAULT_PACKAGING_GRAMS).kg ?? 0),
-          pieces: items.reduce((s, i) => s + i.quantity, 0),
+          pieces: photo ? photo.pieces : items.reduce((s, i) => s + i.quantity, 0),
           labelGenerated: false,
           codAmountCollected: paymentMethod === 'cod' ? aed(totalFils) : 0,
           serviceability: {
@@ -665,11 +684,12 @@ export function placeOrder(input: unknown, context: PlaceOrderContext = {}): Pla
         } as Order['courier'],
         adminNotes: undefined,
         ...(source ? { source } : {}),
+        ...(photo ? { photoOrder: { photos: photo.files.length, ...(photo.note ? { note: photo.note } : {}), pieces: photo.pieces, agreedTotal: aed(photo.amountFils) } satisfies PhotoOrder } : {}),
       };
       writeOrder(created, idempotencyKey);
       // Its VAT breakdown, worked out here and stored once (never for an order placed without VAT).
       if (vatPlan) recordOrderVat(created, vatPlan);
-      logEvent(id, 'customer', 'created', { total: created.total, paymentMethod, ...(created.cardFee ? { cardFee: created.cardFee } : {}), ...(created.bankDetailsBy ? { bankDetailsBy: created.bankDetailsBy } : {}) });
+      logEvent(id, 'customer', 'created', { total: created.total, paymentMethod, ...(photo ? { photoOrder: { photos: photo.files.length, agreedTotal: aed(photo.amountFils) } } : {}), ...(created.cardFee ? { cardFee: created.cardFee } : {}), ...(created.bankDetailsBy ? { bankDetailsBy: created.bankDetailsBy } : {}) });
       if (ipHash) getDb().prepare('UPDATE orders SET card_ip = ? WHERE id = ?').run(ipHash, id);
       if (card) {
         getDb().prepare("UPDATE orders SET card_state = 'pending' WHERE id = ?").run(id);
@@ -696,6 +716,17 @@ export function placeOrder(input: unknown, context: PlaceOrderContext = {}): Pla
       }
       return getOrder(id)!;
     });
+  }
+  if (freshPhotos.length) {
+    // Saved: now the files (a retry of the same checkout returned before any were written).
+    for (const [i, f] of freshPhotos.entries()) {
+      try {
+        fs.renameSync(f.tmp, photoFile(order.id, i + 1, f.ext));
+      } catch (err) {
+        logEvent_('error', 'photo_order_write_failed', { orderId: order.id, n: i + 1, error: err instanceof Error ? err.message : String(err) });
+      }
+    }
+    markChanged('orders');
   }
   if (receipt) {
     try {
@@ -804,6 +835,124 @@ export function readReceipt(orderId: string, version?: number): { bytes: Buffer;
     }
   }
   return null;
+}
+
+// ── Order from your photo: a piece agreed on WhatsApp ───────────────────────
+
+/** Limits on "Order from your photo" (the photos are resized in the browser first). */
+export const PHOTO_ORDER = { maxPhotos: 4, maxPhotoBytes: 1_200_000, minAmount: 1, maxAmount: 20_000, maxPieces: MAX_QTY, noteMax: 300 };
+/** The order line's product id: not a catalogue product (nothing is reserved or put back). */
+export const PHOTO_PRODUCT_ID = 'photo-order';
+const PHOTO_TYPES: Record<string, 'png' | 'jpg' | 'webp'> = { 'image/png': 'png', 'image/jpeg': 'jpg', 'image/webp': 'webp' };
+
+/** An amount in AED (a number, at most two decimals, within the limits), as fils. */
+function photoAmountFils(v: unknown, field = 'Amount'): number {
+  if (typeof v !== 'number' || !Number.isFinite(v)) throw new HttpError(400, `${field}: type the amount in AED, e.g. 350.`);
+  const f = Math.round(v * 100);
+  if (Math.abs(v * 100 - f) > 1e-6) throw new HttpError(400, `${field}: at most two decimals (fils).`);
+  if (f < PHOTO_ORDER.minAmount * 100 || f > PHOTO_ORDER.maxAmount * 100) throw new HttpError(400, `${field}: from AED ${PHOTO_ORDER.minAmount} to AED ${PHOTO_ORDER.maxAmount.toLocaleString('en-US')}.`);
+  return f;
+}
+
+interface PhotoInput {
+  files: { ext: 'png' | 'jpg' | 'webp'; bytes: Buffer }[];
+  note: string;
+  pieces: number;
+  amountFils: number;
+}
+
+/** The photo part of an order: only while the owner takes them (Settings → Store & contact); allow-listed and checked. */
+function parsePhotoOrder(v: unknown): PhotoInput {
+  if (!getSettings('store').photoOrders) {
+    throw new HttpError(404, 'Orders from a photo are not taken right now. Please message us on WhatsApp.', {}, { code: 'photo_orders_off' });
+  }
+  if (!v || typeof v !== 'object' || Array.isArray(v)) throw new HttpError(400, 'The photo order must be an object.');
+  const o = v as Obj;
+  const unknown = Object.keys(o).filter((k) => !['photos', 'note', 'pieces', 'amount'].includes(k));
+  if (unknown.length) throw new HttpError(400, `Unknown field: ${unknown[0].slice(0, 40)}.`);
+  if (!Array.isArray(o.photos) || o.photos.length < 1) throw new HttpError(400, 'Add at least one photo of the piece you want.', {}, { code: 'photo_missing' });
+  if (o.photos.length > PHOTO_ORDER.maxPhotos) throw new HttpError(400, `At most ${PHOTO_ORDER.maxPhotos} photos.`);
+  const files = o.photos.map((p) => {
+    const { mime, bytes } = parseImageDataUrl(p, PHOTO_ORDER.maxPhotoBytes);
+    return { ext: PHOTO_TYPES[mime], bytes };
+  });
+  const pieces = o.pieces === undefined ? 1 : o.pieces;
+  if (typeof pieces !== 'number' || !Number.isInteger(pieces) || pieces < 1 || pieces > PHOTO_ORDER.maxPieces) throw new HttpError(400, `Pieces: a whole number from 1 to ${PHOTO_ORDER.maxPieces}.`);
+  return { files, note: text(o.note, 'What it is', PHOTO_ORDER.noteMax), pieces, amountFils: photoAmountFils(o.amount, 'Amount agreed') };
+}
+
+/** The order's one line: the agreed amount, no catalogue product. */
+function photoLine(photo: Pick<PhotoInput, 'note' | 'pieces' | 'amountFils'>): Order['items'][number] {
+  const note = photo.note.replace(/\s+/g, ' ').trim();
+  return {
+    productId: PHOTO_PRODUCT_ID,
+    title: note ? `From your photo: ${note.length > 80 ? `${note.slice(0, 79)}…` : note}` : 'From your photo',
+    image: '',
+    profileId: 'photo',
+    profileName: `${photo.pieces} ${photo.pieces === 1 ? 'piece' : 'pieces'}`,
+    mattressSize: '',
+    fittedSheet: '',
+    flatSheet: '',
+    pillowcases: '',
+    unitPrice: aed(photo.amountFils),
+    quantity: 1,
+    totalPrice: aed(photo.amountFils),
+    productType: 'photo',
+  };
+}
+
+/** Where an order's photo n is kept: beside the transfer screenshots (backed up and restored with them). */
+function photoFile(orderId: string, n: number, ext: string): string {
+  return path.join(receiptsDir(), `${orderId}.photo${n}.${ext}`);
+}
+
+/** An order's photo n (1 first), for the owner. */
+export function readPhotoOrderPhoto(orderId: string, n: number): { bytes: Buffer; mime: string } | null {
+  if (!/^BUH-[A-Z0-9-]{4,40}$/.test(orderId) || !Number.isInteger(n) || n < 1 || n > PHOTO_ORDER.maxPhotos) return null;
+  for (const [mime, ext] of Object.entries(PHOTO_TYPES)) {
+    try {
+      return { bytes: fs.readFileSync(photoFile(orderId, n, ext)), mime };
+    } catch {
+      // try the next type
+    }
+  }
+  return null;
+}
+
+/**
+ * The owner checks the amount of an order from a photo (and corrects it if the customer typed it
+ * wrong): only then can it be confirmed or booked with the courier. Audited inside the same
+ * transaction; the same amount again changes nothing. Refused once it is with the courier, paid by
+ * transfer, closed, or has a VAT breakdown (then: cancel, and ask for it again with the right amount).
+ */
+export function confirmPhotoAmount(id: string, amount: unknown, actor: string): { order: Order; changed: boolean } {
+  const itemFils = photoAmountFils(amount);
+  const result = auditedTransaction((auditOrThrow) => {
+    const order = getOrder(id);
+    if (!order || !order.photoOrder || order.items.length !== 1) throw new HttpError(404, 'Order not found.');
+    if (order.status === 'cancelled' || order.status === 'delivered') throw new HttpError(409, `${id} is ${order.status}: its amount can’t change.`);
+    if (order.status === 'dispatched' || order.status === 'out_for_delivery') throw new HttpError(409, `${id} is already with the courier: its amount can’t change.`);
+    const fromFils = fils(order.items[0].totalPrice);
+    if (order.photoOrder.confirmedAt && fromFils === itemFils) return { order, changed: false };
+    if (fromFils !== itemFils) {
+      if (order.bankTransfer?.state === 'paid') throw new HttpError(409, `${id} is already paid: its amount can’t change.`);
+      if (orderVat(id)) throw new HttpError(409, `${id} has a VAT breakdown, so its amount can’t change. Cancel it, and ask the customer to send it again with the right amount.`, {}, { code: 'photo_vat' });
+      const totalFils = itemFils + fils(order.deliveryFee) + fils(order.codFee) + fils(order.cardFee ?? 0) + fils(order.vatAdded ?? 0);
+      order.items[0] = { ...order.items[0], unitPrice: aed(itemFils), totalPrice: aed(itemFils) };
+      order.subtotal = aed(itemFils);
+      order.total = aed(totalFils);
+      if (order.paymentMethod === 'cod') order.courier.codAmountCollected = aed(totalFils);
+      getDb().prepare('UPDATE orders SET total_fils = ? WHERE id = ?').run(totalFils, id);
+    }
+    const at = new Date().toISOString();
+    order.photoOrder = { ...order.photoOrder, confirmedAt: at, confirmedBy: actor };
+    writeOrder(order);
+    logEvent(id, actor, 'photo_amount_confirmed', { from: aed(fromFils), to: aed(itemFils) });
+    auditOrThrow('order.photo_amount_confirmed', { by: actor, orderId: id, fromFils, toFils: itemFils, totalFils: fils(order.total), paymentMethod: order.paymentMethod });
+    return { order: getOrder(id)!, changed: true };
+  });
+  if (result.changed) bump('orders');
+  return result;
 }
 
 // ── Bank transfer: the customer's private page, the owner's check ───────────
@@ -1163,6 +1312,10 @@ function assertCardAllows(order: Order, to: OrderStatus): void {
  * received. Cancelling is always possible.
  */
 export function assertNotHeld(order: Order): void {
+  // An order from a photo: the amount is the customer's word until the owner confirms it.
+  if (order.photoOrder && !order.photoOrder.confirmedAt) {
+    throw new HttpError(409, `${order.id} is an order from a photo: check the photos and confirm the amount first (“Confirm amount”).`, {}, { code: 'photo_amount' });
+  }
   const check = order.whatsappCheck;
   if (check?.hold && check.status !== 'confirmed') {
     throw new HttpError(409, `${order.id} is held until the customer confirms on WhatsApp. Tap “Confirmed on WhatsApp” once their message has come, or cancel the order.`, {}, { code: 'whatsapp_hold' });
@@ -2031,7 +2184,13 @@ export function customerView(order: Order) {
     ...(order.whatsappCheck ? { whatsappCheck: whatsAppView(order.whatsappCheck) } : {}),
     ...(order.card ? { card: cardView(order.card) } : {}),
     ...(order.bankTransfer ? { bankTransfer: bankView(order.bankTransfer) } : {}),
+    ...(order.photoOrder ? { photoOrder: photoView(order.photoOrder) } : {}),
   };
+}
+
+/** The customer's side of an order from a photo: the amount they typed, and whether the shop has confirmed it (not who). */
+export function photoView(p: PhotoOrder): Pick<PhotoOrder, 'photos' | 'pieces' | 'agreedTotal' | 'note'> & { amountConfirmed: boolean } {
+  return { photos: p.photos, pieces: p.pieces, agreedTotal: p.agreedTotal, ...(p.note ? { note: p.note } : {}), amountConfirmed: Boolean(p.confirmedAt) };
 }
 
 /** The customer's side of a bank transfer: where it stands, and their own private page while it is open. */
@@ -2100,6 +2259,7 @@ export function lookupOrder(id: string, phone: string) {
     ...(order.whatsappCheck ? { whatsappCheck: whatsAppView(order.whatsappCheck) } : {}),
     ...(order.card ? { card: cardView(order.card) } : {}),
     ...(order.bankTransfer ? { bankTransfer: bankView(order.bankTransfer) } : {}),
+    ...(order.photoOrder ? { photoOrder: photoView(order.photoOrder) } : {}),
   };
 }
 

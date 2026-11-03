@@ -24,6 +24,7 @@ import {
 import { postJson, safeHref, safeLinkHref, sendJson } from '@/lib/apiClient';
 import { awaitingWhatsApp, heldForWhatsApp, OrderTimeline, OrderWhatsAppCheck } from './OrderWhatsAppCheck';
 import { OrderBankTransfer, transferToCheck } from './OrderBankTransfer';
+import { OrderPhotoCheck } from './OrderPhotoCheck';
 import { DEFAULT_PACKAGING_GRAMS, shipmentWeight } from '@/lib/shipmentWeight';
 import { aed2, BLOCKED_MESSAGE, carrierLabel, ECO_LIVE_NOT_CONNECTED, jeeblyMode, LIVE_OFF_WARNING } from '@/lib/courierMode';
 import { EnterTrackingDialog } from './EnterTrackingDialog';
@@ -478,6 +479,7 @@ export const AdminOrdersTab: React.FC<AdminOrdersTabProps> = ({
                 {/* Confirm on WhatsApp, and the bank transfer: first, so the owner sees them on the phone */}
                 <OrderWhatsAppCheck order={order} onOrderChanged={whatsappChecked} shopName={shopName} />
                 {bank && <OrderBankTransfer order={order} bank={bank} shopName={shopName} onOrderChanged={whatsappChecked} />}
+                {order.photoOrder && <OrderPhotoCheck order={order} onOrderChanged={whatsappChecked} />}
 
                 {/* Items & Delivery Info */}
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 text-xs">
@@ -489,7 +491,7 @@ export const AdminOrdersTab: React.FC<AdminOrdersTabProps> = ({
                     {order.items.map((i, idx) => (
                       <div key={idx} className="flex items-center gap-2 text-ink">
                         {/* eslint-disable-next-line @next/next/no-img-element */}
-                        <img src={i.image} alt={i.title} className="w-6 h-6 rounded object-cover" />
+                        {i.image ? <img src={i.image} alt={i.title} className="w-6 h-6 rounded object-cover" /> : <span className="w-6 h-6 rounded bg-sand shrink-0" aria-hidden="true" />}
                         <span className="truncate">
                           <strong>{i.quantity}x</strong> {i.title} ({i.mattressSize ? i.profileName.split(' ')[0] : i.profileName})
                           {i.sku && <span className="text-ink-muted font-mono text-[11px]"> · {i.sku}</span>}

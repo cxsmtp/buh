@@ -36,6 +36,8 @@ interface TrackedOrder {
   whatsappCheck?: Pick<WhatsAppCheck, 'status' | 'code' | 'hold' | 'cancelAt' | 'openBy'>;
   /** A bank transfer: where it stands, and the customer's own private page while it is open. */
   bankTransfer?: Pick<BankTransferCheck, 'state' | 'uploads' | 'payPath'>;
+  /** An order from a photo: whether the shop has checked the amount yet. */
+  photoOrder?: { amountConfirmed: boolean };
 }
 
 /** Copies the tracking number (to paste on the courier's site). */
@@ -174,6 +176,11 @@ export const OrderTrackerModal: React.FC<OrderTrackerModalProps> = ({
                   </span>
                 </div>
 
+                {searchResult.photoOrder && !searchResult.photoOrder.amountConfirmed && searchResult.status !== 'cancelled' && (
+                  <p role="status" data-testid="track-photo-checking" className="text-xs text-ink-soft bg-ivory border border-line rounded-xl px-3 py-2">
+                    Order from your photo: we&rsquo;re checking the photos and the amount. We&rsquo;ll confirm on WhatsApp, then send it.
+                  </p>
+                )}
                 {searchResult.whatsappCheck && searchResult.status !== 'cancelled' && (
                   <WhatsAppConfirm orderId={searchResult.id} phone={foundPhone} check={searchResult.whatsappCheck} bankDetails={Boolean(searchResult.bankTransfer && searchResult.bankTransfer.state !== 'paid')} cancelHours={cancelHoursOf(searchResult.createdAt, searchResult.whatsappCheck.cancelAt)} openHours={cancelHoursOf(searchResult.createdAt, searchResult.whatsappCheck.openBy)} />
                 )}
