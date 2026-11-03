@@ -51,7 +51,7 @@ test('containers: patched bases, pinned by digest; no end-of-life Node, old Cadd
     if (/^FROM\s+(base|cli)\b/.test(l)) continue;
     assert.match(l, /@sha256:[0-9a-f]{64}/, `${f}: ${l}`);
   }
-  assert.deepEqual(fromLines('Dockerfile')[0].split(/\s+/)[1].split('@')[0], 'node:24.22.0-alpine3.24');
+  assert.deepEqual(fromLines('Dockerfile')[0].split(/\s+/)[1].split('@')[0], 'node:24.22.2-alpine3.24');
   assert.match(read('deploy/proxy/Dockerfile'), /^FROM caddy:2\.11\.7-alpine@sha256:/m);
   const compose = read('docker-compose.yml');
   assert.match(compose, /image: caddy:2\.11\.7-alpine@sha256:/);

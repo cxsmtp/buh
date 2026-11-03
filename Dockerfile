@@ -1,15 +1,16 @@
 # Base image with Node.js LTS on Alpine for minimal footprint
-# node:24.22.0-alpine3.24 (Node 24 LTS; Node 20 is past its end of life), pinned by digest;
+# node:24.22.2-alpine3.24 (Node 24 LTS; Node 20 is past its end of life), pinned by digest;
 # Dependabot proposes the newer digest (security fixes) as a pull request.
 # Not Node 26 yet: 26.13 with Next 16.4.3 resets a kept-alive connection after a request refused before
 # its body is read, which behind the proxy fails the next request on it. deploy/ci/single-container-test.sh
 # checks this on the real image, so a Node 26 bump stays red until a fix lands.
-FROM node:24.22.0-alpine3.24@sha256:44fce696f38ba8c987c4db89954051000bbd05ffd8d8659ba15ed4a8602e937f AS base
+FROM node:24.22.2-alpine3.24@sha256:8a32c8cf649a49915a66e81e7a609223c708d0adabf288ee3f4077d765542f85 AS base
 
 # Step 1: Install dependencies
 FROM base AS deps
 # Build tools only for the native SQLite driver, if no prebuilt binary matches.
-RUN apk add --no-cache libc6-compat python3 make g++
+# Versions held to their series ("~": any security revision of it), on the base pinned by digest.
+RUN apk add --no-cache gcompat~1.1 python3~3.14 make~4.4 g++~15.2
 WORKDIR /app
 
 COPY package.json package-lock.json* ./
@@ -36,7 +37,7 @@ WORKDIR /app
 # The shop runs `node server.js` and `node scripts/…` only: the package managers that come with
 # the base image (npm, npx, corepack, yarn, with their own bundled modules) are removed, so
 # nothing in the running image installs or fetches code.
-RUN apk upgrade --no-cache && apk add --no-cache tini \
+RUN apk upgrade --no-cache && apk add --no-cache tini~0.19 \
  && rm -rf /usr/local/lib/node_modules /usr/local/bin/npm /usr/local/bin/npx \
       /usr/local/bin/corepack /usr/local/bin/yarn /usr/local/bin/yarnpkg /opt/yarn-v* /root/.npm
 

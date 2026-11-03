@@ -7,12 +7,12 @@
 # Built from the repository root: docker build -f deploy/updater/Dockerfile .
 # Published by .github/workflows/container.yml next to the shop image (main only).
 # Bases pinned by digest (a moved tag cannot change what is built; Dependabot proposes updates):
-# the docker CLI binary from docker:29.9.1-cli, on plain alpine:3.24. The updater only talks to
+# the docker CLI binary from docker:29.9.2-cli, on plain alpine:3.24. The updater only talks to
 # the engine's API socket, so the CLI image's Compose and Buildx plugins, its source-control
 # client and its SSH client stay out of this image (less to patch, less to attack).
-FROM docker:29.9.1-cli@sha256:6fae2214c3121a28d5aa639d09032f61310b7c9c75ffbad1025f261a1b621800 AS cli
+FROM docker:29.9.2-cli@sha256:5e6baf67325a79f64ed3bed6863954d5e05d0f3d4e57cbdb14809346814bbfdb AS cli
 
-FROM alpine:3.24.2@sha256:294b683cb724975bec92580e1e685676bd4b50bda910ddb8c51d4cabeaec77e6
+FROM alpine:3.24.3@sha256:be2656061b536c1883c4034790e21d0a09c5aaaf51968b89368a3c0371ea2c9a
 
 COPY --from=cli /usr/local/bin/docker /usr/local/bin/docker
 COPY deploy/updater/updater.sh /updater/updater.sh
