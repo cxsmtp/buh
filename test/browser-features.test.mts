@@ -556,7 +556,7 @@ test('regression (reported): a laptop that reports Virginia keeps a Dubai addres
   assert.equal(await page.locator('select').first().inputValue(), 'Dubai', 'the emirate is not changed to a guess');
   await page.getByPlaceholder('e.g. Dubai Marina, Saadiyat, JVC').fill('Al Barsha');
   await page.getByText('We deliver to Al Barsha, Dubai').waitFor();
-  await page.getByText('Standard delivery in 1–2 days').waitFor();
+  await page.getByText('Standard delivery in 1–2 days', { exact: true }).waitFor();
   const body = (await page.textContent('body')) || '';
   assert.doesNotMatch(body, /jeebly|logistics hub|out of range/i, 'no courier details for customers');
 

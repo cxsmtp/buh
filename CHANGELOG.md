@@ -1,9 +1,12 @@
 # Changelog
 
-## BUH-02.28.01 — 2026-11-03 17:02 UTC · [#62](https://github.com/cxsmtp/buh/pull/62)
+## BUH-02.29.00 — 2026-11-03 17:06 UTC · [#62](https://github.com/cxsmtp/buh/pull/62)
 
-- **"Standard delivery", not "free delivery".** Checkout, the bag, the product page, the top banner and the default announcement now say "Standard delivery". The price is unchanged: standard delivery still costs nothing.
+- **"Standard delivery", not "free delivery".** Checkout, the bag, the product page, the top banner and the default announcement now say "Standard delivery". It still costs nothing unless you set a charge (below).
 - **Card payment for orders from a photo.** With card payments on (Settings → Payments), the photo order's checkout also offers card, Apple Pay and Google Pay. The customer pays the amount they typed plus the card fee. Paid by card, the amount can't be changed in the hub: if it is wrong, use **Cancel & refund** and ask them to order again.
+- **Edit the delivery options.** Settings → Delivery now has **Standard delivery**'s name and charge (AED 0 by default, so nothing changes until you set one) and same day's name, beside its charge. Checkout, the bag, the products and the order screen show them. The shop charges exactly what you set, and orders already placed keep theirs.
+- **Orders from a photo get a weight.** Each piece (bedsheet) counts as 1 kg by default, so 3 bedsheets are 3 kg, plus your packaging allowance. Change it in Settings → Couriers → **Weight per piece, order from a photo**. The weight is filled in for booking, and you can still change it there.
+- **The "Have a photo" banner glows.** The home-page banner for **Order from your photo** has a soft gold glow, so customers notice it. It stays still for people whose phone asks for less motion.
 - **Status.**
   - **Benchmark:** pending.
   - **Tests:** pending.

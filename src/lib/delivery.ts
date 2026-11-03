@@ -20,7 +20,9 @@ export interface DeliveryCheck {
   message: string;
   /** "1–2 days" */
   days: string;
-  sameDay: { available: boolean; fee: number; cutoff: string; reason?: string };
+  /** Settings → Delivery: what standard delivery is called and costs (AED). */
+  standard: { name: string; fee: number };
+  sameDay: { available: boolean; fee: number; name: string; cutoff: string; reason?: string };
 }
 
 const norm = (s: string) => s.toLowerCase().replace(/[^\p{L}\p{N}]+/gu, ' ').trim();
@@ -50,6 +52,7 @@ export function deliveryCheck(input: { emirate: string; area: string }, s: Deliv
   const sameDay = {
     available: serviceable && s.sameDayEnabled && sameDayHere && beforeCutoff,
     fee: s.sameDayFee,
+    name: s.sameDayName || 'Same day',
     cutoff: s.sameDayCutoff,
     reason: !s.sameDayEnabled ? undefined : !sameDayHere ? `Same-day delivery is for ${s.sameDayEmirates.join(', ')}.` : !beforeCutoff ? `Same-day delivery is for orders before ${s.sameDayCutoff}; tomorrow is the earliest now.` : undefined,
   };
@@ -61,6 +64,7 @@ export function deliveryCheck(input: { emirate: string; area: string }, s: Deliv
         ? 'Choose your emirate.'
         : `Sorry, we don’t deliver to ${where} yet. Message us and we’ll see what we can do.`,
     days: s.standardDays,
+    standard: { name: s.standardName || 'Standard delivery', fee: Number(s.standardFee) || 0 },
     sameDay,
   };
 }

@@ -71,6 +71,9 @@ test('an order from a photo: the agreed amount, its photos kept for the owner, n
   assert.equal(order.items[0].productId, orders.PHOTO_PRODUCT_ID);
   assert.match(order.items[0].title, /From your photo: King set, blue block print/);
   assert.equal(order.courier.pieces, 2);
+  // Its weight from the pieces (asked by the owner: 1 kg per bedsheet by default), plus the packaging (200 g).
+  assert.equal(order.items[0].weightGrams, 2000);
+  assert.equal(order.courier.weightKg, 2.2);
   assert.equal(order.courier.codAmountCollected, 350);
   assert.deepEqual(order.photoOrder, { photos: 2, note: 'King set, blue block print', pieces: 2, agreedTotal: 350 });
   assert.equal(order.status, 'pending_confirmation');
@@ -184,4 +187,13 @@ test('with card payments on (Settings → Payments), an order from a photo can b
   } finally {
     await updateSettings('payments', { cardEnabled: false });
   }
+});
+
+test('the weight per piece is the owner’s (Settings → Couriers): 3 bedsheets at 1.2 kg are 3.6 kg, plus the packaging; checked', async () => {
+  await updateSettings('courier', { photoPieceGrams: 1200 });
+  const { order } = place({ photos: [png], pieces: 3, amount: 450 });
+  assert.equal(order.items[0].weightGrams, 3600);
+  assert.equal(order.courier.weightKg, 3.8);
+  for (const bad of [0, -5, 1.5, 20_001, 'x']) await assert.rejects(updateSettings('courier', { photoPieceGrams: bad }), (e: { status?: number }) => e.status === 400, String(bad));
+  await updateSettings('courier', { photoPieceGrams: 1000 });
 });

@@ -2,7 +2,7 @@
 
 import React from 'react';
 import { CartItem } from '@/types';
-import { cartFils, formatAed, lineFils } from '@/lib/money';
+import { cartFils, formatAed, lineFils, toFils } from '@/lib/money';
 import { piecesLeft, useShop } from '@/lib/client/shop';
 import { LocalPrice } from '@/lib/client/currency';
 import { encodeBag, inAppBrowser } from '@/lib/client/landing';
@@ -26,12 +26,14 @@ export const CartDrawer: React.FC<CartDrawerProps> = ({
   onRemoveItem,
   onCheckout,
 }) => {
-  const { lowStockThreshold } = useShop();
+  const { lowStockThreshold, delivery } = useShop();
   if (!isOpen) return null;
 
-  // Delivery is free across the UAE (the server charges no delivery fee).
+  // Standard delivery: what Settings → Delivery calls it and charges (the server charges the same).
+  const deliveryName = delivery.standardName || 'Standard delivery';
+  const deliveryFils = toFils(Number(delivery.standardFee) || 0);
   const subtotal = formatAed(cartFils(items));
-  const grandTotal = subtotal;
+  const grandTotal = formatAed(cartFils(items) + deliveryFils);
   // A sold-out line (someone bought the last piece) must be removed before checkout.
   const unavailable = items.some((i) => piecesLeft(i.product, i.selectedProfile.id) < i.quantity);
 
@@ -69,7 +71,7 @@ export const CartDrawer: React.FC<CartDrawerProps> = ({
           <div className="px-4 py-2.5 bg-ivory border-b border-line">
             <span className="flex items-center gap-2 text-xs text-ink-soft tracking-[0.02em]">
               <Truck className="w-4 h-4 text-gold-deep" strokeWidth={1.5} />
-              <span>Standard delivery to all seven emirates</span>
+              <span>{deliveryName} to all seven emirates</span>
             </span>
           </div>
 
@@ -192,7 +194,7 @@ export const CartDrawer: React.FC<CartDrawerProps> = ({
                   </div>
                   <div className="flex flex-wrap justify-between gap-x-3">
                     <span>Delivery to all seven emirates</span>
-                    <span className="text-success">Standard</span>
+                    <span className={deliveryFils ? 'text-ink' : 'text-success'}>{deliveryFils ? `AED ${formatAed(deliveryFils)}` : deliveryName}</span>
                   </div>
                 </div>
                 <BagLinkButton items={items} />
@@ -211,7 +213,7 @@ export const CartDrawer: React.FC<CartDrawerProps> = ({
           {items.length > 0 && (
             <div className="shrink-0 px-4 pt-3 pb-4 bg-ivory border-t border-line space-y-3">
               <div className="flex flex-wrap items-baseline justify-between gap-x-3 text-sm text-ink">
-                <span className="label-caps text-ink-muted">Total · standard delivery</span>
+                <span className="label-caps text-ink-muted">Total · {deliveryName.toLowerCase()}</span>
                 <span className="text-right tracking-[0.02em]">
                   AED {grandTotal}
                   <LocalPrice aed={Number(grandTotal)} className="text-[10px] block" />

@@ -290,7 +290,7 @@ const ProductDetailContent: React.FC<ProductDetailModalProps & { product: Produc
           <ul className="text-xs text-ink-soft space-y-1.5">
             <li className="flex items-center gap-2">
               <Truck className="w-4 h-4 text-gold-deep" aria-hidden="true" />
-              Standard delivery in {delivery.standardDays || '1–2 days'} to all seven emirates
+              {delivery.standardName || 'Standard delivery'} in {delivery.standardDays || '1–2 days'} to all seven emirates
             </li>
             <li className="flex items-center gap-2">
               <ShieldCheck className="w-4 h-4 text-gold-deep" aria-hidden="true" />

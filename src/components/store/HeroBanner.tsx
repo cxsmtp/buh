@@ -42,7 +42,7 @@ export const HeroBanner: React.FC<HeroBannerProps> = ({ brand, pieces }) => {
           <span className="break-anywhere">{where || 'UAE'}</span>
         </span>
         <span>
-          Standard delivery in {delivery.standardDays || '1–2 days'}<span className="hidden sm:inline"> to all seven emirates</span> · Cash on delivery<span className="hidden sm:inline"> or bank transfer{chat ? ' · Questions? Ask us in the chat.' : '.'}</span>
+          {delivery.standardName || 'Standard delivery'} in {delivery.standardDays || '1–2 days'}<span className="hidden sm:inline"> to all seven emirates</span> · Cash on delivery<span className="hidden sm:inline"> or bank transfer{chat ? ' · Questions? Ask us in the chat.' : '.'}</span>
         </span>
       </p>
     </section>

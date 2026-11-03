@@ -3,6 +3,7 @@
 import React, { useId, useState } from 'react';
 import { Camera, ImagePlus, Loader2, MessageCircle, X } from 'lucide-react';
 import { shrinkPhoto } from '@/lib/shrinkPhoto';
+import { useShop } from '@/lib/client/shop';
 
 /** What the customer fills in before the address and payment (the server checks it all again). */
 export interface PhotoOrderDraft {
@@ -26,6 +27,9 @@ const PHOTO_URL_MAX = 1_500_000;
  */
 export function PhotoOrderSheet({ onClose, onContinue, draft }: { onClose: () => void; onContinue: (draft: PhotoOrderDraft) => void; draft?: PhotoOrderDraft | null }) {
   const id = useId();
+  const { delivery } = useShop();
+  const deliveryFee = Number(delivery.standardFee) || 0;
+  const deliveryName = (delivery.standardName || 'Standard delivery').toLowerCase();
   const [photos, setPhotos] = useState<string[]>(draft?.photos ?? []);
   const [busy, setBusy] = useState(0);
   const [note, setNote] = useState(draft?.note ?? '');
@@ -135,7 +139,7 @@ export function PhotoOrderSheet({ onClose, onContinue, draft }: { onClose: () =>
         <div className="grid grid-cols-[minmax(0,1fr)_minmax(0,1.4fr)] gap-3">
           <div>
             <label htmlFor={`${id}-pieces`} className="block text-sm font-semibold text-ink mb-1">
-              Pieces
+              Bedsheets / pieces
             </label>
             <input id={`${id}-pieces`} className={field} type="number" inputMode="numeric" min={1} max={PHOTO_ORDER_LIMITS.maxPieces} step={1} value={pieces} onChange={(e) => setPieces(e.target.value)} />
           </div>
@@ -146,7 +150,7 @@ export function PhotoOrderSheet({ onClose, onContinue, draft }: { onClose: () =>
             <input id={`${id}-amount`} className={field} type="number" inputMode="decimal" min={1} max={PHOTO_ORDER_LIMITS.maxAmount} step="0.01" value={amount} onChange={(e) => setAmount(e.target.value)} placeholder="e.g. 350" required />
           </div>
         </div>
-        <p className="text-xs text-ink-soft">The total for everything in the photos, as agreed on WhatsApp, with standard delivery.</p>
+        <p className="text-xs text-ink-soft">The total for everything in the photos, as agreed on WhatsApp.{deliveryFee > 0 ? ` Delivery (${deliveryName}, AED ${deliveryFee}) is added at checkout.` : ` With ${deliveryName}.`}</p>
 
         {error && (
           <p role="alert" className="text-xs font-semibold text-danger">

@@ -265,7 +265,7 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
   // refuses the order if its total differs from the one shown here (a price changed meanwhile).
   const delivery = deliveryCheck({ emirate, area }, deliverySettings);
   const sameDayChosen = deliveryChoice.option === 'same_day' && deliveryChoice.key === `${emirate}|${area}` && delivery.sameDay.available;
-  const deliveryFils = sameDayChosen ? toFils(delivery.sameDay.fee) : 0;
+  const deliveryFils = sameDayChosen ? toFils(delivery.sameDay.fee) : toFils(delivery.standard.fee);
   const totalFils = (photoOrder ? photoOrder.amountFils : cartFils(items)) + deliveryFils;
   const bankReady = bankTransfer;
   const shopWhatsApp = useShop().store.whatsappNumber.replace(/\D/g, '');
@@ -865,7 +865,7 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
             <div className="flex justify-between items-center">
               <span className="text-ink-muted font-medium">Delivery</span>
               <span className="text-gold-deep flex items-center gap-1">
-                <span>{confirmedOrder.deliveryOption === 'same_day' ? `Same day (AED ${confirmedOrder.deliveryFee})` : `Standard, ${confirmedOrder.courier.serviceability?.deliverySpeed || deliverySettings.standardDays}`}</span>
+                <span>{confirmedOrder.deliveryOption === 'same_day' ? `${deliverySettings.sameDayName || 'Same day'} (AED ${confirmedOrder.deliveryFee})` : `${deliverySettings.standardName || 'Standard delivery'}, ${confirmedOrder.courier.serviceability?.deliverySpeed || deliverySettings.standardDays}${confirmedOrder.deliveryFee ? ` (AED ${confirmedOrder.deliveryFee})` : ''}`}</span>
               </span>
             </div>
 
@@ -956,7 +956,7 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
               Checkout
             </h2>
             <p className="text-[11px] text-ink-muted tracking-[0.02em]">
-              {card ? 'Standard delivery across the UAE · Card, Apple Pay, Google Pay or cash on delivery' : 'Standard delivery across the UAE · Cash on delivery or bank transfer'}
+              {`${deliverySettings.standardName || 'Standard delivery'} across the UAE · ${card ? 'Card, Apple Pay, Google Pay or cash on delivery' : 'Cash on delivery or bank transfer'}`}
             </p>
           </div>
           <button
@@ -1012,7 +1012,7 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
             <ExpressCheckout
               publishableKey={card.publishableKey}
               amountFils={cardTotalFils}
-              shippingRate={sameDayChosen ? { id: 'same_day', displayName: 'Same-day delivery', amount: deliveryFils } : { id: 'standard', displayName: `Standard delivery in ${deliverySettings.standardDays}`, amount: 0 }}
+              shippingRate={sameDayChosen ? { id: 'same_day', displayName: delivery.sameDay.name, amount: deliveryFils } : { id: 'standard', displayName: `${delivery.standard.name} in ${deliverySettings.standardDays}`, amount: deliveryFils }}
               lineItems={cardFee > 0 || cardVatFils > 0 ? [{ name: 'Items', amount: totalFils - deliveryFils }, ...(cardFee > 0 ? [{ name: `Card payment fee (${percentText(feePercent)}%)`, amount: cardFee }] : []), ...(cardVatFils > 0 ? [{ name: `VAT (${percentText(vatAddedPercent)}%)`, amount: cardVatFils }] : [])] : undefined}
               servesEmirate={(state, city) => {
                 const em = emirateFrom(state) ?? emirateFrom(city);
@@ -1319,7 +1319,7 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
                 )}
                 <div>
                   <div className={`font-semibold ${delivery.serviceable ? 'text-success' : 'text-danger'}`}>{delivery.message}</div>
-                  {delivery.serviceable && <div className="text-ink-soft">Standard delivery in {delivery.days}</div>}
+                  {delivery.serviceable && <div className="text-ink-soft">{delivery.standard.name} in {delivery.days}{delivery.standard.fee > 0 ? ` · AED ${formatAed(toFils(delivery.standard.fee))}` : ''}</div>}
                 </div>
               </div>
               {delivery.serviceable && deliverySettings.sameDayEnabled && (
@@ -1328,14 +1328,14 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
                   <label className={`flex items-start gap-2 p-2.5 rounded-xl border cursor-pointer ${!sameDayChosen ? 'border-ink bg-surface' : 'border-line bg-surface/60'}`}>
                     <input type="radio" name="delivery-option" className="mt-0.5" checked={!sameDayChosen} onChange={() => setDeliveryOption('standard')} />
                     <span>
-                      <strong className="block text-ink">Standard delivery</strong>
+                      <strong className="block text-ink">{delivery.standard.name}{delivery.standard.fee > 0 ? ` · AED ${formatAed(toFils(delivery.standard.fee))}` : ''}</strong>
                       <span className="text-ink-muted">{delivery.days}</span>
                     </span>
                   </label>
                   <label className={`flex items-start gap-2 p-2.5 rounded-xl border ${delivery.sameDay.available ? 'cursor-pointer' : 'opacity-60'} ${sameDayChosen ? 'border-ink bg-surface' : 'border-line bg-surface/60'}`}>
                     <input type="radio" name="delivery-option" className="mt-0.5" checked={sameDayChosen} disabled={!delivery.sameDay.available} onChange={() => setDeliveryOption('same_day')} />
                     <span>
-                      <strong className="block text-ink">Same day · +AED {formatAed(toFils(delivery.sameDay.fee))}</strong>
+                      <strong className="block text-ink">{delivery.sameDay.name} · {delivery.standard.fee > 0 ? '' : '+'}AED {formatAed(toFils(delivery.sameDay.fee))}</strong>
                       <span className="text-ink-muted">{delivery.sameDay.available ? `Order before ${delivery.sameDay.cutoff}` : delivery.sameDay.reason}</span>
                     </span>
                   </label>

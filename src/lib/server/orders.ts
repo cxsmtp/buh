@@ -44,7 +44,8 @@ import { DEFAULT_PACKAGING_GRAMS, shipmentWeight } from '@/lib/shipmentWeight';
  * the bank details and uploads the transfer screenshot; the account is never on the website.
  */
 
-export const DELIVERY_FEE = 0; // free delivery across the UAE
+/** Standard delivery's charge when Settings → Delivery has none (free): kept for older callers. */
+export const DELIVERY_FEE = 0;
 export const COD_FEE = 0;
 const MAX_LINES = 20;
 const MAX_QTY = 20;
@@ -422,7 +423,8 @@ export function placeOrder(input: unknown, context: PlaceOrderContext = {}): Pla
   if (deliveryOption === 'same_day' && !delivery.sameDay.available) {
     throw new HttpError(409, delivery.sameDay.reason || 'Same-day delivery is not available for this order. Choose standard delivery.', {}, { code: 'same_day_unavailable' });
   }
-  const deliveryFils = deliveryOption === 'same_day' ? fils(delivery.sameDay.fee) : fils(DELIVERY_FEE);
+  // Settings → Delivery's charges, worked out here (never the browser's).
+  const deliveryFils = deliveryOption === 'same_day' ? fils(delivery.sameDay.fee) : fils(delivery.standard.fee);
 
   if (paymentMethod !== 'cod' && paymentMethod !== 'bank_transfer' && !card) throw new HttpError(400, 'Choose Cash on Delivery, Bank Transfer or Card.');
   // Settings → Payments → Bank transfer: our details sent automatically, or asked for on WhatsApp.
@@ -582,7 +584,7 @@ export function placeOrder(input: unknown, context: PlaceOrderContext = {}): Pla
         }
       }
       // An order from a photo: one line, the agreed amount, no stock (the piece is not in the catalogue).
-      const items: Order['items'] = photo ? [photoLine(photo)] : [];
+      const items: Order['items'] = photo ? [photoLine(photo, Math.max(1, Math.round(Number(courierSettings.photoPieceGrams) || 1000)))] : [];
       for (const line of lines) {
         const product = getProduct(line.productId);
         if (!product || !product.active) throw new HttpError(409, 'An item in your bag is no longer available. Please remove it and try again.');
@@ -881,8 +883,11 @@ function parsePhotoOrder(v: unknown): PhotoInput {
   return { files, note: text(o.note, 'What it is', PHOTO_ORDER.noteMax), pieces, amountFils: photoAmountFils(o.amount, 'Amount agreed') };
 }
 
-/** The order's one line: the agreed amount, no catalogue product. */
-function photoLine(photo: Pick<PhotoInput, 'note' | 'pieces' | 'amountFils'>): Order['items'][number] {
+/**
+ * The order's one line: the agreed amount, no catalogue product, and its weight from the pieces
+ * (Settings → Couriers "Weight per piece", 1 kg by default: 3 bedsheets are 3 kg, plus the packaging).
+ */
+function photoLine(photo: Pick<PhotoInput, 'note' | 'pieces' | 'amountFils'>, pieceGrams: number): Order['items'][number] {
   const note = photo.note.replace(/\s+/g, ' ').trim();
   return {
     productId: PHOTO_PRODUCT_ID,
@@ -897,6 +902,7 @@ function photoLine(photo: Pick<PhotoInput, 'note' | 'pieces' | 'amountFils'>): O
     unitPrice: aed(photo.amountFils),
     quantity: 1,
     totalPrice: aed(photo.amountFils),
+    weightGrams: photo.pieces * pieceGrams,
     productType: 'photo',
   };
 }

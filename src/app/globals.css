@@ -468,3 +468,22 @@ html.sheet-open {
   from { transform: translateX(100%); }
   to { transform: translateX(0); }
 }
+
+/* "Order from your photo" on the home page: a soft gold glow that breathes, so it is noticed.
+   Still (the glow without the pulse) for people who asked their device for less motion. */
+.photo-order-glow {
+  box-shadow: 0 0 0 1px color-mix(in srgb, var(--color-gold) 60%, transparent), 0 0 18px 2px color-mix(in srgb, var(--color-gold) 45%, transparent);
+}
+@media (prefers-reduced-motion: no-preference) {
+  .photo-order-glow {
+    animation: photo-order-glow 2.6s ease-in-out infinite;
+  }
+}
+@keyframes photo-order-glow {
+  0%, 100% {
+    box-shadow: 0 0 0 1px color-mix(in srgb, var(--color-gold) 50%, transparent), 0 0 8px 0 color-mix(in srgb, var(--color-gold) 30%, transparent);
+  }
+  50% {
+    box-shadow: 0 0 0 2px color-mix(in srgb, var(--color-gold) 80%, transparent), 0 0 24px 6px color-mix(in srgb, var(--color-gold) 55%, transparent);
+  }
+}

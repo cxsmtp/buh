@@ -25,6 +25,7 @@ export const INITIAL_BANK_DETAILS: BankTransferDetails = {
 
 export const INITIAL_COURIER_SETTINGS: CourierSettings = {
   packagingGrams: 200,
+  photoPieceGrams: 1000,
   labelPaper: 'a5',
   autoAssignRules: {
     codCourier: 'jeebly', // Default for Cash On Delivery (Jeebly UAE)

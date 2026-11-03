@@ -60,6 +60,21 @@ export function DeliverySettingsCard({ value, onSave, auto }: { value: DeliveryS
         </div>
       </section>
 
+      <section className="space-y-2 rounded-2xl border border-line bg-surface p-3" data-testid="delivery-standard">
+        <h3 className="font-bold text-ink text-xs">Standard delivery (what customers see at checkout)</h3>
+        <div className="grid grid-cols-2 gap-3">
+          <div>
+            <label className={label} htmlFor="dl-std-name">Name</label>
+            <input id="dl-std-name" className={field} value={d.standardName} maxLength={40} placeholder="Standard delivery" onChange={(e) => set('standardName', e.target.value)} />
+          </div>
+          <div>
+            <label className={label} htmlFor="dl-std-fee">Charge (AED, 0 for none)</label>
+            <input id="dl-std-fee" className={field} type="number" min={0} max={500} step="0.5" inputMode="decimal" value={d.standardFee} onChange={(e) => set('standardFee', Number(e.target.value))} />
+          </div>
+        </div>
+        <p className="text-[11px] text-ink-muted">Shown at checkout, in the bag and on the products, with the delivery time above. A charge is added to every order&apos;s total (and to the cash collected on delivery); orders already placed keep theirs.</p>
+      </section>
+
       <section className="space-y-2 rounded-2xl border border-line bg-surface p-3">
         <label className="flex items-center gap-2 text-xs font-semibold">
           <input type="checkbox" checked={d.sameDayEnabled} onChange={(e) => set('sameDayEnabled', e.target.checked)} />
@@ -67,9 +82,13 @@ export function DeliverySettingsCard({ value, onSave, auto }: { value: DeliveryS
         </label>
         {d.sameDayEnabled && (
           <>
+            <div>
+              <label className={label} htmlFor="dl-sd-name">Name</label>
+              <input id="dl-sd-name" className={field} value={d.sameDayName} maxLength={40} placeholder="Same day" onChange={(e) => set('sameDayName', e.target.value)} />
+            </div>
             <div className="grid grid-cols-2 gap-3">
               <div>
-                <label className={label} htmlFor="dl-fee">Extra charge (AED)</label>
+                <label className={label} htmlFor="dl-fee">Charge (AED)</label>
                 <input id="dl-fee" className={field} type="number" min={0} max={500} step="0.5" inputMode="decimal" value={d.sameDayFee} onChange={(e) => set('sameDayFee', Number(e.target.value))} />
               </div>
               <div>
@@ -87,7 +106,7 @@ export function DeliverySettingsCard({ value, onSave, auto }: { value: DeliveryS
                 ))}
               </div>
             </fieldset>
-            <p className="text-[11px] text-ink-muted">Customers choose it at checkout; the charge is added to their total (and to the cash collected on delivery). Book these with the courier&apos;s same-day service.</p>
+            <p className="text-[11px] text-ink-muted">Customers choose it at checkout instead of standard delivery; its charge is added to their total (and to the cash collected on delivery). Book these with the courier&apos;s same-day service.</p>
           </>
         )}
       </section>

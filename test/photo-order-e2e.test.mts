@@ -140,6 +140,8 @@ test('in the shop at 375 and 1280 px: the banner and the link open the form; pho
       await page.goto(server.base, { waitUntil: 'domcontentloaded' });
       const banner = page.getByTestId('photo-order-banner');
       await banner.waitFor();
+      // Highlighted: a gold glow around it (still for people who asked for less motion).
+      assert.notEqual(await banner.evaluate((el) => getComputedStyle(el).boxShadow), 'none');
       assert.equal(await overflow(page), false);
       if (shots) await banner.screenshot({ path: path.join(shots, `photo-banner-${width}.png`) });
       await banner.click();
