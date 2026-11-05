@@ -1,6 +1,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import type { Order, PaymentMethod } from '@/types';
+import { classifyOrder, creditOutFils } from '@/lib/orderMoney';
 import { dubaiDateOf, dubaiToday, twelveMonthsTo } from '@/lib/reportPeriods';
 import { auditExportChunks, iterAuditEntries, verificationText } from './auditView';
 import { audit, auditFiles, auditOrThrow, verifyAllAuditLogs } from './audit';
@@ -39,29 +40,7 @@ export const VAT_WARN_RATIO = 0.8;
 
 const fils = (aed: number | undefined) => Math.round((aed ?? 0) * 100);
 
-export interface OrderClass {
-  counted: boolean;
-  /** Why not counted ('' when counted). */
-  reason: string;
-  paid: boolean;
-}
-
-/** How an order counts in the books (see the comment at the top). */
-export function classifyOrder(o: Order): OrderClass {
-  const card = o.paymentMethod === 'online_card' ? o.card : undefined;
-  const cardTaken = card ? fils(card.paidAmount) > 0 && ['paid', 'refund_pending', 'refunded'].includes(card.state) : false;
-  const paid =
-    o.paymentMethod === 'online_card'
-      ? cardTaken
-      : o.paymentMethod === 'bank_transfer'
-      ? o.bankTransfer?.state === 'paid' || o.paymentStatus === 'verified' || o.paymentStatus === 'paid'
-      : o.paymentStatus === 'paid' || o.paymentStatus === 'verified';
-  let reason = '';
-  if (card?.mode === 'test') reason = 'Stripe test mode (not real money)';
-  else if (o.status === 'pending_payment') reason = 'waiting for the card payment';
-  else if (o.status === 'cancelled' && !cardTaken) reason = 'cancelled';
-  return { counted: !reason, reason, paid };
-}
+export { classifyOrder, type OrderClass } from '@/lib/orderMoney';
 
 /** A refund from the ledger, with its UAE date and whether it counts (not a Stripe test payment). */
 export interface BookedRefund extends RefundRow {
@@ -173,7 +152,8 @@ const inPeriod = (date: string, from: string, to: string) => date >= from && dat
 /** Net sales (counted orders placed, less refunds made) in a period: for the VAT threshold. */
 function netSales(orders: Order[], refunds: BookedRefund[], from: string, to: string): number {
   let n = 0;
-  for (const o of orders) if (classifyOrder(o).counted && inPeriod(dubaiDateOf(o.createdAt), from, to)) n += fils(o.total);
+  // A payment moved onto another order counts there (as part of that order's total), not twice.
+  for (const o of orders) if (classifyOrder(o).counted && inPeriod(dubaiDateOf(o.createdAt), from, to)) n += fils(o.total) - creditOutFils(o);
   for (const r of refunds) if (r.counted && inPeriod(r.date, from, to)) n -= r.amountFils;
   return n;
 }
@@ -207,6 +187,7 @@ export function buildReport(from: string, to: string, now = Date.now()): Report 
   const sales = { orders: 0, itemsFils: 0, deliveryFils: 0, codFeeFils: 0, cardFeeFils: 0, discountFils: 0, grossFils: 0, paidFils: 0, unpaidFils: 0 };
   const refunds = { count: 0, fils: 0 };
   const card = { paidCount: 0, paidFils: 0, refundedFils: 0 };
+  const movedOut = { count: 0, fils: 0 };
   const excluded = { cancelled: 0, awaitingCard: 0, testMode: 0 };
   const notes: string[] = [];
   let outside = 0;
@@ -224,7 +205,14 @@ export function buildReport(from: string, to: string, now = Date.now()): Report 
       else excluded.testMode++;
     }
     if (placedIn && c.counted) {
-      const total = fils(o.total);
+      // A cancelled order's payment moved onto another order is counted on that order (its total
+      // includes it), so it comes off here: one payment, one sale.
+      const moved = creditOutFils(o);
+      if (moved) {
+        movedOut.count++;
+        movedOut.fils += moved;
+      }
+      const total = fils(o.total) - moved;
       sales.orders++;
       sales.itemsFils += fils(o.subtotal);
       sales.deliveryFils += fils(o.deliveryFee);
@@ -278,6 +266,7 @@ export function buildReport(from: string, to: string, now = Date.now()): Report 
   if (approx) notes.push(`${approx} refund${approx === 1 ? ' was' : 's were'} made before refunds were recorded one by one: ${approx === 1 ? 'its date is' : 'their dates are'} the best known (refunds.csv says "approximate").`);
   if (outside) notes.push(`${outside} card order${outside === 1 ? ' was' : 's were'} cancelled with the refund to be made in the Stripe dashboard: check those refunds there.`);
   if (card.paidCount) notes.push('Card payments: Stripe’s fees and payouts to your bank are in your Stripe dashboard (Balance → Payouts); add the fees here as an expense (Bank & card charges) from Stripe’s monthly statement.');
+  if (movedOut.count) notes.push(`AED ${aedText(movedOut.fils)} paid on ${movedOut.count} cancelled order${movedOut.count === 1 ? '' : 's'} was moved onto other orders: it is counted once, on the order it was moved to.`);
   if (sales.unpaidFils) notes.push(`AED ${aedText(sales.unpaidFils)} of these sales is not marked as paid yet (cash on delivery not collected, or a transfer not yet checked).`);
 
   // Summed by the database: every expense of the period, however many.

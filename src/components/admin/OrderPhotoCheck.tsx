@@ -37,31 +37,7 @@ export function OrderPhotoCheck({ order, onOrderChanged }: { order: Order; onOrd
     else setProblem(data.message || 'Not saved. Please try again.');
   };
 
-  return (
-    <div data-testid="photo-order-check" className={`rounded-xl border p-3 space-y-2 text-xs ${p.confirmedAt ? 'border-success-line bg-success-soft' : 'border-warning-line bg-warning-soft'}`}>
-      <p className="flex flex-wrap items-center gap-x-2 gap-y-1">
-        <Camera className="w-4 h-4 text-gold-deep shrink-0" aria-hidden="true" />
-        <strong className={p.confirmedAt ? 'text-success' : 'text-warning'}>{fromDeal ? `Photo deal ${p.dealId} · your fixed price` : p.confirmedAt ? 'Order from a photo · amount confirmed' : 'Order from a photo · check the photos and confirm the amount'}</strong>
-      </p>
-      <ul className="flex flex-wrap gap-2">
-        {Array.from({ length: p.photos }, (_, i) => {
-          const src = `/api/admin/orders/${encodeURIComponent(order.id)}/photos/${i + 1}`;
-          return (
-            <li key={i}>
-              <a href={src} target="_blank" rel="noopener noreferrer" className="block rounded-lg focus:outline-none focus-visible:ring-2 focus-visible:ring-gold" aria-label={`Open photo ${i + 1} of ${order.id}`}>
-                {/* eslint-disable-next-line @next/next/no-img-element */}
-                <img src={src} alt={fromDeal ? `Picture ${i + 1} of the deal` : `Photo ${i + 1} from the customer`} className="w-20 h-20 object-cover rounded-lg border border-line bg-surface" loading="lazy" />
-              </a>
-            </li>
-          );
-        })}
-      </ul>
-      {p.note && <p className="text-ink break-anywhere">&ldquo;{p.note}&rdquo;</p>}
-      <p className="text-ink-soft">
-        {p.pieces} {p.pieces === 1 ? 'piece' : 'pieces'} · {fromDeal ? 'your price' : 'the customer typed'} <strong className="text-ink">AED {p.agreedTotal}</strong>
-        {p.confirmedAt && !fromDeal && <> · confirmed AED {line.totalPrice}{p.confirmedBy ? ` by ${p.confirmedBy}` : ''} on {new Date(p.confirmedAt).toLocaleString('en-GB', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })}</>}
-      </p>
-      {!closed && (
+  const editor = (
         <div className="flex flex-wrap items-end gap-2">
           <div className="min-w-0">
             <label htmlFor={`${id}-amount`} className="block text-[11px] font-semibold text-ink-soft mb-1">
@@ -74,7 +50,39 @@ export function OrderPhotoCheck({ order, onOrderChanged }: { order: Order; onOrd
             {p.confirmedAt ? 'Change amount' : 'Confirm amount'}
           </button>
         </div>
+  );
+
+  return (
+    <div data-testid="photo-order-check" className={`rounded-xl border text-xs ${p.confirmedAt ? 'px-3 py-2 space-y-1.5' : 'p-3 space-y-2'} ${p.confirmedAt ? 'border-success-line bg-success-soft' : 'border-warning-line bg-warning-soft'}`}>
+      <p className="flex flex-wrap items-center gap-x-2 gap-y-1">
+        <Camera className="w-4 h-4 text-gold-deep shrink-0" aria-hidden="true" />
+        <strong className={p.confirmedAt ? 'text-success' : 'text-warning'}>{fromDeal ? `Photo deal ${p.dealId} · your fixed price` : p.confirmedAt ? 'Order from a photo · amount confirmed' : 'Order from a photo · check the photos and confirm the amount'}</strong>
+      </p>
+      <ul className="flex flex-wrap gap-2">
+        {Array.from({ length: p.photos }, (_, i) => {
+          const src = `/api/admin/orders/${encodeURIComponent(order.id)}/photos/${i + 1}`;
+          return (
+            <li key={i}>
+              <a href={src} target="_blank" rel="noopener noreferrer" className="block rounded-lg focus:outline-none focus-visible:ring-2 focus-visible:ring-gold" aria-label={`Open photo ${i + 1} of ${order.id}`}>
+                {/* eslint-disable-next-line @next/next/no-img-element */}
+                <img src={src} alt={fromDeal ? `Picture ${i + 1} of the deal` : `Photo ${i + 1} from the customer`} className={`${p.confirmedAt ? 'w-11 h-11' : 'w-20 h-20'} object-cover rounded-lg border border-line bg-surface`} loading="lazy" />
+              </a>
+            </li>
+          );
+        })}
+      </ul>
+      {p.note && <p className="text-ink break-anywhere">&ldquo;{p.note}&rdquo;</p>}
+      <p className="text-ink-soft">
+        {p.pieces} {p.pieces === 1 ? 'piece' : 'pieces'} · {fromDeal ? 'your price' : 'the customer typed'} <strong className="text-ink">AED {p.agreedTotal}</strong>
+        {p.confirmedAt && !fromDeal && <> · confirmed AED {line.totalPrice}{p.confirmedBy ? ` by ${p.confirmedBy}` : ''} on {new Date(p.confirmedAt).toLocaleString('en-GB', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })}</>}
+      </p>
+      {!closed && p.confirmedAt && (
+        <details className="text-ink-soft">
+          <summary className="min-h-8 inline-flex items-center cursor-pointer font-semibold text-[11px]">Change the amount</summary>
+          {editor}
+        </details>
       )}
+      {!closed && !p.confirmedAt && editor}
       {problem && (
         <p role="alert" className="font-semibold text-danger">
           {problem}

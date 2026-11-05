@@ -44,11 +44,11 @@ export function OrderInvoice({ order, shopName }: { order: Order; shopName?: str
 
   const link = current ? current.pdfUrl ?? (typeof window === 'undefined' ? undefined : `${window.location.origin}${current.pdfPath}`) : undefined;
   const wa = current && link ? waMeLink(order.customer.phone, `Dear ${safeFirstName(order.customer.fullName) || 'customer'}, here is your invoice ${current.number} for order ${order.id}${shopName ? ` from ${shopName}` : ''}: ${link}`) : null;
-  const button = 'min-h-10 px-3 rounded-lg text-xs font-semibold inline-flex items-center justify-center gap-1.5 disabled:opacity-50 focus:outline-none focus-visible:ring-2 focus-visible:ring-gold';
+  const button = 'min-h-8 px-2.5 rounded-lg text-xs font-semibold inline-flex items-center justify-center gap-1.5 disabled:opacity-50 focus:outline-none focus-visible:ring-2 focus-visible:ring-gold';
 
   return (
-    <div data-testid="order-invoice" className="rounded-xl border border-line bg-ivory p-3 space-y-2 text-xs min-w-0">
-      <p className="flex flex-wrap items-center gap-x-2 gap-y-1">
+    <div data-testid="order-invoice" className="rounded-xl border border-line bg-ivory px-3 py-2 space-y-1.5 text-xs min-w-0 sm:flex sm:flex-wrap sm:items-center sm:justify-between sm:gap-2 sm:space-y-0">
+      <p className="flex flex-wrap items-center gap-x-2 gap-y-1 min-w-0">
         <FileText className="w-4 h-4 text-gold-deep shrink-0" aria-hidden="true" />
         {current ? (
           <>

@@ -465,7 +465,7 @@ export const AdminOrdersTab: React.FC<AdminOrdersTabProps> = ({
             return (
               <div
                 key={order.id}
-                className="bg-surface rounded-2xl p-4 border border-line hover:border-line-strong shadow-sm space-y-3 transition-all"
+                className="bg-surface rounded-2xl p-3 sm:p-4 border border-line hover:border-line-strong shadow-sm space-y-2 transition-all"
               >
                 {/* Top Strip */}
                 <div className="flex flex-wrap items-start justify-between gap-2 border-b border-line pb-2.5">
@@ -532,12 +532,10 @@ export const AdminOrdersTab: React.FC<AdminOrdersTabProps> = ({
                 <OrderCredit order={order} orders={orders} onOrderChanged={onOrderChanged} />
 
                 {/* Items & Delivery Info */}
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 text-xs">
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-x-3 gap-y-1.5 text-xs">
                   {/* Items */}
                   <div className="space-y-1">
-                    <span className="text-[10px] font-bold text-ink-muted uppercase tracking-wider block">
-                      Bedding Ordered:
-                    </span>
+                    <span className="sr-only">Bedding ordered:</span>
                     {order.items.map((i, idx) => (
                       <div key={idx} className="flex items-center gap-2 text-ink">
                         {/* eslint-disable-next-line @next/next/no-img-element */}
@@ -552,20 +550,16 @@ export const AdminOrdersTab: React.FC<AdminOrdersTabProps> = ({
 
                   {/* Destination */}
                   <div className="space-y-1 sm:border-l sm:border-line sm:pl-3">
-                    <span className="text-[10px] font-bold text-ink-muted uppercase tracking-wider block">
-                      UAE Delivery Destination:
-                    </span>
-                    <div className="text-ink font-medium">
-                      {order.customer.buildingVilla}, {order.customer.flatVillaNo}, {order.customer.area}
-                    </div>
-                    <div className="text-ink-muted text-[11px]">
-                      Emirate: <strong>{order.customer.emirate}</strong> • Tel: {order.customer.phone}
+                    <span className="sr-only">Delivery address:</span>
+                    <div className="text-ink">
+                      {order.customer.buildingVilla}, {order.customer.flatVillaNo}, {order.customer.area}, <strong>{order.customer.emirate}</strong>
+                      <span className="text-ink-muted"> · {order.customer.phone}</span>
                     </div>
                   </div>
                 </div>
 
                 {/* Courier Assignment Bar */}
-                <div className="bg-ivory rounded-xl p-2.5 flex flex-wrap items-center justify-between gap-2 text-xs border border-line/80">
+                <div className="bg-ivory rounded-xl px-2.5 py-1.5 flex flex-wrap items-center justify-between gap-2 text-xs border border-line/80">
                   <div className="flex flex-wrap items-center gap-2 min-w-0">
                     <Truck className="w-4 h-4 text-gold" />
                     <span className="text-ink-soft">Courier:</span>

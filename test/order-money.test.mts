@@ -152,3 +152,27 @@ test('never more than was paid, never more than is due, never twice; only from a
   const r = orders.moveCredit(bank.id, small.id, 10, OWNER);
   assert.equal(r.to.courier.codAmountCollected, Math.round((small.total - 10) * 100) / 100);
 });
+
+test('reported: sales count each payment once: a cancelled order is not a sale, money moved onto another order counts there only (the hub’s Sales and Money → Reports agree)', async () => {
+  const { saleFils } = await import('@/lib/orderMoney');
+  const { buildReport } = await import('@/lib/server/reports');
+  const { dubaiToday } = await import('@/lib/reportPeriods');
+  const today = dubaiToday(Date.now());
+  const before = buildReport(today, today).sales.grossFils;
+  const phone = '+971506699077';
+  const paid = paidByCard(place({}, phone).id);
+  const other = place({}, phone);
+  const cancelled = place({}, phone);
+  getDb().prepare("UPDATE orders SET status = 'cancelled', data = json_set(data, '$.status', 'cancelled') WHERE id = ?").run(cancelled.id);
+  const move = Math.min(paid.total, other.total);
+  orders.moveCredit(paid.id, other.id, move, OWNER);
+  const all = [paid.id, other.id, cancelled.id].map((id) => orders.getOrder(id)!);
+  const f = (aed: number) => Math.round(aed * 100);
+  // The hub's figure: the other order's total, plus what the paid one kept beyond what moved.
+  assert.equal(all.reduce((s, o) => s + saleFils(o), 0), f(other.total) + f(paid.total) - f(move));
+  assert.equal(saleFils(orders.getOrder(cancelled.id)!), 0, 'a cancelled, unpaid order is no sale');
+  // Money → Reports: the same, once.
+  const r = buildReport(today, today);
+  assert.equal(r.sales.grossFils - before, f(other.total) + f(paid.total) - f(move));
+  assert.ok(r.notes.some((n) => /moved onto other orders/.test(n)));
+});
