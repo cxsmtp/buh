@@ -115,6 +115,25 @@ export function StoreSettingsCard({ value, onSave, auto }: { value: StoreSetting
         <input id="st-addr" className={field} placeholder="Dubai, United Arab Emirates" value={d.storeAddress} maxLength={300} onChange={(e) => set('storeAddress', e.target.value)} />
       </section>
 
+      <fieldset className="space-y-2" data-testid="invoice-details">
+        <legend className={label}>On invoices <span className="font-normal text-ink-muted">(all optional)</span></legend>
+        <p className="text-xs text-ink-muted">Printed on the PDF invoices you send customers, with the address above. Empty: the legal name is the pickup name in Couriers (else the shop&rsquo;s name), and the trade licence lines are left out.</p>
+        <div>
+          <label className="block text-xs font-semibold text-ink mb-1" htmlFor="st-legal">Legal name</label>
+          <input id="st-legal" className={field} placeholder="e.g. Beautiful Home Trading L.L.C" value={d.legalName ?? ''} maxLength={120} onChange={(e) => set('legalName', e.target.value)} />
+        </div>
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+          <div>
+            <label className="block text-xs font-semibold text-ink mb-1" htmlFor="st-tl">Trade licence number</label>
+            <input id="st-tl" className={field} placeholder="e.g. 1234567" value={d.tradeLicenceNumber ?? ''} maxLength={40} onChange={(e) => set('tradeLicenceNumber', e.target.value)} />
+          </div>
+          <div>
+            <label className="block text-xs font-semibold text-ink mb-1" htmlFor="st-tla">Issuing authority</label>
+            <input id="st-tla" className={field} placeholder="e.g. Dubai DET" value={d.tradeLicenceAuthority ?? ''} maxLength={80} onChange={(e) => set('tradeLicenceAuthority', e.target.value)} />
+          </div>
+        </div>
+      </fieldset>
+
       <section>
         <label className="flex items-start gap-2 text-xs">
           <input type="checkbox" className="mt-0.5" checked={d.showLocalCurrency} onChange={(e) => set('showLocalCurrency', e.target.checked)} />

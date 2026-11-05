@@ -1,6 +1,6 @@
 import type { NextConfig } from "next";
 import path from "path";
-import { BILL_CSP, contentSecurityPolicy } from "./src/lib/csp";
+import { BILL_CSP, PDF_CSP, contentSecurityPolicy } from "./src/lib/csp";
 import { DOCUMENT_CSP } from "./src/lib/server/documentHeaders";
 import pkg from "./package.json";
 
@@ -88,6 +88,20 @@ const nextConfig: NextConfig = {
         // An order's private tracking page (the link sent on WhatsApp): no referrer, never cached.
         source: "/track/:token",
         headers: [
+          { key: "Referrer-Policy", value: "no-referrer" },
+          { key: "Cache-Control", value: "private, no-store" },
+          { key: "X-Robots-Tag", value: "noindex, nofollow" },
+        ],
+      },
+      {
+        // The PDF invoice (the hub's, and the customer's private one): the browser's PDF viewer and nothing else.
+        source: "/api/admin/orders/:id/invoice-pdf",
+        headers: [{ key: "Content-Security-Policy", value: PDF_CSP }],
+      },
+      {
+        source: "/invoice/:token/pdf",
+        headers: [
+          { key: "Content-Security-Policy", value: PDF_CSP },
           { key: "Referrer-Policy", value: "no-referrer" },
           { key: "Cache-Control", value: "private, no-store" },
           { key: "X-Robots-Tag", value: "noindex, nofollow" },

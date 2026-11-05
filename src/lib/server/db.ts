@@ -609,6 +609,30 @@ const MIGRATIONS: Array<(db: DB) => void> = [
     `);
     ensureChangeTriggers(db);
   },
+  // 19: invoices (invoices.ts): one per order, numbered INV-<year>-<6 digits> in order of issue,
+  //     never reused; the document's content is kept as it was issued (data), so a later change to
+  //     the order or the settings never changes an invoice already sent. With VAT on, the row is
+  //     the order's tax invoice (its number from vat_invoices; seq empty). Add-only: a new table.
+  (db) => {
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS invoices (
+        number      TEXT PRIMARY KEY,
+        order_id    TEXT NOT NULL UNIQUE,
+        kind        TEXT NOT NULL,
+        year        INTEGER NOT NULL,
+        seq         INTEGER,
+        issued_at   TEXT NOT NULL,
+        issued_by   TEXT NOT NULL,
+        total_fils  INTEGER NOT NULL,
+        data        TEXT NOT NULL,
+        emailed_at  TEXT,
+        emailed_to  TEXT,
+        sent_count  INTEGER NOT NULL DEFAULT 0
+      );
+      CREATE UNIQUE INDEX IF NOT EXISTS invoices_year_seq ON invoices (year, seq) WHERE seq IS NOT NULL;
+    `);
+    ensureChangeTriggers(db);
+  },
 ];
 
 // ── What changed since the last backup: the triggers (migration 16) ─────────
@@ -635,6 +659,7 @@ const WATCHED: Array<[string, string, string[], string?]> = [
   ['vat_invoices', 'vat', []],
   ['vat_credit_notes', 'vat', []],
   ['photo_deals', 'orders', []],
+  ['invoices', 'orders', []],
   ['stripe_events', 'payments', []],
   ['card_refunds', 'payments', []],
   // products.stock is kept in step by product_stock's own triggers: counted there, as stock. Every

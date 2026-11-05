@@ -69,4 +69,7 @@ export function contentSecurityPolicy(): string {
  * for that path in next.config.ts (after the API's own policy, so it is the one sent) and by the
  * route. PDFs are downloaded, not shown: browsers don't open a PDF under a sandbox policy.
  */
+/** A PDF opened on its own (an invoice): the browser's PDF viewer, nothing else. */
+export const PDF_CSP = "default-src 'none'; object-src 'self'; frame-ancestors 'none'";
+
 export const BILL_CSP = "default-src 'none'; img-src 'self'; frame-ancestors 'none'; sandbox";
