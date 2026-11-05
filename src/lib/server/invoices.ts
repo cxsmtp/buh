@@ -50,7 +50,7 @@ export interface InvoiceData {
   supplyOn: string;
   orderId: string;
   seller: { name: string; tradeLicence?: string; authority?: string; address?: string; phone?: string; email?: string; trn?: string };
-  buyer: { name: string; phone: string; email?: string; address: string };
+  buyer: { name: string; phone: string; email?: string; address: string; company?: string; trn?: string };
   lines: Line[];
   subtotalFils: number;
   vat?: { rateBp: number; netFils: number; vatFils: number };
@@ -59,7 +59,7 @@ export interface InvoiceData {
    * paidFils: what was paid before delivery (card, transfer, or moved from another order);
    * dueFils: what the courier collects on delivery. Absent on invoices issued before BUH-02.36.00.
    */
-  payment: { method: Order['paymentMethod']; paid: boolean; paidFils?: number; dueFils?: number; movedInFils?: number };
+  payment: { method: Order['paymentMethod']; paid: boolean; paidFils?: number; dueFils?: number; movedInFils?: number; label?: string; reference?: string };
   /** Regenerated ("Regenerate invoice"): the version and the day; the number and issue date stay. */
   revision?: number;
   revisedOn?: string;
@@ -97,6 +97,7 @@ interface Row {
 
 const fils = (aed: number | undefined) => Math.round((aed ?? 0) * 100);
 const money = (f: number) => `${f < 0 ? '-' : ''}${(Math.abs(f) / 100).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+const BULK_PAY: Record<NonNullable<Order['bulk']>['paidWith'], string> = { cash: 'Cash', bank_transfer: 'Bank transfer', card: 'Card', cheque: 'Cheque', unpaid: 'Not paid yet' };
 const PAY: Record<Order['paymentMethod'], string> = { cod: 'Cash on delivery', bank_transfer: 'Bank transfer', online_card: 'Card' };
 
 /** The customer's private address of an order's PDF invoice (from the server's key, never stored). */
@@ -183,6 +184,11 @@ function linesOf(order: Order): Line[] {
 
 /** What was paid before delivery and what is collected on it (src/lib/orderMoney.ts, as the courier is told). */
 function paymentOf(order: Order, paid: boolean): InvoiceData['payment'] {
+  if (order.bulk) {
+    // A bulk order: paid as the owner said (or due), never "on delivery".
+    const p = order.bulk.paidWith;
+    return { method: order.paymentMethod, paid: p !== 'unpaid', label: BULK_PAY[p], ...(order.bulk.reference ? { reference: order.bulk.reference } : {}), paidFils: p === 'unpaid' ? 0 : fils(order.total), dueFils: 0 };
+  }
   const totalFils = fils(order.total);
   const dueFils = order.status === 'delivered' ? 0 : dueOnDeliveryFils(order);
   const movedInFils = creditInFils(order);
@@ -200,7 +206,7 @@ function dataFor(order: Order, kind: Kind, number: string, issuedOn: string): In
     supplyOn: dubaiDateOf(order.courier.pickupDate ? `${order.courier.pickupDate}T08:00:00Z` : order.createdAt),
     orderId: order.id,
     seller: sellerNow(),
-    buyer: { name: c.fullName, phone: c.phone, ...(c.email ? { email: c.email } : {}), address },
+    buyer: { name: c.fullName, phone: c.phone, ...(c.email ? { email: c.email } : {}), address, ...(c.company ? { company: c.company } : {}), ...(c.trn ? { trn: c.trn } : {}) },
     lines: linesOf(order),
     subtotalFils: fils(order.total) - fils(order.vatAdded),
     totalFils: fils(order.total),
@@ -304,6 +310,14 @@ const SOFT: RGB = [0.42, 0.38, 0.35];
 const GOLD: RGB = [0.62, 0.47, 0.2];
 const SAND: RGB = [0.965, 0.95, 0.925];
 const LINE: RGB = [0.86, 0.83, 0.78];
+const PAPER: RGB = [1, 1, 1];
+const IVORY: RGB = [0.985, 0.975, 0.955];
+const STRIPE: RGB = [0.975, 0.965, 0.945];
+const MIST: RGB = [0.78, 0.74, 0.7];
+const GOLD_LIGHT: RGB = [0.86, 0.72, 0.45];
+const GREEN: RGB = [0.13, 0.5, 0.3];
+const AMBER: RGB = [0.75, 0.48, 0.08];
+const RED: RGB = [0.7, 0.15, 0.12];
 
 const niceDate = (d: string) => {
   const [y, m, day] = d.split('-').map(Number);
@@ -316,45 +330,64 @@ export function invoicePdf(orderId: string): { pdf: Buffer; number: string } | n
   if (!r) return null;
   const d = repaired(JSON.parse(r.data) as InvoiceData, getOrder(orderId));
   const order = getOrder(orderId);
-  const doc = new PdfDoc({ title: `${d.kind === 'tax_invoice' ? 'Tax Invoice' : 'Invoice'} ${d.number}`, author: d.seller.name, subject: `Order ${d.orderId}` });
-  const L = 42;
-  const R = doc.width - 42;
+  const tax = d.kind === 'tax_invoice';
+  const doc = new PdfDoc({ title: `${tax ? 'Tax Invoice' : 'Invoice'} ${d.number}`, author: d.seller.name, subject: `Order ${d.orderId}` });
+  const L = 40;
+  const R = doc.width - 40;
   const W = R - L;
   let y = 0;
   const footer = () => {
     const n = doc.pageCount;
-    doc.line(L, doc.height - 48, R, doc.height - 48, LINE);
-    doc.text('This electronic invoice was issued by the seller and is valid without a signature or stamp.', L, doc.height - 34, { size: 7.5, color: SOFT });
-    doc.text(`${d.number} · page ${n}`, R, doc.height - 34, { size: 7.5, color: SOFT, align: 'right' });
+    doc.box(0, doc.height - 40, doc.width, 40, IVORY);
+    doc.line(0, doc.height - 40, doc.width, doc.height - 40, GOLD, 1.2);
+    doc.text('This electronic invoice was issued by the seller and is valid without a signature or stamp.', L, doc.height - 17, { size: 7.5, color: SOFT });
+    doc.text(`${d.number} · page ${n}`, R, doc.height - 17, { size: 7.5, color: SOFT, align: 'right' });
   };
-  const newPage = () => {
+  // Each page starts with the band: the seller and the document's title.
+  const band = (first: boolean) => {
+    const h = first ? 104 : 54;
+    doc.box(0, 0, doc.width, h, INK);
+    doc.box(0, h, doc.width, 3, GOLD);
+    const initials = (d.seller.name.match(/\b\p{L}/gu) ?? ['B']).slice(0, 2).join('').toUpperCase();
+    const r0 = first ? 21 : 14;
+    const cy = first ? 52 : 27;
+    doc.circle(L + r0, cy, r0, GOLD);
+    doc.text(initials, L + r0, cy + (first ? 6 : 4), { size: first ? 15 : 10, style: 'bold', color: INK, align: 'center' });
+    const nx = L + 2 * r0 + 12;
+    doc.text(d.seller.name, nx, first ? 47 : 31, { size: first ? 16 : 11, style: 'bold', color: PAPER });
+    if (first) {
+      const sub = [d.seller.phone, d.seller.email].filter(Boolean).join(' · ');
+      if (sub) doc.text(sub, nx, 63, { size: 8.5, color: MIST });
+    }
+    doc.text(tax ? 'TAX INVOICE' : 'INVOICE', R, first ? 48 : 31, { size: first ? 24 : 13, style: 'bold', color: PAPER, align: 'right' });
+    if (first) {
+      doc.text(tax ? 'فاتورة ضريبية' : 'فاتورة', R, 68, { size: 12, color: GOLD_LIGHT, align: 'right' });
+      doc.text('Electronic invoice', R, 84, { size: 8, color: MIST, align: 'right' });
+    }
+    y = h + 22;
+  };
+  const newPage = (first = false) => {
     if (doc.pageCount) footer();
     doc.addPage();
-    y = 48;
+    band(first);
   };
-  newPage();
+  newPage(true);
 
-  // Header: the seller, and the document's title.
-  doc.text(d.seller.name, L, y + 14, { size: 15, style: 'bold', color: INK });
-  doc.text(d.kind === 'tax_invoice' ? 'TAX INVOICE' : 'INVOICE', R, y + 16, { size: 22, style: 'bold', color: INK, align: 'right' });
-  doc.text(d.kind === 'tax_invoice' ? 'فاتورة ضريبية' : 'فاتورة', R, y + 34, { size: 12, color: GOLD, align: 'right' });
-  doc.text('Electronic invoice', R, y + 48, { size: 8.5, color: SOFT, align: 'right' });
-  let sy = y + 30;
+  // The seller's legal lines (licence, TRN, address), small, under the band.
   const sellerLines = [
     d.seller.trn ? `TRN: ${d.seller.trn}` : '',
     d.seller.tradeLicence ? `Trade licence: ${d.seller.tradeLicence}${d.seller.authority ? ` (${d.seller.authority})` : ''}` : d.seller.authority ? `Licensed by ${d.seller.authority}` : '',
-    ...(d.seller.address ? doc.wrap(d.seller.address, 9, W * 0.55) : []),
-    [d.seller.phone, d.seller.email].filter(Boolean).join(' · '),
+    d.seller.address ?? '',
   ].filter(Boolean);
-  for (const l of sellerLines) {
-    doc.text(l, L, sy, { size: 9, color: SOFT });
-    sy += 12;
+  if (sellerLines.length) {
+    for (const l of doc.wrap(sellerLines.join('  ·  '), 8.5, W)) {
+      doc.text(l, L, y, { size: 8.5, color: SOFT });
+      y += 11.5;
+    }
+    y += 8;
   }
-  y = Math.max(sy, y + 60) + 8;
-  doc.line(L, y, R, y, LINE);
-  y += 16;
 
-  // The invoice's facts (left) and the customer (right).
+  // Two cards: the invoice's facts, and who it is for.
   const facts: Array<[string, string]> = [
     ['Invoice number', d.number],
     ['Date of issue', niceDate(d.issuedOn)],
@@ -362,92 +395,122 @@ export function invoicePdf(orderId: string): { pdf: Buffer; number: string } | n
     ['Date of supply', niceDate(d.supplyOn)],
     ['Order', d.orderId],
     ['Currency', 'UAE dirham (AED)'],
-    ['Payment', paymentText(d)],
   ];
-  let fy = y;
-  for (const [k, v] of facts) {
-    doc.text(k, L, fy, { size: 8.5, color: SOFT });
-    doc.text(v, L + 92, fy, { size: 9, style: k === 'Invoice number' ? 'bold' : 'regular', color: INK });
-    fy += 13;
+  const gap = 14;
+  const fw = Math.round((W - gap) * 0.56);
+  const cw = W - gap - fw;
+  const billTo = [d.buyer.company ?? '', ...d.buyer.address.split('\n'), d.buyer.trn ? `TRN: ${d.buyer.trn}` : '', d.buyer.phone, d.buyer.email ?? ''].filter(Boolean).flatMap((a) => doc.wrap(a, 9, cw - 28));
+  const factRows = facts.map(([k, v]) => [k, doc.wrap(v, 9, fw - 110)] as const);
+  const factsH = 34 + factRows.reduce((s, [, v]) => s + v.length * 12 + 2, 0);
+  const billH = 50 + billTo.length * 12;
+  const cardH = Math.max(factsH, billH) + 6;
+  doc.roundBox(L, y, fw, cardH, 8, { fill: SAND });
+  doc.roundBox(L + fw + gap, y, cw, cardH, 8, { fill: PAPER, stroke: LINE });
+  doc.text('INVOICE DETAILS', L + 14, y + 20, { size: 7.5, style: 'bold', color: GOLD });
+  let fy = y + 36;
+  for (const [k, v] of factRows) {
+    doc.text(k, L + 14, fy, { size: 8.5, color: SOFT });
+    v.forEach((t, i) => doc.text(t, L + 100, fy + i * 12, { size: 9, style: k === 'Invoice number' ? 'bold' : 'regular', color: INK }));
+    fy += v.length * 12 + 2;
   }
-  const bx = L + W * 0.55;
-  let by = y;
-  doc.text('Bill to', bx, by, { size: 8.5, color: SOFT });
-  by += 13;
-  doc.text(d.buyer.name, bx, by, { size: 10, style: 'bold', color: INK });
-  by += 13;
-  for (const l of [...d.buyer.address.split('\n').flatMap((a) => doc.wrap(a, 9, R - bx)), d.buyer.phone, d.buyer.email ?? ''].filter(Boolean)) {
+  const bx = L + fw + gap + 14;
+  doc.text('Bill to', bx, y + 20, { size: 7.5, style: 'bold', color: GOLD });
+  doc.text(d.buyer.name, bx, y + 38, { size: 11, style: 'bold', color: INK });
+  let by = y + 54;
+  for (const l of billTo) {
     doc.text(l, bx, by, { size: 9, color: INK });
     by += 12;
   }
-  y = Math.max(fy, by) + 12;
+  y += cardH + 10;
+  // How it is paid: its own strip, the full width.
+  const pay = doc.wrap(paymentText(d), 9, W - 100);
+  doc.roundBox(L, y, W, 14 + pay.length * 12, 7, { fill: IVORY, stroke: LINE });
+  doc.text('Payment', L + 14, y + 16, { size: 8.5, color: SOFT });
+  pay.forEach((t, i) => doc.text(t, L + 100, y + 16 + i * 12, { size: 9, style: 'bold', color: INK }));
+  y += 14 + pay.length * 12 + 20;
 
-  // The lines.
-  const tax = d.kind === 'tax_invoice';
-  const cols = { qty: R - 190, unit: R - 110, total: R };
+  // The lines: a dark header, light stripes.
+  const cols = { qty: R - 196, unit: R - 112, total: R - 12 };
   const head = () => {
-    doc.box(L, y, W, 20, SAND);
-    doc.text('Description', L + 6, y + 13.5, { size: 8.5, style: 'bold', color: INK });
-    doc.text('Qty', cols.qty, y + 13.5, { size: 8.5, style: 'bold', color: INK, align: 'right' });
-    doc.text('Unit price', cols.unit, y + 13.5, { size: 8.5, style: 'bold', color: INK, align: 'right' });
-    doc.text(tax ? 'Amount incl. VAT' : 'Amount', cols.total - 6, y + 13.5, { size: 8.5, style: 'bold', color: INK, align: 'right' });
-    y += 26;
+    doc.roundBox(L, y, W, 24, 6, { fill: INK });
+    doc.text('Description', L + 12, y + 15.5, { size: 8.5, style: 'bold', color: PAPER });
+    doc.text('Qty', cols.qty, y + 15.5, { size: 8.5, style: 'bold', color: PAPER, align: 'right' });
+    doc.text('Unit price', cols.unit, y + 15.5, { size: 8.5, style: 'bold', color: PAPER, align: 'right' });
+    doc.text(tax ? 'Amount incl. VAT' : 'Amount', cols.total, y + 15.5, { size: 8.5, style: 'bold', color: PAPER, align: 'right' });
+    y += 30;
   };
   head();
-  for (const l of d.lines) {
-    const label = doc.wrap(l.label, 9, cols.qty - L - 50);
-    const h = label.length * 11.5 + (l.sku ? 10 : 0) + 8;
-    if (y + h > doc.height - 150) {
+  d.lines.forEach((l, n) => {
+    const label = doc.wrap(l.label, 9, cols.qty - L - 60);
+    const h = label.length * 11.5 + (l.sku ? 10 : 0) + 10;
+    if (y + h > doc.height - 170) {
       newPage();
       head();
     }
-    label.forEach((t, i) => doc.text(t, L + 6, y + 4 + i * 11.5, { size: 9, color: INK }));
-    if (l.sku) doc.text(`SKU ${l.sku}`, L + 6, y + 4 + label.length * 11.5 - 1, { size: 7.5, color: SOFT });
-    doc.text(String(l.quantity), cols.qty, y + 4, { size: 9, color: INK, align: 'right' });
-    doc.text(money(l.unitFils), cols.unit, y + 4, { size: 9, color: INK, align: 'right' });
-    doc.text(money(l.totalFils), cols.total - 6, y + 4, { size: 9, color: INK, align: 'right' });
+    if (n % 2 === 1) doc.box(L, y - 4, W, h, STRIPE);
+    label.forEach((t, i) => doc.text(t, L + 12, y + 8 + i * 11.5, { size: 9, color: INK }));
+    if (l.sku) doc.text(`SKU ${l.sku}`, L + 12, y + 8 + label.length * 11.5 - 1, { size: 7.5, color: SOFT });
+    doc.text(String(l.quantity), cols.qty, y + 8, { size: 9, color: INK, align: 'right' });
+    doc.text(money(l.unitFils), cols.unit, y + 8, { size: 9, color: INK, align: 'right' });
+    doc.text(money(l.totalFils), cols.total, y + 8, { size: 9, style: 'bold', color: INK, align: 'right' });
     y += h;
-    doc.line(L, y - 4, R, y - 4, LINE, 0.5);
-  }
+  });
+  doc.line(L, y - 2, R, y - 2, LINE, 0.75);
 
-  // Totals.
-  if (y > doc.height - 190) newPage();
-  y += 8;
-  const tx = R - 220;
-  const total = (k: string, v: string, bold = false) => {
-    doc.text(k, tx, y, { size: bold ? 10.5 : 9, style: bold ? 'bold' : 'regular', color: INK });
-    doc.text(v, R - 6, y, { size: bold ? 10.5 : 9, style: bold ? 'bold' : 'regular', color: INK, align: 'right' });
-    y += bold ? 16 : 13;
+  // Totals, on the right; the paid or due badge on the left.
+  if (y > doc.height - 230) newPage();
+  y += 14;
+  const tw = 230;
+  const tx = R - tw;
+  const row = (k: string, v: string) => {
+    doc.text(k, tx + 12, y, { size: 9, color: SOFT });
+    doc.text(v, R - 12, y, { size: 9, color: INK, align: 'right' });
+    y += 15;
   };
+  const top = y;
   if (d.vat) {
-    total('Total excluding VAT', `AED ${money(d.vat.netFils)}`);
-    total(`VAT ${d.vat.rateBp / 100}%`, `AED ${money(d.vat.vatFils)}`);
+    row('Total excluding VAT', `AED ${money(d.vat.netFils)}`);
+    row(`VAT ${d.vat.rateBp / 100}%`, `AED ${money(d.vat.vatFils)}`);
   } else {
-    total('Subtotal', `AED ${money(d.subtotalFils)}`);
-    total('VAT', 'Not applicable');
+    row('Subtotal', `AED ${money(d.subtotalFils)}`);
+    row('VAT', 'Not applicable');
   }
-  doc.line(tx, y - 6, R, y - 6, INK, 1);
-  y += 4;
-  total(d.vat ? 'Total including VAT' : 'Total', `AED ${money(d.totalFils)}`, true);
+  y += 2;
+  doc.roundBox(tx, y, tw, 34, 7, { fill: INK });
+  doc.text(d.vat ? 'Total including VAT' : 'Total', tx + 12, y + 21.5, { size: 10.5, style: 'bold', color: PAPER });
+  doc.text(`AED ${money(d.totalFils)}`, R - 12, y + 22, { size: 14, style: 'bold', color: GOLD_LIGHT, align: 'right' });
+  y += 48;
   // Part paid, part on delivery: both, so the customer sees what is left to pay.
   const due = d.payment.dueFils;
-  if (due !== undefined && due > 0 && due < d.totalFils) {
-    total(d.payment.movedInFils && d.payment.method === 'cod' ? 'Paid (from an earlier order)' : `Paid (${PAY[d.payment.method].toLowerCase()})`, `AED ${money(d.totalFils - due)}`);
-    total('To pay on delivery', `AED ${money(due)}`, true);
+  const part = due !== undefined && due > 0 && due < d.totalFils;
+  if (part) {
+    row(d.payment.movedInFils && d.payment.method === 'cod' ? 'Paid (from an earlier order)' : `Paid (${PAY[d.payment.method].toLowerCase()})`, `AED ${money(d.totalFils - due)}`);
+    doc.text('To pay on delivery', tx + 12, y, { size: 10, style: 'bold', color: INK });
+    doc.text(`AED ${money(due)}`, R - 12, y, { size: 10, style: 'bold', color: INK, align: 'right' });
+    y += 18;
   }
-  y += 10;
+  // The badge: PAID (green), DUE (amber), or on delivery; a cancelled order's says so.
+  const cancelled = order?.status === 'cancelled';
+  const badge = cancelled ? { t: 'CANCELLED', c: RED } : part || (!d.payment.paid && d.payment.method === 'cod') ? { t: 'PAY ON DELIVERY', c: AMBER } : d.payment.paid ? { t: 'PAID', c: GREEN } : { t: 'DUE', c: AMBER };
+  const bw = doc.measure(badge.t, 11, 'bold') + 30;
+  doc.roundBox(L, top - 10, bw, 26, 13, { stroke: badge.c, width: 1.6 });
+  doc.text(badge.t, L + bw / 2, top + 7, { size: 11, style: 'bold', color: badge.c, align: 'center' });
+  y = Math.max(y, top + 30) + 14;
 
-  // Notes.
+  // A thank-you, then the notes.
+  if (y > doc.height - 150) newPage();
+  doc.text(`Thank you for choosing ${d.seller.name}.`, L, y, { size: 11, style: 'bold', color: GOLD });
+  y += 18;
   const notes: string[] = [];
-  if (order?.status === 'cancelled') notes.push('This order was cancelled after this invoice was issued: nothing is due on it.');
+  if (cancelled) notes.push('This order was cancelled after this invoice was issued: nothing is due on it.');
   if (!d.vat) notes.push('The supplier is not registered for VAT in the UAE, so no VAT is charged. This is not a tax invoice.');
   else notes.push(`Amounts in UAE dirhams (AED). VAT at ${d.vat.rateBp / 100}% (standard rate).`);
   notes.push(`Questions about this invoice: ${[d.seller.phone, d.seller.email].filter(Boolean).join(' or ') || 'reply to the message it came with'}. Please quote ${d.number}.`);
   const check = customerLink(invoicePdfPath(d.orderId));
   for (const n of notes) {
     for (const l of doc.wrap(n, 8.5, W)) {
-      if (y > doc.height - 70) newPage();
-      doc.text(l, L, y, { size: 8.5, color: order?.status === 'cancelled' && n.startsWith('This order was cancelled') ? [0.7, 0.15, 0.12] : SOFT });
+      if (y > doc.height - 60) newPage();
+      doc.text(l, L, y, { size: 8.5, color: cancelled && n.startsWith('This order was cancelled') ? RED : SOFT });
       y += 11.5;
     }
     y += 3;
@@ -467,6 +530,7 @@ export function invoicePdf(orderId: string): { pdf: Buffer; number: string } | n
 /** "Card · paid", "Card · paid AED 103.50 · AED 10.00 on delivery", "Cash on delivery · due on delivery". */
 function paymentText(d: InvoiceData): string {
   const p = d.payment;
+  if (p.label) return p.paid ? `${p.label} · paid${p.reference ? ` (${p.reference})` : ''}` : 'Due on receipt of this invoice';
   const due = p.dueFils;
   if (due !== undefined && due > 0 && due < d.totalFils) return `${PAY[p.method]} · paid AED ${money(d.totalFils - due)} · AED ${money(due)} on delivery`;
   if (due === 0 && p.method === 'cod' && p.movedInFils) return 'Paid (from an earlier order)';
