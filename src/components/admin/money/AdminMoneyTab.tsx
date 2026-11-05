@@ -7,8 +7,9 @@ import { ReportsPanel } from './ReportsPanel';
 import { AuditPanel } from './AuditPanel';
 import { VatPanel } from './VatPanel';
 import { CourierChargesPanel } from './CourierChargesPanel';
+import { InvoicesPanel } from './InvoicesPanel';
 
-type Section = 'expenses' | 'courier' | 'reports' | 'vat' | 'audit';
+type Section = 'expenses' | 'invoices' | 'courier' | 'reports' | 'vat' | 'audit';
 
 /**
  * Money: the shop's expenses (with photos of the bills), the reports for the accountant (and their
@@ -30,6 +31,7 @@ export function AdminMoneyTab({ phone, readOnly = false }: { phone: boolean; rea
   }, []);
   const sections: Array<[Section, string]> = [
     ['expenses', 'Expenses'],
+    ['invoices', 'Invoices'],
     ['courier', 'Courier'],
     ['reports', 'Reports'],
     ...(vat.inUse ? ([['vat', 'VAT']] as Array<[Section, string]>) : []),
@@ -37,7 +39,7 @@ export function AdminMoneyTab({ phone, readOnly = false }: { phone: boolean; rea
   ];
   return (
     <div className={`space-y-4 ${phone ? '' : 'max-w-3xl'}`}>
-      <div role="group" aria-label="Money sections" className={`grid ${sections.length === 5 ? 'grid-cols-5' : 'grid-cols-4'} gap-1 rounded-2xl border border-line-strong bg-surface p-1`}>
+      <div role="group" aria-label="Money sections" className={`grid grid-cols-3 ${sections.length === 6 ? 'sm:grid-cols-6' : 'sm:grid-cols-5'} gap-1 rounded-2xl border border-line-strong bg-surface p-1`}>
         {sections.map(([id, label]) => (
           <button key={id} type="button" aria-pressed={section === id} onClick={() => setSection(id)} className={`min-h-11 rounded-xl text-sm font-semibold ${section === id ? 'bg-ink text-paper' : 'text-ink-soft hover:bg-sand'}`}>
             {label}
@@ -45,6 +47,7 @@ export function AdminMoneyTab({ phone, readOnly = false }: { phone: boolean; rea
         ))}
       </div>
       {section === 'expenses' && <ExpensesPanel readOnly={readOnly} vatOn={vat.on} />}
+      {section === 'invoices' && <InvoicesPanel readOnly={readOnly} />}
       {section === 'courier' && <CourierChargesPanel readOnly={readOnly} />}
       {section === 'reports' && <ReportsPanel readOnly={readOnly} />}
       {section === 'vat' && vat.inUse && <VatPanel />}

@@ -189,6 +189,9 @@ export interface Order {
       lng: number;
     };
     phoneVerified?: boolean;
+    /** A business customer (bulk orders): its name and TRN, for the invoice. */
+    company?: string;
+    trn?: string;
   };
   items: {
     productId: string;
@@ -210,9 +213,10 @@ export interface Order {
     dimensions?: string;
     /**
      * 'simple' for a towel, cushion or other simple product (its profileName is a variant, not a bed size);
-     * 'photo' for "Order from your photo" (a piece agreed on WhatsApp, not in the catalogue: no stock).
+     * 'photo' for "Order from your photo" (a piece agreed on WhatsApp, not in the catalogue: no stock);
+     * 'bulk' for a line the owner typed on a bulk order (Money → Invoices: no stock).
      */
-    productType?: 'simple' | 'photo';
+    productType?: 'simple' | 'photo' | 'bulk';
     /** The size's SKU when the order was placed (BUH-BS-JAIPUR-007-KING). */
     sku?: string;
   }[];
@@ -236,6 +240,11 @@ export interface Order {
   creditsOut?: Array<{ toOrderId: string; amount: number; at: string; by: string }>;
   /** UAE VAT added on top (Settings → Payments → VAT with prices excluding VAT), in AED. Part of total. */
   vatAdded?: number;
+  /**
+   * A bulk order the owner entered (Money → Invoices): sold outside the shop, its lines as typed,
+   * counted in the sales like any order. How and when it was paid (or that it is not yet).
+   */
+  bulk?: { by: string; at: string; paidWith: BulkPaidWith; reference?: string; note?: string };
   /** The hub's copy only: the order's PDF invoice, once issued (src/lib/server/invoices.ts). */
   invoice?: { number: string; issuedAt: string; emailedAt?: string; emailedTo?: string; sentCount: number; pdfPath: string; pdfUrl?: string };
   /** The order's private tracking page (/track/<order>.<mac>, never stored) and its full address when the shop's is set. */
@@ -811,3 +820,6 @@ export interface SmsGatewaySettings {
   firebase?: FirebaseWebConfig;
   isEnabled: boolean;
 }
+
+/** How a bulk order was paid (Money → Invoices), or 'unpaid' (the invoice is due). */
+export type BulkPaidWith = 'cash' | 'bank_transfer' | 'card' | 'cheque' | 'unpaid';

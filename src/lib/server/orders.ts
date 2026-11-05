@@ -5,7 +5,7 @@ import fs from 'node:fs';
 import net from 'node:net';
 import path from 'node:path';
 import type { BankState, CardPayment, CardState, Customer, Emirate, Order, OrderAttention, OrderStatus, PhotoOrder } from '@/types';
-import { deliveryCheck, uaeDate } from '@/lib/delivery';
+import { deliveryCheck, EMIRATES_LIST, uaeDate } from '@/lib/delivery';
 import { dataDir } from './dataDir';
 import { folderRoomProblem } from './diskRoom';
 import { customerLink } from './runtimeConfig';
@@ -17,7 +17,8 @@ import { getProduct, invalidateProducts, listProducts } from './products';
 import { bump } from './live';
 import { bankTransferMode, cardFeePercent, cardPaymentsReady, getSettings, phoneCheckMode, phoneCodesOn } from './settings';
 import { cardFeeFils, vatOnTopFils } from '@/lib/money';
-import { checkoutVat, orderVat, recordOrderVat, syncVatDocumentsQuietly } from './vat';
+import { checkoutVat, orderVat, recordOrderVat, syncVatDocumentsQuietly, vatSettings } from './vat';
+import { normalizePhoneNumber } from '@/lib/phoneNumber';
 import { mac, macMatches } from './secrets';
 import { audit, auditedTransaction, auditOrThrow } from './audit';
 import { kvGet, kvSet } from './kv';
@@ -1234,6 +1235,10 @@ export function editOrderDetails(id: string, input: unknown, actor: string): { o
           if (x.quantity !== it.quantity) throw new HttpError(400, 'An order from a photo has one line of 1: change its pieces or price instead of the quantity.');
           continue;
         }
+        if (it.productType === 'bulk') {
+          if (x.quantity !== it.quantity) throw new HttpError(400, 'A bulk order’s quantities stay as entered: cancel it and enter it again (Money → Invoices).');
+          continue;
+        }
         const delta = x.quantity - it.quantity;
         if (delta > 0) {
           const took = getDb().prepare('UPDATE product_stock SET qty = qty - ? WHERE product_id = ? AND size_id = ? AND qty >= ?').run(delta, it.productId, it.profileId, delta);
@@ -1307,7 +1312,7 @@ export function recreateOrder(id: string, actor: string): { order: Order; create
     }
     // The stock again, size by size (a photo order has none).
     for (const it of source.items) {
-      if (it.productType === 'photo') continue;
+      if (it.productType === 'photo' || it.productType === 'bulk') continue;
       const took = getDb()
         .prepare('UPDATE product_stock SET qty = qty - ? WHERE product_id = ? AND size_id = ? AND qty >= ? AND EXISTS (SELECT 1 FROM products WHERE id = ? AND archived = 0)')
         .run(it.quantity, it.productId, it.profileId, it.quantity, it.productId);
@@ -2749,4 +2754,169 @@ export function listCustomers(): Customer[] {
     byPhone.set(o.customer.phone, c);
   }
   return [...byPhone.values()].sort((a, b) => b.lastOrderDate.localeCompare(a.lastOrderDate));
+}
+
+// ── Bulk orders (Money → Invoices) ──────────────────────────────────────────
+
+/** The line's product id on a bulk order: not a catalogue product (nothing is reserved or put back). */
+export const BULK_PRODUCT_ID = 'bulk-order';
+export const BULK_LIMITS = { lines: 50, quantity: 100_000, unitAed: 1_000_000, totalAed: 5_000_000, description: 160 };
+const BULK_PAID = ['cash', 'bank_transfer', 'card', 'cheque', 'unpaid'] as const;
+const BULK_FIELDS = ['customer', 'lines', 'deliveryFee', 'discount', 'date', 'paidWith', 'reference', 'delivered', 'note'];
+const BULK_CUSTOMER = ['fullName', 'company', 'trn', 'phone', 'email', 'emirate', 'area', 'address'];
+
+/** An amount in AED: a number or text ("1,250.50"), two decimals at most, 0 to max. In fils. */
+function bulkFils(v: unknown, field: string, max: number, { required = false } = {}): number {
+  if (v === undefined || v === null || v === '') {
+    if (required) throw new HttpError(400, `${field} is required.`);
+    return 0;
+  }
+  const t = typeof v === 'number' ? String(v) : typeof v === 'string' ? v.replace(/,/g, '').trim() : '';
+  if (!/^\d{1,9}(\.\d{1,2})?$/.test(t)) throw new HttpError(400, `${field}: an amount in AED, like 125 or 99.50.`);
+  const [w, d = ''] = t.split('.');
+  const f = Number(w) * 100 + Number(d.padEnd(2, '0'));
+  if (f > max * 100) throw new HttpError(400, `${field}: at most AED ${max.toLocaleString('en-US')}.`);
+  return f;
+}
+
+/**
+ * A bulk order the owner received outside the shop (a hotel, a company, a reseller): the customer,
+ * the lines as typed (description, quantity, unit price), delivery and a discount, the date of the
+ * sale and how it was paid (or not yet). It is an order like the shop's own: it counts in the sales
+ * (Money → Reports), its invoice is the same, it is backed up; its lines touch no stock (sold from
+ * stock: Inventory → stock → "Sold offline"). Every amount is worked out here in fils. One key makes
+ * at most one order (a double tap returns the first). Audited in the same transaction.
+ */
+export function createBulkOrder(body: Obj, actor: string, idempotencyKey: string): { order: Order; created: boolean } {
+  const unknown = Object.keys(body).filter((k) => !BULK_FIELDS.includes(k));
+  if (unknown.length) throw new HttpError(400, `Unknown field: ${unknown[0].slice(0, 40)}.`);
+  const c = body.customer;
+  if (!c || typeof c !== 'object' || Array.isArray(c)) throw new HttpError(400, 'The customer is required.');
+  const cu = c as Obj;
+  const extra = Object.keys(cu).filter((k) => !BULK_CUSTOMER.includes(k));
+  if (extra.length) throw new HttpError(400, `Unknown customer field: ${extra[0].slice(0, 40)}.`);
+  const fullName = text(cu.fullName, 'Customer name', 120, { required: true });
+  const company = text(cu.company, 'Company', 120);
+  const trn = text(cu.trn, 'TRN', 20);
+  if (trn && !/^\d{15}$/.test(trn.replace(/[\s-]/g, ''))) throw new HttpError(400, 'TRN: the 15 digits of the customer’s UAE tax registration number.');
+  const rawPhone = text(cu.phone, 'Phone', 32, { required: true });
+  // A UAE number written the local way (04 123 4567, 050 123 4567) gets +971; others need their country code.
+  const digits = rawPhone.replace(/[^\d+]/g, '');
+  const phone = normalizePhoneNumber(/^0[1-9]/.test(digits) ? `+971${digits.slice(1)}` : rawPhone);
+  if (!/^\+[1-9]\d{7,14}$/.test(phone)) throw new HttpError(400, 'Phone: a full number, e.g. +971 50 123 4567.');
+  const email = text(cu.email, 'Email', 254);
+  if (email && !isCustomerEmail(email)) throw new HttpError(400, 'Email: one address, like name@company.com.');
+  const emirate = text(cu.emirate, 'Emirate', 30, { required: true });
+  if (!(EMIRATES_LIST as string[]).includes(emirate)) throw new HttpError(400, 'Emirate: one of the seven.');
+  const area = text(cu.area, 'Area', 100);
+  const address = text(cu.address, 'Address', 300);
+
+  if (!Array.isArray(body.lines) || !body.lines.length) throw new HttpError(400, 'Add at least one line.');
+  if (body.lines.length > BULK_LIMITS.lines) throw new HttpError(400, `At most ${BULK_LIMITS.lines} lines.`);
+  const lines = body.lines.map((l, i) => {
+    if (!l || typeof l !== 'object' || Array.isArray(l)) throw new HttpError(400, `Line ${i + 1} is not a line.`);
+    const lo = l as Obj;
+    const bad = Object.keys(lo).filter((k) => !['description', 'quantity', 'unitPrice'].includes(k));
+    if (bad.length) throw new HttpError(400, `Line ${i + 1}: unknown field ${bad[0].slice(0, 40)}.`);
+    const description = text(lo.description, `Line ${i + 1}: description`, BULK_LIMITS.description, { required: true });
+    const q = typeof lo.quantity === 'string' ? Number(lo.quantity) : lo.quantity;
+    if (typeof q !== 'number' || !Number.isInteger(q) || q < 1 || q > BULK_LIMITS.quantity) throw new HttpError(400, `Line ${i + 1}: the quantity is a whole number from 1 to ${BULK_LIMITS.quantity.toLocaleString('en-US')}.`);
+    const unit = bulkFils(lo.unitPrice, `Line ${i + 1}: unit price`, BULK_LIMITS.unitAed, { required: true });
+    return { description, quantity: q, unit, total: unit * q };
+  });
+  const subtotalFils = lines.reduce((s, l) => s + l.total, 0);
+  const deliveryFils = bulkFils(body.deliveryFee, 'Delivery', 100_000);
+  const discountFils = bulkFils(body.discount, 'Discount', BULK_LIMITS.totalAed);
+  const totalFils = subtotalFils + deliveryFils - discountFils;
+  if (totalFils < 1) throw new HttpError(400, 'The total must be more than zero (the discount is more than the lines).');
+  if (totalFils > BULK_LIMITS.totalAed * 100) throw new HttpError(400, `The total is over AED ${BULK_LIMITS.totalAed.toLocaleString('en-US')}: check the quantities and prices.`);
+
+  const today = uaeDate(Date.now());
+  const date = body.date === undefined || body.date === '' ? today : text(body.date, 'Date', 10);
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(date) || date < '2015-01-01' || date > today || !Number.isFinite(Date.parse(`${date}T00:00:00Z`))) throw new HttpError(400, 'Date: the day of the sale, not after today.');
+  const paidWith = body.paidWith as (typeof BULK_PAID)[number];
+  if (!BULK_PAID.includes(paidWith)) throw new HttpError(400, 'Paid with: cash, bank transfer, card, cheque, or not paid yet.');
+  const reference = text(body.reference, 'Payment reference', 80);
+  const note = text(body.note, 'Note', 500);
+  if (body.delivered !== undefined && typeof body.delivered !== 'boolean') throw new HttpError(400, 'delivered must be true or false.');
+  const delivered = body.delivered !== false;
+  const key = text(idempotencyKey, 'Key', 80, { required: true });
+  if (!/^[A-Za-z0-9_-]{8,80}$/.test(key)) throw new HttpError(400, 'key is required (one per save).');
+  if (vatSettings().enabled) throw new HttpError(409, 'With VAT on, a bulk order needs a tax invoice with its VAT: not available here yet. Ask your accountant to issue it.', {}, { code: 'bulk_vat' });
+
+  return auditedTransaction((auditOrThrow) => {
+    const prior = parse(getDb().prepare(`SELECT ${COLUMNS} FROM orders WHERE idempotency_key = ?`).get(`bulk-${key}`) as Row | undefined);
+    if (prior) return { order: prior, created: false };
+    let id = newOrderId();
+    while (getOrder(id)) id = newOrderId();
+    const now = new Date().toISOString();
+    // The sale's own day (noon in the UAE), so it is counted in the right month in Money → Reports.
+    const createdAt = date === today ? now : new Date(`${date}T08:00:00Z`).toISOString();
+    const paid = paidWith !== 'unpaid';
+    const order = {
+      id,
+      createdAt,
+      customer: {
+        fullName,
+        phone,
+        ...(email ? { email } : {}),
+        emirate: emirate as Emirate,
+        area,
+        streetAddress: address,
+        buildingVilla: '',
+        flatVillaNo: '',
+        ...(company ? { company } : {}),
+        ...(trn ? { trn: trn.replace(/[\s-]/g, '') } : {}),
+      },
+      items: lines.map((l) => ({
+        productId: BULK_PRODUCT_ID,
+        title: l.description,
+        image: '',
+        profileId: 'bulk',
+        profileName: '',
+        mattressSize: '',
+        fittedSheet: '',
+        flatSheet: '',
+        pillowcases: '',
+        unitPrice: aed(l.unit),
+        quantity: l.quantity,
+        totalPrice: aed(l.total),
+        productType: 'bulk' as const,
+      })),
+      subtotal: aed(subtotalFils),
+      deliveryFee: aed(deliveryFils),
+      codFee: 0,
+      discount: aed(discountFils),
+      total: aed(totalFils),
+      // Cash is booked with cash on delivery, the rest with bank transfers (Reports by payment method).
+      paymentMethod: paidWith === 'cash' ? 'cod' : 'bank_transfer',
+      paymentStatus: paid ? 'paid' : 'pending',
+      status: delivered ? 'delivered' : 'confirmed',
+      source: { source: 'bulk' },
+      bulk: { by: actor, at: now, paidWith, ...(reference ? { reference } : {}), ...(note ? { note } : {}) },
+      ...(note ? { adminNotes: note } : {}),
+      courier: {
+        provider: 'manual',
+        serviceType: 'Scheduled',
+        awbNumber: '',
+        trackingUrl: '',
+        status: delivered ? 'Delivered (bulk order)' : 'Bulk order – to deliver',
+        pickupDate: delivered ? date : uaeDate(Date.now(), 1),
+        weightKg: 0,
+        pieces: lines.reduce((s, l) => s + l.quantity, 0),
+        labelGenerated: false,
+        codAmountCollected: 0,
+        ...(delivered ? { deliveredAt: createdAt } : {}),
+      },
+    } as unknown as Order;
+    writeOrder(order, `bulk-${key}`);
+    logEvent(id, actor, 'bulk_created', { totalFils, lines: lines.length, paidWith, date });
+    auditOrThrow('order.bulk_created', { by: actor, orderId: id, totalFils, lines: lines.length, paidWith, date, delivered });
+    return { order: getOrder(id)!, created: true };
+  });
+}
+
+/** The bulk orders (newest first), for Money → Invoices. */
+export function listBulkOrders(limit = 200): Order[] {
+  return (getDb().prepare(`SELECT ${COLUMNS} FROM orders WHERE json_extract(data, '$.bulk') IS NOT NULL ORDER BY created_at DESC LIMIT ?`).all(Math.min(Math.max(1, limit), 1000)) as Row[]).map(fromRow);
 }

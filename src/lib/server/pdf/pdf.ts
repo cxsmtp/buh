@@ -130,6 +130,33 @@ export class PdfDoc {
     this.page.ops.push(`${num(fill[0])} ${num(fill[1])} ${num(fill[2])} rg ${num(x)} ${num(this.height - y - h)} ${num(w)} ${num(h)} re f`);
   }
 
+  /** A box with rounded corners (radius r), filled and/or outlined; its top-left at (x, y). */
+  roundBox(x: number, y: number, w: number, h: number, r: number, opts: { fill?: RGB; stroke?: RGB; width?: number }): void {
+    const k = 0.5523 * r;
+    const X = x;
+    const Y = this.height - y - h; // bottom-left in PDF space
+    const p = [
+      `${num(X + r)} ${num(Y)} m`,
+      `${num(X + w - r)} ${num(Y)} l`,
+      `${num(X + w - r + k)} ${num(Y)} ${num(X + w)} ${num(Y + r - k)} ${num(X + w)} ${num(Y + r)} c`,
+      `${num(X + w)} ${num(Y + h - r)} l`,
+      `${num(X + w)} ${num(Y + h - r + k)} ${num(X + w - r + k)} ${num(Y + h)} ${num(X + w - r)} ${num(Y + h)} c`,
+      `${num(X + r)} ${num(Y + h)} l`,
+      `${num(X + r - k)} ${num(Y + h)} ${num(X)} ${num(Y + h - r + k)} ${num(X)} ${num(Y + h - r)} c`,
+      `${num(X)} ${num(Y + r)} l`,
+      `${num(X)} ${num(Y + r - k)} ${num(X + r - k)} ${num(Y)} ${num(X + r)} ${num(Y)} c h`,
+    ].join(' ');
+    const fill = opts.fill ? `${num(opts.fill[0])} ${num(opts.fill[1])} ${num(opts.fill[2])} rg ` : '';
+    const stroke = opts.stroke ? `${num(opts.stroke[0])} ${num(opts.stroke[1])} ${num(opts.stroke[2])} RG ${num(opts.width ?? 0.75)} w ` : '';
+    const op = opts.fill && opts.stroke ? 'B' : opts.fill ? 'f' : 'S';
+    this.page.ops.push(`${fill}${stroke}${p} ${op}`);
+  }
+
+  /** A filled circle, its centre at (cx, cy). */
+  circle(cx: number, cy: number, r: number, fill: RGB): void {
+    this.roundBox(cx - r, cy - r, 2 * r, 2 * r, r, { fill });
+  }
+
   /** A clickable area (an https link). */
   link(x: number, y: number, w: number, h: number, url: string): void {
     if (/^https?:\/\//.test(url)) this.page.links.push({ rect: [x, this.height - y - h, x + w, this.height - y], url });
