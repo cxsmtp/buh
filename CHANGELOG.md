@@ -10,7 +10,7 @@
   - **Benchmark:** no failed requests in any round (main first, alternating). Catalogue p95 108–124 ms (main 119–125), gift page 114–127 ms (main 125–131), courier serviceability 58–86 ms (main 67–80), home page 70–77 ms (main 69–87).
   - **Tests:** 1302 of 1302 passed in the full run; the files touched by the security fixes after it pass again (13/13).
   - **Dependency audit:** `npm audit --omit=dev`: 0 vulnerabilities; no dependencies changed.
-  - **Security scan:** pending.
+  - **Security scan:** Checkmarx One on this release: its first scan found 7 new findings, all in what this release added (sample keys and a sample password in its tests, a non-crypto fallback for the invoice's save key), and all fixed; the final scan is back to BUH-02.36.00's 59 (9 critical), nothing new. The new route is the owner's (the accountant reads), size-capped at 64 KB, every field allow-listed and checked on the server, amounts in fils, one key one invoice.
 
 ## BUH-02.36.00 — 2026-11-05 20:27 UTC · [#69](https://github.com/cxsmtp/buh/pull/69)
 
