@@ -1,6 +1,6 @@
 # Changelog
 
-## BUH-02.31.00 — 2026-11-05 00:00 UTC · [#64](https://github.com/cxsmtp/buh/pull/64)
+## BUH-02.31.00 — 2026-11-05 10:32 UTC · [#64](https://github.com/cxsmtp/buh/pull/64)
 
 - **Photo deals: you fix the price.** In Orders → **New photo deal** you add the pictures (up to 12), what it is, the price with delivery and the ways the customer may pay (card, cash on delivery, bank transfer), and get a private link with a **Send on WhatsApp** button.
 - **The customer can't change the rate.** The link shows your pictures and the fixed price; the customer only adds the address and pays, and the shop charges the deal's price whatever the page sends.
@@ -10,10 +10,10 @@
 - **Confirmation message with a tracking link.** After **Confirmed on WhatsApp**, the order's **Send confirmation & tracking link** button opens WhatsApp to the customer with their order number and a private link that shows the order and the courier's tracking at any time, without the phone number; the courier update message and the order emails carry the same link.
 - **"Confirmed" means confirmed.** Track Order now shows an order you confirmed on WhatsApp as confirmed instead of "pending confirmation".
 - **Status.**
-  - **Benchmark:** pending.
-  - **Tests:** pending.
-  - **Dependency audit:** pending.
-  - **Security scan:** pending.
+  - **Benchmark:** no failed requests in any round (main first, alternating). Courier serviceability p95 89–101 ms (main 93–106), home page 92–113 ms (main 102–117), catalogue 154–177 ms (main 153–169). The gift page looked 10 ms slower at the median in the mixed run; run alone 4 rounds each it matched main (p50 72–88 vs 74–85 ms, p95 105–130 vs 104–128 ms).
+  - **Tests:** 1241 of 1242 passed in the full run; the one miss (Google Drive connect at 375 px, a screen this release does not touch, "728px wide" under load) passes when run on its own (twice). An earlier run failed 29 tests because the test machine's disk was nearly full (the shop rightly refuses photo uploads under 1 GB free); after freeing space they pass.
+  - **Dependency audit:** `npm audit --omit=dev`: 0 vulnerabilities; no dependencies or images changed.
+  - **Security scan:** new routes follow the shop's rules (owner-only admin routes with size-capped, allow-listed bodies; private links stored only as hashes or made from the server's key; pictures sandboxed, no-store, no-referrer); no new dependencies for the scanner.
 
 ## BUH-02.30.00 — 2026-11-03 20:20 UTC · [#63](https://github.com/cxsmtp/buh/pull/63)
 
