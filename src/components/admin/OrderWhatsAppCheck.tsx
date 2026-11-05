@@ -100,7 +100,7 @@ export function OrderWhatsAppCheck({ order, onOrderChanged, shopName }: { order:
         )}
         {heldForWhatsApp(order) && <span className="px-1.5 py-0.5 rounded-full bg-surface border border-warning-line text-warning font-bold text-[10px] uppercase tracking-wider">Held</span>}
       </div>
-      <p className={`text-ink-soft ${status === 'confirmed' ? 'hidden' : ''}`}>
+      <p className={`text-ink-soft ${status === 'confirmed' ? 'text-[11px]' : ''}`}>
         Order phone: <a href={`tel:${order.customer.phone}`} className="font-mono font-bold text-ink text-sm">{order.customer.phone}</a>
         {check && status !== 'confirmed' && <span className="block text-ink-muted">The message &ldquo;Confirm my order {order.id} · code {check.code}&rdquo; should come from this number.</span>}
         {check?.openedAt && status === 'awaiting' && <span className="block text-ink-muted">Customer opened WhatsApp at {when(check.openedAt)}.</span>}
