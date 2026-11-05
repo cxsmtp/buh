@@ -1,3 +1,4 @@
+import { dueOnDeliveryFils } from '@/lib/orderMoney';
 import crypto from 'node:crypto';
 import { Order, CourierSettings } from '@/types';
 import { BLOCKED_MESSAGE, jeeblyMode, type JeeblyMode } from './courierMode';
@@ -101,7 +102,10 @@ const cut = (s: string, max = 120) => s.replace(/[\u0000-\u001f\u007f]+/g, ' ').
 /** The create-shipment request, from the order and the owner's own pickup details: nothing invented. */
 export function buildJeeblyPayload(order: Order, settings: CourierSettings['jeebly'], sender: JeeblySender): JeeblyCreateOrderPayload {
   const c = order.customer;
-  const cod = order.paymentMethod === 'cod';
+  // What the courier collects: a cash order's total, or the extra the owner added to a paid one,
+  // less payments moved in from cancelled orders (src/lib/orderMoney.ts). Nothing due: prepaid.
+  const dueFils = dueOnDeliveryFils(order);
+  const cod = dueFils > 0;
   const pieces = order.courier?.pieces || order.items.reduce((sum, item) => sum + item.quantity, 0) || 1;
   return {
     // A same-day order (the customer paid for it) is booked Same day.
@@ -112,7 +116,7 @@ export function buildJeeblyPayload(order: Order, settings: CourierSettings['jeeb
     weight: Math.max(1, Math.ceil(Number(order.courier?.weightKg) || 1)),
     payment_type: cod ? 'COD' : 'PREPAID',
     // Dirhams from fils, so 0.1 + 0.2 never becomes 0.30000000000000004.
-    ...(cod ? { cod_amount: Math.round(Number(order.total) * 100) / 100 } : {}),
+    ...(cod ? { cod_amount: dueFils / 100 } : {}),
     num_pieces: pieces,
     customer_reference_number: order.id,
     pickup_date: jeeblyPickupDate(order.courier?.pickupDate),

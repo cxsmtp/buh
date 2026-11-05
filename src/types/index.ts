@@ -221,6 +221,12 @@ export interface Order {
   cardFee?: number;
   /** The fee's percent when the order was placed. */
   cardFeePercent?: number;
+  /** Extra the courier collects on delivery, set by the owner when booking (a shortfall, an item added on WhatsApp). In AED, part of total. */
+  extraCharge?: { amount: number; note?: string; at: string; by: string };
+  /** Payments of cancelled orders moved onto this order instead of a refund: each lowers what is collected on delivery. In AED. */
+  creditsIn?: Array<{ fromOrderId: string; amount: number; at: string; by: string }>;
+  /** This (cancelled) order's payment moved onto other orders instead of a refund. In AED. */
+  creditsOut?: Array<{ toOrderId: string; amount: number; at: string; by: string }>;
   /** UAE VAT added on top (Settings → Payments → VAT with prices excluding VAT), in AED. Part of total. */
   vatAdded?: number;
   /** The hub's copy only: the order's PDF invoice, once issued (src/lib/server/invoices.ts). */

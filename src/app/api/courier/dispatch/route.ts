@@ -34,6 +34,8 @@ export async function POST(request: Request) {
       shipUnconfirmed: body.shipUnconfirmed === true,
       // true once the owner has said yes to a test (sandbox or practice) booking
       testBooking: body.testBooking === true,
+      // "Extra to collect" (AED; checked on the server: 0 to 10,000, fils at most).
+      ...(body.extraCharge !== undefined ? { extraCharge: typeof body.extraCharge === 'number' ? body.extraCharge : Number.NaN, extraNote: body.extraNote === undefined ? '' : str(body.extraNote, 'Reason', 120, { required: false }) } : {}),
     });
     if (outcome.attempt) {
       audit('courier.dispatch', { by: session.email, orderId, provider, rebook: body.rebook === true, ...outcome.attempt });
