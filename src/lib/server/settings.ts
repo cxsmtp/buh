@@ -871,6 +871,7 @@ const VALIDATORS: { [K in SettingsKey]: (input: Obj, current: SettingsMap[K]) =>
       holdUntilWhatsAppConfirmed: bool(input.holdUntilWhatsAppConfirmed, current.holdUntilWhatsAppConfirmed),
       photoOrders: bool(input.photoOrders, current.photoOrders),
       photoOrdersOnHome: bool(input.photoOrdersOnHome, current.photoOrdersOnHome),
+      photoOrdersCard: bool(input.photoOrdersCard, current.photoOrdersCard ?? true),
     };
   },
 

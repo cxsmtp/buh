@@ -2,7 +2,7 @@
 
 import React, { useState, useEffect, useMemo, useCallback, useRef } from 'react';
 import Link from 'next/link';
-import { Product, Order, CartItem, BedProfileMeasurement, BrandSettings, CatalogSettings, StoreSettings, DeliverySettings, PhoneVerificationConfig } from '@/types';
+import { Product, Order, CartItem, BedProfileMeasurement, BrandSettings, CatalogSettings, StoreSettings, DeliverySettings, PhoneVerificationConfig, DealView } from '@/types';
 import { DEFAULT_CATALOG, DEFAULT_DELIVERY, DEFAULT_STORE } from '@/data/catalogDefaults';
 import { askWhatsAppLink, piecesLeft, refreshCart, ShopProvider, type FestivalView, type ShopInfo } from '@/lib/client/shop';
 import { captureLanding, decodeBag, type BagLine, type Landing } from '@/lib/client/landing';
@@ -66,6 +66,7 @@ import { CartDrawer } from '@/components/store/CartDrawer';
 import { CheckoutModal } from '@/components/store/CheckoutModal';
 import { OrderTrackerModal } from '@/components/store/OrderTrackerModal';
 import { PhotoOrderSheet, type PhotoOrderDraft } from '@/components/store/PhotoOrderSheet';
+import { DealSheet } from '@/components/store/DealSheet';
 
 import { HelpLauncher } from '@/components/store/HelpLauncher';
 import { InstallPrompt } from '@/components/store/InstallPrompt';
@@ -100,7 +101,10 @@ export function ShopApp({
   festivalLink,
   explore,
   openPhotoOrder = false,
+  deal,
 }: {
+  /** /deal/<token>: the owner's photo deal (pictures, fixed price), opened straight away. */
+  deal?: DealView;
   initialProductId?: string;
   /** /order-by-photo: "Order from your photo" opens straight away (when the owner takes them). */
   openPhotoOrder?: boolean;
@@ -156,6 +160,7 @@ export function ShopApp({
   const [isTrackerOpen, setIsTrackerOpen] = useState(false);
   // "Order from your photo" (Settings → Store & contact): the sheet, and what it handed to checkout.
   const [photoSheetOpen, setPhotoSheetOpen] = useState(false);
+  const [dealSheetOpen, setDealSheetOpen] = useState(Boolean(deal));
   const [photoDraft, setPhotoDraft] = useState<PhotoOrderDraft | null>(null);
   const photoPlaced = useRef(false);
   const [selectedProduct, setSelectedProduct] = useState<Product | null>(null);
@@ -669,7 +674,8 @@ export function ShopApp({
         onClose={() => {
           setIsCheckoutOpen(false);
           // Closed before ordering: back to the photos (nothing lost); after ordering: done.
-          if (photoDraft && !photoPlaced.current) setPhotoSheetOpen(true);
+          if (photoDraft?.deal && !photoPlaced.current) setDealSheetOpen(true);
+          else if (photoDraft && !photoPlaced.current) setPhotoSheetOpen(true);
           else setPhotoDraft(null);
           photoPlaced.current = false;
         }}
@@ -679,7 +685,8 @@ export function ShopApp({
         bankAskWhatsApp={bankAskWhatsApp}
         supportEmail={supportEmail}
         phoneVerification={phoneVerification}
-        card={cardPayments}
+        // The /order-by-photo page: card only while Settings → Store & contact allows it there (deal links choose their own).
+        card={photoDraft && !photoDraft.deal && storeSettings.photoOrdersCard === false ? null : cardPayments}
         landing={landing}
         onOrderPlaced={handleOrderPlaced}
         onPricesChanged={async () => {
@@ -687,6 +694,21 @@ export function ShopApp({
           if (list) setCart(refreshCart(loadCart(list), list));
         }}
       />}
+
+      {dealSheetOpen && deal && (
+        <DealSheet
+          deal={deal}
+          onClose={() => {
+            setDealSheetOpen(false);
+            setPhotoDraft(null);
+          }}
+          onContinue={() => {
+            setPhotoDraft({ photos: [], note: deal.note ?? '', pieces: deal.pieces, amountFils: deal.amountFils, deal: { token: deal.token, payments: deal.payments, photoUrls: deal.photos } });
+            setDealSheetOpen(false);
+            setIsCheckoutOpen(true);
+          }}
+        />
+      )}
 
       {photoSheetOpen && (
         <PhotoOrderSheet
@@ -721,7 +743,7 @@ export function ShopApp({
 
       <HelpLauncher />
       <InstallPrompt
-        blocked={isCheckoutOpen || isCartOpen || isTrackerOpen || photoSheetOpen || selectedProduct !== null || searchOpen || filterOpen}
+        blocked={isCheckoutOpen || isCartOpen || isTrackerOpen || photoSheetOpen || dealSheetOpen || selectedProduct !== null || searchOpen || filterOpen}
         logo={<BrandLogo brand={brandSettings} className="w-11 h-11 text-base" />}
       />
     </div>

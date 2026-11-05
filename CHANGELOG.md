@@ -1,5 +1,18 @@
 # Changelog
 
+## BUH-02.31.00 — 2026-11-05 00:00 UTC · [#64](https://github.com/cxsmtp/buh/pull/64)
+
+- **Photo deals: you fix the price.** In Orders → **New photo deal** you add the pictures (up to 12), what it is, the price with delivery and the ways the customer may pay (card, cash on delivery, bank transfer), and get a private link with a **Send on WhatsApp** button.
+- **The customer can't change the rate.** The link shows your pictures and the fixed price; the customer only adds the address and pays, and the shop charges the deal's price whatever the page sends.
+- **One order per link.** A used link closes (an unpaid card try that is cancelled opens it again); you can stop a link, and it expires after the days you chose (7 by default).
+- **No "Confirm amount" for deals.** The order arrives with your price already confirmed, so the label and courier booking are ready straight away.
+- **Order from your photo: up to 8 photos, and a card switch.** Settings → Store & contact → Order from your photo has **Card payment on this page**, so you can keep card off where the customer types the amount.
+- **Status.**
+  - **Benchmark:** pending.
+  - **Tests:** pending.
+  - **Dependency audit:** pending.
+  - **Security scan:** pending.
+
 ## BUH-02.30.00 — 2026-11-03 20:20 UTC · [#63](https://github.com/cxsmtp/buh/pull/63)
 
 - **"Last step" checklist after ordering.** An order that still needs the customer's WhatsApp message now shows "Almost there". It ticks what is done (pieces, address, payment) and leaves one open box: **Last step: confirm on WhatsApp**, with a glowing **Tap to confirm →** button and the time left to send it.

@@ -56,6 +56,7 @@ export const DEFAULT_STORE: StoreSettings = {
   // Opt-in: the owner switches on "Order from your photo" (and its home-page banner) when ready.
   photoOrders: false,
   photoOrdersOnHome: false,
+  photoOrdersCard: true,
 };
 
 /** Settings → Themes before the owner changes anything: festivals picked automatically. */

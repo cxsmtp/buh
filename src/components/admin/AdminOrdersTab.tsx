@@ -25,6 +25,7 @@ import { postJson, safeHref, safeLinkHref, sendJson } from '@/lib/apiClient';
 import { awaitingWhatsApp, heldForWhatsApp, OrderTimeline, OrderWhatsAppCheck } from './OrderWhatsAppCheck';
 import { OrderBankTransfer, transferToCheck } from './OrderBankTransfer';
 import { OrderPhotoCheck } from './OrderPhotoCheck';
+import { PhotoDeals } from './PhotoDeals';
 import { DEFAULT_PACKAGING_GRAMS, shipmentWeight } from '@/lib/shipmentWeight';
 import { aed2, BLOCKED_MESSAGE, carrierLabel, ECO_LIVE_NOT_CONNECTED, jeeblyMode, LIVE_OFF_WARNING } from '@/lib/courierMode';
 import { EnterTrackingDialog } from './EnterTrackingDialog';
@@ -357,6 +358,8 @@ export const AdminOrdersTab: React.FC<AdminOrdersTabProps> = ({
 
   return (
     <div className="space-y-4">
+      {/* The owner's photo deal links (pictures, fixed price, allowed payments) */}
+      <PhotoDeals />
       {/* Filter Tabs */}
       <div className="flex items-center gap-2 overflow-x-auto no-scrollbar pb-1">
         {[

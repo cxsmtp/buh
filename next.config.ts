@@ -70,6 +70,15 @@ const nextConfig: NextConfig = {
         headers: [{ key: "Content-Security-Policy", value: BILL_CSP }],
       },
       {
+        // A photo deal's pictures (the hub's, and the customer's behind the private link): the same.
+        source: "/api/admin/deals/:id/photos/:n",
+        headers: [{ key: "Content-Security-Policy", value: BILL_CSP }],
+      },
+      {
+        source: "/api/deal/:token/photos/:n",
+        headers: [{ key: "Content-Security-Policy", value: BILL_CSP }],
+      },
+      {
         // An order's printable receipt or tax invoice (the hub's, and the customer's private one):
         // its own inline style, no scripts at all (src/lib/server/documentHeaders.ts).
         source: "/api/admin/orders/:id/invoice",

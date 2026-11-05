@@ -213,7 +213,14 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
   const [locationProblem, setLocationProblem] = useState(false);
 
   // Payment Method
-  const [paymentMethod, setPaymentMethod] = useState<PaymentMethod>('cod');
+  // A deal link without cash on delivery starts on the first way to pay it offers.
+  const [paymentMethod, setPaymentMethod] = useState<PaymentMethod>(() => {
+    const pays = photoOrder?.deal?.payments;
+    if (!pays || pays.includes('cod')) return 'cod';
+    if (card && pays.includes('online_card')) return 'online_card';
+    if (bankTransfer && pays.includes('bank_transfer')) return 'bank_transfer';
+    return pays[0] ?? 'cod';
+  });
   // The card fee's percent the server gave when it refused a total (the owner changed it meanwhile).
   const [feePercentNow, setFeePercentNow] = useState<number | null>(null);
 
@@ -268,9 +275,13 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
   const standardFils = photoOrder ? 0 : toFils(delivery.standard.fee);
   const deliveryFils = sameDayChosen ? toFils(delivery.sameDay.fee) : standardFils;
   const totalFils = (photoOrder ? photoOrder.amountFils : cartFils(items)) + deliveryFils;
-  const bankReady = bankTransfer;
+  // The owner's deal link: only the ways to pay the owner allowed (the server refuses the others too).
+  const dealPays = photoOrder?.deal?.payments;
+  const codOffered = !dealPays || dealPays.includes('cod');
+  const bankReady = bankTransfer && (!dealPays || dealPays.includes('bank_transfer'));
+  const cardOffered = Boolean(card) && (!dealPays || dealPays.includes('online_card'));
   const shopWhatsApp = useShop().store.whatsappNumber.replace(/\D/g, '');
-  const byCard = paymentMethod === 'online_card' && Boolean(card);
+  const byCard = paymentMethod === 'online_card' && cardOffered;
   // Card payment fee (Settings → Payments): a percent of items + delivery, worked out like the server
   // does (whole fils, half up). The server works it out again and refuses a total that differs.
   const feePercent = feePercentNow ?? card?.cardFeePercent ?? 0;
@@ -435,9 +446,13 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
           color: item.selectedColor,
           quantity: item.quantity,
         })),
-    ...(photoOrder ? { photo: { photos: photoOrder.photos, note: photoOrder.note, pieces: photoOrder.pieces, amount: photoOrder.amountFils / 100 } } : {}),
+    ...(photoOrder?.deal
+      ? { deal: { token: photoOrder.deal.token } }
+      : photoOrder
+        ? { photo: { photos: photoOrder.photos, note: photoOrder.note, pieces: photoOrder.pieces, amount: photoOrder.amountFils / 100 } }
+        : {}),
     paymentMethod: method,
-    deliveryOption: over.deliveryOption ?? (sameDayChosen ? 'same_day' : 'standard'),
+    deliveryOption: photoOrder?.deal ? 'standard' : (over.deliveryOption ?? (sameDayChosen ? 'same_day' : 'standard')),
     // The total shown for this way of paying (a card order includes the card fee).
     expectedTotal: (method === 'online_card' ? cardTotalFils : payTotalFils) / 100,
     source: landing ?? undefined,
@@ -704,7 +719,7 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
     const confirmAsks = bankOnRequest && askWhatsApp && confirmedOrder.whatsappCheck?.status !== 'confirmed';
     const askBankLink = bankOnRequest && !confirmAsks ? waMeLink(shopWhatsApp, askBankDetailsMessage(confirmedOrder.id, confirmedOrder.total)) : null;
     const doneSteps = [
-      confirmedOrder.photoOrder ? 'Photos and agreed total added' : `${pieceCount} ${pieceCount === 1 ? 'piece' : 'pieces'} chosen`,
+      confirmedOrder.photoOrder?.fixedPrice ? 'Pictures and price agreed' : confirmedOrder.photoOrder ? 'Photos and agreed total added' : `${pieceCount} ${pieceCount === 1 ? 'piece' : 'pieces'} chosen`,
       'Delivery address added',
       `Payment: ${confirmedOrder.paymentMethod === 'cod' ? 'cash on delivery' : paidByCard ? (cardPaid ? 'card, paid' : 'card') : 'bank transfer'}`,
     ];
@@ -797,7 +812,7 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
           )}
           {confirmedOrder.photoOrder && (
             <p role="status" data-testid="photo-order-next" className="text-xs text-ink-soft bg-ivory border border-line rounded-xl px-3 py-2 text-left">
-              {confirmedOrder.paymentMethod === 'online_card' ? <>We&rsquo;ll check your photos and confirm on WhatsApp.</> : <>We&rsquo;ll check your photos and the amount (AED {formatAed(toFils(confirmedOrder.total))}) and confirm on WhatsApp.</>} Once it ships, Track Order with <span className="font-mono">{confirmedOrder.id}</span> and your phone number shows the courier&rsquo;s tracking number.
+              {confirmedOrder.photoOrder.fixedPrice ? <>We&rsquo;ll prepare it as agreed.</> : confirmedOrder.paymentMethod === 'online_card' ? <>We&rsquo;ll check your photos and confirm on WhatsApp.</> : <>We&rsquo;ll check your photos and the amount (AED {formatAed(toFils(confirmedOrder.total))}) and confirm on WhatsApp.</>} Once it ships, Track Order with <span className="font-mono">{confirmedOrder.id}</span> and your phone number shows the courier&rsquo;s tracking number.
             </p>
           )}
           {weCall && (
@@ -1006,9 +1021,9 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
           <div className="bg-ivory rounded-2xl p-3 border border-line flex items-center justify-between text-xs">
             {photoOrder ? (
               <div data-testid="checkout-photo-summary" className="min-w-0">
-                <span className="font-semibold text-ink">Your order from a photo</span>
+                <span className="font-semibold text-ink">{photoOrder.deal ? 'Your order' : 'Your order from a photo'}</span>
                 <div className="text-[10px] text-ink-soft mt-0.5 break-anywhere">
-                  {photoOrder.photos.length} {photoOrder.photos.length === 1 ? 'photo' : 'photos'} · {photoOrder.pieces} {photoOrder.pieces === 1 ? 'piece' : 'pieces'}
+                  {photoOrder.deal ? `Fixed price · ` : `${photoOrder.photos.length} ${photoOrder.photos.length === 1 ? 'photo' : 'photos'} · `}{photoOrder.pieces} {photoOrder.pieces === 1 ? 'piece' : 'pieces'}
                   {photoOrder.note ? ` · ${photoOrder.note.length > 60 ? `${photoOrder.note.slice(0, 59)}…` : photoOrder.note}` : ''}
                 </div>
               </div>
@@ -1349,10 +1364,10 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
                 )}
                 <div>
                   <div className={`font-semibold ${delivery.serviceable ? 'text-success' : 'text-danger'}`}>{delivery.message}</div>
-                  {delivery.serviceable && <div className="text-ink-soft">{delivery.standard.name} in {delivery.days}{photoOrder ? ' · included in the agreed total' : standardFils > 0 ? ` · AED ${formatAed(standardFils)}` : ''}</div>}
+                  {delivery.serviceable && <div className="text-ink-soft">{delivery.standard.name} in {delivery.days}{photoOrder?.deal ? ' · included in the price' : photoOrder ? ' · included in the agreed total' : standardFils > 0 ? ` · AED ${formatAed(standardFils)}` : ''}</div>}
                 </div>
               </div>
-              {delivery.serviceable && deliverySettings.sameDayEnabled && (
+              {delivery.serviceable && deliverySettings.sameDayEnabled && !photoOrder?.deal && (
                 <fieldset className="grid grid-cols-1 sm:grid-cols-2 gap-2 pt-1">
                   <legend className="sr-only">Delivery speed</legend>
                   <label className={`flex items-start gap-2 p-2.5 rounded-xl border cursor-pointer ${!sameDayChosen ? 'border-ink bg-surface' : 'border-line bg-surface/60'}`}>
@@ -1382,7 +1397,7 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
 
             <div role="radiogroup" aria-label="Payment" className="grid grid-cols-1 sm:grid-cols-2 gap-3">
               {/* Option 1: Cash On Delivery */}
-              <button
+              {codOffered && <button
                 type="button"
                 role="radio"
                 aria-checked={paymentMethod === 'cod'}
@@ -1403,7 +1418,7 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
                 <span className="block text-[11px] leading-relaxed text-ink-soft">
                   Pay the courier in cash at your door, in any of the seven emirates.
                 </span>
-              </button>
+              </button>}
 
               {/* Option 2: Bank transfer (only once the shop's real account is entered) */}
               {bankReady && <button
@@ -1430,7 +1445,7 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
               </button>}
 
               {/* Option 3: Card through Stripe (only when switched on in Settings → Payments) */}
-              {card && <button
+              {card && cardOffered && <button
                 type="button"
                 role="radio"
                 aria-checked={paymentMethod === 'online_card'}
@@ -1456,7 +1471,7 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
             </div>
 
             {/* Card: Stripe's own fields (the number never touches this shop) */}
-            {byCard && card && (
+            {byCard && card && cardOffered && (
               <div className="rounded-2xl border border-line bg-surface p-3 min-w-0">
                 <CardFields publishableKey={card.publishableKey} amountFils={cardTotalFils} onReady={onCardReady} />
                 <p className="mt-2 text-[10px] text-ink-muted flex items-center gap-1">

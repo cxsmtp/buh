@@ -23,6 +23,7 @@ import { audit, auditedTransaction, auditOrThrow } from './audit';
 import { kvGet, kvSet } from './kv';
 import { logEvent as logEvent_ } from './log';
 import { issuePayLink, payPathOf } from './bankPay';
+import { claimDeal, dealForOrder } from './photoDeals';
 import { waMeLink } from '@/lib/whatsappConfirm';
 import { validatePhone } from '@/lib/otpService';
 import { DEFAULT_PACKAGING_GRAMS, shipmentWeight } from '@/lib/shipmentWeight';
@@ -364,7 +365,18 @@ export function placeOrder(input: unknown, context: PlaceOrderContext = {}): Pla
   const card = paymentMethod === 'online_card';
   // "Order from your photo": a piece agreed on WhatsApp (photos, the agreed amount), not from the catalogue.
   // Paid by card, the customer pays the amount they typed (with the card fee); the owner can't change it afterwards.
-  const photo = body.photo === undefined ? null : parsePhotoOrder(body.photo);
+  // A photo deal (the owner's own link, photoDeals.ts): the owner's pictures and fixed price, the
+  // payments the owner allowed; the customer adds the address. Never with the customer's own photos.
+  if (body.deal !== undefined && body.photo !== undefined) throw new HttpError(400, 'An order is from a deal link or from your photo, not both.');
+  const deal = body.deal === undefined ? null : dealForOrder(body.deal);
+  const photo: PhotoInput | null = deal ? { files: deal.files, note: deal.note, pieces: deal.pieces, amountFils: deal.amountFils } : body.photo === undefined ? null : parsePhotoOrder(body.photo);
+  if (deal && !deal.payments.includes(paymentMethod as Order['paymentMethod'])) {
+    throw new HttpError(400, 'This way of paying is not offered for this order. Please choose another.', {}, { code: 'deal_payment' });
+  }
+  // Settings → Store & contact: card payment on the /order-by-photo page can be switched off (the customer typed the amount there).
+  if (card && photo && !deal && getSettings('store').photoOrdersCard === false) {
+    throw new HttpError(400, 'Card payment is not available for orders from a photo. Please choose Cash on Delivery or Bank Transfer.', {}, { code: 'card_unavailable' });
+  }
   if (card && !cardPaymentsReady()) throw new HttpError(400, 'Card payment is not available right now. Please choose Cash on Delivery.', {}, { code: 'card_unavailable' });
   // Settings → Phone check "WhatsApp (free)": no code; the number typed (UAE mobile rules) is
   // confirmed by the customer's WhatsApp message afterwards. "SMS code": with an SMS gateway
@@ -420,6 +432,8 @@ export function placeOrder(input: unknown, context: PlaceOrderContext = {}): Pla
   const delivery = deliveryCheck({ emirate, area: customer.area }, getSettings('delivery'));
   if (!delivery.serviceable) throw new HttpError(400, delivery.message);
   const deliveryOption = body.deliveryOption === 'same_day' ? 'same_day' : 'standard';
+  // A deal's price is fixed, delivery included: same day is not offered on it.
+  if (deal && deliveryOption === 'same_day') throw new HttpError(400, 'This order’s price includes standard delivery; same-day delivery is not offered for it.', {}, { code: 'same_day_unavailable' });
   if (deliveryOption === 'same_day' && !delivery.sameDay.available) {
     throw new HttpError(409, delivery.sameDay.reason || 'Same-day delivery is not available for this order. Choose standard delivery.', {}, { code: 'same_day_unavailable' });
   }
@@ -687,12 +701,25 @@ export function placeOrder(input: unknown, context: PlaceOrderContext = {}): Pla
         } as Order['courier'],
         adminNotes: undefined,
         ...(source ? { source } : {}),
-        ...(photo ? { photoOrder: { photos: photo.files.length, ...(photo.note ? { note: photo.note } : {}), pieces: photo.pieces, agreedTotal: aed(photo.amountFils) } satisfies PhotoOrder } : {}),
+        ...(photo
+          ? {
+              photoOrder: {
+                photos: photo.files.length,
+                ...(photo.note ? { note: photo.note } : {}),
+                pieces: photo.pieces,
+                agreedTotal: aed(photo.amountFils),
+                // A deal's price is the owner's: confirmed when it was made.
+                ...(deal ? { dealId: deal.id, confirmedAt: now, confirmedBy: deal.createdBy } : {}),
+              } satisfies PhotoOrder,
+            }
+          : {}),
       };
       writeOrder(created, idempotencyKey);
+      // The deal is this order's now (refused, and the order with it, if another order took it meanwhile).
+      if (deal) claimDeal(deal.id, id);
       // Its VAT breakdown, worked out here and stored once (never for an order placed without VAT).
       if (vatPlan) recordOrderVat(created, vatPlan);
-      logEvent(id, 'customer', 'created', { total: created.total, paymentMethod, ...(photo ? { photoOrder: { photos: photo.files.length, agreedTotal: aed(photo.amountFils) } } : {}), ...(created.cardFee ? { cardFee: created.cardFee } : {}), ...(created.bankDetailsBy ? { bankDetailsBy: created.bankDetailsBy } : {}) });
+      logEvent(id, 'customer', 'created', { total: created.total, paymentMethod, ...(photo ? { photoOrder: { photos: photo.files.length, agreedTotal: aed(photo.amountFils), ...(deal ? { dealId: deal.id } : {}) } } : {}), ...(created.cardFee ? { cardFee: created.cardFee } : {}), ...(created.bankDetailsBy ? { bankDetailsBy: created.bankDetailsBy } : {}) });
       if (ipHash) getDb().prepare('UPDATE orders SET card_ip = ? WHERE id = ?').run(ipHash, id);
       if (card) {
         getDb().prepare("UPDATE orders SET card_state = 'pending' WHERE id = ?").run(id);
@@ -843,7 +870,9 @@ export function readReceipt(orderId: string, version?: number): { bytes: Buffer;
 // ── Order from your photo: a piece agreed on WhatsApp ───────────────────────
 
 /** Limits on "Order from your photo" (the photos are resized in the browser first). */
-export const PHOTO_ORDER = { maxPhotos: 4, maxPhotoBytes: 1_200_000, minAmount: 1, maxAmount: 20_000, maxPieces: MAX_QTY, noteMax: 300 };
+export const PHOTO_ORDER = { maxPhotos: 8, maxPhotoBytes: 1_200_000, minAmount: 1, maxAmount: 20_000, maxPieces: MAX_QTY, noteMax: 300 };
+/** The most photos an order can have: the customer's own (8), or a deal's pictures (12). */
+const PHOTO_ORDER_MAX_FILES = 12;
 /** The order line's product id: not a catalogue product (nothing is reserved or put back). */
 export const PHOTO_PRODUCT_ID = 'photo-order';
 const PHOTO_TYPES: Record<string, 'png' | 'jpg' | 'webp'> = { 'image/png': 'png', 'image/jpeg': 'jpg', 'image/webp': 'webp' };
@@ -915,7 +944,7 @@ function photoFile(orderId: string, n: number, ext: string): string {
 
 /** An order's photo n (1 first), for the owner. */
 export function readPhotoOrderPhoto(orderId: string, n: number): { bytes: Buffer; mime: string } | null {
-  if (!/^BUH-[A-Z0-9-]{4,40}$/.test(orderId) || !Number.isInteger(n) || n < 1 || n > PHOTO_ORDER.maxPhotos) return null;
+  if (!/^BUH-[A-Z0-9-]{4,40}$/.test(orderId) || !Number.isInteger(n) || n < 1 || n > PHOTO_ORDER_MAX_FILES) return null;
   for (const [mime, ext] of Object.entries(PHOTO_TYPES)) {
     try {
       return { bytes: fs.readFileSync(photoFile(orderId, n, ext)), mime };
@@ -2198,8 +2227,8 @@ export function customerView(order: Order) {
 }
 
 /** The customer's side of an order from a photo: the amount they typed, and whether the shop has confirmed it (not who). */
-export function photoView(p: PhotoOrder): Pick<PhotoOrder, 'photos' | 'pieces' | 'agreedTotal' | 'note'> & { amountConfirmed: boolean } {
-  return { photos: p.photos, pieces: p.pieces, agreedTotal: p.agreedTotal, ...(p.note ? { note: p.note } : {}), amountConfirmed: Boolean(p.confirmedAt) };
+export function photoView(p: PhotoOrder): Pick<PhotoOrder, 'photos' | 'pieces' | 'agreedTotal' | 'note'> & { amountConfirmed: boolean; fixedPrice?: true } {
+  return { photos: p.photos, pieces: p.pieces, agreedTotal: p.agreedTotal, ...(p.note ? { note: p.note } : {}), amountConfirmed: Boolean(p.confirmedAt), ...(p.dealId ? { fixedPrice: true as const } : {}) };
 }
 
 /** The customer's side of a bank transfer: where it stands, and their own private page while it is open. */

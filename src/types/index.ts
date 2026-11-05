@@ -288,6 +288,23 @@ export interface PhotoOrder {
   /** The owner checked (and may have corrected) the amount: only then can it be booked. */
   confirmedAt?: string;
   confirmedBy?: string;
+  /** Made from the owner's photo deal link (its pictures and fixed price): the deal's id. */
+  dealId?: string;
+  /** The customer's copy of a deal's order (in place of dealId): the price was fixed by the shop. */
+  fixedPrice?: true;
+}
+
+/** A photo deal's private page (/deal/<token>): what the customer sees (src/lib/server/photoDeals.ts). */
+export interface DealView {
+  token: string;
+  note?: string;
+  pieces: number;
+  /** The fixed price, delivery included, in fils. */
+  amountFils: number;
+  payments: PaymentMethod[];
+  /** The pictures' addresses (through the token). */
+  photos: string[];
+  expiresAt: string;
 }
 
 /**
@@ -575,6 +592,8 @@ export interface StoreSettings {
   photoOrders: boolean;
   /** Its banner on the home page ("Have a photo of one of our pieces? Order it here"). */
   photoOrdersOnHome: boolean;
+  /** Card payment on the /order-by-photo page (the customer types the amount there): on unless the owner turns it off. Deal links have their own choice. */
+  photoOrdersCard: boolean;
 }
 
 /** Settings → Delivery: where we deliver, how fast, and the optional same-day service. */
