@@ -28,6 +28,7 @@ import { AccountantAccessCard } from './settings/AccountantAccessCard';
 import { VatSettingsCard } from './settings/VatSettingsCard';
 import { BackupStatus } from './BackupStatus';
 import { DriveBackupCard } from './settings/DriveBackupCard';
+import { S3BackupCard } from './settings/S3BackupCard';
 import { BackupScheduleCard } from './settings/BackupScheduleCard';
 import { BackupPasswordCard } from './settings/BackupPasswordCard';
 import { RestoreNotice } from './RestoreNotice';
@@ -620,6 +621,7 @@ export function AdminApp() {
                       key={`sms-${adminSettingsLoaded}-${settingsEpoch}-${undone['sms'] ?? 0}`}
                       smsSettings={adminSettings.sms.value}
                       secretsSet={adminSettings.sms.secretsSet}
+                      secretsHint={adminSettings.sms.secretsHint}
                       onUpdateSmsSettings={(s: SmsGatewaySettings) => saveSettings('sms', s)}
                       auto={autoSaveHooks}
                     />
@@ -636,6 +638,7 @@ export function AdminApp() {
                       key={`couriers-${adminSettingsLoaded}-${settingsEpoch}-${undone['courier'] ?? 0}`}
                       settings={adminSettings.courier.value}
                       secretsSet={adminSettings.courier.secretsSet}
+                      secretsHint={adminSettings.courier.secretsHint}
                       onUpdateSettings={(s: CourierSettings) => saveSettings('courier', s)}
                       onReload={() => void reloadAll()}
                       auto={autoSaveHooks}
@@ -653,6 +656,7 @@ export function AdminApp() {
                         key={`payments-${adminSettingsLoaded}-${settingsEpoch}-${undone['payments'] ?? 0}`}
                         value={adminSettings.payments.value}
                         secretsSet={adminSettings.payments.secretsSet}
+                        secretsHint={adminSettings.payments.secretsHint}
                         bankAccountSaved={bankDetailsSaved(bankDetails)}
                         shopWhatsApp={adminSettings.store.value.whatsappNumber}
                         onSave={(v, onWarning) => saveSettings('payments', v, onWarning)}
@@ -783,6 +787,7 @@ export function AdminApp() {
                       <BackupScheduleCard />
                       <BackupPasswordCard />
                       <DriveBackupCard />
+                      <S3BackupCard />
                       <SettingsHistoryCard onRestored={() => void reloadAll().then(() => setSettingsEpoch((n) => n + 1))} />
                       <GoLiveCard />
                       <p>

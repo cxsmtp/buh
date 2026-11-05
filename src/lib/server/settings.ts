@@ -137,8 +137,18 @@ const SECRETS: Record<SettingsKey, string[]> = {
   seo: [],
 };
 
-/** Secrets the admin hub may see the last 4 characters of (to tell which key is saved). */
-const SHOW_LAST4 = new Set(['ai.anthropicApiKey', 'ai.geminiApiKey', 'ai.deepseekApiKey', 'ai.openaiApiKey', 'ai.falApiKey']);
+/**
+ * Secrets the admin hub may see the last 4 characters of (to tell which key is saved): API keys and
+ * tokens only, never a password (email's smtpPass and imapPass stay fully hidden).
+ */
+const SHOW_LAST4 = new Set([
+  'ai.anthropicApiKey', 'ai.geminiApiKey', 'ai.deepseekApiKey', 'ai.openaiApiKey', 'ai.falApiKey',
+  'courier.jeebly.apiKey', 'courier.jeebly.clientKey', 'courier.jeebly.sandboxApiKey', 'courier.jeebly.sandboxClientKey', 'courier.echo.apiKey',
+  'sms.twilio.authToken', 'sms.infobip.apiKey', 'sms.customWebhook.bearerToken', 'sms.unifonic.appSid',
+  'payments.stripeSecretKey', 'payments.stripeWebhookSecret',
+]);
+/** A key shorter than this shows no hint (4 characters would say too much about it). */
+const LAST4_MIN_LENGTH = 16;
 
 const cache = new Map<SettingsKey, unknown>();
 
@@ -301,7 +311,7 @@ export function adminView<K extends SettingsKey>(key: K): { value: SettingsMap[K
     const saved = String(getPath(value, p) ?? '');
     secretsSet[p] = Boolean(saved);
     // ••••last4 (never more, and only for a key long enough that 4 characters say nothing about it).
-    if (saved.length >= 20 && SHOW_LAST4.has(`${key}.${p}`)) secretsHint[p] = `••••${saved.slice(-4)}`;
+    if (saved.length >= LAST4_MIN_LENGTH && SHOW_LAST4.has(`${key}.${p}`)) secretsHint[p] = `••••${saved.slice(-4)}`;
     setPath(value, p, '');
   }
   return { value: value as unknown as SettingsMap[K], secretsSet, ...(Object.keys(secretsHint).length ? { secretsHint } : {}) };

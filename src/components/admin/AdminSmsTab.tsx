@@ -25,6 +25,8 @@ interface AdminSmsTabProps {
   smsSettings: SmsGatewaySettings;
   /** Which secret keys are saved on the server (their values never come back). */
   secretsSet: Record<string, boolean>;
+  /** The saved keys' last 4 characters (from the server), to tell which key is saved. */
+  secretsHint?: Record<string, string>;
   /** Saves on the server; resolves to an error message, or null when saved. */
   onUpdateSmsSettings: (updated: SmsGatewaySettings) => Promise<string | null>;
   auto?: AutoSaveHooks;
@@ -33,6 +35,7 @@ interface AdminSmsTabProps {
 export const AdminSmsTab: React.FC<AdminSmsTabProps> = ({
   smsSettings,
   secretsSet,
+  secretsHint,
   onUpdateSmsSettings,
   auto,
 }) => {
@@ -396,7 +399,7 @@ export const AdminSmsTab: React.FC<AdminSmsTabProps> = ({
                 <input
                   type="password"
                   autoComplete="off"
-                  placeholder={secretPlaceholder(secretsSet['twilio.authToken'])}
+                  placeholder={secretPlaceholder(secretsSet['twilio.authToken'], secretsHint?.['twilio.authToken'])}
                   value={twilioAuthToken}
                   onChange={(e) => setTwilioAuthToken(e.target.value)}
                   className="w-full px-3.5 py-2 rounded-xl border border-line-strong bg-surface text-ink font-mono text-xs focus:outline-none focus:ring-1 focus:ring-gold"
@@ -441,7 +444,7 @@ export const AdminSmsTab: React.FC<AdminSmsTabProps> = ({
                 <input
                   type="password"
                   autoComplete="off"
-                  placeholder={secretPlaceholder(secretsSet['infobip.apiKey'])}
+                  placeholder={secretPlaceholder(secretsSet['infobip.apiKey'], secretsHint?.['infobip.apiKey'])}
                   value={infobipApiKey}
                   onChange={(e) => setInfobipApiKey(e.target.value)}
                   className="w-full px-3.5 py-2 rounded-xl border border-line-strong bg-surface text-ink font-mono text-xs focus:outline-none focus:ring-1 focus:ring-gold"
@@ -485,7 +488,7 @@ export const AdminSmsTab: React.FC<AdminSmsTabProps> = ({
                 <input
                   type="password"
                   autoComplete="off"
-                  placeholder={secretPlaceholder(secretsSet['customWebhook.bearerToken'])}
+                  placeholder={secretPlaceholder(secretsSet['customWebhook.bearerToken'], secretsHint?.['customWebhook.bearerToken'])}
                   value={webhookBearer}
                   onChange={(e) => setWebhookBearer(e.target.value)}
                   className="w-full px-3.5 py-2 rounded-xl border border-line-strong bg-surface text-ink text-xs focus:outline-none focus:ring-1 focus:ring-gold"

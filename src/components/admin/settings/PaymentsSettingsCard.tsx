@@ -60,6 +60,7 @@ function parsePercent(text: string): number | null {
 export function PaymentsSettingsCard({
   value,
   secretsSet,
+  secretsHint,
   bankAccountSaved = false,
   shopWhatsApp = '',
   onSave,
@@ -67,6 +68,8 @@ export function PaymentsSettingsCard({
 }: {
   value: PaymentSettings;
   secretsSet: Record<string, boolean>;
+  /** The saved keys' last 4 characters (from the server), to tell which key is saved. */
+  secretsHint?: Record<string, string>;
   /** The bank account is saved (Settings → Branding & bank): its details can be sent automatically. */
   bankAccountSaved?: boolean;
   /** The shop's WhatsApp number (Settings → Store & contact): customers can ask there. */
@@ -256,11 +259,11 @@ export function PaymentsSettingsCard({
         </div>
         <div>
           <label className={label} htmlFor="pay-sk">Secret key</label>
-          <input id="pay-sk" type="password" className={`${field} font-mono`} placeholder={secretPlaceholder(secretsSet.stripeSecretKey)} autoComplete="off" spellCheck={false} value={d.stripeSecretKey} maxLength={250} onChange={(e) => set('stripeSecretKey', e.target.value)} />
+          <input id="pay-sk" type="password" className={`${field} font-mono`} placeholder={secretPlaceholder(secretsSet.stripeSecretKey, secretsHint?.stripeSecretKey)} autoComplete="off" spellCheck={false} value={d.stripeSecretKey} maxLength={250} onChange={(e) => set('stripeSecretKey', e.target.value)} />
         </div>
         <div>
           <label className={label} htmlFor="pay-wh">Webhook signing secret</label>
-          <input id="pay-wh" type="password" className={`${field} font-mono`} placeholder={secretPlaceholder(secretsSet.stripeWebhookSecret)} autoComplete="off" spellCheck={false} value={d.stripeWebhookSecret} maxLength={250} onChange={(e) => set('stripeWebhookSecret', e.target.value)} />
+          <input id="pay-wh" type="password" className={`${field} font-mono`} placeholder={secretPlaceholder(secretsSet.stripeWebhookSecret, secretsHint?.stripeWebhookSecret)} autoComplete="off" spellCheck={false} value={d.stripeWebhookSecret} maxLength={250} onChange={(e) => set('stripeWebhookSecret', e.target.value)} />
         </div>
         <p className="sm:col-span-2 text-[11px] text-ink-muted">Stripe → Developers → API keys. The secret keys are never shown again, never sent to a browser and never put in backups: after restoring a backup, type them again.</p>
       </section>

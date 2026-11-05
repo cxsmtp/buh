@@ -11,6 +11,8 @@ interface AdminCouriersTabProps {
   settings: CourierSettings;
   /** Which secret keys are saved on the server (their values never come back). */
   secretsSet: Record<string, boolean>;
+  /** The saved keys' last 4 characters (from the server), to tell which key is saved. */
+  secretsHint?: Record<string, string>;
   /** Saves on the server; resolves to an error message, or null when saved. */
   onUpdateSettings: (newSettings: CourierSettings) => Promise<string | null>;
   /** Settings changed on the server some other way (Live mode switched): reload them. */
@@ -19,8 +21,9 @@ interface AdminCouriersTabProps {
 }
 
 /** Placeholder for a write-only key field. */
-export function secretPlaceholder(saved: boolean | undefined) {
-  return saved ? '•••• saved — leave blank to keep' : 'Not set';
+/** A secret field's placeholder: which key is saved (its last 4 characters, when the server gives them), or "Not set". */
+export function secretPlaceholder(saved: boolean | undefined, hint?: string) {
+  return saved ? `${hint ?? '••••'} saved — leave blank to keep` : 'Not set';
 }
 
 interface SandboxStep {
@@ -45,7 +48,7 @@ const STEP_NAMES: Record<SandboxStep['step'], string> = { create: 'Create a TEST
 const input = 'w-full px-3 py-2 rounded-xl border border-line-strong bg-surface text-ink text-xs focus:outline-none focus:ring-2 focus:ring-gold';
 const button = 'flex items-center justify-center gap-1.5 px-3 py-2 rounded-xl font-semibold text-xs transition-all disabled:opacity-50 focus:outline-none focus-visible:ring-2 focus-visible:ring-gold focus-visible:ring-offset-2';
 
-export const AdminCouriersTab: React.FC<AdminCouriersTabProps> = ({ settings, secretsSet, onUpdateSettings, onReload, auto }) => {
+export const AdminCouriersTab: React.FC<AdminCouriersTabProps> = ({ settings, secretsSet, secretsHint, onUpdateSettings, onReload, auto }) => {
   const [saveError, setSaveError] = useState('');
   const [saving, setSaving] = useState(false);
   const [activeCarrier, setActiveCarrier] = useState<'jeebly' | 'echo'>('jeebly');
@@ -309,22 +312,22 @@ export const AdminCouriersTab: React.FC<AdminCouriersTabProps> = ({ settings, se
                 <legend className="px-1 font-bold text-ink">Sandbox keys (test bookings)</legend>
                 <label className="block">
                   <span className="block text-ink-soft font-semibold mb-1">Sandbox API key</span>
-                  <input type="password" autoComplete="off" placeholder={secretPlaceholder(secretsSet['jeebly.sandboxApiKey'])} value={j.sandboxApiKey ?? ''} onChange={(e) => setJ({ sandboxApiKey: e.target.value })} className={`${input} font-mono`} />
+                  <input type="password" autoComplete="off" placeholder={secretPlaceholder(secretsSet['jeebly.sandboxApiKey'], secretsHint?.['jeebly.sandboxApiKey'])} value={j.sandboxApiKey ?? ''} onChange={(e) => setJ({ sandboxApiKey: e.target.value })} className={`${input} font-mono`} />
                 </label>
                 <label className="block">
                   <span className="block text-ink-soft font-semibold mb-1">Sandbox client key</span>
-                  <input type="password" autoComplete="off" placeholder={secretPlaceholder(secretsSet['jeebly.sandboxClientKey'])} value={j.sandboxClientKey ?? ''} onChange={(e) => setJ({ sandboxClientKey: e.target.value })} className={`${input} font-mono`} />
+                  <input type="password" autoComplete="off" placeholder={secretPlaceholder(secretsSet['jeebly.sandboxClientKey'], secretsHint?.['jeebly.sandboxClientKey'])} value={j.sandboxClientKey ?? ''} onChange={(e) => setJ({ sandboxClientKey: e.target.value })} className={`${input} font-mono`} />
                 </label>
               </fieldset>
               <fieldset className="space-y-2 rounded-xl border border-line p-3">
                 <legend className="px-1 font-bold text-ink">Live keys (real shipments)</legend>
                 <label className="block">
                   <span className="block text-ink-soft font-semibold mb-1">Live API key</span>
-                  <input type="password" autoComplete="off" placeholder={secretPlaceholder(secretsSet['jeebly.apiKey'])} value={j.apiKey} onChange={(e) => setJ({ apiKey: e.target.value })} className={`${input} font-mono`} />
+                  <input type="password" autoComplete="off" placeholder={secretPlaceholder(secretsSet['jeebly.apiKey'], secretsHint?.['jeebly.apiKey'])} value={j.apiKey} onChange={(e) => setJ({ apiKey: e.target.value })} className={`${input} font-mono`} />
                 </label>
                 <label className="block">
                   <span className="block text-ink-soft font-semibold mb-1">Live client key</span>
-                  <input type="password" autoComplete="off" placeholder={secretPlaceholder(secretsSet['jeebly.clientKey'])} value={j.clientKey} onChange={(e) => setJ({ clientKey: e.target.value })} className={`${input} font-mono`} />
+                  <input type="password" autoComplete="off" placeholder={secretPlaceholder(secretsSet['jeebly.clientKey'], secretsHint?.['jeebly.clientKey'])} value={j.clientKey} onChange={(e) => setJ({ clientKey: e.target.value })} className={`${input} font-mono`} />
                 </label>
                 <label className="block">
                   <span className="block text-ink-soft font-semibold mb-1">Live address (from Jeebly)</span>
@@ -443,7 +446,7 @@ export const AdminCouriersTab: React.FC<AdminCouriersTabProps> = ({ settings, se
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
               <label className="block">
                 <span className="block text-ink-soft font-semibold mb-1">API token (kept for when it is connected)</span>
-                <input type="password" autoComplete="off" placeholder={secretPlaceholder(secretsSet['echo.apiKey'])} value={formData.echo.apiKey} onChange={(e) => setFormData({ ...formData, echo: { ...formData.echo, apiKey: e.target.value } })} className={`${input} font-mono`} />
+                <input type="password" autoComplete="off" placeholder={secretPlaceholder(secretsSet['echo.apiKey'], secretsHint?.['echo.apiKey'])} value={formData.echo.apiKey} onChange={(e) => setFormData({ ...formData, echo: { ...formData.echo, apiKey: e.target.value } })} className={`${input} font-mono`} />
               </label>
               <label className="block">
                 <span className="block text-ink-soft font-semibold mb-1">Account number</span>

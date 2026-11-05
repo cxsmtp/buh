@@ -190,7 +190,7 @@ function PhotoOrdersFields({ d, set }: { d: StoreSettings; set: <K extends keyof
               {copied ? 'Copied' : 'Copy link'}
             </button>
           </div>
-          <p className="text-ink-muted">Share this link on WhatsApp.</p>
+          <p className="text-ink-muted">Share this link on WhatsApp. These switches are also in Orders → Orders from a photo, next to your own deal links.</p>
           <label className="flex items-start gap-2">
             <input type="checkbox" className="mt-0.5" checked={d.photoOrdersOnHome} onChange={(e) => set('photoOrdersOnHome', e.target.checked)} data-testid="photo-orders-home" />
             <span>

@@ -1,5 +1,18 @@
 # Changelog
 
+## BUH-02.34.00 — 2026-11-05 14:00 UTC · [#67](https://github.com/cxsmtp/buh/pull/67)
+
+- **See which key is saved.** Saved courier (Jeebly, Eco Express), SMS and Stripe keys now show their last 4 characters ("••••WXYZ saved"), like the AI keys; passwords stay fully hidden, and a short key shows nothing.
+- **A second place for your backups.** Settings → System & backups → **Second backup place**: each encrypted backup is also copied to your own storage bucket at Cloudflare R2, Backblaze B2 or Amazon S3, keeping the newest 30 (you choose), so a copy is safe even when Google Drive disconnects.
+- **Test it in one tap.** **Test the connection** writes a small file in the bucket and removes it, and says plainly what is wrong (a wrong key, no such bucket, no permission).
+- **Kept private.** The secret key stays on the server (never in a backup, a log or the browser); only encrypted backups are sent, and only with a backup password.
+- **Orders from a photo in one place.** Orders → **Orders from a photo** now has the customer upload page's switches (on/off, its link, the home banner, card payment) right next to your own deal links.
+- **Status.**
+  - **Benchmark:** pending.
+  - **Tests:** pending.
+  - **Dependency audit:** pending.
+  - **Security scan:** pending.
+
 ## BUH-02.33.00 — 2026-11-05 12:30 UTC · [#66](https://github.com/cxsmtp/buh/pull/66)
 
 - **Extra to collect when booking the courier.** The booking box has **Extra to collect (AED)**, 0 by default, with an optional reason: for money still to take from the customer, even on a paid order. It is added to the order's total, the courier is booked to collect it, and the label shows it.
