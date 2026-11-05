@@ -90,7 +90,7 @@ test('at 375 and 1280 px: "Edit order" changes the address and a price; "Recreat
     const hp = await hub.newPage();
     const errors: string[] = [];
     hp.on('pageerror', (e) => errors.push(e.message));
-    hp.on('dialog', (d) => void d.accept());
+    hp.on('dialog', (d) => void d.accept().catch(() => undefined));
     await hp.goto(server.adminUrl, { waitUntil: 'domcontentloaded' });
     await openAdminSection(hp, /^Orders/);
 
