@@ -261,3 +261,44 @@ test('an invoice issued before the fix (its lines short of its total by the extr
   assert.ok(text.includes(invoice.number));
   assert.ok(text.includes(`AED ${invoice.total.toFixed(2)}`));
 });
+
+test('asked: "Regenerate invoice" makes it again from the order now: same number and issue date, "Revised" on the PDF, the earlier version kept; nothing changed stays as is; never for a cancelled order; audited; in the backup', async () => {
+  await updateSettings('store', { legalName: 'Old Name Trading LLC' });
+  const o = confirmed();
+  const { invoice } = invoices.issueOrderInvoice(o.id, OWNER);
+  // Nothing changed: stays as it is.
+  assert.equal(invoices.regenerateOrderInvoice(o.id, OWNER).changed, false);
+  assert.ok(!pdfText(invoices.invoicePdf(o.id)!.pdf).includes('Revised'));
+  // The legal name changed: regenerated with it, the same number.
+  await updateSettings('store', { legalName: 'New Name Trading LLC' });
+  assert.ok(pdfText(invoices.invoicePdf(o.id)!.pdf).includes('Old Name Trading LLC'), 'kept as issued until regenerated');
+  const r = invoices.regenerateOrderInvoice(o.id, OWNER);
+  assert.equal(r.changed, true);
+  assert.equal(r.invoice.number, invoice.number);
+  const text = pdfText(invoices.invoicePdf(o.id)!.pdf);
+  for (const want of ['New Name Trading LLC', invoice.number, 'Revised', '(version 2)']) assert.ok(text.includes(want), `${want} in:\n${text}`);
+  assert.ok(!text.includes('Old Name Trading LLC'));
+  const revs = invoices.invoiceRevisions(o.id);
+  assert.deepEqual(revs.map((x) => x.revision), [1]);
+  const kept = getDb().prepare('SELECT data FROM invoice_revisions WHERE number = ?').pluck().get(invoice.number) as string;
+  assert.match(kept, /Old Name Trading LLC/, 'the version sent first is kept as it was');
+  const a = audits().filter((x) => x.action === 'invoice.regenerated').at(-1);
+  assert.equal(a?.details?.number, invoice.number);
+  assert.equal(a?.details?.version, 2);
+  // No invoice yet, or a cancelled order: refused.
+  const none = confirmed();
+  assert.throws(() => invoices.regenerateOrderInvoice(none.id, OWNER), (e) => code(e) === 'no_invoice');
+  cancel(o.id);
+  assert.throws(() => invoices.regenerateOrderInvoice(o.id, OWNER), (e) => code(e) === 'cancelled');
+  // In the backup, and back with the restore.
+  const result = await backup.createBackup();
+  const target = fs.mkdtempSync(path.join(os.tmpdir(), 'buh-restore-invoice-rev-'));
+  fs.rmSync(target, { recursive: true });
+  execFileSync(process.execPath, ['scripts/restore-backup.mjs', result.file, target]);
+  const { default: Database } = await import('better-sqlite3');
+  const db = new Database(path.join(target, 'shop.db'), { readonly: true });
+  assert.match(String(db.prepare('SELECT data FROM invoice_revisions WHERE number = ?').pluck().get(invoice.number)), /Old Name Trading LLC/);
+  db.close();
+  fs.rmSync(target, { recursive: true, force: true });
+  await updateSettings('store', { legalName: '' });
+});

@@ -60,6 +60,9 @@ export interface InvoiceData {
    * dueFils: what the courier collects on delivery. Absent on invoices issued before BUH-02.36.00.
    */
   payment: { method: Order['paymentMethod']; paid: boolean; paidFils?: number; dueFils?: number; movedInFils?: number };
+  /** Regenerated ("Regenerate invoice"): the version and the day; the number and issue date stay. */
+  revision?: number;
+  revisedOn?: string;
 }
 
 export interface InvoiceRecord {
@@ -257,6 +260,45 @@ export function issueOrderInvoice(orderId: string, actor: string): { invoice: In
   return result;
 }
 
+/**
+ * "Regenerate invoice": the same number and issue date, its content made again from the order and
+ * the settings as they are now (after a correction to the order, the address, the legal name…).
+ * The earlier version is kept in invoice_revisions as it was sent; the PDF says "Revised". Audited
+ * in the same transaction. Not for a tax invoice (VAT: a correction needs a credit note) or a
+ * cancelled order. Nothing changed: the invoice stays as it is.
+ */
+export function regenerateOrderInvoice(orderId: string, actor: string): { invoice: InvoiceRecord; changed: boolean } {
+  const order = getOrder(orderId);
+  if (!order) throw new HttpError(404, 'Order not found.');
+  const had = rowOf(orderId);
+  if (!had) throw new HttpError(409, 'This order has no invoice yet: make it first.', {}, { code: 'no_invoice' });
+  if (had.kind === 'tax_invoice') throw new HttpError(409, 'A tax invoice can’t be regenerated: a correction to it is a credit note (Money → VAT).', {}, { code: 'tax_invoice' });
+  if (order.status === 'cancelled') throw new HttpError(409, 'This order is cancelled: its invoice stays as it was.', {}, { code: 'cancelled' });
+  const result = auditedTransaction((auditOrThrow) => {
+    const before = rowOf(orderId)!;
+    const old = JSON.parse(before.data) as InvoiceData;
+    const fresh = dataFor(getOrder(orderId)!, 'invoice', before.number, old.issuedOn);
+    const same = (d: InvoiceData) => JSON.stringify({ ...d, revision: undefined, revisedOn: undefined, supplyOn: undefined });
+    if (same(fresh) === same({ ...old, supplyOn: fresh.supplyOn })) return { invoice: toRecord(before), changed: false };
+    const revision = ((getDb().prepare('SELECT MAX(revision) FROM invoice_revisions WHERE number = ?').pluck().get(before.number) as number | null) ?? 0) + 1;
+    const now = new Date();
+    getDb().prepare('INSERT INTO invoice_revisions (number, revision, replaced_at, replaced_by, total_fils, data) VALUES (?, ?, ?, ?, ?, ?)').run(before.number, revision, now.toISOString(), actor, before.total_fils, before.data);
+    const data: InvoiceData = { ...fresh, revision: revision + 1, revisedOn: dubaiDateOf(now.toISOString()) };
+    getDb().prepare('UPDATE invoices SET data = ?, total_fils = ? WHERE number = ?').run(JSON.stringify(data), data.totalFils, before.number);
+    auditOrThrow('invoice.regenerated', { by: actor, orderId, number: before.number, version: revision + 1, fromTotalFils: before.total_fils, toTotalFils: data.totalFils });
+    return { invoice: toRecord(rowOf(orderId)!), changed: true };
+  });
+  if (result.changed) bump('orders');
+  return result;
+}
+
+/** The earlier versions of an order's invoice (newest first), for the hub. */
+export function invoiceRevisions(orderId: string): Array<{ revision: number; replacedAt: string; replacedBy: string; total: number }> {
+  const r = rowOf(orderId);
+  if (!r) return [];
+  return (getDb().prepare('SELECT revision, replaced_at, replaced_by, total_fils FROM invoice_revisions WHERE number = ? ORDER BY revision DESC').all(r.number) as Array<{ revision: number; replaced_at: string; replaced_by: string; total_fils: number }>).map((x) => ({ revision: x.revision, replacedAt: x.replaced_at, replacedBy: x.replaced_by, total: x.total_fils / 100 }));
+}
+
 const INK: RGB = [0.14, 0.11, 0.1];
 const SOFT: RGB = [0.42, 0.38, 0.35];
 const GOLD: RGB = [0.62, 0.47, 0.2];
@@ -316,6 +358,7 @@ export function invoicePdf(orderId: string): { pdf: Buffer; number: string } | n
   const facts: Array<[string, string]> = [
     ['Invoice number', d.number],
     ['Date of issue', niceDate(d.issuedOn)],
+    ...(d.revisedOn ? ([['Revised', `${niceDate(d.revisedOn)} (version ${d.revision ?? 2})`]] as Array<[string, string]>) : []),
     ['Date of supply', niceDate(d.supplyOn)],
     ['Order', d.orderId],
     ['Currency', 'UAE dirham (AED)'],

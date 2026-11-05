@@ -1,9 +1,9 @@
 import { requireAdmin, requireReader } from '@/lib/server/guard';
 import { allowFields, handleRouteError, HttpError, json, readJsonBody } from '@/lib/server/http';
-import { emailInvoice, invoiceFileName, invoicePdf, issueOrderInvoice, noteInvoiceShared } from '@/lib/server/invoices';
+import { emailInvoice, invoiceFileName, invoicePdf, issueOrderInvoice, noteInvoiceShared, regenerateOrderInvoice } from '@/lib/server/invoices';
 import { getOrder } from '@/lib/server/orders';
 
-const ACTIONS = ['issue', 'email', 'shared'] as const;
+const ACTIONS = ['issue', 'regenerate', 'email', 'shared'] as const;
 
 /** The order's PDF invoice, once issued (the owner, or the accountant: read-only). Never cached. */
 export async function GET(req: Request, { params }: { params: Promise<{ id: string }> }) {
@@ -26,7 +26,8 @@ export async function GET(req: Request, { params }: { params: Promise<{ id: stri
 }
 
 /**
- * The owner: "issue" the order's invoice (the same one again if already issued), "email" it to the
+ * The owner: "issue" the order's invoice (the same one again if already issued), "regenerate" it
+ * (same number, made again from the order now; the earlier version kept), "email" it to the
  * customer (the PDF attached), or note "shared" (sent on WhatsApp). Checked against the order on
  * the server, numbered and audited before it is reported done.
  */
@@ -37,12 +38,13 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
     const body = await readJsonBody(req, 256);
     allowFields(body, ['action']);
     const action = body.action as (typeof ACTIONS)[number];
-    if (!ACTIONS.includes(action)) throw new HttpError(400, 'Action must be "issue", "email" or "shared".');
+    if (!ACTIONS.includes(action)) throw new HttpError(400, 'Action must be "issue", "regenerate", "email" or "shared".');
     if (!/^BUH-[A-Z0-9-]{4,40}$/.test(id) || !getOrder(id)) throw new HttpError(404, 'Order not found.');
     if (action === 'issue') {
       const { invoice, created } = issueOrderInvoice(id, session.email);
       return json({ invoice, created });
     }
+    if (action === 'regenerate') return json(regenerateOrderInvoice(id, session.email));
     if (action === 'shared') return json({ invoice: noteInvoiceShared(id, session.email) });
     const result = await emailInvoice(id, session.email);
     if (!result.emailed) {

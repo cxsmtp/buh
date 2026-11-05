@@ -633,7 +633,8 @@ const MIGRATIONS: Array<(db: DB) => void> = [
     `);
     ensureChangeTriggers(db);
   },
-  // 20: courier_shipments (courierCharges.ts): what the courier says about each shipment, from its
+  // 20: invoice_revisions (invoices.ts: the earlier versions of a regenerated invoice), and
+  //     courier_shipments (courierCharges.ts): what the courier says about each shipment, from its
   //     own replies or its statement: status, the COD it collected and paid out, and what it
   //     charged (each charge also an expense in Money, "Courier & delivery"). One row per carrier +
   //     AWB. Add-only: a new table, watched with the expenses.
@@ -661,6 +662,16 @@ const MIGRATIONS: Array<(db: DB) => void> = [
       );
       CREATE INDEX IF NOT EXISTS courier_shipments_charged ON courier_shipments (charged_on);
       CREATE INDEX IF NOT EXISTS courier_shipments_order ON courier_shipments (order_id);
+      -- "Regenerate invoice" (invoices.ts): each earlier version of an invoice, as it was sent.
+      CREATE TABLE IF NOT EXISTS invoice_revisions (
+        number      TEXT NOT NULL,
+        revision    INTEGER NOT NULL,
+        replaced_at TEXT NOT NULL,
+        replaced_by TEXT NOT NULL,
+        total_fils  INTEGER NOT NULL,
+        data        TEXT NOT NULL,
+        PRIMARY KEY (number, revision)
+      );
     `);
     ensureChangeTriggers(db);
   },
@@ -691,6 +702,7 @@ const WATCHED: Array<[string, string, string[], string?]> = [
   ['vat_credit_notes', 'vat', []],
   ['photo_deals', 'orders', []],
   ['invoices', 'orders', []],
+  ['invoice_revisions', 'orders', []],
   ['stripe_events', 'payments', []],
   ['card_refunds', 'payments', []],
   // products.stock is kept in step by product_stock's own triggers: counted there, as stock. Every
