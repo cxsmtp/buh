@@ -1,6 +1,6 @@
 # Changelog
 
-## BUH-02.34.00 — 2026-11-05 14:00 UTC · [#67](https://github.com/cxsmtp/buh/pull/67)
+## BUH-02.34.00 — 2026-11-05 18:14 UTC · [#67](https://github.com/cxsmtp/buh/pull/67)
 
 - **See which key is saved.** Saved courier (Jeebly, Eco Express), SMS and Stripe keys now show their last 4 characters ("••••WXYZ saved"), like the AI keys; passwords stay fully hidden, and a short key shows nothing.
 - **A second place for your backups.** Settings → System & backups → **Second backup place**: each encrypted backup is also copied to your own storage bucket at Cloudflare R2, Backblaze B2 or Amazon S3, keeping the newest 30 (you choose), so a copy is safe even when Google Drive disconnects.
@@ -8,10 +8,10 @@
 - **Kept private.** The secret key stays on the server (never in a backup, a log or the browser); only encrypted backups are sent, and only with a backup password.
 - **Orders from a photo in one place.** Orders → **Orders from a photo** now has the customer upload page's switches (on/off, its link, the home banner, card payment) right next to your own deal links.
 - **Status.**
-  - **Benchmark:** pending.
-  - **Tests:** pending.
-  - **Dependency audit:** pending.
-  - **Security scan:** pending.
+  - **Benchmark:** no failed requests in any round (main first, alternating). Catalogue p95 130–137 ms (main 127–138), gift page 149–158 ms (main 143–163), courier serviceability 67–74 ms (main 68–84), home page 72–95 ms (main 90–125).
+  - **Tests:** 1262 of 1266 passed in the full run; the 4 misses (the Google Drive wizard at 375/1280 px and after connecting, and one dark-look screen) timed out under load and pass when run on their own (7/7, 27/27).
+  - **Dependency audit:** `npm audit --omit=dev`: 0 vulnerabilities; no new dependencies (the S3 signing is built in).
+  - **Security scan:** the new backup routes are the owner's only (size-capped, allow-listed); the bucket's secret stays in its own server file, never in a backup, a log or the browser; the endpoint is checked as a public https address at each use and connections refuse private addresses; only encrypted backups are sent.
 
 ## BUH-02.33.00 — 2026-11-05 12:30 UTC · [#66](https://github.com/cxsmtp/buh/pull/66)
 
