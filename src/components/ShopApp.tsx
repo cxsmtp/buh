@@ -102,7 +102,10 @@ export function ShopApp({
   explore,
   openPhotoOrder = false,
   deal,
+  trackToken,
 }: {
+  /** /track/<token>: the order's private tracking link (sent by the shop on WhatsApp), opened straight away. */
+  trackToken?: string;
   /** /deal/<token>: the owner's photo deal (pictures, fixed price), opened straight away. */
   deal?: DealView;
   initialProductId?: string;
@@ -157,7 +160,7 @@ export function ShopApp({
   const [cart, setCart] = useState<CartItem[]>([]);
   const [isCartOpen, setIsCartOpen] = useState(false);
   const [isCheckoutOpen, setIsCheckoutOpen] = useState(false);
-  const [isTrackerOpen, setIsTrackerOpen] = useState(false);
+  const [isTrackerOpen, setIsTrackerOpen] = useState(Boolean(trackToken));
   // "Order from your photo" (Settings → Store & contact): the sheet, and what it handed to checkout.
   const [photoSheetOpen, setPhotoSheetOpen] = useState(false);
   const [dealSheetOpen, setDealSheetOpen] = useState(Boolean(deal));
@@ -727,7 +730,7 @@ export function ShopApp({
 
       {/* Order Tracking Modal */}
       {isTrackerOpen && (
-        <OrderTrackerModal isOpen={isTrackerOpen} onClose={() => setIsTrackerOpen(false)} lastOrderId={lastOrderId} />
+        <OrderTrackerModal isOpen={isTrackerOpen} onClose={() => setIsTrackerOpen(false)} lastOrderId={lastOrderId} trackToken={trackToken} />
       )}
 
       {/* Mobile Bottom Navigation */}

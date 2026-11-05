@@ -85,6 +85,15 @@ const nextConfig: NextConfig = {
         headers: [{ key: "Content-Security-Policy", value: DOCUMENT_CSP }],
       },
       {
+        // An order's private tracking page (the link sent on WhatsApp): no referrer, never cached.
+        source: "/track/:token",
+        headers: [
+          { key: "Referrer-Policy", value: "no-referrer" },
+          { key: "Cache-Control", value: "private, no-store" },
+          { key: "X-Robots-Tag", value: "noindex, nofollow" },
+        ],
+      },
+      {
         source: "/invoice/:token",
         headers: [
           { key: "Content-Security-Policy", value: DOCUMENT_CSP },

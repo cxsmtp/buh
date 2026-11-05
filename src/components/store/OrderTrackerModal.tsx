@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import type { BankTransferCheck, Order, WhatsAppCheck } from '@/types';
 import { X, Search, Truck, ExternalLink, MapPin, Upload, CheckCircle2, Copy, Check } from 'lucide-react';
 import { postJson, safeHref } from '@/lib/apiClient';
@@ -12,6 +12,8 @@ interface OrderTrackerModalProps {
   onClose: () => void;
   /** The order number of this visitor's latest order, to pre-fill. */
   lastOrderId?: string;
+  /** The order's private tracking link (/track/<token>, sent by the shop): shown straight away, no phone needed. */
+  trackToken?: string;
 }
 
 /** What Track Order shows: status and delivery, never the address, email or full name. */
@@ -68,6 +70,7 @@ export const OrderTrackerModal: React.FC<OrderTrackerModalProps> = ({
   isOpen,
   onClose,
   lastOrderId,
+  trackToken,
 }) => {
   const [orderId, setOrderId] = useState(lastOrderId || '');
   const [phone, setPhone] = useState('');
@@ -77,6 +80,22 @@ export const OrderTrackerModal: React.FC<OrderTrackerModalProps> = ({
   const [searching, setSearching] = useState(false);
   /** The phone the order was found with (for the "Confirm on WhatsApp" ping). */
   const [foundPhone, setFoundPhone] = useState('');
+
+  // The private tracking link: the order is looked up by its token (the server checks it).
+  useEffect(() => {
+    if (!trackToken) return;
+    let alive = true;
+    void postJson<{ found?: boolean; order?: TrackedOrder; message?: string }>('/api/orders/lookup', { token: trackToken }).then(({ data }) => {
+      if (!alive) return;
+      setSearchResult(data.found && data.order ? data.order : null);
+      if (data.order) setOrderId(data.order.id);
+      setMessage(data.found ? '' : data.message || 'This tracking link is not valid.');
+      setHasSearched(true);
+    });
+    return () => {
+      alive = false;
+    };
+  }, [trackToken]);
 
   if (!isOpen) return null;
 
@@ -167,12 +186,13 @@ export const OrderTrackerModal: React.FC<OrderTrackerModalProps> = ({
                     className={`px-2.5 py-1 rounded-full text-[10px] font-semibold uppercase tracking-wider ${
                       searchResult.status === 'dispatched'
                         ? 'bg-sand text-ink'
-                        : searchResult.status === 'confirmed'
+                        : searchResult.status === 'confirmed' || (searchResult.status === 'pending_confirmation' && searchResult.whatsappCheck?.status === 'confirmed')
                         ? 'bg-success-soft text-success'
                         : 'bg-warning-soft text-warning'
                     }`}
                   >
-                    {searchResult.status.replace(/_/g, ' ')}
+                    {/* Confirmed on WhatsApp (or by phone) by the shop: confirmed for the customer, as the shop's message says. */}
+                    {searchResult.status === 'pending_confirmation' && searchResult.whatsappCheck?.status === 'confirmed' ? 'confirmed' : searchResult.status.replace(/_/g, ' ')}
                   </span>
                 </div>
 
@@ -181,7 +201,7 @@ export const OrderTrackerModal: React.FC<OrderTrackerModalProps> = ({
                     Order from your photo: we&rsquo;re checking the photos and the amount. We&rsquo;ll confirm on WhatsApp, then send it.
                   </p>
                 )}
-                {searchResult.whatsappCheck && searchResult.status !== 'cancelled' && (
+                {searchResult.whatsappCheck && searchResult.status !== 'cancelled' && foundPhone && (
                   <WhatsAppConfirm orderId={searchResult.id} phone={foundPhone} check={searchResult.whatsappCheck} bankDetails={Boolean(searchResult.bankTransfer && searchResult.bankTransfer.state !== 'paid')} cancelHours={cancelHoursOf(searchResult.createdAt, searchResult.whatsappCheck.cancelAt)} openHours={cancelHoursOf(searchResult.createdAt, searchResult.whatsappCheck.openBy)} />
                 )}
 

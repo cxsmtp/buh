@@ -7,6 +7,8 @@
 - **One order per link.** A used link closes (an unpaid card try that is cancelled opens it again); you can stop a link, and it expires after the days you chose (7 by default).
 - **No "Confirm amount" for deals.** The order arrives with your price already confirmed, so the label and courier booking are ready straight away.
 - **Order from your photo: up to 8 photos, and a card switch.** Settings → Store & contact → Order from your photo has **Card payment on this page**, so you can keep card off where the customer types the amount.
+- **Confirmation message with a tracking link.** After **Confirmed on WhatsApp**, the order's **Send confirmation & tracking link** button opens WhatsApp to the customer with their order number and a private link that shows the order and the courier's tracking at any time, without the phone number; the courier update message and the order emails carry the same link.
+- **"Confirmed" means confirmed.** Track Order now shows an order you confirmed on WhatsApp as confirmed instead of "pending confirmation".
 - **Status.**
   - **Benchmark:** pending.
   - **Tests:** pending.

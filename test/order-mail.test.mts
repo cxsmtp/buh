@@ -112,7 +112,8 @@ test('cash on delivery: "in process" once when placed (with the WhatsApp link wh
     assert.equal(got[0].to, 'layla@example.com');
     assert.equal(got[0].subject, `One last step to confirm your order ${o.id}`);
     assert.match(got[0].text, new RegExp(`code%20${o.whatsappCheck!.code}|code ${o.whatsappCheck!.code}`));
-    assert.ok(got[0].text.includes(`https://beautifuluaehome.com/?open=track&order=${o.id}`));
+    // The order's private tracking link (asked by the owner: customers can look any time without asking).
+    assert.ok(got[0].text.includes(`https://beautifuluaehome.com${orders.trackPath(o.id)}`), got[0].text);
     assert.ok(orders.orderEvents(o.id).some((e) => e.event === 'received_emailed'), 'noted on the order');
 
     // The shop confirms it on WhatsApp: "confirmed", once.

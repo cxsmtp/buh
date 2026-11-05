@@ -18,7 +18,7 @@ import { bump } from './live';
 import { bankTransferMode, cardFeePercent, cardPaymentsReady, getSettings, phoneCheckMode, phoneCodesOn } from './settings';
 import { cardFeeFils, vatOnTopFils } from '@/lib/money';
 import { checkoutVat, orderVat, recordOrderVat, syncVatDocumentsQuietly } from './vat';
-import { mac } from './secrets';
+import { mac, macMatches } from './secrets';
 import { audit, auditedTransaction, auditOrThrow } from './audit';
 import { kvGet, kvSet } from './kv';
 import { logEvent as logEvent_ } from './log';
@@ -200,6 +200,11 @@ export function normalizeBankStates(): number {
 
 function fromRow(r: Row): Order {
   const order = JSON.parse(r.data) as Order;
+  // The private tracking link (worked out from the key, never stored).
+  order.trackPath = trackPath(order.id);
+  const trackUrl = customerLink(order.trackPath);
+  if (trackUrl) order.trackUrl = trackUrl;
+  else delete order.trackUrl;
   delete order.whatsappCheck;
   delete order.card;
   delete order.bankTransfer;
@@ -288,7 +293,9 @@ export function allOrders(): Order[] {
 
 function writeOrder(order: Order, idempotencyKey?: string) {
   // The WhatsApp confirmation, the card payment, the bank transfer and the owner's notes live in their own columns, never in the JSON.
-  const { whatsappCheck: _check, card: _card, bankTransfer: _bank, attention: _attention, ...stored } = order;
+  const { whatsappCheck: _check, card: _card, bankTransfer: _bank, attention: _attention, trackPath: _track, trackUrl: _trackUrl, ...stored } = order;
+  void _track;
+  void _trackUrl;
   void _check;
   void _card;
   void _bank;
@@ -345,6 +352,25 @@ function recordableVat(baseFils: number, plan: { rateBp: number; inclusive: bool
  */
 export function documentPath(orderId: string): string {
   return `/invoice/${orderId}.${mac('order-document', orderId)}`;
+}
+
+/**
+ * The customer's private tracking page for an order: /track/<order>.<mac>, made from the server's
+ * key (never stored), so the link the shop sends on WhatsApp opens that order's tracking without the
+ * phone number, any time. It shows what Track Order shows (first name, area, pieces, the courier's
+ * tracking), never the full address or phone.
+ */
+export const TRACK_ROUTE = '/track';
+export function trackPath(orderId: string): string {
+  return `${TRACK_ROUTE}/${orderId}.${mac('order-track', orderId)}`;
+}
+
+/** The order a tracking token opens (its mac checked in constant time), or null. */
+export function openTrackOrderId(token: unknown): string | null {
+  if (typeof token !== 'string') return null;
+  const m = /^(BUH-[A-Z0-9-]{4,40})\.([A-Za-z0-9_-]{43})$/.exec(token);
+  if (!m || !macMatches('order-track', m[1], m[2])) return null;
+  return getOrder(m[1]) ? m[1] : null;
 }
 
 export interface PlaceOrderResult {
@@ -2282,6 +2308,18 @@ export function lookupOrder(id: string, phone: string) {
   const order = getOrder(id.trim().toUpperCase());
   if (!order) return null;
   if (order.customer.phone !== phone && !hadPhone(order.id, phone)) return null;
+  return trackingSummary(order);
+}
+
+/** The order the private tracking link opens (/track/<token>), shown like Track Order's. */
+export function lookupTracked(token: unknown) {
+  const id = openTrackOrderId(token);
+  const order = id ? getOrder(id) : undefined;
+  return order ? trackingSummary(order) : null;
+}
+
+/** What Track Order shows: first name, area, pieces and the courier's tracking; never the address or phone. */
+function trackingSummary(order: Order) {
   return {
     id: order.id,
     createdAt: order.createdAt,

@@ -223,6 +223,9 @@ export interface Order {
   cardFeePercent?: number;
   /** UAE VAT added on top (Settings → Payments → VAT with prices excluding VAT), in AED. Part of total. */
   vatAdded?: number;
+  /** The order's private tracking page (/track/<order>.<mac>, never stored) and its full address when the shop's is set. */
+  trackPath?: string;
+  trackUrl?: string;
   /** Customer view only: the private address of the order's printable receipt or tax invoice, and its name. */
   documentPath?: string;
   documentLabel?: string;
