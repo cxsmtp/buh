@@ -28,6 +28,7 @@ import { OrderPhotoCheck } from './OrderPhotoCheck';
 import { PhotoDeals } from './PhotoDeals';
 import { creditInFils, dueOnDeliveryFils } from '@/lib/orderMoney';
 import { OrderCredit } from './OrderCredit';
+import { OrderEdit, orderEditable } from './OrderEdit';
 import { OrderInvoice } from './OrderInvoice';
 import { trackLinkOf } from '@/lib/whatsappConfirm';
 import { DEFAULT_PACKAGING_GRAMS, shipmentWeight } from '@/lib/shipmentWeight';
@@ -226,6 +227,9 @@ export const AdminOrdersTab: React.FC<AdminOrdersTabProps> = ({
   };
   const [selectedOrderForConfirm, setSelectedOrderForConfirm] = useState<Order | null>(null);
   const [labelOrder, setLabelOrder] = useState<Order | null>(null);
+  // "Edit order" (before the label) and "Recreate order" (a cancelled cash order).
+  const [editing, setEditing] = useState<Order | null>(null);
+  const [recreating, setRecreating] = useState('');
   const [trackingOrder, setTrackingOrder] = useState<Order | null>(null);
   const modeFor = (provider: CourierProvider) => bookingModeOf(provider, courierSettings, courierSecretsSet);
   const liveKeysSaved = Boolean(courierSecretsSet['jeebly.apiKey'] && courierSecretsSet['jeebly.clientKey']);
@@ -380,6 +384,16 @@ export const AdminOrdersTab: React.FC<AdminOrdersTabProps> = ({
       );
     }
     setLabelOrder(data.order);
+  };
+
+  const recreate = async (order: Order) => {
+    if (!window.confirm(`Recreate ${order.id} as a new order for ${order.customer.fullName}? The same items and prices, their stock taken again; you can edit it before booking the courier.`)) return;
+    setRecreating(order.id);
+    const { ok, data } = await postJson<{ order?: Order; created?: boolean; message?: string }>(`/api/admin/orders/${encodeURIComponent(order.id)}/recreate`, {});
+    setRecreating('');
+    if (!ok || !data.order) return alert(data.message || 'Not recreated. Please try again.');
+    onOrderChanged(data.order);
+    alert(data.created ? `New order ${data.order.id} made (confirmed). Use "Edit order" on it to change anything before booking the courier.` : `${order.id} was already recreated as ${data.order.id}.`);
   };
 
   const sendWhatsAppUpdate = (order: Order) => {
@@ -762,6 +776,25 @@ export const AdminOrdersTab: React.FC<AdminOrdersTabProps> = ({
                   )}
                 </div>
 
+                {/* Edit before the label; recreate a cancelled cash order (asked by the owner). */}
+                {(orderEditable(order) || (order.status === 'cancelled' && order.paymentMethod === 'cod')) && (
+                  <div className="flex flex-wrap items-center gap-2 text-[11px]" data-testid="order-edit-actions">
+                    {orderEditable(order) && (
+                      <button type="button" onClick={() => setEditing(order)} className="px-2 py-1 min-h-9 rounded-lg font-semibold border border-line-strong bg-surface text-ink hover:bg-sand">
+                        Edit order
+                      </button>
+                    )}
+                    {order.status === 'cancelled' && order.paymentMethod === 'cod' && (
+                      <>
+                        <button type="button" disabled={recreating === order.id} onClick={() => void recreate(order)} className="px-2 py-1 min-h-9 rounded-lg font-semibold border border-line-strong bg-surface text-ink hover:bg-sand disabled:opacity-50">
+                          {order.recreatedAs ? `Recreated as ${order.recreatedAs} · recreate again` : 'Recreate order'}
+                        </button>
+                      </>
+                    )}
+                    {order.recreatedFrom && <span className="text-ink-muted">Recreated from {order.recreatedFrom}</span>}
+                  </div>
+                )}
+
                 <OrderTimeline orderId={order.id} />
 
                 {/* Action Buttons */}
@@ -828,6 +861,8 @@ export const AdminOrdersTab: React.FC<AdminOrdersTabProps> = ({
       </div>
 
       {/* ORDER CONFIRMATION & SMART COURIER ASSIGNMENT MODAL */}
+      {editing && <OrderEdit order={editing} onClose={() => setEditing(null)} onSaved={(o) => onOrderChanged(o)} />}
+
       {selectedOrderForConfirm && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-scrim/45 p-3 sm:p-4 overscroll-contain" role="dialog" aria-modal="true" aria-labelledby="confirm-order-title">
           <div className="bg-surface rounded-3xl max-w-lg w-full min-w-0 max-h-[calc(100dvh-1.5rem)] overflow-y-auto overflow-x-hidden overscroll-contain p-5 border border-line space-y-4">
