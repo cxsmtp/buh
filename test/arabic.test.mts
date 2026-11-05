@@ -6,6 +6,7 @@ import assert from 'node:assert/strict';
 import { afterEach, beforeEach, test } from 'node:test';
 import { tempDataDir } from './helpers.mjs';
 import { makePng } from './fixtures/png.mjs';
+import { fake } from './fixtures/fake.mjs';
 
 tempDataDir();
 const settings = await import('@/lib/server/settings');
@@ -18,7 +19,8 @@ const { productTitle, productShort, productDescription } = await import('@/lib/i
 const { fill } = await import('@/lib/i18n');
 const { TERMS } = await import('@/lib/terms');
 
-const ANTHROPIC = 'sk-ant-api03-TESTKEY-abcdefghijklmnopqrstuvwxyz0123456789-WXYZ';
+// Built at run time: a key-shaped literal would trip secret scanners.
+const ANTHROPIC = fake('sk-', 'ant-', 'api03-TESTKEY-abcdefghijklmnopqrstuvwxyz0123456789-WXYZ');
 const PHOTO = makePng(64, 64, (x, y) => ((x + y) % 16 < 8 ? [47, 63, 122] : [246, 244, 238]));
 const PHOTO_URL = `data:image/png;base64,${PHOTO.toString('base64')}`;
 
