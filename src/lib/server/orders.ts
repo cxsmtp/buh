@@ -24,6 +24,7 @@ import { kvGet, kvSet } from './kv';
 import { logEvent as logEvent_ } from './log';
 import { issuePayLink, payPathOf } from './bankPay';
 import { claimDeal, dealForOrder } from './photoDeals';
+import { creditOutFils, dueOnDeliveryFils, heldFils } from '@/lib/orderMoney';
 import { waMeLink } from '@/lib/whatsappConfirm';
 import { validatePhone } from '@/lib/otpService';
 import { DEFAULT_PACKAGING_GRAMS, shipmentWeight } from '@/lib/shipmentWeight';
@@ -1019,6 +1020,112 @@ export function confirmPhotoAmount(id: string, amount: unknown, actor: string): 
   return result;
 }
 
+// ── Money on delivery: an extra to collect, a cancelled order's payment moved ─
+
+/** Most the owner can add for the courier to collect on one order (AED). */
+export const EXTRA_CHARGE_MAX = 10_000;
+
+/** Already with the courier (or delivered, or cancelled): what the courier collects can't change now. */
+function collectLocked(order: Order): string | null {
+  if (order.status === 'cancelled' || order.status === 'delivered') return `${order.id} is ${order.status}.`;
+  if (order.status === 'dispatched' || order.status === 'out_for_delivery' || order.courier.bookingState === 'booked') return `${order.id} is already booked with the courier, so what it collects can't change (change it in the courier's portal).`;
+  return null;
+}
+
+/** An amount in AED (at most two decimals), as fils, within 0..max. */
+function aedFils(v: unknown, field: string, max: number, min = 0): number {
+  if (typeof v !== 'number' || !Number.isFinite(v)) throw new HttpError(400, `${field}: type the amount in AED, e.g. 50.`);
+  const f = Math.round(v * 100);
+  if (Math.abs(v * 100 - f) > 1e-6) throw new HttpError(400, `${field}: at most two decimals (fils).`);
+  if (f < min * 100 || f > max * 100) throw new HttpError(400, `${field}: from AED ${min} to AED ${max.toLocaleString('en-US')}.`);
+  return f;
+}
+
+/**
+ * The owner's "Extra to collect" when booking (asked by the owner: money still to take from the
+ * customer, even after payment; 0 by default): added to the order's total and to what the courier
+ * collects on delivery. Refused once it is with the courier, with VAT on (its breakdown is fixed),
+ * or once its invoice is issued. Audited in the same transaction; the same amount changes nothing.
+ */
+export function setExtraCharge(id: string, amount: unknown, note: unknown, actor: string): { order: Order; changed: boolean } {
+  const toFils = aedFils(amount, 'Extra to collect', EXTRA_CHARGE_MAX);
+  const why = text(note, 'Reason', 120);
+  const result = auditedTransaction((auditOrThrow) => {
+    const order = getOrder(id);
+    if (!order) throw new HttpError(404, 'Order not found.');
+    const fromFils = fils(order.extraCharge?.amount ?? 0);
+    if (fromFils === toFils && (order.extraCharge?.note ?? '') === why) return { order, changed: false };
+    const locked = collectLocked(order);
+    if (locked) throw new HttpError(409, locked, {}, { code: 'collect_locked' });
+    if (orderVat(id)) throw new HttpError(409, `${id} has a VAT breakdown, so its total can't change. Make a new order for the extra.`, {}, { code: 'extra_vat' });
+    if (getDb().prepare('SELECT 1 FROM invoices WHERE order_id = ?').get(id)) throw new HttpError(409, `${id} has its invoice already, so its total can't change.`, {}, { code: 'extra_invoiced' });
+    const totalFils = fils(order.total) - fromFils + toFils;
+    if (toFils) order.extraCharge = { amount: aed(toFils), ...(why ? { note: why } : {}), at: new Date().toISOString(), by: actor };
+    else delete order.extraCharge;
+    order.total = aed(totalFils);
+    order.courier.codAmountCollected = aed(dueOnDeliveryFils(order));
+    getDb().prepare('UPDATE orders SET total_fils = ? WHERE id = ?').run(totalFils, id);
+    writeOrder(order);
+    logEvent(id, actor, 'extra_charge_set', { from: aed(fromFils), to: aed(toFils), ...(why ? { note: why } : {}) });
+    auditOrThrow('order.extra_charge_set', { by: actor, orderId: id, fromFils, toFils, totalFils, collectFils: dueOnDeliveryFils(order) });
+    return { order: getOrder(id)!, changed: true };
+  });
+  if (result.changed) bump('orders');
+  return result;
+}
+
+/**
+ * Move a paid order's money onto another order instead of refunding it (asked by the owner: "an
+ * order is cancelled but payment is made and I have to adjust the money against another order").
+ * The paid order (card or bank transfer) is cancelled if it isn't yet (its pieces back on sale);
+ * the amount (at most what it still holds, and at most what the other order still has to collect)
+ * comes off what the courier collects for the other order. Neither may be with the courier yet.
+ * Both orders and the audit log are written in one transaction.
+ */
+export function moveCredit(fromId: string, toId: unknown, amount: unknown, actor: string): { from: Order; to: Order } {
+  const target = typeof toId === 'string' ? toId.trim().toUpperCase() : '';
+  if (!/^BUH-[A-Z0-9-]{4,40}$/.test(target)) throw new HttpError(400, 'Type the other order’s number (BUH-…).');
+  if (target === fromId) throw new HttpError(400, 'Choose another order.');
+  const moveFils = aedFils(amount, 'Amount', EXTRA_CHARGE_MAX * 10, 0.01);
+  const result = auditedTransaction((auditOrThrow) => {
+    const from = getOrder(fromId);
+    const to = getOrder(target);
+    if (!from) throw new HttpError(404, 'Order not found.');
+    if (!to) throw new HttpError(404, `No order ${target}.`);
+    if (from.status === 'delivered') throw new HttpError(409, `${from.id} was delivered: its payment belongs to it.`);
+    if (from.status === 'dispatched' || from.status === 'out_for_delivery' || from.courier.bookingState === 'booked') throw new HttpError(409, `${from.id} is with the courier: cancel that booking first.`, {}, { code: 'collect_locked' });
+    const held = heldFils(from);
+    if (!held) throw new HttpError(409, `${from.id} holds no payment to move (it is not paid, or it was refunded or moved already).`, {}, { code: 'nothing_held' });
+    if (from.card?.state === 'refund_pending') throw new HttpError(409, `${from.id} has a refund on its way.`);
+    const locked = collectLocked(to);
+    if (locked) throw new HttpError(409, locked, {}, { code: 'collect_locked' });
+    const due = dueOnDeliveryFils(to);
+    if (!due) throw new HttpError(409, `${to.id} has nothing to collect on delivery (it is paid). Add an extra to collect on it first, or refund instead.`, {}, { code: 'nothing_due' });
+    if (moveFils > held) throw new HttpError(409, `${from.id} holds AED ${aed(held)}: at most that can move.`, {}, { code: 'too_much' });
+    if (moveFils > due) throw new HttpError(409, `${to.id} has AED ${aed(due)} to collect: at most that can move.`, {}, { code: 'too_much' });
+    const at = new Date().toISOString();
+    if (from.status !== 'cancelled') {
+      releaseStock(from, 'cancelled');
+      from.status = 'cancelled';
+      logEvent(from.id, actor, 'cancelled', { reason: `payment moved to ${to.id}` });
+    }
+    from.creditsOut = [...(from.creditsOut ?? []), { toOrderId: to.id, amount: aed(moveFils), at, by: actor }];
+    to.creditsIn = [...(to.creditsIn ?? []), { fromOrderId: from.id, amount: aed(moveFils), at, by: actor }];
+    to.courier.codAmountCollected = aed(dueOnDeliveryFils(to));
+    writeOrder(from);
+    writeOrder(to);
+    logEvent(from.id, actor, 'credit_moved_out', { to: to.id, amount: aed(moveFils) });
+    logEvent(to.id, actor, 'credit_moved_in', { from: from.id, amount: aed(moveFils) });
+    auditOrThrow('order.credit_moved', { by: actor, fromOrderId: from.id, toOrderId: to.id, amountFils: moveFils, heldBeforeFils: held, dueBeforeFils: due, collectFils: dueOnDeliveryFils(to) });
+    return { from: getOrder(from.id)!, to: getOrder(to.id)! };
+  });
+  // Its pieces went back on sale: the catalogue shows them again.
+  invalidateProducts();
+  bump('orders');
+  bump('catalog');
+  return result;
+}
+
 // ── Bank transfer: the customer's private page, the owner's check ───────────
 
 /**
@@ -1956,7 +2063,8 @@ export function cancelCardOrder(orderId: string, actor: string, reason: string, 
 
 /** What is left to refund of a paid card order, in fils (paid, less any refund already made). */
 export function refundableFils(order: Order): number {
-  return Math.max(0, fils(order.card?.paidAmount ?? 0) - fils(order.card?.refundedAmount ?? 0));
+  // A payment moved to another order (moveCredit) is not refunded too.
+  return Math.max(0, fils(order.card?.paidAmount ?? 0) - fils(order.card?.refundedAmount ?? 0) - creditOutFils(order));
 }
 
 // ── The refunds ledger ──────────────────────────────────────────────────────

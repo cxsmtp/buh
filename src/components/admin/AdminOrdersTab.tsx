@@ -26,6 +26,8 @@ import { awaitingWhatsApp, heldForWhatsApp, OrderTimeline, OrderWhatsAppCheck } 
 import { OrderBankTransfer, transferToCheck } from './OrderBankTransfer';
 import { OrderPhotoCheck } from './OrderPhotoCheck';
 import { PhotoDeals } from './PhotoDeals';
+import { creditInFils, dueOnDeliveryFils } from '@/lib/orderMoney';
+import { OrderCredit } from './OrderCredit';
 import { OrderInvoice } from './OrderInvoice';
 import { trackLinkOf } from '@/lib/whatsappConfirm';
 import { DEFAULT_PACKAGING_GRAMS, shipmentWeight } from '@/lib/shipmentWeight';
@@ -106,7 +108,9 @@ export function cardBadge(order: Order): { text: string; tone: 'success' | 'warn
 
 /** What is left to refund of a card payment (paid, less a partial refund made in Stripe's dashboard), in AED. */
 export function cardLeft(order: Order): number {
-  return Math.max(0, Math.round(((order.card?.paidAmount ?? order.total) - (order.card?.refundedAmount ?? 0)) * 100)) / 100;
+  // Less what was moved to other orders (src/lib/orderMoney.ts): that part is not refunded.
+  const moved = (order.creditsOut ?? []).reduce((s, c) => s + c.amount, 0);
+  return Math.max(0, Math.round(((order.card?.paidAmount ?? order.total) - (order.card?.refundedAmount ?? 0) - moved) * 100)) / 100;
 }
 
 const TONES = {
@@ -233,6 +237,9 @@ export const AdminOrdersTab: React.FC<AdminOrdersTabProps> = ({
   const [weightKg, setWeightKg] = useState<string>('');
   const [pieces, setPieces] = useState<number>(1);
   const [adminNotes, setAdminNotes] = useState<string>('');
+  // "Extra to collect" (AED): 0 unless the owner adds money still to take from the customer.
+  const [extraCharge, setExtraCharge] = useState<string>('0');
+  const [extraNote, setExtraNote] = useState<string>('');
   const [isDispatching, setIsDispatching] = useState<boolean>(false);
 
   const filteredOrders = orders.filter((o) => {
@@ -263,7 +270,20 @@ export const AdminOrdersTab: React.FC<AdminOrdersTabProps> = ({
     setWeightKg(w.kg !== null ? String(w.kg) : order.courier.weightKg > 0 ? String(order.courier.weightKg) : '');
     setPieces(order.courier.pieces || 1);
     setAdminNotes(order.adminNotes || '');
+    setExtraCharge(String(order.extraCharge?.amount ?? 0));
+    setExtraNote(order.extraCharge?.note ?? '');
   };
+
+  // What the courier will collect, worked out like the server (src/lib/orderMoney.ts), shown before booking.
+  const extraValue = Number(extraCharge.replace(/,/g, '') || '0');
+  const extraOk = Number.isFinite(extraValue) && extraValue >= 0 && extraValue <= 10_000 && Math.abs(extraValue * 100 - Math.round(extraValue * 100)) < 1e-6;
+  const collectPreview = selectedOrderForConfirm
+    ? dueOnDeliveryFils({
+        ...selectedOrderForConfirm,
+        total: Math.round((selectedOrderForConfirm.total - (selectedOrderForConfirm.extraCharge?.amount ?? 0) + (extraOk ? extraValue : 0)) * 100) / 100,
+        extraCharge: extraOk && extraValue > 0 ? { amount: extraValue, at: '', by: '' } : undefined,
+      })
+    : 0;
 
   const handleConfirmAndDispatch = async () => {
     if (!selectedOrderForConfirm) return;
@@ -281,6 +301,10 @@ export const AdminOrdersTab: React.FC<AdminOrdersTabProps> = ({
     ) {
       return;
     }
+    if (!extraOk) {
+      alert('Extra to collect: an amount in AED from 0 to 10,000 (e.g. 50 or 12.50).');
+      return;
+    }
     setIsDispatching(true);
 
     // The server reads the order and the courier keys itself; only the booking details go up.
@@ -291,6 +315,8 @@ export const AdminOrdersTab: React.FC<AdminOrdersTabProps> = ({
       weightKg: weightKg.trim() === '' ? undefined : Number(weightKg),
       pieces,
       adminNotes,
+      extraCharge: extraValue,
+      extraNote: extraNote.trim(),
     };
     type DispatchReply = { success?: boolean; message?: string; code?: string; awbNumber?: string; isSimulated?: boolean; testKind?: string; needsConfirm?: boolean; needsTestConfirm?: boolean; alreadyBooked?: boolean; order?: Order };
     const mode = modeFor(chosenCourier);
@@ -489,6 +515,7 @@ export const AdminOrdersTab: React.FC<AdminOrdersTabProps> = ({
                 {bank && <OrderBankTransfer order={order} bank={bank} shopName={shopName} onOrderChanged={whatsappChecked} />}
                 {order.photoOrder && <OrderPhotoCheck order={order} onOrderChanged={whatsappChecked} />}
                 <OrderInvoice key={`${order.id}-${order.invoice?.number ?? ''}`} order={order} shopName={shopName} />
+                <OrderCredit order={order} orders={orders} onOrderChanged={onOrderChanged} />
 
                 {/* Items & Delivery Info */}
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 text-xs">
@@ -972,6 +999,22 @@ export const AdminOrdersTab: React.FC<AdminOrdersTabProps> = ({
                   </p>
                 );
               })()}
+
+              {/* Extra to collect (asked by the owner): 0 unless money is still to be taken from the customer. */}
+              <div className="col-span-2 sm:col-span-3 grid grid-cols-1 min-[420px]:grid-cols-[minmax(0,1fr)_minmax(0,1.6fr)] gap-2" data-testid="extra-charge">
+                <div>
+                  <label htmlFor="dispatch-extra" className="block text-ink-soft font-semibold mb-1">Extra to collect (AED)</label>
+                  <input id="dispatch-extra" type="number" inputMode="decimal" min={0} max={10000} step="0.01" value={extraCharge} onChange={(e) => setExtraCharge(e.target.value)} className="w-full px-3 py-1.5 rounded-xl border border-line-strong text-xs" aria-describedby="dispatch-collect" />
+                </div>
+                <div>
+                  <label htmlFor="dispatch-extra-note" className="block text-ink-soft font-semibold mb-1">Reason <span className="font-normal">(optional)</span></label>
+                  <input id="dispatch-extra-note" type="text" maxLength={120} placeholder="e.g. 1 extra pillow cover" value={extraNote} onChange={(e) => setExtraNote(e.target.value)} className="w-full px-3 py-1.5 rounded-xl border border-line-strong text-xs" />
+                </div>
+                <p id="dispatch-collect" data-testid="collect-preview" role="status" className={`col-span-full text-[11px] ${collectPreview > 0 ? 'text-ink font-semibold' : 'text-ink-soft'}`}>
+                  {collectPreview > 0 ? `The courier collects AED ${(collectPreview / 100).toFixed(2)} from the customer` : 'Nothing to collect: prepaid'}
+                  {creditInFils(selectedOrderForConfirm) ? ` (after AED ${(creditInFils(selectedOrderForConfirm) / 100).toFixed(2)} paid on ${selectedOrderForConfirm.creditsIn!.map((c) => c.fromOrderId).join(', ')})` : ''}.
+                </p>
+              </div>
 
               <div className="col-span-2 sm:col-span-3">
                 <label className="block text-ink-soft font-semibold mb-1">

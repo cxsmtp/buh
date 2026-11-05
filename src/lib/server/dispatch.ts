@@ -4,7 +4,7 @@ import { BLOCKED_MESSAGE, carrierLabel, ECO_LIVE_NOT_CONNECTED } from '@/lib/cou
 import type { Order } from '@/types';
 import { HttpError } from './http';
 import { cancelJeeblyBooking, jeeblyBooking } from './jeeblyOps';
-import { assertNotHeld, assertShipAllowed, getOrder, recordBooking } from './orders';
+import { assertNotHeld, assertShipAllowed, getOrder, recordBooking, setExtraCharge } from './orders';
 import { emailOrder } from './orderMail';
 import { contactEmail, getSettings } from './settings';
 
@@ -37,6 +37,9 @@ export async function dispatchOrder(input: {
   shipUnconfirmed?: boolean;
   /** The owner's explicit "yes, a test booking" when the courier is not in Live mode (asked first). */
   testBooking?: boolean;
+  /** "Extra to collect" (AED, 0 by default): more for the courier to take from the customer, set before booking. */
+  extraCharge?: number;
+  extraNote?: string;
 }): Promise<DispatchOutcome> {
   const { orderId, provider, rebook, actor } = input;
   const order = getOrder(orderId);
@@ -95,14 +98,21 @@ export async function dispatchOrder(input: {
     };
   }
 
+  // The owner's extra to collect: saved (audited) before anything goes to a carrier, so the booking,
+  // the label and the order agree.
+  let current = order;
+  if (input.extraCharge !== undefined && (Math.round(input.extraCharge * 100) !== Math.round((order.extraCharge?.amount ?? 0) * 100) || (input.extraNote ?? '') !== (order.extraCharge?.note ?? ''))) {
+    current = setExtraCharge(order.id, input.extraCharge, input.extraNote ?? '', actor).order;
+  }
+
   const toBook: Order = {
-    ...order,
-    adminNotes: input.adminNotes ?? order.adminNotes,
+    ...current,
+    adminNotes: input.adminNotes ?? current.adminNotes,
     courier: {
-      ...order.courier,
-      pickupDate: input.pickupDate ?? order.courier.pickupDate,
-      weightKg: input.weightKg ?? order.courier.weightKg,
-      pieces: input.pieces ?? order.courier.pieces,
+      ...current.courier,
+      pickupDate: input.pickupDate ?? current.courier.pickupDate,
+      weightKg: input.weightKg ?? current.courier.weightKg,
+      pieces: input.pieces ?? current.courier.pieces,
     },
   };
 

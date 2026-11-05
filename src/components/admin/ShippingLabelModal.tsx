@@ -1,5 +1,6 @@
 'use client';
 
+import { dueOnDeliveryFils } from '@/lib/orderMoney';
 import React, { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { CourierSettings, LabelPaper, Order } from '@/types';
@@ -38,7 +39,8 @@ function dateOf(iso?: string): string {
 export function Label({ order, shopName, pickup }: { order: Order; shopName: string; pickup: Partial<CourierSettings['jeebly']> }) {
   const c = order.courier;
   const test = Boolean(c.simulated);
-  const cod = order.paymentMethod === 'cod';
+  // Collect on delivery: a cash order, or a paid one with an extra to collect (src/lib/orderMoney.ts).
+  const cod = dueOnDeliveryFils(order) > 0;
   const carrier = carrierLabel(c.provider, c.carrierName);
   const pieces = c.pieces || order.items.reduce((n, i) => n + i.quantity, 0);
   // The sender as the owner entered it (Couriers → Pickup name: the legal name), else the shop's name.
@@ -103,7 +105,7 @@ export function Label({ order, shopName, pickup }: { order: Order; shopName: str
         {cod ? (
           <>
             <div className="font-bold uppercase" style={{ fontSize: 10 }}>Cash on delivery – collect</div>
-            <div className="font-mono font-black" style={{ fontSize: 20 }}>AED {aed2(order.total)}</div>
+            <div className="font-mono font-black" style={{ fontSize: 20 }}>AED {aed2(dueOnDeliveryFils(order) / 100)}</div>
           </>
         ) : (
           <div className="font-black uppercase" style={{ fontSize: 16 }}>Prepaid – do not collect cash</div>
