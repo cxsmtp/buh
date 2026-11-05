@@ -15,7 +15,7 @@ const { adminView, updateSettings } = await import('@/lib/server/settings');
 
 test('courier, SMS and Stripe keys: ••••last4 once saved; the key itself never leaves the server', async () => {
   const jeebly = fake('jb_', 'live_', '9f8e7d6c5b4a3210WXYZ');
-  const client = fake('client-', 'key-', '0123456789-ABCD');
+  const client = fake('client-', 'key-', '01234', '56789', '-ABCD');
   await updateSettings('courier', { jeebly: { apiKey: jeebly, clientKey: client } });
   const c = adminView('courier');
   assert.equal(c.secretsHint?.['jeebly.apiKey'], '••••WXYZ');
