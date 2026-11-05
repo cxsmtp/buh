@@ -13,15 +13,15 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { before, after, test } from 'node:test';
 import { hasBuild, rawFetch, startServer, type RunningServer } from './server.mjs';
-import { fake, ownerPassword, wrongLogin } from './fixtures/fake.mjs';
+import { ownerPassword, wrongLogin } from './fixtures/fake.mjs';
 /** The owner password for this run (made up when the tests start). */
 const OWNER_PASSWORD = ownerPassword();
 
 const skip = !hasBuild;
 const EMAIL = 'admin@beautifuluaehome.com';
 const CA = 'ca@firm.test';
-// Built at run time: a password-shaped literal would trip secret scanners.
-const CA_PASSWORD = fake('Ledger-', 'Reader-', '2026!');
+// A fresh strong one per run (no fixed value in the repository).
+const CA_SIGN_IN = ownerPassword();
 
 /** The read-only routes an accountant may use (path under /api/admin → methods). Everything else: owner only. */
 const ACCOUNTANT_ALLOWED: Record<string, string[]> = {
@@ -114,7 +114,7 @@ test('the owner invites; the setup link opens the hub (its own path) and signs t
   assert.ok(door, 'a door');
   // Not for someone without that path: an admin API without a door is the unknown address.
   assert.equal((await rawFetch(`${server.base}/api/admin/staff/setup`, { method: 'POST', headers: h(), body: '{}' })).status, 404);
-  const setup = await rawFetch(`${server.base}/api/admin/staff/setup`, { method: 'POST', headers: { ...h(), cookie: door! }, body: JSON.stringify({ token: decodeURIComponent(m[2]), password: CA_PASSWORD }) });
+  const setup = await rawFetch(`${server.base}/api/admin/staff/setup`, { method: 'POST', headers: { ...h(), cookie: door! }, body: JSON.stringify({ token: decodeURIComponent(m[2]), password: CA_SIGN_IN }) });
   assert.equal(setup.status, 200, await setup.clone().text());
   const cookies = (setup.headers.getSetCookie?.() ?? []).map((c) => c.split(';')[0]);
   accountant = cookies.find((c) => c.startsWith('buh_admin='))!;
@@ -122,10 +122,10 @@ test('the owner invites; the setup link opens the hub (its own path) and signs t
   assert.ok(cookies.some((c) => c.startsWith('buh_door=')), 'the hub’s ordinary door for this browser');
   grantDoor = door!;
   setupDoor = cookies.find((c) => c.startsWith('buh_door='))!;
-  const again = await rawFetch(`${server.base}/api/admin/staff/setup`, { method: 'POST', headers: { ...h(), cookie: door! }, body: JSON.stringify({ token: decodeURIComponent(m[2]), password: CA_PASSWORD }) });
+  const again = await rawFetch(`${server.base}/api/admin/staff/setup`, { method: 'POST', headers: { ...h(), cookie: door! }, body: JSON.stringify({ token: decodeURIComponent(m[2]), password: CA_SIGN_IN }) });
   assert.notEqual(again.status, 200, 'the link works once');
   // Signing in with the ordinary form: audited as the accountant's sign-in.
-  const login = await fetch(`${server.base}/api/admin/login`, { method: 'POST', headers: h(), body: JSON.stringify({ email: CA, password: CA_PASSWORD }) });
+  const login = await fetch(`${server.base}/api/admin/login`, { method: 'POST', headers: h(), body: JSON.stringify({ email: CA, password: CA_SIGN_IN }) });
   assert.equal(login.status, 200);
   assert.equal(((await login.json()) as { role: string }).role, 'accountant');
   accountant = (login.headers.get('set-cookie') || '').split(';')[0];
@@ -281,7 +281,7 @@ test('the owner’s "sign out everywhere" signs every accountant out too', { ski
   const m = /\/([A-Za-z0-9_-]{43})#setup=([^&]+)$/.exec(((await res.json()) as { link: string }).link)!;
   const hub = await rawFetch(`${server.base}/${m[1]}`, { redirect: 'manual' });
   const door = (hub.headers.getSetCookie?.() ?? []).map((c) => c.split(';')[0]).find((c) => c.startsWith('buh_door='))!;
-  const setup = await rawFetch(`${server.base}/api/admin/staff/setup`, { method: 'POST', headers: { ...h(), cookie: door }, body: JSON.stringify({ token: decodeURIComponent(m[2]), password: CA_PASSWORD }) });
+  const setup = await rawFetch(`${server.base}/api/admin/staff/setup`, { method: 'POST', headers: { ...h(), cookie: door }, body: JSON.stringify({ token: decodeURIComponent(m[2]), password: CA_SIGN_IN }) });
   assert.equal(setup.status, 200, await setup.clone().text());
   const second = (setup.headers.getSetCookie?.() ?? []).map((c) => c.split(';')[0]).find((c) => c.startsWith('buh_admin='))!;
   assert.equal((await as(second, 'GET', '/api/admin/reports')).status, 200);
