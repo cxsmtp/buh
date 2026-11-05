@@ -13,7 +13,7 @@
   - **Benchmark:** no failed requests in any round (main first, alternating). Catalogue p95 89–147 ms (main 144–158), gift page 118–148 ms (main 141–150), courier serviceability 55–78 ms (main 69–96), home page 55–80 ms (main 78–139).
   - **Tests:** 1293 of 1295 passed in the full run; the 2 misses were this release's compact order card hiding a confirmed order's phone number, now shown again (small), and those files pass (12/12).
   - **Dependency audit:** `npm audit --omit=dev`: 0 vulnerabilities; no dependencies changed.
-  - **Security scan:** Checkmarx could not run (its connector needs signing in again); reviewed by hand instead: every new route is the owner's (the accountant reads Money → Courier), size-capped and allow-listed; amounts are worked out on the server in fils; the courier figures come only from Jeebly and never change an order; the Arabic boot script is a constant.
+  - **Security scan:** Checkmarx One (SAST, SCA, IaC, containers, secrets, API): 121 findings (31 critical) before, 59 (9 critical) after. Fixed: the HTTPS proxy on caddy 2.11.8 (its HTTP/2 flaw; the port-binding capability now set in the image, which CI caught), the updater on docker CLI 29.9.3, and key-shaped test strings built at run time. Left, none a gap: test-only sample values, two names the secret rule reads as a key (no key is in the code), and Node 24 image issues with no fixed Node 24 yet (the critical one only affects a custom certificate check, which the shop does not use).
 
 ## BUH-02.35.00 — 2026-11-05 19:10 UTC · [#68](https://github.com/cxsmtp/buh/pull/68)
 
