@@ -25,6 +25,8 @@ import { postJson, safeHref, safeLinkHref, sendJson } from '@/lib/apiClient';
 import { awaitingWhatsApp, heldForWhatsApp, OrderTimeline, OrderWhatsAppCheck } from './OrderWhatsAppCheck';
 import { OrderBankTransfer, transferToCheck } from './OrderBankTransfer';
 import { OrderPhotoCheck } from './OrderPhotoCheck';
+import { PhotoDeals } from './PhotoDeals';
+import { trackLinkOf } from '@/lib/whatsappConfirm';
 import { DEFAULT_PACKAGING_GRAMS, shipmentWeight } from '@/lib/shipmentWeight';
 import { aed2, BLOCKED_MESSAGE, carrierLabel, ECO_LIVE_NOT_CONNECTED, jeeblyMode, LIVE_OFF_WARNING } from '@/lib/courierMode';
 import { EnterTrackingDialog } from './EnterTrackingDialog';
@@ -70,6 +72,9 @@ export function whatsAppUpdateText(order: Order, shopName = 'Beautiful UAE Home'
   } else {
     lines.push(`Your order ${order.id} is confirmed and being prepared for delivery. We will send the tracking number once it is booked with the courier.`);
   }
+  // The order's private tracking page: status and courier tracking any time, without asking.
+  const track = trackLinkOf(order);
+  if (track) lines.push(`Track your order any time: ${track}`);
   lines.push(pay, '', `Thank you for shopping with ${shopName}!`);
   return lines.join('\n');
 }
@@ -357,6 +362,8 @@ export const AdminOrdersTab: React.FC<AdminOrdersTabProps> = ({
 
   return (
     <div className="space-y-4">
+      {/* The owner's photo deal links (pictures, fixed price, allowed payments) */}
+      <PhotoDeals />
       {/* Filter Tabs */}
       <div className="flex items-center gap-2 overflow-x-auto no-scrollbar pb-1">
         {[

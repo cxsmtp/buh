@@ -6,7 +6,7 @@
  * log. In Chromium at 375 and 1280 px: the checkout's confirmation screen shows the button
  * (visible, no sideways scroll, reachable with the keyboard) with the right wa.me link, and
  * tapping it is noted on the order; then the hub's phone view shows the badge with the code
- * and confirms in one tap, with a "Reply on WhatsApp" link. Skipped without a build.
+ * and confirms in one tap, with a "Send confirmation & tracking link" link (the order number and its private tracking link). Skipped without a build.
  */
 import assert from 'node:assert/strict';
 import crypto from 'node:crypto';
@@ -275,9 +275,12 @@ for (const [width, phone] of [[375, '050 771 2001'], [1280, '055 771 2002']] as 
     assert.deepEqual(await overflow(hp), [], 'hub: no sideways scroll');
     await card.getByRole('button', { name: 'Confirmed on WhatsApp' }).click();
     await hp.getByText(/Confirmed on WhatsApp by admin@beautifuluaehome\.com/).first().waitFor();
-    const reply = hp.getByRole('link', { name: 'Reply on WhatsApp' }).first();
+    const reply = hp.getByRole('link', { name: 'Send confirmation & tracking link' }).first();
     const digits = order.customer.phone.replace(/\D/g, '');
-    assert.equal(await reply.getAttribute('href'), `https://wa.me/${digits}?text=${encodeURIComponent(`Thank you, your order ${id} is confirmed ✓`)}`);
+    const replyHref = (await reply.getAttribute("href")) ?? "";
+    assert.ok(replyHref.startsWith(`https://wa.me/${digits}?text=`), replyHref);
+    const text = decodeURIComponent(replyHref.split('?text=')[1]);
+    assert.match(text, new RegExp(`^Thank you, [^,]+, your order ${id} is confirmed ✓\nTrack it any time: http\\S+/track/${id}\\.[A-Za-z0-9_-]{43}$`));
     const after = await adminOrder(id!);
     assert.equal(after.order.whatsappCheck!.status, 'confirmed');
     assert.deepEqual(hubErrors, []);

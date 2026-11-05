@@ -5,7 +5,7 @@ import { CheckCircle2, ChevronRight, MessageCircle, Phone, Send, XCircle } from 
 import type { Order } from '@/types';
 import { getJson, postJson } from '@/lib/apiClient';
 import { safeFirstName } from '@/lib/bankMessages';
-import { askToConfirmMessage, confirmedReply, timeLeft, waMeLink } from '@/lib/whatsappConfirm';
+import { askToConfirmMessage, confirmedReply, timeLeft, trackLinkOf, waMeLink } from '@/lib/whatsappConfirm';
 import { normalizePhoneNumber } from '@/lib/phoneNumber';
 
 /** True while an order still needs the customer's WhatsApp message (and is not cancelled). */
@@ -35,6 +35,7 @@ export function OrderWhatsAppCheck({ order, onOrderChanged, shopName }: { order:
   const [problem, setProblem] = useState('');
   const [sender, setSender] = useState('');
   const [correction, setCorrection] = useState('');
+  const [copiedTrack, setCopiedTrack] = useState(false);
   const check = order.whatsappCheck;
   const callOnly = !check && order.attention?.kind === 'call_customer';
   if (!check && !callOnly) return null;
@@ -56,7 +57,9 @@ export function OrderWhatsAppCheck({ order, onOrderChanged, shopName }: { order:
     } else setProblem(data.message || 'Not saved. Please try again.');
   };
 
-  const reply = waMeLink(order.customer.phone, confirmedReply(order.id));
+  // After confirming: a short WhatsApp to the customer with the order number and its private tracking link.
+  const trackLink = trackLinkOf(order);
+  const reply = waMeLink(order.customer.phone, confirmedReply(order.id, trackLink, safeFirstName(order.customer.fullName)));
   const ask = waMeLink(order.customer.phone, askToConfirmMessage(order.id, safeFirstName(order.customer.fullName), shopName));
   const button = 'min-h-11 px-3 py-2 rounded-xl text-xs font-bold flex items-center justify-center gap-1.5 disabled:opacity-50 focus:outline-none focus-visible:ring-2 focus-visible:ring-gold';
   const status = check?.status ?? 'awaiting';
@@ -173,10 +176,31 @@ export function OrderWhatsAppCheck({ order, onOrderChanged, shopName }: { order:
           </form>
         </details>
       )}
-      {status === 'confirmed' && reply && (
-        <a href={reply} target="_blank" rel="noopener noreferrer" className={`${button} bg-whatsapp text-paper w-full min-[380px]:w-auto inline-flex`}>
-          <MessageCircle className="w-4 h-4" aria-hidden="true" /> Reply on WhatsApp
-        </a>
+      {status === 'confirmed' && reply && order.status !== 'cancelled' && (
+        <div className="space-y-1.5" data-testid="whatsapp-confirmed-reply">
+          <div className="flex flex-wrap gap-2">
+            <a href={reply} target="_blank" rel="noopener noreferrer" className={`${button} bg-whatsapp text-paper w-full min-[380px]:w-auto inline-flex`}>
+              <MessageCircle className="w-4 h-4" aria-hidden="true" /> Send confirmation &amp; tracking link
+            </a>
+            {trackLink && (
+              <button
+                type="button"
+                className={`${button} bg-surface text-ink border border-line-strong w-full min-[380px]:w-auto`}
+                onClick={() => {
+                  void navigator.clipboard?.writeText(trackLink).then(() => {
+                    setCopiedTrack(true);
+                    setTimeout(() => setCopiedTrack(false), 2000);
+                  });
+                }}
+              >
+                {copiedTrack ? 'Copied' : 'Copy tracking link'}
+              </button>
+            )}
+          </div>
+          <p className="text-ink-muted break-anywhere">
+            Sends: &ldquo;{confirmedReply(order.id, trackLink ? '…' : undefined, safeFirstName(order.customer.fullName)).replace('\n', ' · ')}&rdquo; The link shows the order&rsquo;s status and courier tracking at any time, without the phone number.
+          </p>
+        </div>
       )}
       {problem && <p role="alert" className="text-danger font-semibold">{problem}</p>}
     </div>

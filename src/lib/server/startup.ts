@@ -4,6 +4,7 @@ import { ensureAdminAccount } from './adminAuth';
 import { ensureAdminLink } from './adminLinkSetup';
 import { MIN_PASSPHRASE_LENGTH, auditRestoreOnce, emailConfigured, startBackupSchedule } from './backup';
 import { refreshPayHashes } from './bankPay';
+import { refreshDealHashes } from './photoDeals';
 import { ensureChangeTriggers, getDb } from './db';
 import { migrateDriveSecrets } from './driveBackup';
 import { backupPassphrase } from './backupSecret';
@@ -144,6 +145,13 @@ export function bankUpkeepOnce(): boolean {
   } catch (err) {
     ok = false;
     logEvent('warn', 'pay_links_rehash_failed', { error: err instanceof Error ? err.message : String(err) });
+  }
+  try {
+    const rehashed = refreshDealHashes();
+    if (rehashed) logEvent('info', 'deal_links_rehashed', { deals: rehashed });
+  } catch (err) {
+    ok = false;
+    logEvent('warn', 'deal_links_rehash_failed', { error: err instanceof Error ? err.message : String(err) });
   }
   try {
     const fixed = normalizeBankStates();

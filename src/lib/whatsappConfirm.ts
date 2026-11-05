@@ -27,8 +27,17 @@ export function confirmLink(shopNumber: string, orderId: string, code: string, o
 }
 
 /** The owner's one-tap reply after confirming. */
-export function confirmedReply(orderId: string): string {
-  return `Thank you, your order ${orderId} is confirmed ✓`;
+export function confirmedReply(orderId: string, trackUrl?: string, firstName?: string): string {
+  const thanks = `Thank you${firstName ? `, ${firstName}` : ''}, your order ${orderId} is confirmed ✓`;
+  // The order's private tracking page: the customer can look any time, without asking.
+  return trackUrl ? `${thanks}\nTrack it any time: ${trackUrl}` : thanks;
+}
+
+/** The order's private tracking link, full: the shop's address when set, else this page's (the hub is on the shop's own address). */
+export function trackLinkOf(order: { trackUrl?: string; trackPath?: string }): string | undefined {
+  if (order.trackUrl) return order.trackUrl;
+  if (!order.trackPath) return undefined;
+  return typeof window === 'undefined' ? undefined : `${window.location.origin}${order.trackPath}`;
 }
 
 /** The hours an order had to be confirmed (Settings → Phone check), from its times; null when it isn't cancelled for that. */

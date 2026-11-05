@@ -4,6 +4,7 @@ import React, { useId, useState } from 'react';
 import { Camera, ImagePlus, Loader2, MessageCircle, X } from 'lucide-react';
 import { shrinkPhoto } from '@/lib/shrinkPhoto';
 import { useShop } from '@/lib/client/shop';
+import type { PaymentMethod } from '@/types';
 
 /** What the customer fills in before the address and payment (the server checks it all again). */
 export interface PhotoOrderDraft {
@@ -12,12 +13,14 @@ export interface PhotoOrderDraft {
   pieces: number;
   /** The amount agreed on WhatsApp, in fils. */
   amountFils: number;
+  /** From the owner's deal link: its pictures and fixed price (the server takes them from the deal, never from here) and the ways to pay. */
+  deal?: { token: string; payments: PaymentMethod[]; photoUrls: string[] };
 }
 
 /** Kept in step with the server (src/lib/server/orders.ts PHOTO_ORDER). */
-export const PHOTO_ORDER_LIMITS = { maxPhotos: 4, maxAmount: 20_000, maxPieces: 20, noteMax: 300 };
-/** About 1.1 MB once decoded: under the server's 1.2 MB per photo. */
-const PHOTO_URL_MAX = 1_500_000;
+export const PHOTO_ORDER_LIMITS = { maxPhotos: 8, maxAmount: 20_000, maxPieces: 20, noteMax: 300 };
+/** About 0.6 MB once decoded, so 8 photos fit in one order (the server takes up to 1.2 MB each). */
+export const PHOTO_URL_MAX = 800_000;
 
 /**
  * "Order from your photo": for a piece agreed on WhatsApp that is not in the shop. The customer

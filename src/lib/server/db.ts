@@ -579,6 +579,36 @@ const MIGRATIONS: Array<(db: DB) => void> = [
     if (!have.has('received_emailed_at')) db.exec('ALTER TABLE orders ADD COLUMN received_emailed_at TEXT');
     if (!have.has('confirmed_emailed_at')) db.exec('ALTER TABLE orders ADD COLUMN confirmed_emailed_at TEXT');
   },
+  // 18: photo deals (photoDeals.ts): the owner's pictures, fixed price and allowed payments behind
+  //     a private link. The token is never stored (only its SHA-256; nonce makes it again). Its
+  //     pictures are in receipts/ (backed up and restored with the order photos). Add-only: a new
+  //     table, its index and its backup triggers; an older version simply never reads it.
+  (db) => {
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS photo_deals (
+        id           TEXT PRIMARY KEY,
+        created_at   TEXT NOT NULL,
+        created_by   TEXT NOT NULL,
+        for_whom     TEXT,
+        note         TEXT,
+        pieces       INTEGER NOT NULL,
+        amount_fils  INTEGER NOT NULL,
+        payments     TEXT NOT NULL,
+        photos       INTEGER NOT NULL,
+        nonce        TEXT NOT NULL,
+        token_hash   TEXT NOT NULL,
+        expires_at   TEXT NOT NULL,
+        status       TEXT NOT NULL DEFAULT 'open',
+        order_id     TEXT,
+        ordered_at   TEXT,
+        cancelled_at TEXT,
+        cancelled_by TEXT
+      );
+      CREATE UNIQUE INDEX IF NOT EXISTS photo_deals_token ON photo_deals (token_hash);
+      CREATE INDEX IF NOT EXISTS photo_deals_created ON photo_deals (created_at);
+    `);
+    ensureChangeTriggers(db);
+  },
 ];
 
 // ── What changed since the last backup: the triggers (migration 16) ─────────
@@ -604,6 +634,7 @@ const WATCHED: Array<[string, string, string[], string?]> = [
   ['order_vat', 'vat', []],
   ['vat_invoices', 'vat', []],
   ['vat_credit_notes', 'vat', []],
+  ['photo_deals', 'orders', []],
   ['stripe_events', 'payments', []],
   ['card_refunds', 'payments', []],
   // products.stock is kept in step by product_stock's own triggers: counted there, as stock. Every

@@ -3,7 +3,7 @@ import { orderConfirmedEmail, orderReceivedEmail, type OrderMailInput } from '@/
 import { confirmLink } from '@/lib/whatsappConfirm';
 import { logEvent } from './log';
 import { mailConfig, ownerEmail, sender, transport } from './mail';
-import { claimOrderEmail, getOrder, isCustomerEmail, orderEmailDone, type OrderEmailKind } from './orders';
+import { claimOrderEmail, getOrder, isCustomerEmail, orderEmailDone, trackPath, type OrderEmailKind } from './orders';
 import { customerLink } from './runtimeConfig';
 import { contactEmail, getSettings } from './settings';
 
@@ -57,7 +57,8 @@ function mailInput(order: Order, kind: OrderEmailKind): OrderMailInput {
   const waiting = kind === 'received' && order.whatsappCheck && order.whatsappCheck.status !== 'confirmed';
   const link = waiting ? confirmLink(getSettings('store').whatsappNumber, order.id, order.whatsappCheck!.code) : null;
   const cancelHours = waiting && order.whatsappCheck?.cancelAt ? Math.round((Date.parse(order.whatsappCheck.cancelAt) - Date.parse(order.createdAt)) / 3600_000) : undefined;
-  const track = customerLink(`/?open=track&order=${encodeURIComponent(order.id)}`);
+  // The order's private tracking page (no phone number needed); without the shop's address set, none.
+  const track = order.trackUrl ?? customerLink(trackPath(order.id));
   return {
     orderId: order.id,
     total: order.total,

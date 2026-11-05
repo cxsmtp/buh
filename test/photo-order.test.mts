@@ -123,11 +123,11 @@ test('nothing is confirmed or booked before the owner confirms the amount; corre
   assert.throws(() => orders.confirmPhotoAmount('BUH-000000-NOPE', 100, 'owner@shop.test'), (e: { status?: number }) => e.status === 404);
 });
 
-test('what the photo order takes: 1–4 real images, an amount in AED with fils, whole pieces, its own fields only; no bag items; card only when card payments are on', () => {
+test('what the photo order takes: 1–8 real images, an amount in AED with fils, whole pieces, its own fields only; no bag items; card only when card payments are on', () => {
   const refused = (photo: unknown, over: Record<string, unknown> = {}) => assert.throws(() => place(photo, over), (e: { status?: number }) => e.status === 400 || e.status === 413, JSON.stringify(photo)?.slice(0, 80));
   refused({ photos: [], amount: 100 });
   refused({ amount: 100 });
-  refused({ photos: [png, png, png, png, png], amount: 100 });
+  refused({ photos: Array(9).fill(png), amount: 100 });
   refused({ photos: ['data:image/png;base64,AAAA'], amount: 100 });
   refused({ photos: [`data:application/pdf;base64,${Buffer.from('%PDF-1.4 x').toString('base64')}`], amount: 100 });
   refused({ photos: [`data:image/jpeg;base64,${Buffer.alloc(1_300_000, 0xff).toString('base64')}`], amount: 100 });

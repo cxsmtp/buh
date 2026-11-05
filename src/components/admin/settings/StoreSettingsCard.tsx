@@ -179,6 +179,13 @@ function PhotoOrdersFields({ d, set }: { d: StoreSettings; set: <K extends keyof
               <span className="block text-ink-muted">A banner under the top picture: &ldquo;Have a photo of one of our pieces? Order it here&rdquo;. The catalogue stays as it is.</span>
             </span>
           </label>
+          <label className="flex items-start gap-2">
+            <input type="checkbox" className="mt-0.5" checked={d.photoOrdersCard !== false} onChange={(e) => set('photoOrdersCard', e.target.checked)} data-testid="photo-orders-card" />
+            <span>
+              Card payment on this page
+              <span className="block text-ink-muted">Off: customers ordering here choose cash on delivery or bank transfer, so you can check the amount they typed before any money is taken. To fix the price yourself, use Orders &rarr; &ldquo;New photo deal&rdquo;.</span>
+            </span>
+          </label>
         </div>
       )}
     </fieldset>

@@ -1,16 +1,27 @@
 import { enforceIpLimit } from '@/lib/server/guard';
-import { assertSameOrigin, handleRouteError, json, readJsonBody, str } from '@/lib/server/http';
+import { allowFields, assertSameOrigin, handleRouteError, json, readJsonBody, str } from '@/lib/server/http';
 import { normalizePhoneNumber } from '@/lib/otpService';
-import { getOrder, lookupOrder } from '@/lib/server/orders';
+import { getOrder, lookupOrder, lookupTracked } from '@/lib/server/orders';
 import { customerTracking } from '@/lib/server/jeeblyOps';
 import { rateLimit } from '@/lib/server/rateLimit';
 
-/** Track Order: order number + the phone number on the order. Limited to slow guessing. */
+/**
+ * Track Order: order number + the phone number on the order, or the order's private tracking link
+ * ({ token }, sent by the shop on WhatsApp). Limited to slow guessing.
+ */
 export async function POST(req: Request) {
   try {
     assertSameOrigin(req);
     enforceIpLimit(req, 'lookup', 30, 15 * 60 * 1000, 'Too many lookups. Please wait a few minutes.');
     const body = await readJsonBody(req, 1024);
+    if (body.token !== undefined) {
+      allowFields(body, ['token']);
+      const tracked = lookupTracked(body.token);
+      if (!tracked) return json({ found: false, message: 'This tracking link is not valid. Please check it, or use your order number and phone number.' }, 404);
+      const full = getOrder(tracked.id);
+      const live = full ? await customerTracking(full).catch(() => undefined) : undefined;
+      return json({ found: true, order: live ? { ...tracked, courier: { ...tracked.courier, live } } : tracked });
+    }
     const orderId = str(body.orderId, 'Order number', 40);
     const phone = normalizePhoneNumber(str(body.phone, 'Phone number', 32));
     // Per order number too, so spreading guesses over addresses does not help.

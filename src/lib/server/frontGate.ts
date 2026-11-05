@@ -19,6 +19,7 @@ import {
   verifyDoorToken,
 } from './adminLink';
 import { PAY_ROUTE, openPayOrderId } from './bankPay';
+import { DEAL_ROUTE, openDealId } from './photoDeals';
 import { logEvent } from './log';
 import { takeAll } from './rateLimit';
 import { SLOW_MS, addressOf, countsAsProbe, recordMiss, verdictFor } from './scannerGuard';
@@ -43,7 +44,8 @@ import { SLOW_MS, addressOf, countsAsProbe, recordMiss, verdictFor } from './sca
  * src/lib/server/bankPay.ts) is not part of the hub's door: it passes as it is, with
  * no-referrer, noindex and no-store, and page views limited per address and per order. Only a
  * token that opens no order (unknown, expired, paid, cancelled) is handed on as an unknown
- * address, so it gets the shop's ordinary 404, byte for byte.
+ * address, so it gets the shop's ordinary 404, byte for byte. A photo deal's private page
+ * (/deal/<token>, its pictures at /api/deal/<token>/photos/<n>, src/lib/server/photoDeals.ts) the same.
  * Done here rather than in a Next.js proxy: a proxy's rewrite leaves its own headers
  * on the answer (so a 404 would differ from an unknown address's), and a proxy that
  * runs for every request costs the storefront.
@@ -103,6 +105,7 @@ export type GateDecision =
   | { kind: 'unknown'; url: string }
   | { kind: 'hub'; url: string; cookie: string; hubHeader: string }
   | { kind: 'pay'; orderId: string; api: boolean }
+  | { kind: 'deal'; dealId: string; api: boolean }
   | { kind: 'renew'; cookie: string };
 
 function serializeCookie(c: ReturnType<typeof doorCookie>): string {
@@ -120,6 +123,14 @@ export function decide(rawUrl: string | undefined, cookieHeader: string | undefi
     const api = path.startsWith('/api/');
     const orderId = openPayOrderId(path.slice(api ? `/api${PAY_ROUTE}/`.length : `${PAY_ROUTE}/`.length), now);
     return orderId ? { kind: 'pay', orderId, api } : unknown(api);
+  }
+  if (path.startsWith(`${DEAL_ROUTE}/`) || path.startsWith(`/api${DEAL_ROUTE}/`)) {
+    const api = path.startsWith('/api/');
+    const rest = path.slice(api ? `/api${DEAL_ROUTE}/`.length : `${DEAL_ROUTE}/`.length);
+    // The page is /deal/<token> exactly; the API is /api/deal/<token>/photos/<n>.
+    const token = api ? rest.split('/')[0] : rest;
+    const dealId = (api ? /^[^/]+\/photos\/\d{1,2}$/.test(rest) : !rest.includes('/')) ? openDealId(token, now) : null;
+    return dealId ? { kind: 'deal', dealId, api } : unknown(api);
   }
   if (path.startsWith('/api/')) {
     // Stripe's webhook answers only what looks like a delivery from Stripe (a POST with a
@@ -265,6 +276,17 @@ export function installFrontGate(): void {
       if (!decision.api) {
         const { perAddress, perOrder, windowMs } = PAY_VIEW_LIMITS;
         const refused = takeAll([...(ip ? [{ key: `pay-view:${ip}`, max: perAddress, windowMs }] : []), { key: `pay-view:order:${decision.orderId}`, max: perOrder, windowMs }]);
+        if (refused) {
+          res.writeHead(429, { 'Content-Type': 'text/plain; charset=utf-8', 'Retry-After': String(refused.result.retryAfterSec), ...HUB_HEADERS });
+          res.end('Too many requests. Please try again in a few minutes.\n');
+          return true;
+        }
+      }
+      finalHeaders(res, HUB_HEADERS);
+    } else if (decision.kind === 'deal') {
+      if (!decision.api) {
+        const { perAddress, perOrder, windowMs } = PAY_VIEW_LIMITS;
+        const refused = takeAll([...(ip ? [{ key: `deal-view:${ip}`, max: perAddress, windowMs }] : []), { key: `deal-view:${decision.dealId}`, max: perOrder, windowMs }]);
         if (refused) {
           res.writeHead(429, { 'Content-Type': 'text/plain; charset=utf-8', 'Retry-After': String(refused.result.retryAfterSec), ...HUB_HEADERS });
           res.end('Too many requests. Please try again in a few minutes.\n');
