@@ -1,5 +1,17 @@
 # Changelog
 
+## BUH-02.35.00 — 2026-11-05 19:10 UTC · [#68](https://github.com/cxsmtp/buh/pull/68)
+
+- **Edit an order before its label.** **Edit order** on any order not yet booked with the courier: the customer's name, mobile, email and full address, and for a cash order also each item's quantity and price (0 removes it) and the delivery charge.
+- **Everything follows.** The stock moves with the quantities, and the total, what the courier collects and the parcel weight are worked out again; a changed mobile keeps the old number in the order's history, so Track Order still finds it.
+- **Safe amounts.** A card-paid, transfer-paid or invoiced order keeps its amounts (its details can still change); once the courier is booked the order is locked.
+- **Recreate a cancelled cash order.** **Recreate order** on a cancelled cash-on-delivery order makes a new confirmed order with the same customer, items and prices, takes the stock again (or says which piece sold out), and links the two orders; then edit it before booking.
+- **Status.**
+  - **Benchmark:** no failed requests in any round (main first, alternating). Catalogue p95 123–156 ms (main 142–176), gift page 123–208 ms (main 195–231), courier serviceability 92–109 ms (main 91–120), home page 89–147 ms (main 106–150).
+  - **Tests:** 1273 of 1274 passed in the full run; the miss was this release's own browser test (a confirmation box answered after its window closed); fixed so the answer can't outlive the window, and it passes twice in a row (4/4).
+  - **Dependency audit:** `npm audit --omit=dev`: 0 vulnerabilities; no dependencies changed.
+  - **Security scan:** the two new routes are the owner's only (size-capped, every field allow-listed and checked on the server); amounts are worked out on the server in fils; the stock moves in the same transaction; both changes are audited before they are reported done.
+
 ## BUH-02.34.00 — 2026-11-05 18:14 UTC · [#67](https://github.com/cxsmtp/buh/pull/67)
 
 - **See which key is saved.** Saved courier (Jeebly, Eco Express), SMS and Stripe keys now show their last 4 characters ("••••WXYZ saved"), like the AI keys; passwords stay fully hidden, and a short key shows nothing.

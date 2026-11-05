@@ -1126,6 +1126,263 @@ export function moveCredit(fromId: string, toId: unknown, amount: unknown, actor
   return result;
 }
 
+// ── Edit an order before its label; recreate a cancelled cash order ─────────
+
+const CUSTOMER_FIELDS = ['fullName', 'phone', 'email', 'emirate', 'area', 'streetAddress', 'buildingVilla', 'flatVillaNo', 'landmark'] as const;
+/** What the courier collects can't change once a real booking exists (its label is printed). */
+function editLocked(order: Order): string | null {
+  if (order.status === 'cancelled' || order.status === 'delivered') return `${order.id} is ${order.status}: it can't be edited.`;
+  if (order.status === 'dispatched' || order.status === 'out_for_delivery' || order.courier.bookingState === 'booked' || order.courier.bookingState === 'uncertain') {
+    return `${order.id} is already booked with the courier (its label is made): change it in the courier's portal, or cancel and recreate it.`;
+  }
+  return null;
+}
+/** Money paid already (card, bank transfer) or fixed elsewhere (VAT, an invoice, a deal): only the details can change, not the amounts. */
+function moneyLocked(order: Order): string | null {
+  if (order.paymentMethod === 'online_card') return 'paid by card';
+  if (order.bankTransfer?.state === 'paid') return 'already paid by bank transfer';
+  if (orderVat(order.id)) return 'it has a VAT breakdown';
+  if (getDb().prepare('SELECT 1 FROM invoices WHERE order_id = ?').get(order.id)) return 'its invoice is issued';
+  if (order.photoOrder?.dealId) return 'its price is a photo deal’s';
+  return null;
+}
+
+/**
+ * The owner edits an order before its label is made (asked by the owner: "before label creation
+ * edit all the data if needed"): the customer's name, phone, email and address, and, for an order
+ * whose money isn't settled elsewhere, each line's quantity and unit price and the delivery charge.
+ * Checked like checkout (UAE phone, emirate, lengths); the stock follows the quantities (taken or
+ * put back in the same transaction); the total, the amount the courier collects and the weight are
+ * worked out again here. Audited with every change (before → after). Nothing changed: nothing written.
+ */
+export function editOrderDetails(id: string, input: unknown, actor: string): { order: Order; changed: boolean } {
+  if (!input || typeof input !== 'object' || Array.isArray(input)) throw new HttpError(400, 'Changes must be an object.');
+  const o = input as Obj;
+  const unknownField = Object.keys(o).find((k) => !['customer', 'lines', 'deliveryFee'].includes(k));
+  if (unknownField) throw new HttpError(400, `Unknown field: ${unknownField.slice(0, 40)}.`);
+  const result = auditedTransaction((auditOrThrow) => {
+    const order = getOrder(id);
+    if (!order) throw new HttpError(404, 'Order not found.');
+    const locked = editLocked(order);
+    if (locked) throw new HttpError(409, locked, {}, { code: 'edit_locked' });
+    const changes: Obj = {};
+
+    // The customer.
+    if (o.customer !== undefined) {
+      if (!o.customer || typeof o.customer !== 'object' || Array.isArray(o.customer)) throw new HttpError(400, 'Customer must be an object.');
+      const c = o.customer as Obj;
+      const bad = Object.keys(c).find((k) => !(CUSTOMER_FIELDS as readonly string[]).includes(k));
+      if (bad) throw new HttpError(400, `Unknown customer field: ${bad.slice(0, 40)}.`);
+      const next = { ...order.customer };
+      const req = (k: keyof Order['customer'], label: string, max: number) => {
+        if (c[k] !== undefined) (next as Obj)[k] = text(c[k], label, max, { required: true });
+      };
+      req('fullName', 'Full name', 120);
+      req('area', 'Area', 120);
+      req('streetAddress', 'Street address', 200);
+      req('buildingVilla', 'Building / villa', 120);
+      req('flatVillaNo', 'Flat / villa number', 40);
+      if (c.emirate !== undefined) {
+        const e = text(c.emirate, 'Emirate', 40, { required: true });
+        if (!EMIRATES.includes(e as Emirate)) throw new HttpError(400, 'Please choose one of the seven Emirates.');
+        next.emirate = e as Emirate;
+      }
+      if (c.landmark !== undefined) next.landmark = text(c.landmark, 'Landmark', 200) || undefined;
+      if (c.email !== undefined) {
+        const e = text(c.email, 'Email', 254);
+        if (e && !isCustomerEmail(e)) throw new HttpError(400, 'Please check the email address.');
+        next.email = e || undefined;
+      }
+      const phone = c.phone === undefined ? order.customer.phone : validatePhone(c.phone);
+      for (const k of CUSTOMER_FIELDS) {
+        if (k === 'phone') continue;
+        if ((next as Obj)[k] !== (order.customer as Obj)[k]) changes[`customer.${k}`] = { from: (order.customer as Obj)[k] ?? '', to: (next as Obj)[k] ?? '' };
+      }
+      order.customer = { ...next, phone: order.customer.phone };
+      if (phone !== order.customer.phone) {
+        changes['customer.phone'] = { from: order.customer.phone, to: phone };
+        changeOrderPhone(order, phone, actor, 'owner_edit', auditOrThrow);
+      }
+    }
+
+    // The money: each line's quantity and unit price, and the delivery charge.
+    if (o.lines !== undefined || o.deliveryFee !== undefined) {
+      const why = moneyLocked(order);
+      if (why) throw new HttpError(409, `${order.id}'s amounts can't change (${why}); its customer details can.`, {}, { code: 'money_locked' });
+    }
+    if (o.lines !== undefined) {
+      if (!Array.isArray(o.lines) || o.lines.length !== order.items.length) throw new HttpError(400, `Lines: one entry per line (${order.items.length}).`);
+      const items = order.items.map((it, i) => {
+        const l = (o.lines as unknown[])[i];
+        if (!l || typeof l !== 'object' || Array.isArray(l)) throw new HttpError(400, `Line ${i + 1} must be an object.`);
+        const lo = l as Obj;
+        if (Object.keys(lo).some((k) => k !== 'quantity' && k !== 'unitPrice')) throw new HttpError(400, `Line ${i + 1}: quantity and unitPrice only.`);
+        const quantity = lo.quantity === undefined ? it.quantity : lo.quantity;
+        if (typeof quantity !== 'number' || !Number.isInteger(quantity) || quantity < 0 || quantity > MAX_QTY) throw new HttpError(400, `Line ${i + 1}: quantity 0 to ${MAX_QTY} (0 removes it).`);
+        let unit = fils(it.unitPrice);
+        if (lo.unitPrice !== undefined) {
+          if (typeof lo.unitPrice !== 'number' || !Number.isFinite(lo.unitPrice) || lo.unitPrice < 0 || lo.unitPrice > 100_000 || Math.abs(lo.unitPrice * 100 - Math.round(lo.unitPrice * 100)) > 1e-6) throw new HttpError(400, `Line ${i + 1}: unit price in AED, at most two decimals.`);
+          unit = Math.round(lo.unitPrice * 100);
+        }
+        return { before: it, quantity, unit };
+      });
+      if (!items.some((x) => x.quantity > 0)) throw new HttpError(400, 'An order keeps at least one line: cancel it instead.');
+      // Stock follows the quantities of catalogue pieces (an order from a photo has none).
+      for (const x of items) {
+        const it = x.before;
+        if (it.productType === 'photo') {
+          if (x.quantity !== it.quantity) throw new HttpError(400, 'An order from a photo has one line of 1: change its pieces or price instead of the quantity.');
+          continue;
+        }
+        const delta = x.quantity - it.quantity;
+        if (delta > 0) {
+          const took = getDb().prepare('UPDATE product_stock SET qty = qty - ? WHERE product_id = ? AND size_id = ? AND qty >= ?').run(delta, it.productId, it.profileId, delta);
+          if (took.changes !== 1) {
+            const left = (getDb().prepare('SELECT qty FROM product_stock WHERE product_id = ? AND size_id = ?').pluck().get(it.productId, it.profileId) as number | undefined) ?? 0;
+            throw new HttpError(409, `${it.title} (${it.profileName}): only ${left} more in stock.`, {}, { code: 'stock' });
+          }
+        } else if (delta < 0) {
+          getDb()
+            .prepare('INSERT INTO product_stock (product_id, size_id, qty) SELECT ?, ?, ? WHERE EXISTS (SELECT 1 FROM products WHERE id = ?) ON CONFLICT(product_id, size_id) DO UPDATE SET qty = qty + excluded.qty')
+            .run(it.productId, it.profileId, -delta, it.productId);
+        }
+      }
+      const next: Order['items'] = [];
+      items.forEach((x, i) => {
+        if (x.quantity !== x.before.quantity || x.unit !== fils(x.before.unitPrice)) changes[`line${i + 1}`] = { item: x.before.title.slice(0, 80), from: `${x.before.quantity} × ${x.before.unitPrice}`, to: `${x.quantity} × ${aed(x.unit)}` };
+        if (x.quantity > 0) next.push({ ...x.before, quantity: x.quantity, unitPrice: aed(x.unit), totalPrice: aed(x.unit * x.quantity) });
+      });
+      order.items = next;
+    }
+    if (o.deliveryFee !== undefined) {
+      const d = o.deliveryFee;
+      if (typeof d !== 'number' || !Number.isFinite(d) || d < 0 || d > 1000 || Math.abs(d * 100 - Math.round(d * 100)) > 1e-6) throw new HttpError(400, 'Delivery charge: AED 0 to 1,000, at most two decimals.');
+      if (fils(d) !== fils(order.deliveryFee)) changes.deliveryFee = { from: order.deliveryFee, to: d };
+      order.deliveryFee = aed(fils(d));
+    }
+    if (!Object.keys(changes).length) return { order, changed: false };
+
+    // Worked out again here: the total, what the courier collects, the parcel.
+    const subtotalFils = order.items.reduce((s, i) => s + fils(i.totalPrice), 0);
+    const totalFils = subtotalFils + fils(order.deliveryFee) + fils(order.codFee) + fils(order.cardFee ?? 0) + fils(order.vatAdded ?? 0) + fils(order.extraCharge?.amount ?? 0) - fils(order.discount);
+    order.subtotal = aed(subtotalFils);
+    order.total = aed(totalFils);
+    order.courier.codAmountCollected = aed(dueOnDeliveryFils(order));
+    if (o.lines !== undefined) {
+      const w = shipmentWeight(order, getSettings('courier').packagingGrams ?? DEFAULT_PACKAGING_GRAMS);
+      if (w.kg !== null) order.courier.weightKg = Math.min(500, w.kg);
+      if (!order.photoOrder) order.courier.pieces = order.items.reduce((s, i) => s + i.quantity, 0);
+    }
+    getDb().prepare('UPDATE orders SET total_fils = ? WHERE id = ?').run(totalFils, id);
+    writeOrder(order);
+    logEvent(id, actor, 'details_edited', changes);
+    auditOrThrow('order.details_edited', { by: actor, orderId: id, totalFils, collectFils: dueOnDeliveryFils(order), changes });
+    return { order: getOrder(id)!, changed: true };
+  });
+  if (result.changed) {
+    invalidateProducts();
+    bump('orders');
+    bump('catalog');
+  }
+  return result;
+}
+
+/**
+ * Recreate a cancelled cash-on-delivery order (asked by the owner): a new order, its own number,
+ * with the same customer, lines and prices, the stock taken again (refused, saying which piece, if
+ * it has sold out meanwhile), confirmed (the owner made it), ready to edit and book. An order from
+ * a photo keeps its photos. Asked again, the same new order comes back (unless that one was
+ * cancelled too). Both orders point to each other; audited.
+ */
+export function recreateOrder(id: string, actor: string): { order: Order; created: boolean } {
+  let copyPhotos: { from: string; to: string; count: number } | null = null;
+  const result = auditedTransaction((auditOrThrow) => {
+    const source = getOrder(id);
+    if (!source) throw new HttpError(404, 'Order not found.');
+    if (source.status !== 'cancelled') throw new HttpError(409, `${id} is not cancelled.`, {}, { code: 'not_cancelled' });
+    if (source.paymentMethod !== 'cod') throw new HttpError(409, `${id} was not cash on delivery: ask the customer to order again.`, {}, { code: 'not_cod' });
+    if (source.recreatedAs) {
+      const done = getOrder(source.recreatedAs);
+      if (done && done.status !== 'cancelled') return { order: done, created: false };
+    }
+    // The stock again, size by size (a photo order has none).
+    for (const it of source.items) {
+      if (it.productType === 'photo') continue;
+      const took = getDb()
+        .prepare('UPDATE product_stock SET qty = qty - ? WHERE product_id = ? AND size_id = ? AND qty >= ? AND EXISTS (SELECT 1 FROM products WHERE id = ? AND archived = 0)')
+        .run(it.quantity, it.productId, it.profileId, it.quantity, it.productId);
+      if (took.changes !== 1) {
+        const left = (getDb().prepare('SELECT qty FROM product_stock WHERE product_id = ? AND size_id = ?').pluck().get(it.productId, it.profileId) as number | undefined) ?? 0;
+        throw new HttpError(409, `${it.title} (${it.profileName}): ${left > 0 ? `only ${left} left` : 'sold out'}. Add stock in Inventory, or recreate it and change the line.`, {}, { code: 'stock' });
+      }
+    }
+    let newId = newOrderId();
+    while (getOrder(newId)) newId = newOrderId();
+    const now = new Date().toISOString();
+    const delivery = deliveryCheck({ emirate: source.customer.emirate, area: source.customer.area }, getSettings('delivery'));
+    const { creditsIn: _ci, creditsOut: _co, recreatedAs: _ra, invoice: _inv, trackPath: _tp, trackUrl: _tu, ...rest } = source;
+    void _ci;
+    void _co;
+    void _ra;
+    void _inv;
+    void _tp;
+    void _tu;
+    const created: Order = {
+      ...rest,
+      id: newId,
+      createdAt: now,
+      status: 'confirmed',
+      paymentStatus: 'cod_pending',
+      recreatedFrom: source.id,
+      adminNotes: [`Recreated from ${source.id}.`, source.adminNotes].filter(Boolean).join(' '),
+      ...(source.photoOrder ? { photoOrder: { ...source.photoOrder, confirmedAt: source.photoOrder.confirmedAt ?? now, confirmedBy: source.photoOrder.confirmedBy ?? actor } } : {}),
+      courier: {
+        provider: source.courier.provider,
+        serviceType: source.courier.serviceType,
+        awbNumber: '',
+        trackingUrl: '',
+        status: 'Order recreated – ready to book',
+        pickupDate: uaeDate(Date.now(), 1),
+        weightKg: source.courier.weightKg,
+        pieces: source.courier.pieces,
+        labelGenerated: false,
+        codAmountCollected: 0,
+        serviceability: { verified: delivery.serviceable, hub: '', deliverySpeed: delivery.days, zone: source.customer.emirate, checkedAt: now },
+      } as Order['courier'],
+    };
+    created.courier.codAmountCollected = aed(dueOnDeliveryFils(created));
+    writeOrder(created, `recreate-${source.id}-${crypto.randomBytes(6).toString('hex')}`);
+    source.recreatedAs = newId;
+    writeOrder(source);
+    logEvent(newId, actor, 'recreated_from', { from: source.id });
+    logEvent(source.id, actor, 'recreated_as', { to: newId });
+    auditOrThrow('order.recreated', { by: actor, fromOrderId: source.id, orderId: newId, totalFils: fils(created.total) });
+    if (source.photoOrder?.photos) copyPhotos = { from: source.id, to: newId, count: source.photoOrder.photos };
+    return { order: getOrder(newId)!, created: true };
+  });
+  // The photos of an order from a photo go with it (files, after the commit).
+  const cp = copyPhotos as { from: string; to: string; count: number } | null;
+  if (result.created && cp) {
+    for (let n = 1; n <= cp.count; n++) {
+      const photo = readPhotoOrderPhoto(cp.from, n);
+      if (!photo) continue;
+      const ext = PHOTO_TYPES[photo.mime];
+      try {
+        fs.writeFileSync(photoFile(cp.to, n, ext), photo.bytes, { mode: 0o600 });
+      } catch (err) {
+        logEvent_('error', 'recreate_photo_copy_failed', { orderId: cp.to, n, error: err instanceof Error ? err.message : String(err) });
+      }
+    }
+    markChanged('orders');
+  }
+  if (result.created) {
+    invalidateProducts();
+    bump('orders');
+    bump('catalog');
+  }
+  return result;
+}
+
 // ── Bank transfer: the customer's private page, the owner's check ───────────
 
 /**
