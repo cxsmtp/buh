@@ -1,6 +1,6 @@
 # Changelog
 
-## BUH-02.32.00 — 2026-11-05 12:00 UTC · [#65](https://github.com/cxsmtp/buh/pull/65)
+## BUH-02.32.00 — 2026-11-05 11:53 UTC · [#65](https://github.com/cxsmtp/buh/pull/65)
 
 - **PDF invoices for customers.** On a confirmed order, **Make invoice (PDF)** issues its invoice, numbered INV-2026-000001 onwards in order of issue and never reused; then **Open PDF**, **Email to customer** (the PDF attached) or **Send on WhatsApp** (its private link).
 - **Made for UAE rules while you are not VAT-registered.** The invoice shows your legal name, trade licence (when set), address, the customer, the date of issue and supply, the items, delivery and total, and says plainly that no VAT is charged and it is not a tax invoice; with VAT switched on, the order's tax invoice is the PDF instead.
@@ -8,10 +8,10 @@
 - **Fixed once sent.** An invoice keeps what it said when issued, even if you change the order or your settings later; a cancelled order's invoice says it was cancelled.
 - **Optional invoice details.** Settings → Store & contact → On invoices: legal name, trade licence number and issuing authority, all optional.
 - **Status.**
-  - **Benchmark:** pending.
-  - **Tests:** pending.
-  - **Dependency audit:** pending.
-  - **Security scan:** pending.
+  - **Benchmark:** no failed requests in any round (main first, alternating). Home page p95 78–109 ms (main 82–135), catalogue 140–158 ms (main 141–201), courier serviceability 78–85 ms (main 82–95), gift page 158–162 ms (main 159–189).
+  - **Tests:** 1248 of 1250 passed in the full run; the 2 misses were the Versions screen tests, because that build was made just before this entry was written (no notes for the new version yet); on a fresh build they pass (16/16).
+  - **Dependency audit:** `npm audit --omit=dev`: 0 vulnerabilities; no new dependencies (the PDF writer is built in; the DejaVu fonts are bundled with their free licence).
+  - **Security scan:** the new routes follow the shop's rules (owner-only issue/send with a 256-byte allow-listed body; the accountant may only open the PDF; the customer's link is made from the server's key, 404 until issued, limited per address, no-store, no-referrer, the browser's PDF viewer only).
 
 ## BUH-02.31.00 — 2026-11-05 10:32 UTC · [#64](https://github.com/cxsmtp/buh/pull/64)
 
