@@ -4,7 +4,7 @@
 # Not Node 26 yet: 26.13 with Next 16.4.3 resets a kept-alive connection after a request refused before
 # its body is read, which behind the proxy fails the next request on it. deploy/ci/single-container-test.sh
 # checks this on the real image, so a Node 26 bump stays red until a fix lands.
-FROM node:24.22.2-alpine3.24@sha256:8a32c8cf649a49915a66e81e7a609223c708d0adabf288ee3f4077d765542f85 AS base
+FROM node:26.13.0-alpine3.24@sha256:c6ad9e9c1d80f6eb607c26b4b0a132ff7a2344fad1c78ea3baa2a7d4c8de6d94 AS base
 
 # Step 1: Install dependencies
 FROM base AS deps
