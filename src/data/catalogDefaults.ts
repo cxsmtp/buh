@@ -57,6 +57,9 @@ export const DEFAULT_STORE: StoreSettings = {
   photoOrders: false,
   photoOrdersOnHome: false,
   photoOrdersCard: true,
+  legalName: '',
+  tradeLicenceNumber: '',
+  tradeLicenceAuthority: '',
 };
 
 /** Settings → Themes before the owner changes anything: festivals picked automatically. */

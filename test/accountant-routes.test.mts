@@ -34,6 +34,8 @@ const ACCOUNTANT_ALLOWED: Record<string, string[]> = {
   'expenses/categories': ['GET'],
   'orders/[id]/receipt': ['GET'],
   'orders/[id]/invoice': ['GET'],
+  // The PDF invoice: the accountant may open it (read-only); issuing and sending stay the owner's.
+  'orders/[id]/invoice-pdf': ['GET'],
   vat: ['GET'],
   'vat/return': ['GET'],
 };

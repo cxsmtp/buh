@@ -872,6 +872,10 @@ const VALIDATORS: { [K in SettingsKey]: (input: Obj, current: SettingsMap[K]) =>
       photoOrders: bool(input.photoOrders, current.photoOrders),
       photoOrdersOnHome: bool(input.photoOrdersOnHome, current.photoOrdersOnHome),
       photoOrdersCard: bool(input.photoOrdersCard, current.photoOrdersCard ?? true),
+      // Invoices (optional): cut to their length like every settings text.
+      legalName: text(input.legalName, 'Legal name', 120, current.legalName ?? ''),
+      tradeLicenceNumber: text(input.tradeLicenceNumber, 'Trade licence number', 40, current.tradeLicenceNumber ?? ''),
+      tradeLicenceAuthority: text(input.tradeLicenceAuthority, 'Issuing authority', 80, current.tradeLicenceAuthority ?? ''),
     };
   },
 

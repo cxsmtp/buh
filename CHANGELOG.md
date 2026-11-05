@@ -1,5 +1,18 @@
 # Changelog
 
+## BUH-02.32.00 — 2026-11-05 12:00 UTC · [#65](https://github.com/cxsmtp/buh/pull/65)
+
+- **PDF invoices for customers.** On a confirmed order, **Make invoice (PDF)** issues its invoice, numbered INV-2026-000001 onwards in order of issue and never reused; then **Open PDF**, **Email to customer** (the PDF attached) or **Send on WhatsApp** (its private link).
+- **Made for UAE rules while you are not VAT-registered.** The invoice shows your legal name, trade licence (when set), address, the customer, the date of issue and supply, the items, delivery and total, and says plainly that no VAT is charged and it is not a tax invoice; with VAT switched on, the order's tax invoice is the PDF instead.
+- **An electronic invoice.** It is made by the shop (no printing or signing), says it is valid without a signature, and the customer can open it again any time from its private link; Arabic names print correctly.
+- **Fixed once sent.** An invoice keeps what it said when issued, even if you change the order or your settings later; a cancelled order's invoice says it was cancelled.
+- **Optional invoice details.** Settings → Store & contact → On invoices: legal name, trade licence number and issuing authority, all optional.
+- **Status.**
+  - **Benchmark:** pending.
+  - **Tests:** pending.
+  - **Dependency audit:** pending.
+  - **Security scan:** pending.
+
 ## BUH-02.31.00 — 2026-11-05 10:32 UTC · [#64](https://github.com/cxsmtp/buh/pull/64)
 
 - **Photo deals: you fix the price.** In Orders → **New photo deal** you add the pictures (up to 12), what it is, the price with delivery and the ways the customer may pay (card, cash on delivery, bank transfer), and get a private link with a **Send on WhatsApp** button.

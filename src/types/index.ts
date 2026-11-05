@@ -223,6 +223,8 @@ export interface Order {
   cardFeePercent?: number;
   /** UAE VAT added on top (Settings → Payments → VAT with prices excluding VAT), in AED. Part of total. */
   vatAdded?: number;
+  /** The hub's copy only: the order's PDF invoice, once issued (src/lib/server/invoices.ts). */
+  invoice?: { number: string; issuedAt: string; emailedAt?: string; emailedTo?: string; sentCount: number; pdfPath: string; pdfUrl?: string };
   /** The order's private tracking page (/track/<order>.<mac>, never stored) and its full address when the shop's is set. */
   trackPath?: string;
   trackUrl?: string;
@@ -597,6 +599,10 @@ export interface StoreSettings {
   photoOrdersOnHome: boolean;
   /** Card payment on the /order-by-photo page (the customer types the amount there): on unless the owner turns it off. Deal links have their own choice. */
   photoOrdersCard: boolean;
+  /** On invoices (all optional): the business's legal name (else Couriers' pickup name, else the shop's name), trade licence number and its issuing authority. */
+  legalName?: string;
+  tradeLicenceNumber?: string;
+  tradeLicenceAuthority?: string;
 }
 
 /** Settings → Delivery: where we deliver, how fast, and the optional same-day service. */

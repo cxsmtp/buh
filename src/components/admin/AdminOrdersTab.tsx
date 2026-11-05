@@ -26,6 +26,7 @@ import { awaitingWhatsApp, heldForWhatsApp, OrderTimeline, OrderWhatsAppCheck } 
 import { OrderBankTransfer, transferToCheck } from './OrderBankTransfer';
 import { OrderPhotoCheck } from './OrderPhotoCheck';
 import { PhotoDeals } from './PhotoDeals';
+import { OrderInvoice } from './OrderInvoice';
 import { trackLinkOf } from '@/lib/whatsappConfirm';
 import { DEFAULT_PACKAGING_GRAMS, shipmentWeight } from '@/lib/shipmentWeight';
 import { aed2, BLOCKED_MESSAGE, carrierLabel, ECO_LIVE_NOT_CONNECTED, jeeblyMode, LIVE_OFF_WARNING } from '@/lib/courierMode';
@@ -487,6 +488,7 @@ export const AdminOrdersTab: React.FC<AdminOrdersTabProps> = ({
                 <OrderWhatsAppCheck order={order} onOrderChanged={whatsappChecked} shopName={shopName} />
                 {bank && <OrderBankTransfer order={order} bank={bank} shopName={shopName} onOrderChanged={whatsappChecked} />}
                 {order.photoOrder && <OrderPhotoCheck order={order} onOrderChanged={whatsappChecked} />}
+                <OrderInvoice key={`${order.id}-${order.invoice?.number ?? ''}`} order={order} shopName={shopName} />
 
                 {/* Items & Delivery Info */}
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 text-xs">
