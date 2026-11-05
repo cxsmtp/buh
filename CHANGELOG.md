@@ -1,5 +1,17 @@
 # Changelog
 
+## BUH-02.33.00 — 2026-11-05 12:30 UTC · [#66](https://github.com/cxsmtp/buh/pull/66)
+
+- **Extra to collect when booking the courier.** The booking box has **Extra to collect (AED)**, 0 by default, with an optional reason: for money still to take from the customer, even on a paid order. It is added to the order's total, the courier is booked to collect it, and the label shows it.
+- **See what the courier collects before you book.** Under the field, the box says exactly how much the courier will collect (or "Nothing to collect: prepaid").
+- **Use a payment on another order instead of refunding.** A paid order (card or bank transfer) shows **Use it on another order**: choose the customer's other order (same customer listed first) and the amount, and tap Move. The paid order is cancelled (its pieces back on sale), and the other order's courier collects that much less.
+- **Safe by design.** Never more than was paid or more than is due, never twice, and not once an order is with the courier; what moved is no longer offered as a refund, and both orders show the move.
+- **Status.**
+  - **Benchmark:** pending.
+  - **Tests:** pending.
+  - **Dependency audit:** pending.
+  - **Security scan:** pending.
+
 ## BUH-02.32.00 — 2026-11-05 11:53 UTC · [#65](https://github.com/cxsmtp/buh/pull/65)
 
 - **PDF invoices for customers.** On a confirmed order, **Make invoice (PDF)** issues its invoice, numbered INV-2026-000001 onwards in order of issue and never reused; then **Open PDF**, **Email to customer** (the PDF attached) or **Send on WhatsApp** (its private link).
