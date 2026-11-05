@@ -67,19 +67,19 @@ export function ArabicFields({
       )}
       <div>
         <label className={label} htmlFor="pe-title-ar">
-          Arabic name
+          Arabic title
         </label>
         <input id="pe-title-ar" dir="rtl" lang="ar" className={field} value={value.titleAr} maxLength={160} onChange={(e) => onChange({ titleAr: e.target.value })} />
       </div>
       <div>
         <label className={label} htmlFor="pe-short-ar">
-          Arabic short description
+          Arabic card line
         </label>
         <input id="pe-short-ar" dir="rtl" lang="ar" className={field} value={value.shortDescriptionAr} maxLength={300} onChange={(e) => onChange({ shortDescriptionAr: e.target.value })} />
       </div>
       <div>
         <label className={label} htmlFor="pe-desc-ar">
-          Arabic full description
+          Arabic details
         </label>
         <textarea id="pe-desc-ar" dir="rtl" lang="ar" className={`${field} min-h-[90px]`} value={value.descriptionAr} maxLength={4000} onChange={(e) => onChange({ descriptionAr: e.target.value })} />
       </div>

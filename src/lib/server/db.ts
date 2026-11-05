@@ -633,24 +633,34 @@ const MIGRATIONS: Array<(db: DB) => void> = [
     `);
     ensureChangeTriggers(db);
   },
-  // 20: courier_charges (courierCharges.ts): what the courier charged for each shipment (from its
-  //     own replies or its statement), one row per carrier + AWB, each with its expense in Money
-  //     (category "Courier & delivery"). Add-only: a new table, watched with the expenses.
+  // 20: courier_shipments (courierCharges.ts): what the courier says about each shipment, from its
+  //     own replies or its statement: status, the COD it collected and paid out, and what it
+  //     charged (each charge also an expense in Money, "Courier & delivery"). One row per carrier +
+  //     AWB. Add-only: a new table, watched with the expenses.
   (db) => {
     db.exec(`
-      CREATE TABLE IF NOT EXISTS courier_charges (
-        carrier     TEXT NOT NULL,
-        awb         TEXT NOT NULL,
-        order_id    TEXT,
-        amount_fils INTEGER NOT NULL,
-        source      TEXT NOT NULL,
-        charged_on  TEXT NOT NULL,
-        expense_id  TEXT NOT NULL,
-        recorded_at TEXT NOT NULL,
-        recorded_by TEXT NOT NULL,
+      CREATE TABLE IF NOT EXISTS courier_shipments (
+        carrier          TEXT NOT NULL,
+        awb              TEXT NOT NULL,
+        order_id         TEXT,
+        status           TEXT,
+        status_at        TEXT,
+        delivered_on     TEXT,
+        charge_fils      INTEGER,
+        charge_source    TEXT,
+        charged_on       TEXT,
+        expense_id       TEXT,
+        cod_fils         INTEGER,
+        cod_source       TEXT,
+        remitted_fils    INTEGER,
+        remitted_on      TEXT,
+        remittance_ref   TEXT,
+        updated_at       TEXT NOT NULL,
+        updated_by       TEXT NOT NULL,
         PRIMARY KEY (carrier, awb)
       );
-      CREATE INDEX IF NOT EXISTS courier_charges_on ON courier_charges (charged_on);
+      CREATE INDEX IF NOT EXISTS courier_shipments_charged ON courier_shipments (charged_on);
+      CREATE INDEX IF NOT EXISTS courier_shipments_order ON courier_shipments (order_id);
     `);
     ensureChangeTriggers(db);
   },
@@ -695,7 +705,7 @@ const WATCHED: Array<[string, string, string[], string?]> = [
   ['expenses', 'expenses', []],
   ['expense_versions', 'expenses', []],
   ['expense_bills', 'expenses', []],
-  ['courier_charges', 'expenses', []],
+  ['courier_shipments', 'expenses', []],
   ['admin_recovery_codes', 'accounts', []],
   // A sign-in moves the passkey's counter and last use: not a change to back up.
   ['admin_passkeys', 'accounts', ['public_key', 'transports', 'name', 'rp_id', 'device_type', 'backed_up', 'created_at']],

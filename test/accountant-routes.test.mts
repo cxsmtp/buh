@@ -38,6 +38,8 @@ const ACCOUNTANT_ALLOWED: Record<string, string[]> = {
   'orders/[id]/invoice-pdf': ['GET'],
   vat: ['GET'],
   'vat/return': ['GET'],
+  // Money → Courier: Jeebly's COD, payouts and charges (read-only); checking Jeebly and importing stay the owner's.
+  'money/courier-charges': ['GET'],
 };
 /** Routes that need no session at all (only the door): signing in, out, the setup link and the like. */
 const DOOR_ONLY = new Set(['login', 'login/passkey', 'login/passkey/options', 'login/recovery', 'logout', 'session', 'password/forgot', 'password/reset', 'client-error', 'staff/setup']);
