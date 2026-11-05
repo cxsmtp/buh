@@ -1,6 +1,6 @@
 # Changelog
 
-## BUH-02.36.00 — 2026-11-05 22:30 UTC · [#69](https://github.com/cxsmtp/buh/pull/69)
+## BUH-02.36.00 — 2026-11-05 20:27 UTC · [#69](https://github.com/cxsmtp/buh/pull/69)
 
 - **The shop in Arabic.** Shoppers whose phone or computer is set to Arabic get the whole shop in UAE Arabic, right to left (browsing, product page, bag, checkout, tracking, WhatsApp confirmation, payment, help chat); a switch at the top, before the bag, changes the language and is remembered. Messages that reach the owner stay in English.
 - **Arabic product words.** The product editor has an Arabic name, short and full description, and **Translate to Arabic** fills them from the English through AI writing (nothing invented, nothing saved until you save). Empty fields show the English, and the shop's search finds Arabic names.
@@ -10,10 +10,10 @@
 - **Sales counted once.** The hub's top figure is now **Sales**, counted as Money → Reports counts them: no cancelled or unpaid card orders, less refunds (it used to add up every order's total, cancelled ones too). A paid order's money moved onto another order is counted once, on that order, in the hub and in Reports.
 - **A compact order card.** Steps that are done (confirmed on WhatsApp, photo amount confirmed, invoice made) take one short line with small buttons; the address and items sit on one line each; changing a confirmed amount or phone number is one tap away.
 - **Status.**
-  - **Benchmark:** pending.
-  - **Tests:** pending.
-  - **Dependency audit:** pending.
-  - **Security scan:** pending.
+  - **Benchmark:** no failed requests in any round (main first, alternating). Catalogue p95 89–147 ms (main 144–158), gift page 118–148 ms (main 141–150), courier serviceability 55–78 ms (main 69–96), home page 55–80 ms (main 78–139).
+  - **Tests:** 1293 of 1295 passed in the full run; the 2 misses were this release's compact order card hiding a confirmed order's phone number, now shown again (small), and those files pass (12/12).
+  - **Dependency audit:** `npm audit --omit=dev`: 0 vulnerabilities; no dependencies changed.
+  - **Security scan:** Checkmarx could not run (its connector needs signing in again); reviewed by hand instead: every new route is the owner's (the accountant reads Money → Courier), size-capped and allow-listed; amounts are worked out on the server in fils; the courier figures come only from Jeebly and never change an order; the Arabic boot script is a constant.
 
 ## BUH-02.35.00 — 2026-11-05 19:10 UTC · [#68](https://github.com/cxsmtp/buh/pull/68)
 
