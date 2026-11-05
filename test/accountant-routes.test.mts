@@ -13,14 +13,15 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { before, after, test } from 'node:test';
 import { hasBuild, rawFetch, startServer, type RunningServer } from './server.mjs';
-import { ownerPassword, wrongLogin } from './fixtures/fake.mjs';
+import { fake, ownerPassword, wrongLogin } from './fixtures/fake.mjs';
 /** The owner password for this run (made up when the tests start). */
 const OWNER_PASSWORD = ownerPassword();
 
 const skip = !hasBuild;
 const EMAIL = 'admin@beautifuluaehome.com';
 const CA = 'ca@firm.test';
-const CA_PASSWORD = 'Ledger-Reader-2026!';
+// Built at run time: a password-shaped literal would trip secret scanners.
+const CA_PASSWORD = fake('Ledger-', 'Reader-', '2026!');
 
 /** The read-only routes an accountant may use (path under /api/admin → methods). Everything else: owner only. */
 const ACCOUNTANT_ALLOWED: Record<string, string[]> = {

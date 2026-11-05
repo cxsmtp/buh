@@ -34,7 +34,12 @@ const PAID: Array<[BulkPaidWith, string]> = [
   ['unpaid', 'Not paid yet'],
 ];
 const PAID_LABEL = Object.fromEntries(PAID) as Record<BulkPaidWith, string>;
-const newKey = () => (crypto.randomUUID ? crypto.randomUUID() : `${Date.now()}-${Math.random().toString(36).slice(2)}`).replace(/[^A-Za-z0-9_-]/g, '');
+/** One key per invoice being made (a retry returns the same invoice); random from the browser's crypto. */
+const newKey = () => {
+  if (crypto.randomUUID) return crypto.randomUUID();
+  const b = crypto.getRandomValues(new Uint8Array(16));
+  return Array.from(b, (x) => x.toString(16).padStart(2, '0')).join('');
+};
 const blankLine = (): Line => ({ description: '', quantity: '1', unitPrice: '' });
 
 /** "1,250.50" → fils, or null (the server checks it again). */
