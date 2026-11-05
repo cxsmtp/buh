@@ -20,6 +20,7 @@ import { kvGet, kvSet } from './kv';
 import { expenseCsvFiles } from './expenses';
 import { toCsv } from './csv';
 import { blankDriveKeyIn, CLOCK_WRONG, copyBackupToDrive, driveStatus, serverClockSuspect } from './driveBackup';
+import { copyBackupToS3, s3Enabled } from './s3Backup';
 import { changeMark, describeAreas, markBackedUp, pendingChanges } from './dataChanges';
 import { catchUpEmailDue, decideBackup, localBackupsToRemove, RETRY_MS, shouldEmail, WEEKLY_OVERDUE_DAYS, type BackupReason, type BackupSettings } from './backupPolicy';
 import { backupPassphrase, currentBackupKey, describeFingerprint, MIN_PASSPHRASE_LENGTH, passphraseFingerprintSync, passphraseSource, UNREADABLE_MESSAGE } from './backupSecret';
@@ -706,6 +707,8 @@ export function runBackup(reasonIn: BackupReason | 'scheduled', options: RunOpti
       if (patch.lastEmailError) logEvent('warn', 'backup_not_emailed', { error: patch.lastEmailError, reason });
       else logEvent('info', 'backup_done', { file: patch.lastFile, summary: result.summary, reason, changes: mark.pending.total });
       if (copied) void copyBackupToDrive(result.file, reason);
+      // The second place (Settings → System & backups → S3-compatible storage), when switched on: the same, never waited for.
+      if (s3Enabled()) void copyBackupToS3(result.file, reason);
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
       // Email when it starts failing, when the error changes, on "Back up now", and then at most daily.
@@ -798,7 +801,7 @@ export function backupHealth(now = Date.now()) {
   // Nothing has left the server for 2 days: no Drive, and the newer backups were not emailed.
   let driveOn = false;
   try {
-    driveOn = driveStatus().enabled;
+    driveOn = driveStatus().enabled || s3Enabled();
   } catch {
     driveOn = false;
   }

@@ -2,7 +2,7 @@
 
 import React, { useCallback, useEffect, useId, useState } from 'react';
 import { Camera, Copy, ImagePlus, Link2, Loader2, MessageCircle, Plus, X } from 'lucide-react';
-import { getJson, postJson } from '@/lib/apiClient';
+import { getJson, postJson, sendJson } from '@/lib/apiClient';
 import { shrinkPhoto } from '@/lib/shrinkPhoto';
 import { PHOTO_URL_MAX } from '@/components/store/PhotoOrderSheet';
 import type { PaymentMethod } from '@/types';
@@ -60,6 +60,9 @@ export function PhotoDeals() {
   const [error, setError] = useState('');
   const [made, setMade] = useState<Deal | null>(null);
   const [copied, setCopied] = useState('');
+  // The customer upload page (/order-by-photo): the same switches as Settings → Store & contact, here too.
+  const [page, setPage] = useState<{ photoOrders: boolean; photoOrdersOnHome: boolean; photoOrdersCard?: boolean; whatsappNumber: string } | null>(null);
+  const [pageNote, setPageNote] = useState('');
 
   const load = useCallback(async () => {
     const { ok, data } = await getJson<{ deals?: Deal[] }>('/api/admin/deals');
@@ -69,6 +72,9 @@ export function PhotoDeals() {
     let alive = true;
     void getJson<{ deals?: Deal[] }>('/api/admin/deals').then(({ ok, data }) => {
       if (alive && ok && data.deals) setDeals(data.deals);
+    });
+    void getJson<{ store?: { value: { photoOrders: boolean; photoOrdersOnHome: boolean; photoOrdersCard?: boolean; whatsappNumber: string } } }>('/api/admin/settings').then(({ ok, data }) => {
+      if (alive && ok && data.store) setPage(data.store.value);
     });
     return () => {
       alive = false;
@@ -146,6 +152,19 @@ export function PhotoDeals() {
     void load();
   };
 
+  const savePage = async (patch: Partial<NonNullable<typeof page>>) => {
+    if (!page) return;
+    const before = page;
+    setPage({ ...page, ...patch });
+    setPageNote('');
+    const { ok, data } = await sendJson<{ message?: string }>('PUT', '/api/admin/settings/store', { settings: patch });
+    if (!ok) {
+      setPage(before);
+      setPageNote(data.message || 'Not saved. Please try again.');
+    } else setPageNote('Saved.');
+  };
+  const pageLink = typeof window === 'undefined' ? '/order-by-photo' : `${window.location.origin}/order-by-photo`;
+
   const field = 'w-full min-w-0 px-3 py-2 min-h-11 rounded-xl border border-line-strong bg-surface text-ink text-sm focus:outline-none focus:ring-2 focus:ring-gold';
   const pick = 'min-h-11 rounded-xl border border-ink bg-surface text-ink text-sm font-semibold flex items-center justify-center gap-2 cursor-pointer focus-within:ring-2 focus-within:ring-gold';
   const small = 'min-h-10 px-3 rounded-lg border border-line-strong bg-surface text-ink text-xs font-semibold inline-flex items-center gap-1.5 focus:outline-none focus-visible:ring-2 focus-visible:ring-gold';
@@ -165,13 +184,47 @@ export function PhotoDeals() {
     <section aria-labelledby={`${id}-title`} data-testid="photo-deals" className="rounded-2xl border border-line bg-surface p-3 sm:p-4 space-y-3 min-w-0">
       <div className="flex flex-wrap items-center justify-between gap-2">
         <h2 id={`${id}-title`} className="text-sm font-bold text-ink flex items-center gap-1.5">
-          <Link2 className="w-4 h-4 text-gold-deep" aria-hidden="true" /> Photo deals
+          <Link2 className="w-4 h-4 text-gold-deep" aria-hidden="true" /> Orders from a photo
         </h2>
         <button type="button" onClick={() => { setOpen((v) => !v); setMade(null); }} aria-expanded={open} className="min-h-11 px-3 rounded-xl bg-ink text-paper text-xs font-bold inline-flex items-center gap-1.5 focus:outline-none focus-visible:ring-2 focus-visible:ring-gold">
           {open ? <X className="w-4 h-4" aria-hidden="true" /> : <Plus className="w-4 h-4" aria-hidden="true" />} {open ? 'Close' : 'New photo deal'}
         </button>
       </div>
-      <p className="text-xs text-ink-soft">For a piece agreed on WhatsApp: add its pictures and your price with delivery, then send the link. The customer sees the pictures and the fixed price, adds their address and pays. They can&rsquo;t change the price.</p>
+      <p className="text-xs text-ink-soft"><strong className="text-ink">Your deal links:</strong> for a piece agreed on WhatsApp, add its pictures and your price with delivery, then send the link. The customer sees the pictures and the fixed price, adds their address and pays. They can&rsquo;t change the price.</p>
+
+      {page && (
+        <details className="rounded-xl border border-line bg-ivory p-3 text-xs" data-testid="photo-page-settings">
+          <summary className="min-h-9 flex items-center cursor-pointer font-semibold text-ink">
+            Customer upload page: {page.photoOrders ? 'on' : 'off'}
+          </summary>
+          <div className="mt-2 space-y-2">
+            <p className="text-ink-soft">The customer adds their own photos and the amount you agreed; you check it with &ldquo;Confirm amount&rdquo; on the order.</p>
+            <label className="flex items-start gap-2">
+              <input type="checkbox" className="mt-0.5" checked={page.photoOrders} onChange={(e) => void savePage({ photoOrders: e.target.checked })} />
+              <span>Take orders from the customer&rsquo;s own photos {!page.whatsappNumber && <span className="text-ink-muted">(set the shop&rsquo;s WhatsApp in Settings first)</span>}</span>
+            </label>
+            {page.photoOrders && (
+              <>
+                <div className="flex flex-wrap items-center gap-2">
+                  <code className="min-w-0 break-all rounded-lg bg-surface px-2 py-1 text-ink" data-testid="photo-page-link">{pageLink}</code>
+                  <button type="button" className={small} onClick={() => void navigator.clipboard?.writeText(pageLink).then(() => setPageNote('Link copied.'))}>
+                    <Copy className="w-4 h-4" aria-hidden="true" /> Copy link
+                  </button>
+                </div>
+                <label className="flex items-start gap-2">
+                  <input type="checkbox" className="mt-0.5" checked={page.photoOrdersOnHome} onChange={(e) => void savePage({ photoOrdersOnHome: e.target.checked })} />
+                  <span>Show its banner on the home page</span>
+                </label>
+                <label className="flex items-start gap-2">
+                  <input type="checkbox" className="mt-0.5" checked={page.photoOrdersCard !== false} onChange={(e) => void savePage({ photoOrdersCard: e.target.checked })} />
+                  <span>Card payment on this page <span className="text-ink-muted">(off: cash on delivery or bank transfer, so you check the amount first)</span></span>
+                </label>
+              </>
+            )}
+            {pageNote && <p role="status" className="text-ink-soft">{pageNote}</p>}
+          </div>
+        </details>
+      )}
 
       {made?.url && (
         <div role="status" data-testid="deal-made" className="rounded-xl border border-success-line bg-success-soft p-3 space-y-2 text-xs">
