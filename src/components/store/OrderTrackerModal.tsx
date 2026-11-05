@@ -6,6 +6,7 @@ import { X, Search, Truck, ExternalLink, MapPin, Upload, CheckCircle2, Copy, Che
 import { postJson, safeHref } from '@/lib/apiClient';
 import { WhatsAppConfirm } from './WhatsAppConfirm';
 import { cancelHoursOf } from '@/lib/whatsappConfirm';
+import { useLocale, useT, type Words } from '@/lib/i18n';
 
 interface OrderTrackerModalProps {
   isOpen: boolean;
@@ -42,8 +43,51 @@ interface TrackedOrder {
   photoOrder?: { amountConfirmed: boolean };
 }
 
+const WORDS = {
+  copiedLabel: { en: 'Tracking number copied', ar: 'تم نسخ رقم التتبع' },
+  copyLabel: { en: 'Copy tracking number', ar: 'نسخ رقم التتبع' },
+  copied: { en: 'Copied', ar: 'تم النسخ' },
+  copy: { en: 'Copy', ar: 'نسخ' },
+  badLink: { en: 'This tracking link is not valid.', ar: 'رابط التتبع هذا غير صالح.' },
+  noMatch: { en: 'No order matches that order number and phone number.', ar: 'لا يوجد طلب يطابق رقم الطلب ورقم الهاتف.' },
+  title: { en: 'Track your order', ar: 'تتبّع طلبك' },
+  close: { en: 'Close Track Order', ar: 'إغلاق تتبّع الطلب' },
+  orderNumber: { en: 'Order number', ar: 'رقم الطلب' },
+  orderPh: { en: 'Order number (BUH-…)', ar: 'رقم الطلب (BUH-…)' },
+  mobileLabel: { en: 'Mobile number on the order', ar: 'رقم الجوال المسجل في الطلب' },
+  mobilePh: { en: 'Mobile on the order', ar: 'الجوال المسجل في الطلب' },
+  finding: { en: 'Finding…', ar: 'جارٍ البحث…' },
+  track: { en: 'Track', ar: 'تتبّع' },
+  placed: { en: 'Placed on {date}', ar: 'تاريخ الطلب {date}' },
+  photoChecking: { en: 'Order from your photo: we’re checking the photos and the amount. We’ll confirm on WhatsApp, then send it.', ar: 'طلب من صورتك: نراجع الصور والمبلغ. سنؤكد على واتساب ثم نرسله.' },
+  arrived: { en: 'Your bank transfer has arrived. Thank you.', ar: 'وصل تحويلك البنكي. شكراً لك.' },
+  haveShot: { en: 'We have your transfer screenshot and will confirm your order once we see the transfer.', ar: 'وصلتنا لقطة شاشة التحويل، وسنؤكد طلبك فور وصول التحويل.' },
+  payBank: { en: 'Paying by bank transfer: our bank details and the upload for your transfer screenshot are on your order’s private page.', ar: 'الدفع بالتحويل البنكي: بياناتنا البنكية ورفع لقطة شاشة التحويل موجودة في الصفحة الخاصة بطلبك.' },
+  different: { en: 'Upload a different screenshot', ar: 'ارفع لقطة شاشة أخرى' },
+  upload: { en: 'Upload your transfer screenshot', ar: 'ارفع لقطة شاشة التحويل' },
+  delivery: { en: 'Delivery:', ar: 'التوصيل:' },
+  trackingNo: { en: 'Tracking number{carrier}:', ar: 'رقم التتبع{carrier}:' },
+  withTeam: { en: 'Your parcel is with our delivery team; the tracking number will appear here once the courier scans it.', ar: 'طردك مع فريق التوصيل؛ سيظهر رقم التتبع هنا بعد أن تمسحه شركة الشحن.' },
+  willAppear: { en: 'The tracking number will appear here once your order is with the courier.', ar: 'سيظهر رقم التتبع هنا عندما يصل طلبك إلى شركة الشحن.' },
+  updates: { en: 'Courier updates', ar: 'تحديثات شركة الشحن' },
+  courierPage: { en: "Track on the courier's page", ar: 'تتبّع على صفحة شركة الشحن' },
+  items: { en: 'Items in this Parcel:', ar: 'محتويات الطرد:' },
+  deliveringTo: { en: 'Delivering to {name} in {area}, {emirate}', ar: 'التوصيل إلى {name} في {area}، {emirate}' },
+} as const satisfies Words;
+
+const STATUS_AR: Record<Order['status'], string> = {
+  pending_payment: 'بانتظار الدفع',
+  pending_confirmation: 'بانتظار التأكيد',
+  confirmed: 'مؤكد',
+  dispatched: 'تم الشحن',
+  out_for_delivery: 'في الطريق إليك',
+  delivered: 'تم التوصيل',
+  cancelled: 'ملغى',
+};
+
 /** Copies the tracking number (to paste on the courier's site). */
 function CopyButton({ text }: { text: string }) {
+  const t = useT(WORDS);
   const [copied, setCopied] = useState(false);
   return (
     <button
@@ -57,11 +101,11 @@ function CopyButton({ text }: { text: string }) {
           () => undefined
         );
       }}
-      aria-label={copied ? 'Tracking number copied' : 'Copy tracking number'}
+      aria-label={copied ? t('copiedLabel') : t('copyLabel')}
       className="shrink-0 inline-flex items-center gap-1 px-2 min-h-8 rounded-lg border border-line-strong text-ink text-[11px] font-semibold hover:bg-sand focus:outline-none focus-visible:ring-2 focus-visible:ring-gold"
     >
       {copied ? <Check className="w-3.5 h-3.5" aria-hidden="true" /> : <Copy className="w-3.5 h-3.5" aria-hidden="true" />}
-      <span>{copied ? 'Copied' : 'Copy'}</span>
+      <span>{copied ? t('copied') : t('copy')}</span>
     </button>
   );
 }
@@ -72,6 +116,8 @@ export const OrderTrackerModal: React.FC<OrderTrackerModalProps> = ({
   lastOrderId,
   trackToken,
 }) => {
+  const { locale } = useLocale();
+  const t = useT(WORDS);
   const [orderId, setOrderId] = useState(lastOrderId || '');
   const [phone, setPhone] = useState('');
   const [searchResult, setSearchResult] = useState<TrackedOrder | null>(null);
@@ -89,12 +135,13 @@ export const OrderTrackerModal: React.FC<OrderTrackerModalProps> = ({
       if (!alive) return;
       setSearchResult(data.found && data.order ? data.order : null);
       if (data.order) setOrderId(data.order.id);
-      setMessage(data.found ? '' : data.message || 'This tracking link is not valid.');
+      setMessage(data.found ? '' : data.message || t('badLink'));
       setHasSearched(true);
     });
     return () => {
       alive = false;
     };
+  // eslint-disable-next-line react-hooks/exhaustive-deps -- the fallback words need not re-run the lookup
   }, [trackToken]);
 
   if (!isOpen) return null;
@@ -111,7 +158,7 @@ export const OrderTrackerModal: React.FC<OrderTrackerModalProps> = ({
     setSearching(false);
     setSearchResult(data.found && data.order ? data.order : null);
     setFoundPhone(phone.trim());
-    setMessage(data.found ? '' : data.message || 'No order matches that order number and phone number.');
+    setMessage(data.found ? '' : data.message || t('noMatch'));
     setHasSearched(true);
   };
 
@@ -123,14 +170,14 @@ export const OrderTrackerModal: React.FC<OrderTrackerModalProps> = ({
           <div className="flex items-center gap-2 min-w-0">
             <Truck className="w-5 h-5 text-gold-deep shrink-0" strokeWidth={1.5} />
             <h2 id="track-title" className="font-serif text-2xl text-ink">
-              Track your order
+              {t('title')}
             </h2>
           </div>
           <button
             type="button"
             onClick={onClose}
-            aria-label="Close Track Order"
-            className="shrink-0 w-10 h-10 -mr-2 flex items-center justify-center text-ink rounded-full hover:bg-sand"
+            aria-label={t('close')}
+            className="shrink-0 w-10 h-10 -me-2 flex items-center justify-center text-ink rounded-full hover:bg-sand"
           >
             <X className="w-5 h-5" strokeWidth={1.5} />
           </button>
@@ -141,8 +188,8 @@ export const OrderTrackerModal: React.FC<OrderTrackerModalProps> = ({
           <input
             type="text"
             required
-            aria-label="Order number"
-            placeholder="Order number (BUH-…)"
+            aria-label={t('orderNumber')}
+            placeholder={t('orderPh')}
             value={orderId}
             maxLength={40}
             onChange={(e) => setOrderId(e.target.value)}
@@ -151,12 +198,13 @@ export const OrderTrackerModal: React.FC<OrderTrackerModalProps> = ({
           <input
             type="tel"
             required
-            aria-label="Mobile number on the order"
-            placeholder="Mobile on the order"
+            aria-label={t('mobileLabel')}
+            placeholder={t('mobilePh')}
             value={phone}
             maxLength={20}
+            dir="ltr"
             onChange={(e) => setPhone(e.target.value)}
-            className="w-full px-3.5 py-2.5 rounded-xl border border-line-strong text-xs focus:outline-none focus:ring-2 focus:ring-gold"
+            className="w-full text-start rtl:text-end px-3.5 py-2.5 rounded-xl border border-line-strong text-xs focus:outline-none focus:ring-2 focus:ring-gold"
           />
           <button
             type="submit"
@@ -164,7 +212,7 @@ export const OrderTrackerModal: React.FC<OrderTrackerModalProps> = ({
             className="bg-ink hover:bg-ink disabled:opacity-60 text-paper px-4 py-2.5 rounded-xl text-xs font-semibold flex items-center justify-center gap-1.5 transition-colors"
           >
             <Search className="w-4 h-4" />
-            <span>{searching ? 'Finding…' : 'Track'}</span>
+            <span>{searching ? t('finding') : t('track')}</span>
           </button>
         </form>
 
@@ -179,7 +227,7 @@ export const OrderTrackerModal: React.FC<OrderTrackerModalProps> = ({
                       {searchResult.id}
                     </span>
                     <div className="text-[10px] text-ink-muted">
-                      Placed on {new Date(searchResult.createdAt).toLocaleDateString()}
+                      {t('placed', { date: locale === 'ar' ? new Date(searchResult.createdAt).toLocaleDateString('ar-AE-u-nu-latn') : new Date(searchResult.createdAt).toLocaleDateString() })}
                     </div>
                   </div>
                   <span
@@ -192,13 +240,13 @@ export const OrderTrackerModal: React.FC<OrderTrackerModalProps> = ({
                     }`}
                   >
                     {/* Confirmed on WhatsApp (or by phone) by the shop: confirmed for the customer, as the shop's message says. */}
-                    {searchResult.status === 'pending_confirmation' && searchResult.whatsappCheck?.status === 'confirmed' ? 'confirmed' : searchResult.status.replace(/_/g, ' ')}
+                    {searchResult.status === 'pending_confirmation' && searchResult.whatsappCheck?.status === 'confirmed' ? (locale === 'ar' ? STATUS_AR.confirmed : 'confirmed') : locale === 'ar' ? (STATUS_AR[searchResult.status] ?? searchResult.status) : searchResult.status.replace(/_/g, ' ')}
                   </span>
                 </div>
 
                 {searchResult.photoOrder && !searchResult.photoOrder.amountConfirmed && searchResult.status !== 'cancelled' && (
                   <p role="status" data-testid="track-photo-checking" className="text-xs text-ink-soft bg-ivory border border-line rounded-xl px-3 py-2">
-                    Order from your photo: we&rsquo;re checking the photos and the amount. We&rsquo;ll confirm on WhatsApp, then send it.
+                    {t('photoChecking')}
                   </p>
                 )}
                 {searchResult.whatsappCheck && searchResult.status !== 'cancelled' && foundPhone && (
@@ -208,14 +256,14 @@ export const OrderTrackerModal: React.FC<OrderTrackerModalProps> = ({
                 {/* Bank transfer: the details and the screenshot upload are on the order's private page. */}
                 {searchResult.bankTransfer?.state === 'paid' ? (
                   <p role="status" className="flex items-center gap-1.5 font-semibold text-success bg-success-soft border border-success-line rounded-xl px-3 py-2">
-                    <CheckCircle2 className="w-4 h-4 shrink-0" aria-hidden="true" /> Your bank transfer has arrived. Thank you.
+                    <CheckCircle2 className="w-4 h-4 shrink-0" aria-hidden="true" /> {t('arrived')}
                   </p>
                 ) : searchResult.bankTransfer?.payPath ? (
                   <div className="bg-surface p-3 rounded-xl border border-line space-y-2">
                     <p className="text-ink-soft leading-relaxed">
                       {searchResult.bankTransfer.state === 'uploaded'
-                        ? 'We have your transfer screenshot and will confirm your order once we see the transfer.'
-                        : 'Paying by bank transfer: our bank details and the upload for your transfer screenshot are on your order’s private page.'}
+                        ? t('haveShot')
+                        : t('payBank')}
                     </p>
                     <a
                       href={searchResult.bankTransfer.payPath}
@@ -224,7 +272,7 @@ export const OrderTrackerModal: React.FC<OrderTrackerModalProps> = ({
                       className="w-full min-h-11 bg-ink hover:bg-ink-2 text-ivory font-semibold text-xs py-2.5 px-4 rounded-xl flex items-center justify-center gap-2 focus:outline-none focus-visible:ring-2 focus-visible:ring-gold focus-visible:ring-offset-2"
                     >
                       <Upload className="w-4 h-4 shrink-0" aria-hidden="true" />
-                      <span>{searchResult.bankTransfer.uploads > 0 ? 'Upload a different screenshot' : 'Upload your transfer screenshot'}</span>
+                      <span>{searchResult.bankTransfer.uploads > 0 ? t('different') : t('upload')}</span>
                     </a>
                   </div>
                 ) : null}
@@ -233,14 +281,14 @@ export const OrderTrackerModal: React.FC<OrderTrackerModalProps> = ({
                 {searchResult.status !== 'cancelled' && (
                   <div data-testid="tracking-box" className="bg-surface p-3 rounded-xl border border-line space-y-2">
                     <div className="flex justify-between items-center gap-3">
-                      <span className="text-ink-muted font-medium">Delivery:</span>
-                      <span className="font-medium text-ink text-right" data-testid="tracking-status">{searchResult.courier.live?.lastStatus || searchResult.courier.status}</span>
+                      <span className="text-ink-muted font-medium">{t('delivery')}</span>
+                      <span className="font-medium text-ink text-end" data-testid="tracking-status">{searchResult.courier.live?.lastStatus || searchResult.courier.status}</span>
                     </div>
 
                     {searchResult.courier.awbNumber ? (
                       <div className="flex flex-wrap justify-between items-center gap-2">
                         <span className="text-ink-muted font-medium">
-                          Tracking number{searchResult.courier.carrier ? ` (${searchResult.courier.carrier})` : ''}:
+                          {t('trackingNo', { carrier: searchResult.courier.carrier ? ` (${searchResult.courier.carrier})` : '' })}
                         </span>
                         <span className="flex items-center gap-1.5 min-w-0">
                           <span className="font-mono font-semibold text-ink break-anywhere" data-testid="tracking-awb">{searchResult.courier.awbNumber}</span>
@@ -248,13 +296,13 @@ export const OrderTrackerModal: React.FC<OrderTrackerModalProps> = ({
                         </span>
                       </div>
                     ) : searchResult.status === 'dispatched' || searchResult.status === 'out_for_delivery' ? (
-                      <p className="text-ink-soft leading-relaxed">Your parcel is with our delivery team; the tracking number will appear here once the courier scans it.</p>
+                      <p className="text-ink-soft leading-relaxed">{t('withTeam')}</p>
                     ) : searchResult.status !== 'delivered' ? (
-                      <p className="text-ink-soft leading-relaxed">The tracking number will appear here once your order is with the courier.</p>
+                      <p className="text-ink-soft leading-relaxed">{t('willAppear')}</p>
                     ) : null}
 
                     {searchResult.courier.live && searchResult.courier.live.events.length > 0 && (
-                      <ol data-testid="tracking-events" aria-label="Courier updates" className="border-t border-line pt-2 space-y-1.5">
+                      <ol data-testid="tracking-events" aria-label={t('updates')} className="border-t border-line pt-2 space-y-1.5">
                         {searchResult.courier.live.events.slice(0, 8).map((e, i) => (
                           <li key={i} className="flex gap-2">
                             <span className={`mt-1 w-2 h-2 rounded-full shrink-0 ${i === 0 ? 'bg-gold' : 'bg-line-strong'}`} aria-hidden="true" />
@@ -281,8 +329,8 @@ export const OrderTrackerModal: React.FC<OrderTrackerModalProps> = ({
                         rel="noopener noreferrer"
                         className="mt-1 flex items-center justify-center gap-1.5 w-full min-h-11 bg-gold/15 hover:bg-gold/25 text-ink font-semibold py-2 rounded-lg transition-colors text-xs focus:outline-none focus-visible:ring-2 focus-visible:ring-gold"
                       >
-                        <span>Track on the courier&apos;s page</span>
-                        <ExternalLink className="w-3.5 h-3.5" aria-hidden="true" />
+                        <span>{t('courierPage')}</span>
+                        <ExternalLink className="w-3.5 h-3.5 rtl:-scale-x-100" aria-hidden="true" />
                       </a>
                     )}
                   </div>
@@ -290,7 +338,7 @@ export const OrderTrackerModal: React.FC<OrderTrackerModalProps> = ({
 
                 {/* Items */}
                 <div>
-                  <span className="font-semibold text-ink-soft block mb-1">Items in this Parcel:</span>
+                  <span className="font-semibold text-ink-soft block mb-1">{t('items')}</span>
                   <div className="space-y-1">
                     {searchResult.items.map((i, idx) => (
                       <div key={idx} className="flex justify-between text-ink-soft text-[11px]">
@@ -307,7 +355,7 @@ export const OrderTrackerModal: React.FC<OrderTrackerModalProps> = ({
                 <div className="flex items-center gap-1.5 text-ink-muted text-[11px] pt-1">
                   <MapPin className="w-3.5 h-3.5 text-gold" />
                   <span>
-                    Delivering to {searchResult.firstName} in {searchResult.area}, {searchResult.emirate}
+                    {t('deliveringTo', { name: searchResult.firstName, area: searchResult.area, emirate: searchResult.emirate })}
                   </span>
                 </div>
               </div>

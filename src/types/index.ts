@@ -56,6 +56,10 @@ export interface Product {
   seoDescription?: string;
   description: string;
   shortDescription: string;
+  /** The Arabic name and descriptions (optional, Catalogue → the product): shown in the Arabic shop, else the English. */
+  titleAr?: string;
+  shortDescriptionAr?: string;
+  descriptionAr?: string;
   /** Bedding (bed sizes) or simple (plain variants). Absent: bedding. */
   productType?: ProductType;
   /** A category id from Settings → Catalogue (built-in: bedsheets, duvet-covers, fitted-sheets, hotel-luxury, silk-collection). */

@@ -1,5 +1,19 @@
 # Changelog
 
+## BUH-02.36.00 — 2026-11-05 22:30 UTC · [#69](https://github.com/cxsmtp/buh/pull/69)
+
+- **The shop in Arabic.** Shoppers whose phone or computer is set to Arabic get the whole shop in UAE Arabic, right to left: browsing, the product page, the bag, checkout, order tracking, the WhatsApp confirmation, payment and the help chat.
+- **English or Arabic, your choice.** A switch at the top of the shop, before the bag, changes the language, and the shop remembers it; messages that reach the owner stay in English.
+- **Arabic product words.** The product editor has an Arabic name, short and full description, and **Translate to Arabic** fills them from the English through AI writing (nothing invented, nothing saved until you save). Empty fields show the English, and the shop's search finds Arabic names.
+- **Terms & Conditions.** A new page (/terms), linked from the footer and the checkout, in English and Arabic, with your legal name, trade licence, address and contact filled in from Settings. It covers orders, payment, delivery, made-to-order pieces, no returns or exchanges for change of mind (personal, hygiene-sensitive bedding) and the 48-hour remedy for damaged, faulty or wrong items that UAE consumer law requires. Have a UAE lawyer review it before relying on it.
+- **Jeebly charges in Money.** Money → Courier shows what Jeebly charged per shipment, and each charge is a courier expense (Courier & delivery, paid to Jeebly), once per AWB. They come from Jeebly: from its replies, which the shop checks every 15 minutes (past shipments too), and from the statement CSV you download from the Jeebly portal (previewed first, a corrected figure updates the expense and keeps its history).
+- **Invoice fix: the extra charge.** The extra you add when booking the courier is now a line on the invoice, and a part-paid order's invoice shows what was paid and what is left to pay on delivery (reported: a card-paid order with AED 10 extra showed the right total but no line for it). Invoices already issued show the missing line too, with the same number and total.
+- **Status.**
+  - **Benchmark:** pending.
+  - **Tests:** pending.
+  - **Dependency audit:** pending.
+  - **Security scan:** pending.
+
 ## BUH-02.35.00 — 2026-11-05 19:10 UTC · [#68](https://github.com/cxsmtp/buh/pull/68)
 
 - **Edit an order before its label.** **Edit order** on any order not yet booked with the courier: the customer's name, mobile, email and full address, and for a cash order also each item's quantity and price (0 removes it) and the delivery charge.

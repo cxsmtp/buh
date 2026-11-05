@@ -1,6 +1,7 @@
 import type { Order } from '@/types';
 import { callJeebly, fetchJeeblyLabel, JEEBLY_API, jeeblyOk, jeeblySaid, mapJeeblyTracking, type JeeblyTracking } from '@/lib/jeeblyApi';
 import { auditOrThrow } from './audit';
+import { noteJeeblyReply } from './courierCharges';
 import { redact } from './log';
 import { getOrder, noteCarrierCancel } from './orders';
 import { rateLimit } from './rateLimit';
@@ -69,6 +70,8 @@ export async function jeeblyTrackingFor(order: Order, { fresh = false } = {}): P
   const value: JeeblyTracking | { error: string } = !call.reached
     ? { error: `Could not reach Jeebly (${call.error}).` }
     : mapJeeblyTracking(call.data) ?? { error: `Jeebly gave no tracking (HTTP ${call.status})${jeeblySaid(call.data, [access.keys.apiKey, access.keys.clientKey]) ? `: ${jeeblySaid(call.data, [access.keys.apiKey, access.keys.clientKey])}` : ''}.` };
+  // What Jeebly says the shipment cost, when its tracking says so: a courier expense in Money.
+  if (call.reached && !('error' in value)) noteJeeblyReply(order, call.data);
   if (tracked.size > 5000) tracked.clear();
   tracked.set(key, { at: Date.now(), value });
   return value;

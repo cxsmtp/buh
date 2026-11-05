@@ -633,6 +633,27 @@ const MIGRATIONS: Array<(db: DB) => void> = [
     `);
     ensureChangeTriggers(db);
   },
+  // 20: courier_charges (courierCharges.ts): what the courier charged for each shipment (from its
+  //     own replies or its statement), one row per carrier + AWB, each with its expense in Money
+  //     (category "Courier & delivery"). Add-only: a new table, watched with the expenses.
+  (db) => {
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS courier_charges (
+        carrier     TEXT NOT NULL,
+        awb         TEXT NOT NULL,
+        order_id    TEXT,
+        amount_fils INTEGER NOT NULL,
+        source      TEXT NOT NULL,
+        charged_on  TEXT NOT NULL,
+        expense_id  TEXT NOT NULL,
+        recorded_at TEXT NOT NULL,
+        recorded_by TEXT NOT NULL,
+        PRIMARY KEY (carrier, awb)
+      );
+      CREATE INDEX IF NOT EXISTS courier_charges_on ON courier_charges (charged_on);
+    `);
+    ensureChangeTriggers(db);
+  },
 ];
 
 // ── What changed since the last backup: the triggers (migration 16) ─────────
@@ -674,6 +695,7 @@ const WATCHED: Array<[string, string, string[], string?]> = [
   ['expenses', 'expenses', []],
   ['expense_versions', 'expenses', []],
   ['expense_bills', 'expenses', []],
+  ['courier_charges', 'expenses', []],
   ['admin_recovery_codes', 'accounts', []],
   // A sign-in moves the passkey's counter and last use: not a change to back up.
   ['admin_passkeys', 'accounts', ['public_key', 'transports', 'name', 'rp_id', 'device_type', 'backed_up', 'created_at']],

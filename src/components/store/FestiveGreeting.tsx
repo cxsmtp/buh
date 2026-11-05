@@ -39,7 +39,7 @@ export function FestiveGreeting({ theme, className = '', compact = false }: { th
   }
   return (
     <div role="note" data-festive="" style={festiveVars(theme)} className={`relative overflow-hidden rounded-2xl border border-festive-glow/40 bg-festive-soft px-4 py-3.5 sm:px-5 ${className}`}>
-      <FestivePattern motif={theme.motif} className="absolute inset-y-0 right-0 w-2/3 sm:w-1/2 text-festive-glow opacity-[0.22] pointer-events-none [mask-image:linear-gradient(to_left,black,transparent)]" />
+      <FestivePattern motif={theme.motif} className="absolute inset-y-0 end-0 w-2/3 sm:w-1/2 text-festive-glow opacity-[0.22] pointer-events-none [mask-image:linear-gradient(to_left,black,transparent)] rtl:[mask-image:linear-gradient(to_right,black,transparent)]" />
       <div className="relative flex items-center gap-3.5 min-w-0">
         <span className="shrink-0 w-11 h-11 rounded-full border border-festive-glow/70 bg-surface/60 text-festive flex items-center justify-center">
           <FestiveMotif motif={theme.motif} className="w-6 h-6" />

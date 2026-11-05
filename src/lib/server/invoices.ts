@@ -6,6 +6,7 @@ import { HttpError } from './http';
 import { bump } from './live';
 import { logEvent } from './log';
 import { emailConfigured, mailConfig, sender, transport } from './mail';
+import { creditInFils, dueOnDeliveryFils } from '@/lib/orderMoney';
 import { getOrder, isCustomerEmail } from './orders';
 import { PdfDoc, type RGB } from './pdf/pdf';
 import { mac } from './secrets';
@@ -54,7 +55,11 @@ export interface InvoiceData {
   subtotalFils: number;
   vat?: { rateBp: number; netFils: number; vatFils: number };
   totalFils: number;
-  payment: { method: Order['paymentMethod']; paid: boolean };
+  /**
+   * paidFils: what was paid before delivery (card, transfer, or moved from another order);
+   * dueFils: what the courier collects on delivery. Absent on invoices issued before BUH-02.36.00.
+   */
+  payment: { method: Order['paymentMethod']; paid: boolean; paidFils?: number; dueFils?: number; movedInFils?: number };
 }
 
 export interface InvoiceRecord {
@@ -168,7 +173,17 @@ function linesOf(order: Order): Line[] {
   extra('Cash-on-delivery fee', fils(order.codFee));
   extra(`Card payment fee${order.cardFeePercent ? ` (${order.cardFeePercent}%)` : ''}`, fils(order.cardFee));
   if (fils(order.discount)) lines.push({ label: 'Discount', quantity: 1, unitFils: -fils(order.discount), totalFils: -fils(order.discount) });
+  // The extra the owner added when booking the courier (it is in the total, so it is a line too).
+  extra(`Extra charge${order.extraCharge?.note ? ` (${order.extraCharge.note})` : ''}`, fils(order.extraCharge?.amount));
   return lines;
+}
+
+/** What was paid before delivery and what is collected on it (src/lib/orderMoney.ts, as the courier is told). */
+function paymentOf(order: Order, paid: boolean): InvoiceData['payment'] {
+  const totalFils = fils(order.total);
+  const dueFils = order.status === 'delivered' ? 0 : dueOnDeliveryFils(order);
+  const movedInFils = creditInFils(order);
+  return { method: order.paymentMethod, paid, paidFils: Math.max(0, totalFils - dueFils), dueFils, ...(movedInFils ? { movedInFils } : {}) };
 }
 
 function dataFor(order: Order, kind: Kind, number: string, issuedOn: string): InvoiceData {
@@ -186,7 +201,7 @@ function dataFor(order: Order, kind: Kind, number: string, issuedOn: string): In
     lines: linesOf(order),
     subtotalFils: fils(order.total) - fils(order.vatAdded),
     totalFils: fils(order.total),
-    payment: { method: order.paymentMethod, paid },
+    payment: paymentOf(order, paid),
   };
   if (kind === 'tax_invoice') {
     const v = orderVat(order.id)!;
@@ -257,7 +272,7 @@ const niceDate = (d: string) => {
 export function invoicePdf(orderId: string): { pdf: Buffer; number: string } | null {
   const r = rowOf(orderId);
   if (!r) return null;
-  const d = JSON.parse(r.data) as InvoiceData;
+  const d = repaired(JSON.parse(r.data) as InvoiceData, getOrder(orderId));
   const order = getOrder(orderId);
   const doc = new PdfDoc({ title: `${d.kind === 'tax_invoice' ? 'Tax Invoice' : 'Invoice'} ${d.number}`, author: d.seller.name, subject: `Order ${d.orderId}` });
   const L = 42;
@@ -304,7 +319,7 @@ export function invoicePdf(orderId: string): { pdf: Buffer; number: string } | n
     ['Date of supply', niceDate(d.supplyOn)],
     ['Order', d.orderId],
     ['Currency', 'UAE dirham (AED)'],
-    ['Payment', `${PAY[d.payment.method]}${d.payment.paid ? ' · paid' : d.payment.method === 'cod' ? ' · due on delivery' : ' · due'}`],
+    ['Payment', paymentText(d)],
   ];
   let fy = y;
   for (const [k, v] of facts) {
@@ -371,6 +386,12 @@ export function invoicePdf(orderId: string): { pdf: Buffer; number: string } | n
   doc.line(tx, y - 6, R, y - 6, INK, 1);
   y += 4;
   total(d.vat ? 'Total including VAT' : 'Total', `AED ${money(d.totalFils)}`, true);
+  // Part paid, part on delivery: both, so the customer sees what is left to pay.
+  const due = d.payment.dueFils;
+  if (due !== undefined && due > 0 && due < d.totalFils) {
+    total(d.payment.movedInFils && d.payment.method === 'cod' ? 'Paid (from an earlier order)' : `Paid (${PAY[d.payment.method].toLowerCase()})`, `AED ${money(d.totalFils - due)}`);
+    total('To pay on delivery', `AED ${money(due)}`, true);
+  }
   y += 10;
 
   // Notes.
@@ -398,6 +419,30 @@ export function invoicePdf(orderId: string): { pdf: Buffer; number: string } | n
   }
   footer();
   return { pdf: doc.render(), number: d.number };
+}
+
+/** "Card · paid", "Card · paid AED 103.50 · AED 10.00 on delivery", "Cash on delivery · due on delivery". */
+function paymentText(d: InvoiceData): string {
+  const p = d.payment;
+  const due = p.dueFils;
+  if (due !== undefined && due > 0 && due < d.totalFils) return `${PAY[p.method]} · paid AED ${money(d.totalFils - due)} · AED ${money(due)} on delivery`;
+  if (due === 0 && p.method === 'cod' && p.movedInFils) return 'Paid (from an earlier order)';
+  return `${PAY[p.method]}${p.paid ? ' · paid' : p.method === 'cod' ? ' · due on delivery' : ' · due'}`;
+}
+
+/**
+ * An invoice issued before BUH-02.36.00 left out the extra added when booking the courier (it was
+ * in the total but not in the lines, nor in what was left to pay). Shown with that line and that
+ * amount now; its number, date, lines and total stay as issued.
+ */
+function repaired(d: InvoiceData, order: Order | undefined): InvoiceData {
+  if (d.vat || d.payment.dueFils !== undefined) return d;
+  const gap = d.subtotalFils - d.lines.reduce((sum, l) => sum + l.totalFils, 0);
+  if (gap <= 0) return d;
+  const note = order?.extraCharge?.note;
+  const lines = [...d.lines, { label: `Extra charge${note ? ` (${note})` : ''}`, quantity: 1, unitFils: gap, totalFils: gap }];
+  const dueFils = d.payment.method === 'cod' || order?.status === 'delivered' ? undefined : gap;
+  return { ...d, lines, payment: { ...d.payment, ...(dueFils !== undefined ? { dueFils } : {}) } };
 }
 
 /** The file's name: Invoice-INV-2026-000123.pdf */

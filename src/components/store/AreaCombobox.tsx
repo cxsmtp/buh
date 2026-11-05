@@ -2,6 +2,13 @@
 
 import React, { useEffect, useId, useMemo, useRef, useState } from 'react';
 import { searchAreas, type UAEArea } from '@/data/uaeAreas';
+import { useT, type Words } from '@/lib/i18n';
+
+const WORDS = {
+  list: { en: 'Area suggestions', ar: 'اقتراحات المنطقة' },
+  one: { en: '{n} suggestion', ar: 'اقتراح واحد' },
+  many: { en: '{n} suggestions', ar: '{n} اقتراحات' },
+} as const satisfies Words;
 
 /**
  * Area / neighbourhood: free text with suggestions from every emirate (the chosen one first).
@@ -25,6 +32,7 @@ interface Props {
 }
 
 export function AreaCombobox({ id, value, emirate, placeholder, className, required, onChange, onPick }: Props) {
+  const t = useT(WORDS);
   const listId = useId();
   const [open, setOpen] = useState(false);
   const [active, setActive] = useState(-1);
@@ -113,9 +121,9 @@ export function AreaCombobox({ id, value, emirate, placeholder, className, requi
         id={listId}
         ref={listRef}
         role="listbox"
-        aria-label="Area suggestions"
+        aria-label={t('list')}
         hidden={!shown}
-        className="absolute left-0 right-0 top-full z-30 mt-1 max-h-64 overflow-y-auto overscroll-contain rounded-xl border border-line-strong bg-surface py-1"
+        className="absolute inset-x-0 top-full z-30 mt-1 max-h-64 overflow-y-auto overscroll-contain rounded-xl border border-line-strong bg-surface py-1"
       >
         {shown &&
           matches.map((m, i) => {
@@ -145,7 +153,7 @@ export function AreaCombobox({ id, value, emirate, placeholder, className, requi
           })}
       </ul>
       <span className="sr-only" aria-live="polite">
-        {shown ? `${matches.length} suggestion${matches.length === 1 ? '' : 's'}` : ''}
+        {shown ? t(matches.length === 1 ? 'one' : 'many', { n: matches.length }) : ''}
       </span>
     </div>
   );

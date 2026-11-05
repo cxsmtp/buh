@@ -6,6 +6,17 @@ import { useShop } from '@/lib/client/shop';
 import { LocalPrice } from '@/lib/client/currency';
 import { isOnSale, productPhoto } from '@/lib/catalogFilter';
 import { feedSizes, photoSources } from '@/lib/client/photos';
+import { useLocale, useT, type Words } from '@/lib/i18n';
+import { productTitle } from '@/lib/i18n/product';
+
+const WORDS = {
+  styled: { en: 'Styled image', ar: 'صورة منسّقة' },
+  was: { en: 'was ', ar: 'كان ' },
+  reduced: { en: 'Reduced', ar: 'مخفّض' },
+  soldOut: { en: 'Sold out', ar: 'نفدت الكمية' },
+  only1: { en: 'Only 1 left', ar: 'بقيت قطعة واحدة فقط' },
+  onlyN: { en: 'Only {n} left', ar: 'بقي {n} فقط' },
+} as const satisfies Words;
 
 interface ProductCardProps {
   product: Product;
@@ -25,6 +36,8 @@ interface ProductCardProps {
  */
 export const ProductCard: React.FC<ProductCardProps> = ({ product, onSelect, eager = false, layout = 'grid' }) => {
   const { lowStockThreshold } = useShop();
+  const t = useT(WORDS);
+  const { locale } = useLocale();
   const soldOut = product.stockCount === 0;
   const fewLeft = !soldOut && product.stockCount <= lowStockThreshold;
   const sale = isOnSale(product);
@@ -64,24 +77,24 @@ export const ProductCard: React.FC<ProductCardProps> = ({ product, onSelect, eag
             />
           )}
           {styled && (
-            <span className="pointer-events-none absolute left-2 bottom-2 rounded-full bg-surface/90 px-2 py-0.5 text-[11px] font-semibold text-ink shadow-sm" data-testid="styled-tag">
-              Styled image
+            <span className="pointer-events-none absolute start-2 bottom-2 rounded-full bg-surface/90 px-2 py-0.5 text-[11px] font-semibold text-ink shadow-sm" data-testid="styled-tag">
+              {t('styled')}
             </span>
           )}
         </div>
         <div className={`pt-3 space-y-1 ${one ? 'px-4 sm:px-0.5' : 'px-0.5'}`}>
-          <h3 className={`font-serif leading-snug text-ink line-clamp-2 transition-colors group-hover:text-gold-deep ${one ? 'text-xl sm:text-lg' : 'text-base'}`}>
-            {product.title}
+          <h3 className={`font-serif leading-snug text-ink line-clamp-2 transition-colors group-hover:text-gold-deep ${one ? 'text-xl sm:text-lg' : 'text-base'}`} dir="auto">
+            {productTitle(product, locale)}
           </h3>
           <p className={`flex items-baseline flex-wrap gap-x-2 ${one ? 'text-[15px] sm:text-sm' : 'text-sm'}`}>
             <span className="text-ink tracking-[0.02em]">{`AED ${product.price}`}</span>
             {sale && (
               <span className="text-xs text-ink-muted line-through decoration-ink-muted/60">
-                <span className="sr-only">was </span>
+                <span className="sr-only">{t('was')}</span>
                 {`AED ${product.compareAtPrice}`}
               </span>
             )}
-            {sale && <span className="label-caps !text-[10px] text-rose-deep">Reduced</span>}
+            {sale && <span className="label-caps !text-[10px] text-rose-deep">{t('reduced')}</span>}
           </p>
           <LocalPrice aed={product.price} className="text-[11px] block" />
           {product.giftLine && (
@@ -91,7 +104,7 @@ export const ProductCard: React.FC<ProductCardProps> = ({ product, onSelect, eag
           )}
           {(soldOut || fewLeft) && (
             <p className={`text-[11px] tracking-[0.04em] ${soldOut ? 'text-ink-muted' : 'text-warning'}`}>
-              {soldOut ? 'Sold out' : product.stockCount === 1 ? 'Only 1 left' : `Only ${product.stockCount} left`}
+              {soldOut ? t('soldOut') : product.stockCount === 1 ? t('only1') : t('onlyN', { n: product.stockCount })}
             </p>
           )}
         </div>

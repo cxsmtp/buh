@@ -8,6 +8,37 @@ import { LocalPrice } from '@/lib/client/currency';
 import { encodeBag, inAppBrowser } from '@/lib/client/landing';
 import { sheetRow } from '@/lib/measurements';
 import { X, Trash2, ArrowRight, ShoppingBag, Truck, ShieldCheck } from 'lucide-react';
+import { useLocale, useT, type Words } from '@/lib/i18n';
+import { productTitle } from '@/lib/i18n/product';
+
+const WORDS = {
+  standard: { en: 'Standard delivery', ar: 'توصيل عادي' },
+  title: { en: 'Your bag', ar: 'حقيبتك' },
+  item: { en: 'item', ar: 'قطعة' },
+  items: { en: 'items', ar: 'قطع' },
+  close: { en: 'Close bag', ar: 'إغلاق الحقيبة' },
+  toAll: { en: '{name} to all seven emirates', ar: '{name} إلى الإمارات السبع' },
+  empty: { en: 'Your bag is empty', ar: 'حقيبتك فارغة' },
+  emptyText: { en: 'Browse our luxury bed sheet collections tailored for UAE homes and add to your bag.', ar: 'تصفّح مجموعات مفارش السرير الفاخرة المصمّمة لبيوت الإمارات وأضف ما يعجبك إلى حقيبتك.' },
+  explore: { en: 'Explore the collection', ar: 'استكشف المجموعة' },
+  justSoldOut: { en: 'Just sold out: please remove it to check out.', ar: 'نفدت للتو: يُرجى إزالتها لإتمام الطلب.' },
+  onlyLeft: { en: 'Only {n} left', ar: 'بقي {n} فقط' },
+  fewer: { en: 'One fewer {title}', ar: 'قطعة أقل من {title}' },
+  more: { en: 'One more {title}', ar: 'قطعة أخرى من {title}' },
+  removeItem: { en: 'Remove item', ar: 'إزالة القطعة' },
+  remove: { en: 'Remove {title}', ar: 'إزالة {title}' },
+  subtotal: { en: 'Subtotal', ar: 'المجموع الفرعي' },
+  delivery: { en: 'Delivery to all seven emirates', ar: 'التوصيل إلى الإمارات السبع' },
+  pay: { en: 'Cash on delivery or bank transfer', ar: 'الدفع عند الاستلام أو التحويل البنكي' },
+  door: { en: 'Delivered to your door', ar: 'التوصيل حتى باب منزلك' },
+  total: { en: 'Total · {name}', ar: 'الإجمالي · {name}' },
+  checkout: { en: 'Proceed to Checkout', ar: 'المتابعة لإتمام الطلب' },
+  myBag: { en: 'My bag', ar: 'حقيبتي' },
+  copiedInApp: { en: 'Link copied: paste it into Safari or Chrome to continue there.', ar: 'تم نسخ الرابط: الصقه في Safari أو Chrome للمتابعة هناك.' },
+  copied: { en: 'Link copied.', ar: 'تم نسخ الرابط.' },
+  continueBrowser: { en: 'Continue in your browser (copy a link to this bag)', ar: 'تابع في متصفحك (انسخ رابط هذه الحقيبة)' },
+  saveLink: { en: 'Save or send this bag as a link', ar: 'احفظ هذه الحقيبة أو أرسلها كرابط' },
+} as const satisfies Words;
 
 interface CartDrawerProps {
   isOpen: boolean;
@@ -27,10 +58,12 @@ export const CartDrawer: React.FC<CartDrawerProps> = ({
   onCheckout,
 }) => {
   const { lowStockThreshold, delivery } = useShop();
+  const t = useT(WORDS);
+  const { locale } = useLocale();
   if (!isOpen) return null;
 
   // Standard delivery: what Settings → Delivery calls it and charges (the server charges the same).
-  const deliveryName = delivery.standardName || 'Standard delivery';
+  const deliveryName = delivery.standardName || t('standard');
   const deliveryFils = toFils(Number(delivery.standardFee) || 0);
   const subtotal = formatAed(cartFils(items));
   const grandTotal = formatAed(cartFils(items) + deliveryFils);
@@ -47,21 +80,21 @@ export const CartDrawer: React.FC<CartDrawerProps> = ({
       />
 
       {/* Up to 28rem wide, leaving a strip of the page showing on phones (never wider than the screen). */}
-      <div className="fixed top-0 bottom-0 right-0 left-8 sm:left-auto flex justify-end">
-        <div className="w-full sm:w-[28rem] h-[100dvh] bg-surface border-l border-line flex flex-col pt-safe pb-safe slide-in-right">
+      <div className="fixed top-0 bottom-0 end-0 start-8 sm:start-auto flex justify-end">
+        <div className="w-full sm:w-[28rem] h-[100dvh] bg-surface border-s border-line flex flex-col pt-safe pb-safe slide-in-right">
           {/* Header */}
           <div className="sticky top-0 px-4 py-3.5 border-b border-line flex items-center justify-between gap-3 bg-surface">
             <div className="flex items-baseline gap-2.5 min-w-0">
-              <h2 id="bag-title" className="font-serif text-2xl text-ink">Your bag</h2>
+              <h2 id="bag-title" className="font-serif text-2xl text-ink">{t('title')}</h2>
               <span className="label-caps text-ink-muted">
-                {items.length} {items.length === 1 ? 'item' : 'items'}
+                {items.length} {t(items.length === 1 ? 'item' : 'items')}
               </span>
             </div>
             <button
               type="button"
               onClick={onClose}
-              aria-label="Close bag"
-              className="shrink-0 w-10 h-10 -mr-1.5 flex items-center justify-center text-ink rounded-full hover:bg-sand transition-colors"
+              aria-label={t('close')}
+              className="shrink-0 w-10 h-10 -me-1.5 flex items-center justify-center text-ink rounded-full hover:bg-sand transition-colors"
             >
               <X className="w-5 h-5" strokeWidth={1.5} />
             </button>
@@ -71,7 +104,7 @@ export const CartDrawer: React.FC<CartDrawerProps> = ({
           <div className="px-4 py-2.5 bg-ivory border-b border-line">
             <span className="flex items-center gap-2 text-xs text-ink-soft tracking-[0.02em]">
               <Truck className="w-4 h-4 text-gold-deep" strokeWidth={1.5} />
-              <span>{deliveryName} to all seven emirates</span>
+              <span>{t('toAll', { name: deliveryName })}</span>
             </span>
           </div>
 
@@ -80,15 +113,15 @@ export const CartDrawer: React.FC<CartDrawerProps> = ({
             {items.length === 0 ? (
               <div className="py-16 text-center text-ink-muted space-y-3">
                 <ShoppingBag className="w-12 h-12 mx-auto text-sand stroke-1" />
-                <p className="font-serif text-xl text-ink">Your bag is empty</p>
+                <p className="font-serif text-xl text-ink">{t('empty')}</p>
                 <p className="text-xs text-ink-muted max-w-xs mx-auto">
-                  Browse our luxury bed sheet collections tailored for UAE homes and add to your bag.
+                  {t('emptyText')}
                 </p>
                 <button
                   onClick={onClose}
                   className="mt-2 inline-flex items-center gap-1 text-xs font-semibold text-gold-deep hover:underline"
                 >
-                  Explore the collection
+                  {t('explore')}
                 </button>
               </div>
             ) : (
@@ -107,7 +140,7 @@ export const CartDrawer: React.FC<CartDrawerProps> = ({
                       {/* eslint-disable-next-line @next/next/no-img-element */}
                       <img
                         src={item.product.featuredImage}
-                        alt={item.product.title}
+                        alt={productTitle(item.product, locale)}
                         className="w-full h-full object-cover"
                       />
                     </div>
@@ -115,8 +148,8 @@ export const CartDrawer: React.FC<CartDrawerProps> = ({
                     {/* Item Details */}
                     <div className="flex-1 min-w-0 flex flex-col justify-between">
                       <div>
-                        <h4 className="font-serif text-base leading-snug text-ink line-clamp-2 pr-8">
-                          {item.product.title}
+                        <h4 className="font-serif text-base leading-snug text-ink line-clamp-2 pe-8" dir="auto">
+                          {productTitle(item.product, locale)}
                         </h4>
                         <div className="flex flex-wrap items-center gap-x-1 text-[11px] text-ink-soft mt-1 min-w-0">
                           <span>{item.selectedProfile.name}</span>
@@ -133,9 +166,9 @@ export const CartDrawer: React.FC<CartDrawerProps> = ({
                           </div>
                         )}
                         {left === 0 ? (
-                          <div className="text-[10px] font-semibold text-danger mt-0.5" role="status">Just sold out: please remove it to check out.</div>
+                          <div className="text-[10px] font-semibold text-danger mt-0.5" role="status">{t('justSoldOut')}</div>
                         ) : left <= lowStockThreshold ? (
-                          <div className="text-[10px] font-semibold text-warning mt-0.5">Only {left} left</div>
+                          <div className="text-[10px] font-semibold text-warning mt-0.5">{t('onlyLeft', { n: left })}</div>
                         ) : null}
                       </div>
 
@@ -145,7 +178,7 @@ export const CartDrawer: React.FC<CartDrawerProps> = ({
                           <button
                             type="button"
                             onClick={() => onUpdateQuantity(idx, item.quantity - 1)}
-                            aria-label={`One fewer ${item.product.title}`}
+                            aria-label={t('fewer', { title: productTitle(item.product, locale) })}
                             className="w-8 h-8 text-sm text-ink hover:bg-sand"
                           >
                             -
@@ -157,14 +190,14 @@ export const CartDrawer: React.FC<CartDrawerProps> = ({
                             type="button"
                             onClick={() => onUpdateQuantity(idx, item.quantity + 1)}
                             disabled={item.quantity >= left}
-                            aria-label={`One more ${item.product.title}`}
+                            aria-label={t('more', { title: productTitle(item.product, locale) })}
                             className="w-8 h-8 text-sm text-ink hover:bg-sand disabled:opacity-30"
                           >
                             +
                           </button>
                         </div>
 
-                        <div className="text-right">
+                        <div className="text-end">
                           <span className="text-sm text-ink">
                             AED {itemTotalPrice}
                           </span>
@@ -175,9 +208,9 @@ export const CartDrawer: React.FC<CartDrawerProps> = ({
                     {/* Remove Item */}
                     <button
                       onClick={() => onRemoveItem(idx)}
-                      className="absolute top-3 right-0 w-8 h-8 flex items-center justify-center rounded-full text-ink-muted hover:text-danger transition-colors"
-                      title="Remove item"
-                      aria-label={`Remove ${item.product.title}`}
+                      className="absolute top-3 end-0 w-8 h-8 flex items-center justify-center rounded-full text-ink-muted hover:text-danger transition-colors"
+                      title={t('removeItem')}
+                      aria-label={t('remove', { title: productTitle(item.product, locale) })}
                     >
                       <Trash2 className="w-4 h-4" strokeWidth={1.5} />
                     </button>
@@ -189,11 +222,11 @@ export const CartDrawer: React.FC<CartDrawerProps> = ({
               <div className="py-4 space-y-3">
                 <div className="space-y-1.5 text-xs text-ink-soft">
                   <div className="flex flex-wrap justify-between gap-x-3">
-                    <span>Subtotal</span>
+                    <span>{t('subtotal')}</span>
                     <span className="text-ink">AED {subtotal}</span>
                   </div>
                   <div className="flex flex-wrap justify-between gap-x-3">
-                    <span>Delivery to all seven emirates</span>
+                    <span>{t('delivery')}</span>
                     <span className={deliveryFils ? 'text-ink' : 'text-success'}>{deliveryFils ? `AED ${formatAed(deliveryFils)}` : deliveryName}</span>
                   </div>
                 </div>
@@ -201,9 +234,9 @@ export const CartDrawer: React.FC<CartDrawerProps> = ({
                 <p className="flex flex-wrap items-center justify-center gap-x-3 gap-y-1 text-[10px] text-ink-soft text-center">
                   <span className="flex items-center gap-1">
                     <ShieldCheck className="w-3.5 h-3.5 text-gold-deep" strokeWidth={1.5} />
-                    Cash on delivery or bank transfer
+                    {t('pay')}
                   </span>
-                  <span>Delivered to your door</span>
+                  <span>{t('door')}</span>
                 </p>
               </div>
             )}
@@ -213,8 +246,8 @@ export const CartDrawer: React.FC<CartDrawerProps> = ({
           {items.length > 0 && (
             <div className="shrink-0 px-4 pt-3 pb-4 bg-ivory border-t border-line space-y-3">
               <div className="flex flex-wrap items-baseline justify-between gap-x-3 text-sm text-ink">
-                <span className="label-caps text-ink-muted">Total · {deliveryName.toLowerCase()}</span>
-                <span className="text-right tracking-[0.02em]">
+                <span className="label-caps text-ink-muted">{t('total', { name: deliveryName.toLowerCase() })}</span>
+                <span className="text-end tracking-[0.02em]">
                   AED {grandTotal}
                   <LocalPrice aed={Number(grandTotal)} className="text-[10px] block" />
                 </span>
@@ -228,8 +261,8 @@ export const CartDrawer: React.FC<CartDrawerProps> = ({
                 }}
                 className="w-full bg-ink hover:bg-ink-2 text-ivory font-medium tracking-[0.04em] text-sm py-3.5 px-3 rounded-xl flex items-center justify-center gap-2 transition-colors disabled:opacity-50"
               >
-                <span>Proceed to Checkout</span>
-                <ArrowRight className="w-4 h-4 shrink-0 text-gold-light" />
+                <span>{t('checkout')}</span>
+                <ArrowRight className="w-4 h-4 shrink-0 text-gold-light rtl:-scale-x-100" />
               </button>
             </div>
           )}
@@ -246,16 +279,17 @@ export const CartDrawer: React.FC<CartDrawerProps> = ({
  */
 function BagLinkButton({ items }: { items: CartItem[] }) {
   const [done, setDone] = React.useState('');
+  const t = useT(WORDS);
   const [inApp] = React.useState(() => typeof navigator !== 'undefined' && inAppBrowser());
   const share = async () => {
     const url = `${window.location.origin}/?bag=${encodeBag(items.map((i) => ({ productId: i.product.id, profileId: i.selectedProfile.id, color: i.selectedColor, quantity: i.quantity })))}`;
     try {
       if (navigator.share && !inApp) {
-        await navigator.share({ title: 'My bag', url });
+        await navigator.share({ title: t('myBag'), url });
         return;
       }
       await navigator.clipboard.writeText(url);
-      setDone(inApp ? 'Link copied: paste it into Safari or Chrome to continue there.' : 'Link copied.');
+      setDone(inApp ? t('copiedInApp') : t('copied'));
     } catch {
       setDone('');
     }
@@ -263,7 +297,7 @@ function BagLinkButton({ items }: { items: CartItem[] }) {
   return (
     <div className="text-center">
       <button type="button" onClick={() => void share()} className="text-[11px] font-semibold text-ink underline">
-        {inApp ? 'Continue in your browser (copy a link to this bag)' : 'Save or send this bag as a link'}
+        {inApp ? t('continueBrowser') : t('saveLink')}
       </button>
       {done && <p role="status" className="text-[10px] text-success mt-0.5">{done}</p>}
     </div>

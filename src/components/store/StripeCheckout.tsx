@@ -6,6 +6,18 @@ import type { Stripe, StripeElements, StripeElementsOptions, StripeExpressChecko
 import { Elements, ExpressCheckoutElement, PaymentElement, useElements, useStripe } from '@stripe/react-stripe-js';
 import { PALETTE } from '@/lib/design/tokens';
 import type { WalletContact } from '@/lib/walletAddress';
+import { useLocale, useT, type Locale, type Words } from '@/lib/i18n';
+
+const WORDS = {
+  failed: { en: 'The secure card form could not load (a blocker, or no connection). Please choose cash on delivery, or try again later.', ar: 'تعذّر تحميل نموذج البطاقة الآمن (مانع إعلانات أو لا يوجد اتصال). اختر الدفع عند الاستلام، أو حاول لاحقاً.' },
+  loading: { en: 'Loading the secure card form…', ar: 'جارٍ تحميل نموذج البطاقة الآمن…' },
+  express: { en: 'Express checkout · your address and phone fill in', ar: 'دفع سريع · يُملأ عنوانك ورقمك تلقائياً' },
+  notThrough: { en: 'The payment did not go through.', ar: 'لم تتم عملية الدفع.' },
+  notConfirmed: { en: 'The payment could not be confirmed.', ar: 'تعذّر تأكيد الدفع.' },
+  checkCard: { en: 'Please check the card details.', ar: 'يرجى التحقق من بيانات البطاقة.' },
+} as const satisfies Words;
+/** These messages outside a component (confirm()): the words in a language. */
+const say = (key: keyof typeof WORDS, locale: Locale) => (locale === 'ar' ? WORDS[key].ar : WORDS[key].en);
 
 /**
  * Stripe's own fields at checkout, loaded only there and only when card payments are on (this file
@@ -92,12 +104,13 @@ function appearance(): StripeElementsOptions['appearance'] {
   };
 }
 
-function options(amountFils: number): StripeElementsOptions {
-  return { mode: 'payment', amount: amountFils, currency: 'aed', paymentMethodTypes: ['card', 'link'], appearance: appearance() };
+function options(amountFils: number, locale: Locale = 'en'): StripeElementsOptions {
+  // Stripe's own card form in the shop's language.
+  return { mode: 'payment', amount: amountFils, currency: 'aed', paymentMethodTypes: ['card', 'link'], appearance: appearance(), locale };
 }
 
 /** After Stripe has the payment: confirm it in the browser (3-D Secure in a frame, no redirect for cards). */
-async function confirm(stripe: Stripe, elements: StripeElements, clientSecret: string, orderId: string): Promise<{ message: string; type?: string } | null> {
+async function confirm(stripe: Stripe, elements: StripeElements, clientSecret: string, orderId: string, locale: Locale = 'en'): Promise<{ message: string; type?: string } | null> {
   try {
     const { error } = await stripe.confirmPayment({
       elements,
@@ -107,25 +120,27 @@ async function confirm(stripe: Stripe, elements: StripeElements, clientSecret: s
       redirect: 'if_required',
     });
     if (!error) return null;
-    return { message: error.message || 'The payment did not go through.', type: error.type };
+    return { message: error.message || say('notThrough', locale), type: error.type };
   } catch {
     // Stripe.js itself failed (no connection): whether the card was charged is not known here.
-    return { message: 'The payment could not be confirmed.', type: 'api_connection_error' };
+    return { message: say('notConfirmed', locale), type: 'api_connection_error' };
   }
 }
 
 // ── Card typed in ───────────────────────────────────────────────────────────
 
 export function CardFields({ publishableKey, amountFils, onReady }: { publishableKey: string; amountFils: number; onReady: (pay: CardPay | null) => void }) {
+  const { locale } = useLocale();
+  const t = useT(WORDS);
   if (useStripeFailed(publishableKey)) {
     return (
       <p role="alert" className="text-[11px] text-danger py-2">
-        The secure card form could not load (a blocker, or no connection). Please choose cash on delivery, or try again later.
+        {t('failed')}
       </p>
     );
   }
   return (
-    <Elements stripe={stripeFor(publishableKey)} options={options(amountFils)}>
+    <Elements stripe={stripeFor(publishableKey)} options={options(amountFils, locale)}>
       <CardFieldsInner onReady={onReady} />
     </Elements>
   );
@@ -135,25 +150,27 @@ function CardFieldsInner({ onReady }: { onReady: (pay: CardPay | null) => void }
   const stripe = useStripe();
   const elements = useElements();
   const [loaded, setLoaded] = useState(false);
+  const { locale } = useLocale();
+  const t = useT(WORDS);
   useEffect(() => {
     if (!stripe || !elements || !loaded) return;
     onReady(async (createOrder) => {
       const { error } = await elements.submit();
-      if (error) return { ok: false, message: error.message || 'Please check the card details.' };
+      if (error) return { ok: false, message: error.message || say('checkCard', locale) };
       const started = await createOrder();
       if (!started.ok || !started.clientSecret || !started.orderId) return { ok: started.paid === true, orderId: started.orderId, message: started.message };
-      const problem = await confirm(stripe, elements, started.clientSecret, started.orderId);
+      const problem = await confirm(stripe, elements, started.clientSecret, started.orderId, locale);
       return { ok: !problem, message: problem?.message, errorType: problem?.type, orderId: started.orderId, clientSecret: started.clientSecret };
     });
     return () => onReady(null);
-  }, [stripe, elements, loaded, onReady]);
+  }, [stripe, elements, loaded, onReady, locale]);
   return (
     <div data-testid="card-element" className="min-h-[3rem]">
       <PaymentElement
         onReady={() => setLoaded(true)}
         options={{ layout: 'tabs', wallets: { applePay: 'never', googlePay: 'never' } }}
       />
-      {!loaded && <p className="text-[11px] text-ink-muted py-2">Loading the secure card form…</p>}
+      {!loaded && <p className="text-[11px] text-ink-muted py-2">{t('loading')}</p>}
     </div>
   );
 }
@@ -186,9 +203,10 @@ export function ExpressCheckout({
   onWallet: (p: WalletPayment) => Promise<StartedCardOrder & { reason?: 'invalid_shipping_address' | 'address_unserviceable' | 'fail' }>;
   onDone: (result: CardResult) => void;
 }) {
+  const { locale } = useLocale();
   if (useStripeFailed(publishableKey)) return null;
   return (
-    <Elements stripe={stripeFor(publishableKey)} options={options(amountFils)}>
+    <Elements stripe={stripeFor(publishableKey)} options={options(amountFils, locale)}>
       <ExpressInner shippingRate={shippingRate} lineItems={lineItems} servesEmirate={servesEmirate} onWallet={onWallet} onDone={onDone} />
     </Elements>
   );
@@ -199,6 +217,8 @@ function ExpressInner({ shippingRate, lineItems, servesEmirate, onWallet, onDone
   const elements = useElements();
   const [available, setAvailable] = useState<boolean | null>(null);
   const busy = useRef(false);
+  const { locale } = useLocale();
+  const t = useT(WORDS);
 
   const onConfirm = async (event: StripeExpressCheckoutElementConfirmEvent) => {
     if (!stripe || !elements || busy.current) return event.paymentFailed({ reason: 'fail' });
@@ -218,7 +238,7 @@ function ExpressInner({ shippingRate, lineItems, servesEmirate, onWallet, onDone
         event.paymentFailed({ reason: started.reason ?? 'fail', ...(started.message ? { message: started.message.slice(0, 200) } : {}) });
         return onDone({ ok: started.paid === true, orderId: started.orderId, message: started.message });
       }
-      const problem = await confirm(stripe, elements, started.clientSecret, started.orderId);
+      const problem = await confirm(stripe, elements, started.clientSecret, started.orderId, locale);
       if (problem) event.paymentFailed({ reason: 'fail' });
       onDone({ ok: !problem, message: problem?.message, errorType: problem?.type, orderId: started.orderId, clientSecret: started.clientSecret });
     } finally {
@@ -228,7 +248,7 @@ function ExpressInner({ shippingRate, lineItems, servesEmirate, onWallet, onDone
 
   return (
     <div data-testid="express-checkout" className={available === false ? 'hidden' : 'space-y-1.5'}>
-      {available && <p className="label-caps text-ink-muted text-center">Express checkout · your address and phone fill in</p>}
+      {available && <p className="label-caps text-ink-muted text-center">{t('express')}</p>}
       <ExpressCheckoutElement
         options={{
           emailRequired: true,

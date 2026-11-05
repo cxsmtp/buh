@@ -216,3 +216,48 @@ test('the invoices are in the backup and come back with the restore', async () =
   db.close();
   fs.rmSync(target, { recursive: true, force: true });
 });
+
+/** As if paid by card (Stripe's part is covered by the Stripe tests). */
+function paidByCard(id: string) {
+  const o = orders.getOrder(id)!;
+  getDb()
+    .prepare("UPDATE orders SET payment_method = 'online_card', card_state = 'paid', paid_fils = ?, payment_ref = ?, payment_status = 'paid', data = json_set(json_set(json_set(data, '$.paymentMethod', 'online_card'), '$.paymentStatus', 'paid'), '$.courier.codAmountCollected', 0) WHERE id = ?")
+    .run(Math.round(o.total * 100), `pi_invoice_${id}`, id);
+  return orders.getOrder(id)!;
+}
+
+test('reported: the extra added on booking (AED 10 on a card-paid order) is a line on the invoice, and the invoice says what is left to pay on delivery', () => {
+  const o = confirmed();
+  paidByCard(o.id);
+  const paid = orders.getOrder(o.id)!.total;
+  orders.setExtraCharge(o.id, 10, 'Second delivery attempt', OWNER);
+  invoices.issueOrderInvoice(o.id, OWNER);
+  const text = pdfText(invoices.invoicePdf(o.id)!.pdf);
+  for (const want of ['Extra charge (Second delivery attempt)', '10.00', `AED ${(paid + 10).toFixed(2)}`, `paid AED ${paid.toFixed(2)}`, 'AED 10.00 on delivery', 'To pay on delivery']) assert.ok(text.includes(want), `${want} in:\n${text}`);
+  // Cash on delivery with an extra: a line too, all due on delivery.
+  const c = confirmed();
+  orders.setExtraCharge(c.id, 15, '', OWNER);
+  invoices.issueOrderInvoice(c.id, OWNER);
+  const cod = pdfText(invoices.invoicePdf(c.id)!.pdf);
+  assert.ok(cod.includes('Extra charge'), cod);
+  assert.ok(cod.includes('Cash on delivery · due on delivery'), cod);
+  assert.ok(!cod.includes('To pay on delivery'), 'nothing was paid before');
+});
+
+test('an invoice issued before the fix (its lines short of its total by the extra) shows the missing line and what is due; its number and total stay', () => {
+  const o = confirmed();
+  paidByCard(o.id);
+  orders.setExtraCharge(o.id, 10, '', OWNER);
+  const { invoice } = invoices.issueOrderInvoice(o.id, OWNER);
+  // As BUH-02.35.00 stored it: no extra line, no amounts paid or due.
+  const row = getDb().prepare('SELECT data FROM invoices WHERE order_id = ?').pluck().get(o.id) as string;
+  const old = JSON.parse(row);
+  old.lines = old.lines.filter((l: { label: string }) => !l.label.startsWith('Extra charge'));
+  old.payment = { method: 'online_card', paid: true };
+  getDb().prepare('UPDATE invoices SET data = ? WHERE order_id = ?').run(JSON.stringify(old), o.id);
+  const text = pdfText(invoices.invoicePdf(o.id)!.pdf);
+  assert.ok(text.includes('Extra charge'), text);
+  assert.ok(text.includes('AED 10.00 on delivery'), text);
+  assert.ok(text.includes(invoice.number));
+  assert.ok(text.includes(`AED ${invoice.total.toFixed(2)}`));
+});

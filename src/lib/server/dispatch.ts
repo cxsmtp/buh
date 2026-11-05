@@ -1,3 +1,4 @@
+import { noteJeeblyReply } from './courierCharges';
 import { createJeeblyShipment, jeeblyModeOf } from '@/lib/jeebly';
 import { createEchoShipment } from '@/lib/echo';
 import { BLOCKED_MESSAGE, carrierLabel, ECO_LIVE_NOT_CONNECTED } from '@/lib/courierMode';
@@ -179,7 +180,8 @@ export async function dispatchOrder(input: {
     // Booked with a real courier: the order is confirmed for the customer too (once; never a test booking).
     if (result.success && !result.isSimulated && saved.status !== 'cancelled' && saved.customer.email) void emailOrder(saved.id, 'confirmed');
     const { rawResponse: _raw, ...safe } = result as typeof result & { rawResponse?: unknown };
-    void _raw;
+    // What Jeebly says the shipment cost, when its reply says so: a courier expense in Money.
+    if (result.success && provider === 'jeebly' && !result.isSimulated && _raw) noteJeeblyReply(saved, _raw);
     return {
       status: result.success ? 200 : 502,
       body: { ...(safe as Record<string, unknown>), order: saved },

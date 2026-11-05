@@ -393,6 +393,8 @@ export function startMonitor() {
   const tick = async () => {
     try {
       await checkAndAlert();
+      // Courier charges from Jeebly, a few shipments each time (past ones too), for Money.
+      await import('./courierCharges').then((m) => m.syncJeeblyCharges()).catch((err) => logEvent('warn', 'courier_charges_sync_failed', { error: err instanceof Error ? err.message : String(err) }));
       const now = new Date();
       const dubaiHour = (now.getUTCHours() + 4) % 24;
       const today = new Date(now.getTime() + 4 * 3600_000).toISOString().slice(0, 10);

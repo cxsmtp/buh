@@ -5,6 +5,10 @@ import type { Story } from '@/lib/catalogFilter';
 import type { MotifId } from '@/lib/festivals/catalog';
 import { photoSources } from '@/lib/client/photos';
 import { FestiveMotif } from './FestiveMotif';
+import { useLocale, useT, type Words } from '@/lib/i18n';
+import { catalogLabel } from './FilterSheet';
+
+const WORDS = { collections: { en: 'Collections', ar: 'المجموعات' } } as const satisfies Words;
 
 interface StoryChipsProps {
   stories: Story[];
@@ -23,19 +27,22 @@ interface StoryChipsProps {
  * with its motif).
  */
 export function StoryChips({ stories, activeId, onPick, logo, motif }: StoryChipsProps) {
+  const t = useT(WORDS);
+  const { locale } = useLocale();
   if (stories.length < 2) return null;
   return (
-    <div role="group" aria-label="Collections" className="-mx-4 sm:mx-0">
+    <div role="group" aria-label={t('collections')} className="-mx-4 sm:mx-0">
       <ul className="flex gap-4 sm:gap-5 overflow-x-auto no-scrollbar px-4 sm:px-0 py-1.5 snap-x">
         {stories.map((s) => {
           const active = s.id === activeId;
+          const label = catalogLabel(s.label, locale);
           const photo = s.image ? photoSources(s.image, [128, 192]) : null;
           return (
             <li key={s.id} className="snap-start shrink-0">
               <button
                 type="button"
                 aria-pressed={active}
-                aria-label={s.label}
+                aria-label={label}
                 onClick={() => onPick(s)}
                 className="w-[4.5rem] flex flex-col items-center gap-2 rounded-xl text-center"
               >
@@ -48,17 +55,17 @@ export function StoryChips({ stories, activeId, onPick, logo, motif }: StoryChip
                         // eslint-disable-next-line @next/next/no-img-element
                         <img src={photo.src} srcSet={photo.srcSet} sizes="64px" alt="" width={64} height={64} loading="lazy" decoding="async" className="photo w-full h-full object-cover" />
                       ) : (
-                        <span className="font-serif text-2xl text-gold-deep">{s.label.trim().charAt(0)}</span>
+                        <span className="font-serif text-2xl text-gold-deep">{label.trim().charAt(0)}</span>
                       )}
                     </span>
                   </span>
                   {active && motif && (
-                    <span className="absolute -bottom-0.5 -right-0.5 w-6 h-6 rounded-full bg-ivory border border-festive-glow text-festive flex items-center justify-center" aria-hidden="true">
+                    <span className="absolute -bottom-0.5 -end-0.5 w-6 h-6 rounded-full bg-ivory border border-festive-glow text-festive flex items-center justify-center" aria-hidden="true">
                       <FestiveMotif motif={motif} className="w-3.5 h-3.5" strokeWidth={1.5} />
                     </span>
                   )}
                 </span>
-                <span className={`block w-full text-[11px] leading-tight line-clamp-2 tracking-[0.02em] ${active ? 'text-ink font-medium' : 'text-ink-soft'}`}>{s.label}</span>
+                <span className={`block w-full text-[11px] leading-tight line-clamp-2 tracking-[0.02em] ${active ? 'text-ink font-medium' : 'text-ink-soft'}`}>{label}</span>
               </button>
             </li>
           );

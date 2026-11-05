@@ -548,6 +548,54 @@ Return exactly this JSON:
   return { giftLines, festivals, model, provider: ai.provider };
 }
 
+const TRANSLATE_FIELDS = new Set(['image', 'imageId', 'imageUrl', 'title', 'shortDescription', 'description']);
+
+/** The model's JSON: { titleAr, shortDescriptionAr, descriptionAr }, each cut to its field's length. */
+export function parseTranslation(text: string): { titleAr: string; shortDescriptionAr: string; descriptionAr: string } {
+  const bad = () => new HttpError(502, 'The AI’s answer could not be read. Please try again.', {}, { code: 'ai_bad_reply' });
+  const m = text.match(/\{[\s\S]*\}/);
+  if (!m) throw bad();
+  let j: Record<string, unknown>;
+  try {
+    j = JSON.parse(m[0]) as Record<string, unknown>;
+  } catch {
+    throw bad();
+  }
+  const s = (v: unknown, max: number) => (typeof v === 'string' ? plain(v, { lines: true }).slice(0, max) : '');
+  const out = { titleAr: s(j.titleAr, 160), shortDescriptionAr: s(j.shortDescriptionAr, 300), descriptionAr: s(j.descriptionAr, 4000) };
+  if (!out.titleAr) throw bad();
+  return out;
+}
+
+/**
+ * "Translate to Arabic" (product editor, for the Arabic shop): the product's English name and
+ * descriptions in natural UAE Arabic, with its photo for context. Nothing is invented and nothing
+ * is saved: the editor shows them for the owner to check and save. Counted like a description.
+ */
+export async function translateProduct(body: Record<string, unknown>, actor: string): Promise<{ titleAr: string; shortDescriptionAr: string; descriptionAr: string; model: string; provider: AiProvider }> {
+  for (const k of Object.keys(body)) if (!TRANSLATE_FIELDS.has(k)) throw new HttpError(400, `Unexpected field: ${k.slice(0, 30)}.`);
+  const title = clamp(plain(body.title), 160);
+  if (!title) throw new HttpError(400, 'Give the product a name first.');
+  const short = clamp(plain(body.shortDescription), 300);
+  const description = clamp(plain(body.description, { lines: true }), 4000);
+  const ai = readySettings();
+  const image = resolveImage(body);
+  if (ai.provider !== 'anthropic' && image.kind === 'url') throw new HttpError(400, 'Use a photo uploaded to the shop (add it again from the gallery).');
+  enforceLimit(`ai-describe:${actor}`, DESCRIBE_LIMIT.max, DESCRIBE_LIMIT.windowMs, 'That is 20 descriptions this hour. Please wait a while before the next one.');
+  const user = `Translate this product's English shop text into natural, warm Modern Standard Arabic as used by shops in the UAE. Keep the meaning exactly: add nothing, leave nothing out, invent no facts. Keep brand names, measurements, numbers (Western digits), "AED" and sizes as they are. Keep line breaks.
+Name: ${JSON.stringify(title)}
+Short description: ${JSON.stringify(short)}
+Full description: ${JSON.stringify(description)}
+
+Return exactly this JSON:
+{"titleAr": "…", "shortDescriptionAr": "…", "descriptionAr": "…"}`;
+  const answer = await ask(ai, image, user, 'You are a careful Arabic translator for a UAE home-linen shop. Answer with the JSON only.');
+  const out = parsed(answer, ai, parseTranslation);
+  const model = writerModel(ai);
+  audit('product.ai_translated', { by: actor, provider: ai.provider, model, photo: image.kind });
+  return { ...out, ...(short ? {} : { shortDescriptionAr: '' }), ...(description ? {} : { descriptionAr: '' }), model, provider: ai.provider };
+}
+
 /**
  * Settings → AI writing → Test: a tiny text call with the key typed (or the saved one) and the
  * model chosen. Ok, or Anthropic's reason (without the key).

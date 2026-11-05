@@ -1,6 +1,8 @@
 import type { Metadata } from 'next';
 import { notFound } from 'next/navigation';
+import { LocaleBoot } from '@/components/common/LocaleBoot';
 import { PayTransfer } from '@/components/store/PayTransfer';
+import { LocaleProvider } from '@/lib/i18n';
 import { bankAskLink, bankDetailsSaved, safeFirstName } from '@/lib/bankMessages';
 import { openPayOrderId } from '@/lib/server/bankPay';
 import { getOrder } from '@/lib/server/orders';
@@ -38,7 +40,9 @@ export default async function PayPage({ params }: { params: Promise<{ token: str
     ? { bankName: '', accountName: '', iban: '', accountNumber: '', swiftCode: '', branch: '', instructions: '' }
     : { bankName: bank.bankName, accountName: bank.accountName, iban: bank.iban, accountNumber: bank.accountNumber, swiftCode: bank.swiftCode, branch: bank.branch, instructions: bank.instructions };
   return (
-    <PayTransfer
+    <LocaleProvider>
+      <LocaleBoot />
+      <PayTransfer
       token={token}
       shopName={getSettings('brand').storeName || 'Beautiful UAE Home'}
       order={{ id: order.id, total: order.total, firstName: safeFirstName(order.customer.fullName), state: order.bankTransfer.state, uploads: order.bankTransfer.uploads }}
@@ -47,6 +51,7 @@ export default async function PayPage({ params }: { params: Promise<{ token: str
       askConfirms={ask?.confirms ?? false}
       supportEmail={onRequest && !ask ? contactEmail() : ''}
       bank={shown}
-    />
+      />
+    </LocaleProvider>
   );
 }

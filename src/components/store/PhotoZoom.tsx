@@ -4,6 +4,17 @@ import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { ChevronLeft, ChevronRight, Minus, Plus, X } from 'lucide-react';
 import { ZOOM_SIZES, photoSources } from '@/lib/client/photos';
+import { useT, type Words } from '@/lib/i18n';
+
+const WORDS = {
+  dialog: { en: '{title}, photo {n} of {count}, zoomed', ar: '{title}، الصورة {n} من {count}، مكبّرة' },
+  zoomOut: { en: 'Zoom out', ar: 'تصغير' },
+  zoomIn: { en: 'Zoom in', ar: 'تكبير' },
+  close: { en: 'Close zoom', ar: 'إغلاق التكبير' },
+  photoN: { en: '{title}, photo {n}', ar: '{title}، الصورة {n}' },
+  prev: { en: 'Previous photo', ar: 'الصورة السابقة' },
+  next: { en: 'Next photo', ar: 'الصورة التالية' },
+} as const satisfies Words;
 
 interface PhotoZoomProps {
   images: string[];
@@ -23,6 +34,7 @@ const FIT: View = { s: 1, x: 0, y: 0 };
  * phone's Back button close it, back on the same photo in the product.
  */
 export function PhotoZoom({ images, start, title, onClose }: PhotoZoomProps) {
+  const t = useT(WORDS);
   const [index, setIndex] = useState(start);
   const [view, setView] = useState<View>(FIT);
   // A finger or the mouse is down: the photo follows it without easing.
@@ -179,23 +191,23 @@ export function PhotoZoom({ images, start, title, onClose }: PhotoZoomProps) {
       ref={root}
       role="dialog"
       aria-modal="true"
-      aria-label={`${title}, photo ${index + 1} of ${count}, zoomed`}
+      aria-label={t('dialog', { title, n: index + 1, count })}
       onKeyDown={onKeyDown}
       className="look-paper fixed inset-0 z-[60] bg-black text-white flex flex-col sheet-fade"
       data-testid="photo-zoom"
     >
       <div className="absolute top-0 inset-x-0 z-10 flex items-center justify-between gap-2 px-3 pt-[calc(0.75rem+env(safe-area-inset-top,0px))]">
-        <span className="text-sm text-white/90 tabular-nums" aria-live="polite">
+        <span className="text-sm text-white/90 tabular-nums" aria-live="polite" dir="ltr">
           {index + 1} / {count}
         </span>
         <div className="flex items-center gap-2">
-          <button type="button" className={btn} onClick={() => setView((v) => zoomAt(v, v.s / 1.5, { x: 0, y: 0 }))} disabled={view.s <= 1} aria-label="Zoom out">
+          <button type="button" className={btn} onClick={() => setView((v) => zoomAt(v, v.s / 1.5, { x: 0, y: 0 }))} disabled={view.s <= 1} aria-label={t('zoomOut')}>
             <Minus className="w-5 h-5" aria-hidden="true" />
           </button>
-          <button type="button" className={btn} onClick={() => setView((v) => zoomAt(v, v.s * 1.5, { x: 0, y: 0 }))} disabled={view.s >= MAX} aria-label="Zoom in">
+          <button type="button" className={btn} onClick={() => setView((v) => zoomAt(v, v.s * 1.5, { x: 0, y: 0 }))} disabled={view.s >= MAX} aria-label={t('zoomIn')}>
             <Plus className="w-5 h-5" aria-hidden="true" />
           </button>
-          <button ref={closeBtn} type="button" className={btn} onClick={close} aria-label="Close zoom">
+          <button ref={closeBtn} type="button" className={btn} onClick={close} aria-label={t('close')}>
             <X className="w-5 h-5" aria-hidden="true" />
           </button>
         </div>
@@ -215,7 +227,7 @@ export function PhotoZoom({ images, start, title, onClose }: PhotoZoomProps) {
           src={s.src}
           srcSet={s.srcSet}
           sizes={s.srcSet ? ZOOM_SIZES : undefined}
-          alt={index === 0 ? title : `${title}, photo ${index + 1}`}
+          alt={index === 0 ? title : t('photoN', { title, n: index + 1 })}
           draggable={false}
           className="photo absolute inset-0 w-full h-full object-contain will-change-transform"
           style={{ transform: `translate3d(${view.x}px, ${view.y}px, 0) scale(${view.s})`, transition: held ? 'none' : 'transform 0.2s ease-out' }}
@@ -223,11 +235,11 @@ export function PhotoZoom({ images, start, title, onClose }: PhotoZoomProps) {
         />
       </div>
       {count > 1 && (
-        <div className="absolute bottom-0 inset-x-0 flex items-center justify-between px-3 pb-[calc(0.75rem+env(safe-area-inset-bottom,0px))]">
-          <button type="button" className={btn} onClick={() => go(index - 1)} disabled={index === 0} aria-label="Previous photo">
+        <div dir="ltr" className="absolute bottom-0 inset-x-0 flex items-center justify-between px-3 pb-[calc(0.75rem+env(safe-area-inset-bottom,0px))]">
+          <button type="button" className={btn} onClick={() => go(index - 1)} disabled={index === 0} aria-label={t('prev')}>
             <ChevronLeft className="w-5 h-5" aria-hidden="true" />
           </button>
-          <button type="button" className={btn} onClick={() => go(index + 1)} disabled={index === count - 1} aria-label="Next photo">
+          <button type="button" className={btn} onClick={() => go(index + 1)} disabled={index === count - 1} aria-label={t('next')}>
             <ChevronRight className="w-5 h-5" aria-hidden="true" />
           </button>
         </div>

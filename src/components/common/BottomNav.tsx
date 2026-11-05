@@ -2,6 +2,17 @@
 
 import React from 'react';
 import { Home, ShoppingBag, Truck, Search } from 'lucide-react';
+import { useT, type Words } from '@/lib/i18n';
+
+const WORDS = {
+  shop: { en: 'Shop', ar: 'المتجر' },
+  home: { en: 'Home', ar: 'الرئيسية' },
+  search: { en: 'Search', ar: 'بحث' },
+  bag: { en: 'Bag', ar: 'السلة' },
+  bag1: { en: 'Bag, {n} piece', ar: 'السلة، قطعة واحدة' },
+  bagN: { en: 'Bag, {n} pieces', ar: 'السلة، {n} قطع' },
+  orders: { en: 'Orders', ar: 'الطلبات' },
+} as const satisfies Words;
 
 interface BottomNavProps {
   /** Which shop tab is lit: the feed, or search while it is open. */
@@ -18,33 +29,34 @@ interface BottomNavProps {
 export const BottomNav: React.FC<BottomNavProps> = ({ storeTab, onHome, onOpenSearch, cartCount, onOpenCart, onOpenTrack, helpSlot = false }) => {
   // The shop on a phone: Home, Search, Bag and Orders, like an app's tab bar (hidden on wider screens,
   // where the header has them). The Help button takes the slot at its right end, so it never floats over the feed.
+  const t = useT(WORDS);
   const tab = (active: boolean) =>
     `flex-1 flex flex-col items-center justify-center gap-0.5 h-14 text-[11px] transition-transform active:scale-95 ${active ? 'text-ink font-semibold' : 'text-ink-soft'}`;
   return (
-    <nav aria-label="Shop" className="fixed bottom-0 inset-x-0 z-40 bg-ivory/95 backdrop-blur-md border-t border-line pb-safe px-safe md:hidden">
+    <nav aria-label={t('shop')} className="fixed bottom-0 inset-x-0 z-40 bg-ivory/95 backdrop-blur-md border-t border-line pb-safe px-safe md:hidden">
       <div className="flex items-stretch">
         <button type="button" onClick={onHome} aria-current={storeTab === 'home' ? 'page' : undefined} className={tab(storeTab === 'home')}>
           <Home className="w-6 h-6" aria-hidden="true" strokeWidth={storeTab === 'home' ? 2.25 : 1.75} />
-          <span>Home</span>
+          <span>{t('home')}</span>
         </button>
         <button type="button" onClick={onOpenSearch} className={tab(storeTab === 'search')}>
           <Search className="w-6 h-6" aria-hidden="true" strokeWidth={storeTab === 'search' ? 2.25 : 1.75} />
-          <span>Search</span>
+          <span>{t('search')}</span>
         </button>
-        <button type="button" onClick={onOpenCart} aria-label={`Bag${cartCount ? `, ${cartCount} ${cartCount === 1 ? 'piece' : 'pieces'}` : ''}`} className={tab(false)}>
+        <button type="button" onClick={onOpenCart} aria-label={cartCount ? t(cartCount === 1 ? 'bag1' : 'bagN', { n: cartCount }) : t('bag')} className={tab(false)}>
           <span className="relative">
             <ShoppingBag className="w-6 h-6" aria-hidden="true" strokeWidth={1.75} />
             {cartCount > 0 && (
-              <span className="absolute -top-1.5 -right-2.5 bg-gold text-ink text-[10px] font-semibold min-w-4 h-4 px-1 rounded-full flex items-center justify-center" aria-hidden="true">
+              <span className="absolute -top-1.5 -end-2.5 bg-gold text-ink text-[10px] font-semibold min-w-4 h-4 px-1 rounded-full flex items-center justify-center" aria-hidden="true">
                 {cartCount}
               </span>
             )}
           </span>
-          <span>Bag</span>
+          <span>{t('bag')}</span>
         </button>
         <button type="button" onClick={onOpenTrack} className={tab(false)}>
           <Truck className="w-6 h-6" aria-hidden="true" strokeWidth={1.75} />
-          <span>Orders</span>
+          <span>{t('orders')}</span>
         </button>
         {helpSlot && <span className="w-[4.5rem] shrink-0" aria-hidden="true" />}
       </div>

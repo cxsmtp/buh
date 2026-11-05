@@ -6,9 +6,47 @@ import type { ConfirmationResult } from 'firebase/auth';
 import { postJson } from '@/lib/apiClient';
 import { confirmFirebaseCode, firebaseErrorMessage, preloadFirebasePhone, sendFirebaseCode } from '@/lib/firebasePhoneClient';
 import type { PhoneVerificationConfig } from '@/types';
+import { useT, type Words } from '@/lib/i18n';
 
 /** Shown until the shop's settings load (the real address comes from the server at runtime). */
 export const DEFAULT_SUPPORT_EMAIL = 'orders@beautifuluaehome.com';
+
+const WORDS = {
+  enterUae: { en: 'Enter a UAE mobile number, e.g. 50 123 4567.', ar: 'أدخل رقم جوال إماراتي، مثل 50 123 4567.' },
+  sent: { en: 'We sent a 6-digit code by SMS to +971 {num}.', ar: 'أرسلنا رمزاً من 6 أرقام برسالة نصية إلى \u2066+971 {num}\u2069.' },
+  testMode: { en: 'Test mode: no SMS gateway is set up yet, so no text was sent to +971 {num}.', ar: 'وضع التجربة: لم تُضبط خدمة الرسائل بعد، لذلك لم تُرسل رسالة إلى \u2066+971 {num}\u2069.' },
+  sendFailed: { en: 'We could not send the code. Please try again.', ar: 'تعذّر إرسال الرمز. حاول مرة أخرى.' },
+  noMatch: { en: 'That code did not match. Please try again.', ar: 'الرمز غير صحيح. حاول مرة أخرى.' },
+  tapResend: { en: 'Please tap “Resend code” for a new code.', ar: 'اضغط «إعادة إرسال الرمز» للحصول على رمز جديد.' },
+  verified: { en: 'Mobile number verified', ar: 'تم التحقق من رقم الجوال' },
+  change: { en: 'Change', ar: 'تغيير' },
+  waTitle: { en: 'Your UAE mobile number', ar: 'رقم جوالك الإماراتي' },
+  courierTitle: { en: 'Your UAE mobile, for the courier', ar: 'جوالك الإماراتي، لشركة التوصيل' },
+  verifyTitle: { en: 'Verify your UAE mobile to place your order', ar: 'تحقق من جوالك الإماراتي لإتمام طلبك' },
+  waSub: { en: 'We confirm orders over WhatsApp.', ar: 'نؤكد الطلبات عبر واتساب.' },
+  cardSub: { en: 'Paying by card: no SMS code needed', ar: 'الدفع بالبطاقة: لا حاجة لرمز SMS' },
+  verifySub: { en: 'Free • takes 30 seconds • protects your delivery', ar: 'مجاني • يستغرق 30 ثانية • يحمي توصيلك' },
+  required: { en: 'Required', ar: 'مطلوب' },
+  label: { en: 'UAE Mobile Number', ar: 'رقم الجوال الإماراتي' },
+  intl: { en: 'International number', ar: 'رقم دولي' },
+  uae: { en: 'UAE', ar: 'الإمارات' },
+  sending: { en: 'Sending…', ar: 'جارٍ الإرسال…' },
+  wait: { en: 'Wait {n}s', ar: 'انتظر {n} ث' },
+  sendCode: { en: 'Send code', ar: 'أرسل الرمز' },
+  willText: { en: "we'll text you a 6-digit code.", ar: 'سنرسل لك رمزاً من 6 أرقام.' },
+  starts: { en: 'UAE mobile numbers start with 50, 52, 54, 55, 56 or 58 and have 9 digits.', ar: 'أرقام الجوال الإماراتية تبدأ بـ 50 أو 52 أو 54 أو 55 أو 56 أو 58 وتتكون من 9 أرقام.' },
+  outside: { en: 'Ordering from outside the UAE?', ar: 'تطلب من خارج الإمارات؟' },
+  outsideText: { en: 'Online checkout verifies UAE mobile numbers only. Email us and our team will arrange your order, delivery and payment personally.', ar: 'الدفع عبر الموقع يتحقق من الأرقام الإماراتية فقط. راسلنا بالبريد وسيرتب فريقنا طلبك وتوصيله ودفعه شخصياً.' },
+  email: { en: 'Email {email}', ar: 'راسلنا على {email}' },
+  edit: { en: 'Edit number', ar: 'تعديل الرقم' },
+  codeGroup: { en: '6-digit verification code', ar: 'رمز التحقق من 6 أرقام' },
+  digit: { en: 'Digit {n}', ar: 'الرقم {n}' },
+  checking: { en: 'Checking…', ar: 'جارٍ التحقق…' },
+  valid: { en: 'Code is valid for 10 minutes.', ar: 'الرمز صالح لمدة 10 دقائق.' },
+  resendIn: { en: 'Resend in {n}s', ar: 'إعادة الإرسال بعد {n} ث' },
+  resend: { en: 'Resend code', ar: 'إعادة إرسال الرمز' },
+  testTap: { en: 'Test mode (no SMS gateway yet): tap to use code', ar: 'وضع التجربة (لا توجد خدمة رسائل بعد): اضغط لاستخدام الرمز' },
+} as const satisfies Words;
 
 const CODE_LENGTH = 6;
 const RESEND_SECONDS = 30;
@@ -84,6 +122,7 @@ export const PhoneVerification: React.FC<PhoneVerificationProps> = ({
   codeOptional: cardNoCode = false,
   whatsapp = false,
 }) => {
+  const tr = useT(WORDS);
   const codeOptional = cardNoCode || whatsapp;
   const firebase = verification?.method === 'firebase' ? verification.firebase : undefined;
   // Firebase: the pending sign-in for the code that was sent, and where its invisible reCAPTCHA renders.
@@ -130,7 +169,7 @@ export const PhoneVerification: React.FC<PhoneVerificationProps> = ({
 
   const sendCode = async () => {
     if (info.kind !== 'uae') {
-      setError('Enter a UAE mobile number, e.g. 50 123 4567.');
+      setError(tr('enterUae'));
       return;
     }
     setSending(true);
@@ -150,7 +189,7 @@ export const PhoneVerification: React.FC<PhoneVerificationProps> = ({
       setCooldown(RESEND_SECONDS);
       setCooldownFor(info.e164);
       setSandboxCode('');
-      setNotice(`We sent a 6-digit code by SMS to +971 ${formatLocal(info.local)}.`);
+      setNotice(tr('sent', { num: formatLocal(info.local) }));
       setTimeout(() => boxes.current[0]?.focus(), 50);
       return;
     }
@@ -167,8 +206,8 @@ export const PhoneVerification: React.FC<PhoneVerificationProps> = ({
       setSandboxCode(data.devOtpCode || '');
       setNotice(
         data.devOtpCode
-          ? `Test mode: no SMS gateway is set up yet, so no text was sent to +971 ${formatLocal(info.local)}.`
-          : `We sent a 6-digit code by SMS to +971 ${formatLocal(info.local)}.`
+          ? tr('testMode', { num: formatLocal(info.local) })
+          : tr('sent', { num: formatLocal(info.local) })
       );
       setTimeout(() => boxes.current[0]?.focus(), 50);
     } else {
@@ -179,7 +218,7 @@ export const PhoneVerification: React.FC<PhoneVerificationProps> = ({
           setCooldownFor(info.e164);
         }
       }
-      setError(data.message || 'We could not send the code. Please try again.');
+      setError(data.message || tr('sendFailed'));
     }
   };
 
@@ -196,7 +235,7 @@ export const PhoneVerification: React.FC<PhoneVerificationProps> = ({
       setNotice('');
       setSandboxCode('');
     } else {
-      setError(data.message || 'That code did not match. Please try again.');
+      setError(data.message || tr('noMatch'));
       resetCode();
       setTimeout(() => boxes.current[0]?.focus(), 50);
     }
@@ -204,7 +243,7 @@ export const PhoneVerification: React.FC<PhoneVerificationProps> = ({
 
   /** Firebase checks the code; our server then checks Firebase's signed answer and issues the phone token. */
   const verifyWithFirebase = async (code: string): Promise<VerifyResponse> => {
-    if (!firebase || !confirmation.current) return { valid: false, message: 'Please tap “Resend code” for a new code.' };
+    if (!firebase || !confirmation.current) return { valid: false, message: tr('tapResend') };
     let idToken: string;
     try {
       idToken = await confirmFirebaseCode(firebase, confirmation.current, code);
@@ -251,8 +290,8 @@ export const PhoneVerification: React.FC<PhoneVerificationProps> = ({
           <BadgeCheck className="w-5 h-5" />
         </div>
         <div className="flex-1 min-w-0">
-          <p className="text-xs font-semibold text-success">Mobile number verified</p>
-          <p className="text-[11px] text-success/80 font-mono">+971 {formatLocal(info.local)}</p>
+          <p className="text-xs font-semibold text-success">{tr('verified')}</p>
+          <p className="text-[11px] text-success/80 font-mono" dir="ltr">+971 {formatLocal(info.local)}</p>
         </div>
         <button
           type="button"
@@ -260,7 +299,7 @@ export const PhoneVerification: React.FC<PhoneVerificationProps> = ({
           className="text-[11px] font-semibold text-success hover:text-success flex items-center gap-1 px-2 py-1 rounded-lg hover:bg-success-soft transition-colors"
         >
           <Pencil className="w-3 h-3" />
-          Change
+          {tr('change')}
         </button>
       </div>
     );
@@ -276,30 +315,31 @@ export const PhoneVerification: React.FC<PhoneVerificationProps> = ({
       <div className="flex items-center gap-2.5 px-3.5 py-2.5 bg-gradient-to-r from-ink to-ink-2 text-paper">
         <ShieldCheck className="w-4 h-4 text-gold" />
         <div className="flex-1">
-          <p className="text-[11px] font-semibold tracking-wide">{whatsapp ? 'Your UAE mobile number' : codeOptional ? 'Your UAE mobile, for the courier' : 'Verify your UAE mobile to place your order'}</p>
-          <p className="text-[10px] text-sand">{whatsapp ? 'We confirm orders over WhatsApp.' : codeOptional ? 'Paying by card: no SMS code needed' : 'Free • takes 30 seconds • protects your delivery'}</p>
+          <p className="text-[11px] font-semibold tracking-wide">{whatsapp ? tr('waTitle') : codeOptional ? tr('courierTitle') : tr('verifyTitle')}</p>
+          <p className="text-[10px] text-sand">{whatsapp ? tr('waSub') : codeOptional ? tr('cardSub') : tr('verifySub')}</p>
         </div>
-        <span className="text-[10px] font-semibold bg-gold text-ink px-2 py-0.5 rounded-full">Required</span>
+        <span className="text-[10px] font-semibold bg-gold text-ink px-2 py-0.5 rounded-full">{tr('required')}</span>
       </div>
 
       <div className="p-3.5 space-y-3">
         {stage === 'enter' && (
           <>
             <label htmlFor="checkout-phone" className="block text-xs font-semibold text-ink">
-              UAE Mobile Number <span className="text-danger">*</span>
+              {tr('label')} <span className="text-danger">*</span>
             </label>
             <div className="flex flex-col min-[380px]:flex-row gap-2">
               <div
+                dir="ltr"
                 className={`flex-1 min-w-0 flex items-center rounded-xl border bg-surface transition-shadow focus-within:ring-2 focus-within:ring-gold ${
                   info.kind === 'invalid' || info.kind === 'international' ? 'border-gold' : 'border-line-strong'
                 }`}
               >
-                <span className="flex items-center gap-1.5 pl-3 pr-2.5 py-2.5 border-r border-line text-xs font-semibold text-ink-soft select-none">
+                <span className="flex items-center gap-1.5 ps-3 pe-2.5 py-2.5 border-e border-line text-xs font-semibold text-ink-soft select-none">
                   {info.kind === 'international' ? (
-                    <Globe2 className="w-3.5 h-3.5 text-ink-muted" aria-label="International number" />
+                    <Globe2 className="w-3.5 h-3.5 text-ink-muted" aria-label={tr('intl')} />
                   ) : (
                     <>
-                      <span className="label-caps !text-[10px] text-ink-muted" aria-hidden>UAE</span>+971
+                      <span className="label-caps !text-[10px] text-ink-muted" aria-hidden>{tr('uae')}</span>+971
                     </>
                   )}
                 </span>
@@ -333,17 +373,17 @@ export const PhoneVerification: React.FC<PhoneVerificationProps> = ({
                 className="px-4 py-2.5 bg-ink hover:bg-ink disabled:bg-line-strong disabled:cursor-not-allowed text-paper rounded-xl text-[11px] font-semibold shrink-0 transition-colors flex items-center justify-center gap-1.5"
               >
                 {sending ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <MessageSquareText className="w-3.5 h-3.5 text-gold-light" />}
-                {sending ? 'Sending…' : wait > 0 ? `Wait ${wait}s` : 'Send code'}
+                {sending ? tr('sending') : wait > 0 ? tr('wait', { n: wait }) : tr('sendCode')}
               </button>}
             </div>
 
             {info.kind === 'uae' && (
               <p className="text-[11px] text-success font-medium flex items-center gap-1">
-                <Smartphone className="w-3 h-3" /> +971 {formatLocal(info.local)}{codeOptional ? '' : <> — we&apos;ll text you a 6-digit code.</>}
+                <Smartphone className="w-3 h-3" /> <span dir="ltr">+971 {formatLocal(info.local)}</span>{codeOptional ? '' : <> — {tr('willText')}</>}
               </p>
             )}
             {info.kind === 'invalid' && (
-              <p className="text-[11px] text-warning">UAE mobile numbers start with 50, 52, 54, 55, 56 or 58 and have 9 digits.</p>
+              <p className="text-[11px] text-warning">{tr('starts')}</p>
             )}
 
             {info.kind === 'international' && (
@@ -353,9 +393,9 @@ export const PhoneVerification: React.FC<PhoneVerificationProps> = ({
                     <Globe2 className="w-4 h-4 text-gold" />
                   </div>
                   <div className="space-y-0.5">
-                    <p className="text-xs font-semibold text-ink">Ordering from outside the UAE?</p>
+                    <p className="text-xs font-semibold text-ink">{tr('outside')}</p>
                     <p className="text-[11px] text-ink-soft leading-relaxed">
-                      Online checkout verifies UAE mobile numbers only. Email us and our team will arrange your order, delivery and payment personally.
+                      {tr('outsideText')}
                     </p>
                   </div>
                 </div>
@@ -364,7 +404,7 @@ export const PhoneVerification: React.FC<PhoneVerificationProps> = ({
                   className="flex items-center justify-center gap-2 w-full bg-ink hover:bg-ink text-paper font-semibold text-[11px] py-2.5 rounded-xl transition-colors"
                 >
                   <Mail className="w-3.5 h-3.5 text-gold-light" />
-                  Email {supportEmail}
+                  {tr('email', { email: supportEmail })}
                 </a>
               </div>
             )}
@@ -380,11 +420,11 @@ export const PhoneVerification: React.FC<PhoneVerificationProps> = ({
                 onClick={changeNumber}
                 className="text-[11px] font-semibold text-ink-soft hover:text-ink flex items-center gap-1 shrink-0"
               >
-                <Pencil className="w-3 h-3" /> Edit number
+                <Pencil className="w-3 h-3" /> {tr('edit')}
               </button>
             </div>
 
-            <div className="flex justify-center gap-1.5 sm:gap-2" role="group" aria-label="6-digit verification code">
+            <div className="flex justify-center gap-1.5 sm:gap-2" dir="ltr" role="group" aria-label={tr('codeGroup')}>
               {digits.map((d, i) => (
                 <input
                   key={i}
@@ -394,7 +434,7 @@ export const PhoneVerification: React.FC<PhoneVerificationProps> = ({
                   type="text"
                   inputMode="numeric"
                   autoComplete={i === 0 ? 'one-time-code' : 'off'}
-                  aria-label={`Digit ${i + 1}`}
+                  aria-label={tr('digit', { n: i + 1 })}
                   maxLength={i === 0 ? CODE_LENGTH * 2 : 1}
                   value={d}
                   disabled={checking}
@@ -420,10 +460,10 @@ export const PhoneVerification: React.FC<PhoneVerificationProps> = ({
               <span className="text-ink-muted flex items-center gap-1">
                 {checking ? (
                   <>
-                    <Loader2 className="w-3 h-3 animate-spin" /> Checking…
+                    <Loader2 className="w-3 h-3 animate-spin" /> {tr('checking')}
                   </>
                 ) : (
-                  'Code is valid for 10 minutes.'
+                  tr('valid')
                 )}
               </span>
               <button
@@ -433,7 +473,7 @@ export const PhoneVerification: React.FC<PhoneVerificationProps> = ({
                 className="font-semibold text-ink hover:underline disabled:text-ink-muted disabled:no-underline flex items-center gap-1"
               >
                 <RotateCcw className="w-3 h-3" />
-                {wait > 0 ? `Resend in ${wait}s` : 'Resend code'}
+                {wait > 0 ? tr('resendIn', { n: wait }) : tr('resend')}
               </button>
             </div>
 
@@ -444,7 +484,7 @@ export const PhoneVerification: React.FC<PhoneVerificationProps> = ({
                 onClick={() => onDigit(0, sandboxCode)}
                 className="w-full text-[11px] text-warning bg-warning-soft border border-dashed border-warning-line rounded-xl py-2 hover:bg-warning-soft transition-colors"
               >
-                Test mode (no SMS gateway yet): tap to use code <strong className="font-mono tracking-widest">{sandboxCode}</strong>
+                {tr('testTap')} <strong className="font-mono tracking-widest">{sandboxCode}</strong>
               </button>
             )}
           </div>
