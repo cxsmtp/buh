@@ -20,7 +20,11 @@ FROM caddy:2.11.8-alpine@sha256:f6228111e5fafa1a5238258d0858e103f10599b8d1659a14
 # so that a release does not restart the proxy (see container.yml).
 # curl (and the libraries only it uses) is not needed by Caddy: removed, so there is less to patch.
 # apk logs the time it ran in /var/log/apk.log: removed too, so the image stays the same.
-RUN apk del --no-cache --no-network curl \
+# caddy 2.11.8's image no longer marks the binary with that capability, so it is set here
+# (setcap is added for this one step and removed again).
+RUN apk add --no-cache libcap-setcap \
+ && setcap cap_net_bind_service=+ep /usr/bin/caddy \
+ && apk del --no-cache --no-network libcap-setcap curl \
  && rm -f /var/log/apk.log \
  && printf 'buhproxy:x:1000:1000::/nonexistent:/sbin/nologin\n' >> /etc/passwd \
  && printf 'buhproxy:x:1000:\n' >> /etc/group \

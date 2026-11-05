@@ -72,7 +72,9 @@ test('containers: what the images do not need is not in them', () => {
   assert.match(final, /^FROM alpine:3\.24\.3@sha256:/);
   assert.match(updater, /^COPY --from=cli \/usr\/local\/bin\/docker \/usr\/local\/bin\/docker$/m);
   assert.doesNotMatch(updater, /cli-plugins/);
-  assert.match(read('deploy/proxy/Dockerfile'), /apk del --no-cache --no-network curl/);
+  assert.match(read('deploy/proxy/Dockerfile'), /apk del --no-cache --no-network libcap-setcap curl/);
+  // Binding 80 and 443 as a non-root user: the one capability, on the binary (2.11.8's image no longer sets it).
+  assert.match(read('deploy/proxy/Dockerfile'), /setcap cap_net_bind_service=\+ep \/usr\/bin\/caddy/);
 });
 
 test('IaC: every image and Compose service has a healthcheck', () => {
