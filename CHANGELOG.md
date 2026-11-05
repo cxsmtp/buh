@@ -7,10 +7,10 @@
 - **Use a payment on another order instead of refunding.** A paid order (card or bank transfer) shows **Use it on another order**: choose the customer's other order (same customer listed first) and the amount, and tap Move. The paid order is cancelled (its pieces back on sale), and the other order's courier collects that much less.
 - **Safe by design.** Never more than was paid or more than is due, never twice, and not once an order is with the courier; what moved is no longer offered as a refund, and both orders show the move.
 - **Status.**
-  - **Benchmark:** pending.
-  - **Tests:** pending.
-  - **Dependency audit:** pending.
-  - **Security scan:** pending.
+  - **Benchmark:** no failed requests in any round (main first, alternating). Catalogue p95 149–178 ms (main 147–188), gift page 172–195 ms (main 156–199), home page 97–114 ms (main 104–108, one round 81). Courier serviceability looked slower in two mixed rounds, so it was run alone 4 rounds each: p50 54–65 vs 58–74 ms, p95 94–104 vs 92–113 ms, the same as main.
+  - **Tests:** the full `npm test` passed: 1257 of 1257.
+  - **Dependency audit:** `npm audit --omit=dev`: 0 vulnerabilities; no dependencies changed.
+  - **Security scan:** the new route is the owner's only, with a 256-byte allow-listed body; amounts are checked and worked out on the server in fils; both orders and the audit entry are written in one transaction; nothing is moved or refunded twice.
 
 ## BUH-02.32.00 — 2026-11-05 11:53 UTC · [#65](https://github.com/cxsmtp/buh/pull/65)
 
