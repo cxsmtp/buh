@@ -1,15 +1,15 @@
 # Changelog
 
-## BUH-02.37.00 — 2026-11-05 21:40 UTC · [#70](https://github.com/cxsmtp/buh/pull/70)
+## BUH-02.37.00 — 2026-11-05 21:54 UTC · [#70](https://github.com/cxsmtp/buh/pull/70)
 
 - **Bulk orders, invoiced.** Money → Invoices → **New bulk invoice**: type in an order you took outside the shop (a hotel, a company, a reseller) with the customer (company and TRN optional), the item lines, delivery, a discount, the date of sale and how it was paid; **Make invoice** makes a numbered invoice from exactly that data.
 - **Counted in your sales.** A bulk order counts in Sales and Money → Reports on its date of sale, like any order; it waits in Orders when it is still to be delivered. It never changes stock (use Inventory → "Sold offline" for pieces that left it), and one tap never makes two.
 - **Every bulk invoice in one list,** with Open PDF, Email, WhatsApp and Regenerate; your accountant can open them, read-only.
 - **A more beautiful invoice.** A dark header band with a gold monogram and your legal name, cards for the invoice details and the customer, a payment strip, an items table in light stripes, the total in a dark box, a PAID, DUE or PAY ON DELIVERY badge and a thank-you line; every invoice, already issued ones included.
 - **Status.**
-  - **Benchmark:** pending.
-  - **Tests:** pending.
-  - **Dependency audit:** pending.
+  - **Benchmark:** no failed requests in any round (main first, alternating). Catalogue p95 108–124 ms (main 119–125), gift page 114–127 ms (main 125–131), courier serviceability 58–86 ms (main 67–80), home page 70–77 ms (main 69–87).
+  - **Tests:** 1302 of 1302 passed in the full run; the files touched by the security fixes after it pass again (13/13).
+  - **Dependency audit:** `npm audit --omit=dev`: 0 vulnerabilities; no dependencies changed.
   - **Security scan:** pending.
 
 ## BUH-02.36.00 — 2026-11-05 20:27 UTC · [#69](https://github.com/cxsmtp/buh/pull/69)
