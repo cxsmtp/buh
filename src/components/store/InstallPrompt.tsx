@@ -1,5 +1,6 @@
 'use client';
 
+import { useT, type Words } from '@/lib/i18n';
 import React, { useEffect, useState, useSyncExternalStore } from 'react';
 import { Share, SquarePlus, X } from 'lucide-react';
 import { isIos, isStandalone, type InstallPromptEvent } from '@/lib/client/pwa';
@@ -64,7 +65,22 @@ interface InstallPromptProps {
  * never while something is open (a sheet, the bag, checkout, the chat, phone sign-in), never inside
  * the installed app. It counts as shown only after it has been on screen for a second.
  */
+const WORDS = {
+  region: { en: 'Install the app', ar: 'ثبّت التطبيق' },
+  title: { en: 'Install the shop as an app', ar: 'ثبّت المتجر كتطبيق' },
+  close: { en: 'Close', ar: 'إغلاق' },
+  tap: { en: 'Tap', ar: 'اضغط' },
+  share: { en: 'Share', ar: 'مشاركة' },
+  bottom: { en: 'at the bottom of Safari, then', ar: 'أسفل متصفح سفاري، ثم' },
+  addHome: { en: 'Add to Home Screen', ar: 'إضافة إلى الشاشة الرئيسية' },
+  open: { en: 'Open the shop from your home screen, full screen, like an app. It takes no space and no store.', ar: 'افتح المتجر من شاشتك الرئيسية بملء الشاشة كأي تطبيق. لا يشغل مساحة ولا يحتاج متجر تطبيقات.' },
+  gotIt: { en: 'Got it', ar: 'حسناً' },
+  notNow: { en: 'Not now', ar: 'ليس الآن' },
+  install: { en: 'Install', ar: 'تثبيت' },
+} as const satisfies Words;
+
 export function InstallPrompt({ blocked, logo }: InstallPromptProps) {
+  const tr = useT(WORDS);
   const [offer, setOffer] = useState<InstallPromptEvent | null>(null);
   const [ios, setIos] = useState(false);
   const [ready, setReady] = useState(false);
@@ -137,31 +153,31 @@ export function InstallPrompt({ blocked, logo }: InstallPromptProps) {
   return (
     <section
       role="region"
-      aria-label="Install the app"
-      className="browser-only fixed z-[42] inset-x-3 bottom-above-tabs md:bottom-6 md:left-6 md:right-auto md:w-[360px] max-h-[calc(100dvh-6rem-env(safe-area-inset-bottom,0px))] overflow-y-auto overscroll-contain rounded-2xl bg-surface text-ink shadow-[0_18px_50px_-24px_rgb(43_33_39/0.5)] border border-line p-4 rise-in"
+      aria-label={tr('region')}
+      className="browser-only fixed z-[42] inset-x-3 bottom-above-tabs md:bottom-6 md:start-6 md:end-auto md:w-[360px] max-h-[calc(100dvh-6rem-env(safe-area-inset-bottom,0px))] overflow-y-auto overscroll-contain rounded-2xl bg-surface text-ink shadow-[0_18px_50px_-24px_rgb(43_33_39/0.5)] border border-line p-4 rise-in"
     >
       <div className="flex items-center gap-3">
         <span className="shrink-0">{logo}</span>
-        <h2 className="min-w-0 flex-1 font-serif text-lg leading-tight text-ink">Install the shop as an app</h2>
-        <button type="button" onClick={close} aria-label="Close" className="shrink-0 -mr-1 w-9 h-9 rounded-full flex items-center justify-center text-ink-soft hover:bg-sand">
+        <h2 className="min-w-0 flex-1 font-serif text-lg leading-tight text-ink">{tr('title')}</h2>
+        <button type="button" onClick={close} aria-label={tr('close')} className="shrink-0 -me-1 w-9 h-9 rounded-full flex items-center justify-center text-ink-soft hover:bg-sand">
           <X className="w-4 h-4" aria-hidden="true" />
         </button>
       </div>
       {ios ? (
         <p className="mt-2 text-xs text-ink-soft leading-relaxed">
-          Tap <Share className="inline w-4 h-4 -mt-0.5 text-ink" aria-label="Share" /> <strong>Share</strong> at the bottom of Safari, then{' '}
-          <SquarePlus className="inline w-4 h-4 -mt-0.5 text-ink" aria-hidden="true" /> <strong>Add to Home Screen</strong>.
+          {tr('tap')} <Share className="inline w-4 h-4 -mt-0.5 text-ink" aria-label={tr('share')} /> <strong>{tr('share')}</strong> {tr('bottom')}{' '}
+          <SquarePlus className="inline w-4 h-4 -mt-0.5 text-ink" aria-hidden="true" /> <strong>{tr('addHome')}</strong>.
         </p>
       ) : (
-        <p className="mt-2 text-xs text-ink-soft leading-relaxed">Open the shop from your home screen, full screen, like an app. It takes no space and no store.</p>
+        <p className="mt-2 text-xs text-ink-soft leading-relaxed">{tr('open')}</p>
       )}
       <div className="sticky -bottom-4 -mx-4 -mb-4 px-4 pb-4 pt-3 bg-surface flex flex-wrap items-center justify-end gap-2">
         <button type="button" onClick={close} className="min-h-10 px-4 rounded-full text-sm text-ink hover:bg-sand">
-          {ios ? 'Got it' : 'Not now'}
+          {ios ? tr('gotIt') : tr('notNow')}
         </button>
         {!ios && (
           <button type="button" onClick={() => void install()} className="min-h-10 px-5 rounded-full bg-ink text-ivory text-sm font-medium tracking-[0.03em] hover:bg-ink-2">
-            Install
+            {tr('install')}
           </button>
         )}
       </div>

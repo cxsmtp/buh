@@ -216,3 +216,89 @@ test('the invoices are in the backup and come back with the restore', async () =
   db.close();
   fs.rmSync(target, { recursive: true, force: true });
 });
+
+/** As if paid by card (Stripe's part is covered by the Stripe tests). */
+function paidByCard(id: string) {
+  const o = orders.getOrder(id)!;
+  getDb()
+    .prepare("UPDATE orders SET payment_method = 'online_card', card_state = 'paid', paid_fils = ?, payment_ref = ?, payment_status = 'paid', data = json_set(json_set(json_set(data, '$.paymentMethod', 'online_card'), '$.paymentStatus', 'paid'), '$.courier.codAmountCollected', 0) WHERE id = ?")
+    .run(Math.round(o.total * 100), `pi_invoice_${id}`, id);
+  return orders.getOrder(id)!;
+}
+
+test('reported: the extra added on booking (AED 10 on a card-paid order) is a line on the invoice, and the invoice says what is left to pay on delivery', () => {
+  const o = confirmed();
+  paidByCard(o.id);
+  const paid = orders.getOrder(o.id)!.total;
+  orders.setExtraCharge(o.id, 10, 'Second delivery attempt', OWNER);
+  invoices.issueOrderInvoice(o.id, OWNER);
+  const text = pdfText(invoices.invoicePdf(o.id)!.pdf);
+  for (const want of ['Extra charge (Second delivery attempt)', '10.00', `AED ${(paid + 10).toFixed(2)}`, `paid AED ${paid.toFixed(2)}`, 'AED 10.00 on delivery', 'To pay on delivery']) assert.ok(text.includes(want), `${want} in:\n${text}`);
+  // Cash on delivery with an extra: a line too, all due on delivery.
+  const c = confirmed();
+  orders.setExtraCharge(c.id, 15, '', OWNER);
+  invoices.issueOrderInvoice(c.id, OWNER);
+  const cod = pdfText(invoices.invoicePdf(c.id)!.pdf);
+  assert.ok(cod.includes('Extra charge'), cod);
+  assert.ok(cod.includes('Cash on delivery · due on delivery'), cod);
+  assert.ok(!cod.includes('To pay on delivery'), 'nothing was paid before');
+});
+
+test('an invoice issued before the fix (its lines short of its total by the extra) shows the missing line and what is due; its number and total stay', () => {
+  const o = confirmed();
+  paidByCard(o.id);
+  orders.setExtraCharge(o.id, 10, '', OWNER);
+  const { invoice } = invoices.issueOrderInvoice(o.id, OWNER);
+  // As BUH-02.35.00 stored it: no extra line, no amounts paid or due.
+  const row = getDb().prepare('SELECT data FROM invoices WHERE order_id = ?').pluck().get(o.id) as string;
+  const old = JSON.parse(row);
+  old.lines = old.lines.filter((l: { label: string }) => !l.label.startsWith('Extra charge'));
+  old.payment = { method: 'online_card', paid: true };
+  getDb().prepare('UPDATE invoices SET data = ? WHERE order_id = ?').run(JSON.stringify(old), o.id);
+  const text = pdfText(invoices.invoicePdf(o.id)!.pdf);
+  assert.ok(text.includes('Extra charge'), text);
+  assert.ok(text.includes('AED 10.00 on delivery'), text);
+  assert.ok(text.includes(invoice.number));
+  assert.ok(text.includes(`AED ${invoice.total.toFixed(2)}`));
+});
+
+test('asked: "Regenerate invoice" makes it again from the order now: same number and issue date, "Revised" on the PDF, the earlier version kept; nothing changed stays as is; never for a cancelled order; audited; in the backup', async () => {
+  await updateSettings('store', { legalName: 'Old Name Trading LLC' });
+  const o = confirmed();
+  const { invoice } = invoices.issueOrderInvoice(o.id, OWNER);
+  // Nothing changed: stays as it is.
+  assert.equal(invoices.regenerateOrderInvoice(o.id, OWNER).changed, false);
+  assert.ok(!pdfText(invoices.invoicePdf(o.id)!.pdf).includes('Revised'));
+  // The legal name changed: regenerated with it, the same number.
+  await updateSettings('store', { legalName: 'New Name Trading LLC' });
+  assert.ok(pdfText(invoices.invoicePdf(o.id)!.pdf).includes('Old Name Trading LLC'), 'kept as issued until regenerated');
+  const r = invoices.regenerateOrderInvoice(o.id, OWNER);
+  assert.equal(r.changed, true);
+  assert.equal(r.invoice.number, invoice.number);
+  const text = pdfText(invoices.invoicePdf(o.id)!.pdf);
+  for (const want of ['New Name Trading LLC', invoice.number, 'Revised', '(version 2)']) assert.ok(text.includes(want), `${want} in:\n${text}`);
+  assert.ok(!text.includes('Old Name Trading LLC'));
+  const revs = invoices.invoiceRevisions(o.id);
+  assert.deepEqual(revs.map((x) => x.revision), [1]);
+  const kept = getDb().prepare('SELECT data FROM invoice_revisions WHERE number = ?').pluck().get(invoice.number) as string;
+  assert.match(kept, /Old Name Trading LLC/, 'the version sent first is kept as it was');
+  const a = audits().filter((x) => x.action === 'invoice.regenerated').at(-1);
+  assert.equal(a?.details?.number, invoice.number);
+  assert.equal(a?.details?.version, 2);
+  // No invoice yet, or a cancelled order: refused.
+  const none = confirmed();
+  assert.throws(() => invoices.regenerateOrderInvoice(none.id, OWNER), (e) => code(e) === 'no_invoice');
+  cancel(o.id);
+  assert.throws(() => invoices.regenerateOrderInvoice(o.id, OWNER), (e) => code(e) === 'cancelled');
+  // In the backup, and back with the restore.
+  const result = await backup.createBackup();
+  const target = fs.mkdtempSync(path.join(os.tmpdir(), 'buh-restore-invoice-rev-'));
+  fs.rmSync(target, { recursive: true });
+  execFileSync(process.execPath, ['scripts/restore-backup.mjs', result.file, target]);
+  const { default: Database } = await import('better-sqlite3');
+  const db = new Database(path.join(target, 'shop.db'), { readonly: true });
+  assert.match(String(db.prepare('SELECT data FROM invoice_revisions WHERE number = ?').pluck().get(invoice.number)), /Old Name Trading LLC/);
+  db.close();
+  fs.rmSync(target, { recursive: true, force: true });
+  await updateSettings('store', { legalName: '' });
+});

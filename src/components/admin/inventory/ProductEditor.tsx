@@ -14,6 +14,7 @@ import { blankVariant, defaultTypeFor, productTypeOf } from '@/lib/productType';
 import { StageInBedroom } from './StageInBedroom';
 import { SetPiecesField, type SetPieceKind } from './SetPiecesField';
 import { WriteFromPhoto } from './WriteFromPhoto';
+import { ArabicFields } from './ArabicFields';
 import { SkuField } from './SkuField';
 import { ProductSeoFields } from '../SnippetPreview';
 
@@ -54,6 +55,10 @@ interface Draft {
   seoDescription: string;
   shortDescription: string;
   description: string;
+  /** The Arabic shop's words (empty: the English shows). */
+  titleAr: string;
+  shortDescriptionAr: string;
+  descriptionAr: string;
   category: string;
   material: string;
   threadCount: string;
@@ -104,6 +109,9 @@ function draftFrom(product: Product | null, catalog: CatalogSettings): Draft {
       seoDescription: '',
       shortDescription: '',
       description: '',
+      titleAr: '',
+      shortDescriptionAr: '',
+      descriptionAr: '',
       category,
       material: '100% Cotton',
       threadCount: '300',
@@ -145,6 +153,9 @@ function draftFrom(product: Product | null, catalog: CatalogSettings): Draft {
     seoDescription: product.seoDescription ?? '',
     shortDescription: product.shortDescription,
     description: product.description,
+    titleAr: product.titleAr ?? '',
+    shortDescriptionAr: product.shortDescriptionAr ?? '',
+    descriptionAr: product.descriptionAr ?? '',
     category: product.category,
     material: product.material,
     threadCount: String(product.threadCount || ''),
@@ -450,6 +461,9 @@ export function ProductEditor({
       seoDescription: draft.seoDescription.trim(),
       shortDescription: draft.shortDescription.trim(),
       description: draft.description.trim(),
+      titleAr: (draft.titleAr ?? '').trim(),
+      shortDescriptionAr: (draft.shortDescriptionAr ?? '').trim(),
+      descriptionAr: (draft.descriptionAr ?? '').trim(),
       giftLines: Object.fromEntries(Object.entries(draft.giftLines ?? {}).filter(([, v]) => v.trim())),
       category: draft.category,
       material: draft.material.trim(),
@@ -817,6 +831,15 @@ export function ProductEditor({
                   </label>
                   <textarea id="pe-desc" className={`${field} min-h-[90px]`} value={draft.description} maxLength={4000} onChange={(e) => set('description', e.target.value)} />
                 </div>
+                <ArabicFields
+                  value={{ titleAr: draft.titleAr ?? '', shortDescriptionAr: draft.shortDescriptionAr ?? '', descriptionAr: draft.descriptionAr ?? '' }}
+                  english={{ title: draft.title, shortDescription: draft.shortDescription, description: draft.description }}
+                  photo={draft.photos[0]}
+                  original={draft.photos[0] ? originals[draft.photos[0]] : undefined}
+                  field={field}
+                  label={label}
+                  onChange={(patch) => setDraft((d) => ({ ...d, ...patch }))}
+                />
                 <fieldset className="sm:col-span-2 space-y-2">
                   <legend className={label}>Colours (optional)</legend>
                   <p className="text-xs text-ink-soft">

@@ -468,6 +468,22 @@ html.sheet-open {
   from { transform: translateX(100%); }
   to { transform: translateX(0); }
 }
+/* The Arabic shop opens drawers from the left, so they slide in from that side. */
+[dir="rtl"] .slide-in-right {
+  animation-name: slide-in-left;
+}
+@keyframes slide-in-left {
+  from { transform: translateX(-100%); }
+  to { transform: translateX(0); }
+}
+
+/* Arabic text: the phone's or computer's own Arabic fonts (the shop's Latin fonts have no Arabic). */
+:root[lang|="ar"] body {
+  font-family: var(--font-ui), "Inter", "SF Arabic", "Geeza Pro", "Segoe UI", Tahoma, "Noto Sans Arabic", "Noto Naskh Arabic", system-ui, sans-serif;
+}
+:root[lang|="ar"] .font-serif {
+  font-family: var(--font-display), "Cormorant Garamond", "SF Arabic", "Geeza Pro", "Segoe UI", Tahoma, "Noto Naskh Arabic", serif;
+}
 
 /* "Order from your photo" on the home page: a soft gold glow that breathes, so it is noticed.
    Still (the glow without the pulse) for people who asked their device for less motion. */

@@ -6,6 +6,7 @@ import { HttpError } from './http';
 import { bump } from './live';
 import { logEvent } from './log';
 import { emailConfigured, mailConfig, sender, transport } from './mail';
+import { creditInFils, dueOnDeliveryFils } from '@/lib/orderMoney';
 import { getOrder, isCustomerEmail } from './orders';
 import { PdfDoc, type RGB } from './pdf/pdf';
 import { mac } from './secrets';
@@ -54,7 +55,14 @@ export interface InvoiceData {
   subtotalFils: number;
   vat?: { rateBp: number; netFils: number; vatFils: number };
   totalFils: number;
-  payment: { method: Order['paymentMethod']; paid: boolean };
+  /**
+   * paidFils: what was paid before delivery (card, transfer, or moved from another order);
+   * dueFils: what the courier collects on delivery. Absent on invoices issued before BUH-02.36.00.
+   */
+  payment: { method: Order['paymentMethod']; paid: boolean; paidFils?: number; dueFils?: number; movedInFils?: number };
+  /** Regenerated ("Regenerate invoice"): the version and the day; the number and issue date stay. */
+  revision?: number;
+  revisedOn?: string;
 }
 
 export interface InvoiceRecord {
@@ -168,7 +176,17 @@ function linesOf(order: Order): Line[] {
   extra('Cash-on-delivery fee', fils(order.codFee));
   extra(`Card payment fee${order.cardFeePercent ? ` (${order.cardFeePercent}%)` : ''}`, fils(order.cardFee));
   if (fils(order.discount)) lines.push({ label: 'Discount', quantity: 1, unitFils: -fils(order.discount), totalFils: -fils(order.discount) });
+  // The extra the owner added when booking the courier (it is in the total, so it is a line too).
+  extra(`Extra charge${order.extraCharge?.note ? ` (${order.extraCharge.note})` : ''}`, fils(order.extraCharge?.amount));
   return lines;
+}
+
+/** What was paid before delivery and what is collected on it (src/lib/orderMoney.ts, as the courier is told). */
+function paymentOf(order: Order, paid: boolean): InvoiceData['payment'] {
+  const totalFils = fils(order.total);
+  const dueFils = order.status === 'delivered' ? 0 : dueOnDeliveryFils(order);
+  const movedInFils = creditInFils(order);
+  return { method: order.paymentMethod, paid, paidFils: Math.max(0, totalFils - dueFils), dueFils, ...(movedInFils ? { movedInFils } : {}) };
 }
 
 function dataFor(order: Order, kind: Kind, number: string, issuedOn: string): InvoiceData {
@@ -186,7 +204,7 @@ function dataFor(order: Order, kind: Kind, number: string, issuedOn: string): In
     lines: linesOf(order),
     subtotalFils: fils(order.total) - fils(order.vatAdded),
     totalFils: fils(order.total),
-    payment: { method: order.paymentMethod, paid },
+    payment: paymentOf(order, paid),
   };
   if (kind === 'tax_invoice') {
     const v = orderVat(order.id)!;
@@ -242,6 +260,45 @@ export function issueOrderInvoice(orderId: string, actor: string): { invoice: In
   return result;
 }
 
+/**
+ * "Regenerate invoice": the same number and issue date, its content made again from the order and
+ * the settings as they are now (after a correction to the order, the address, the legal name…).
+ * The earlier version is kept in invoice_revisions as it was sent; the PDF says "Revised". Audited
+ * in the same transaction. Not for a tax invoice (VAT: a correction needs a credit note) or a
+ * cancelled order. Nothing changed: the invoice stays as it is.
+ */
+export function regenerateOrderInvoice(orderId: string, actor: string): { invoice: InvoiceRecord; changed: boolean } {
+  const order = getOrder(orderId);
+  if (!order) throw new HttpError(404, 'Order not found.');
+  const had = rowOf(orderId);
+  if (!had) throw new HttpError(409, 'This order has no invoice yet: make it first.', {}, { code: 'no_invoice' });
+  if (had.kind === 'tax_invoice') throw new HttpError(409, 'A tax invoice can’t be regenerated: a correction to it is a credit note (Money → VAT).', {}, { code: 'tax_invoice' });
+  if (order.status === 'cancelled') throw new HttpError(409, 'This order is cancelled: its invoice stays as it was.', {}, { code: 'cancelled' });
+  const result = auditedTransaction((auditOrThrow) => {
+    const before = rowOf(orderId)!;
+    const old = JSON.parse(before.data) as InvoiceData;
+    const fresh = dataFor(getOrder(orderId)!, 'invoice', before.number, old.issuedOn);
+    const same = (d: InvoiceData) => JSON.stringify({ ...d, revision: undefined, revisedOn: undefined, supplyOn: undefined });
+    if (same(fresh) === same({ ...old, supplyOn: fresh.supplyOn })) return { invoice: toRecord(before), changed: false };
+    const revision = ((getDb().prepare('SELECT MAX(revision) FROM invoice_revisions WHERE number = ?').pluck().get(before.number) as number | null) ?? 0) + 1;
+    const now = new Date();
+    getDb().prepare('INSERT INTO invoice_revisions (number, revision, replaced_at, replaced_by, total_fils, data) VALUES (?, ?, ?, ?, ?, ?)').run(before.number, revision, now.toISOString(), actor, before.total_fils, before.data);
+    const data: InvoiceData = { ...fresh, revision: revision + 1, revisedOn: dubaiDateOf(now.toISOString()) };
+    getDb().prepare('UPDATE invoices SET data = ?, total_fils = ? WHERE number = ?').run(JSON.stringify(data), data.totalFils, before.number);
+    auditOrThrow('invoice.regenerated', { by: actor, orderId, number: before.number, version: revision + 1, fromTotalFils: before.total_fils, toTotalFils: data.totalFils });
+    return { invoice: toRecord(rowOf(orderId)!), changed: true };
+  });
+  if (result.changed) bump('orders');
+  return result;
+}
+
+/** The earlier versions of an order's invoice (newest first), for the hub. */
+export function invoiceRevisions(orderId: string): Array<{ revision: number; replacedAt: string; replacedBy: string; total: number }> {
+  const r = rowOf(orderId);
+  if (!r) return [];
+  return (getDb().prepare('SELECT revision, replaced_at, replaced_by, total_fils FROM invoice_revisions WHERE number = ? ORDER BY revision DESC').all(r.number) as Array<{ revision: number; replaced_at: string; replaced_by: string; total_fils: number }>).map((x) => ({ revision: x.revision, replacedAt: x.replaced_at, replacedBy: x.replaced_by, total: x.total_fils / 100 }));
+}
+
 const INK: RGB = [0.14, 0.11, 0.1];
 const SOFT: RGB = [0.42, 0.38, 0.35];
 const GOLD: RGB = [0.62, 0.47, 0.2];
@@ -257,7 +314,7 @@ const niceDate = (d: string) => {
 export function invoicePdf(orderId: string): { pdf: Buffer; number: string } | null {
   const r = rowOf(orderId);
   if (!r) return null;
-  const d = JSON.parse(r.data) as InvoiceData;
+  const d = repaired(JSON.parse(r.data) as InvoiceData, getOrder(orderId));
   const order = getOrder(orderId);
   const doc = new PdfDoc({ title: `${d.kind === 'tax_invoice' ? 'Tax Invoice' : 'Invoice'} ${d.number}`, author: d.seller.name, subject: `Order ${d.orderId}` });
   const L = 42;
@@ -301,10 +358,11 @@ export function invoicePdf(orderId: string): { pdf: Buffer; number: string } | n
   const facts: Array<[string, string]> = [
     ['Invoice number', d.number],
     ['Date of issue', niceDate(d.issuedOn)],
+    ...(d.revisedOn ? ([['Revised', `${niceDate(d.revisedOn)} (version ${d.revision ?? 2})`]] as Array<[string, string]>) : []),
     ['Date of supply', niceDate(d.supplyOn)],
     ['Order', d.orderId],
     ['Currency', 'UAE dirham (AED)'],
-    ['Payment', `${PAY[d.payment.method]}${d.payment.paid ? ' · paid' : d.payment.method === 'cod' ? ' · due on delivery' : ' · due'}`],
+    ['Payment', paymentText(d)],
   ];
   let fy = y;
   for (const [k, v] of facts) {
@@ -371,6 +429,12 @@ export function invoicePdf(orderId: string): { pdf: Buffer; number: string } | n
   doc.line(tx, y - 6, R, y - 6, INK, 1);
   y += 4;
   total(d.vat ? 'Total including VAT' : 'Total', `AED ${money(d.totalFils)}`, true);
+  // Part paid, part on delivery: both, so the customer sees what is left to pay.
+  const due = d.payment.dueFils;
+  if (due !== undefined && due > 0 && due < d.totalFils) {
+    total(d.payment.movedInFils && d.payment.method === 'cod' ? 'Paid (from an earlier order)' : `Paid (${PAY[d.payment.method].toLowerCase()})`, `AED ${money(d.totalFils - due)}`);
+    total('To pay on delivery', `AED ${money(due)}`, true);
+  }
   y += 10;
 
   // Notes.
@@ -398,6 +462,30 @@ export function invoicePdf(orderId: string): { pdf: Buffer; number: string } | n
   }
   footer();
   return { pdf: doc.render(), number: d.number };
+}
+
+/** "Card · paid", "Card · paid AED 103.50 · AED 10.00 on delivery", "Cash on delivery · due on delivery". */
+function paymentText(d: InvoiceData): string {
+  const p = d.payment;
+  const due = p.dueFils;
+  if (due !== undefined && due > 0 && due < d.totalFils) return `${PAY[p.method]} · paid AED ${money(d.totalFils - due)} · AED ${money(due)} on delivery`;
+  if (due === 0 && p.method === 'cod' && p.movedInFils) return 'Paid (from an earlier order)';
+  return `${PAY[p.method]}${p.paid ? ' · paid' : p.method === 'cod' ? ' · due on delivery' : ' · due'}`;
+}
+
+/**
+ * An invoice issued before BUH-02.36.00 left out the extra added when booking the courier (it was
+ * in the total but not in the lines, nor in what was left to pay). Shown with that line and that
+ * amount now; its number, date, lines and total stay as issued.
+ */
+function repaired(d: InvoiceData, order: Order | undefined): InvoiceData {
+  if (d.vat || d.payment.dueFils !== undefined) return d;
+  const gap = d.subtotalFils - d.lines.reduce((sum, l) => sum + l.totalFils, 0);
+  if (gap <= 0) return d;
+  const note = order?.extraCharge?.note;
+  const lines = [...d.lines, { label: `Extra charge${note ? ` (${note})` : ''}`, quantity: 1, unitFils: gap, totalFils: gap }];
+  const dueFils = d.payment.method === 'cod' || order?.status === 'delivered' ? undefined : gap;
+  return { ...d, lines, payment: { ...d.payment, ...(dueFils !== undefined ? { dueFils } : {}) } };
 }
 
 /** The file's name: Invoice-INV-2026-000123.pdf */

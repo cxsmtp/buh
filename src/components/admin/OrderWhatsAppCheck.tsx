@@ -62,12 +62,14 @@ export function OrderWhatsAppCheck({ order, onOrderChanged, shopName }: { order:
   const reply = waMeLink(order.customer.phone, confirmedReply(order.id, trackLink, safeFirstName(order.customer.fullName)));
   const ask = waMeLink(order.customer.phone, askToConfirmMessage(order.id, safeFirstName(order.customer.fullName), shopName));
   const button = 'min-h-11 px-3 py-2 rounded-xl text-xs font-bold flex items-center justify-center gap-1.5 disabled:opacity-50 focus:outline-none focus-visible:ring-2 focus-visible:ring-gold';
+  // Done steps stay small (asked by the owner: "too many details").
+  const small = 'min-h-9 px-2.5 py-1.5 rounded-lg text-[11px] font-bold flex items-center justify-center gap-1.5 disabled:opacity-50 focus:outline-none focus-visible:ring-2 focus-visible:ring-gold';
   const status = check?.status ?? 'awaiting';
   const open = status !== 'confirmed' && order.status !== 'cancelled';
   const byCall = check?.method === 'call';
 
   return (
-    <div data-testid="whatsapp-check" className={`rounded-xl border p-3 space-y-2 text-xs ${status === 'confirmed' ? 'border-success-line bg-success-soft/50' : status === 'mismatch' ? 'border-danger-line bg-danger-soft/60' : 'border-warning-line bg-warning-soft/60'}`}>
+    <div data-testid="whatsapp-check" className={`rounded-xl border text-xs ${status === 'confirmed' ? 'px-3 py-2 flex flex-col gap-1.5' : 'p-3 space-y-2'} ${status === 'confirmed' ? 'border-success-line bg-success-soft/50' : status === 'mismatch' ? 'border-danger-line bg-danger-soft/60' : 'border-warning-line bg-warning-soft/60'}`}>
       <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
         {byCall || callOnly ? <Phone className="w-4 h-4 text-ink-soft shrink-0" aria-hidden="true" /> : <MessageCircle className="w-4 h-4 text-whatsapp shrink-0" aria-hidden="true" />}
         {callOnly && <strong className="text-warning">Not confirmed: no WhatsApp number set — call the customer</strong>}
@@ -98,7 +100,7 @@ export function OrderWhatsAppCheck({ order, onOrderChanged, shopName }: { order:
         )}
         {heldForWhatsApp(order) && <span className="px-1.5 py-0.5 rounded-full bg-surface border border-warning-line text-warning font-bold text-[10px] uppercase tracking-wider">Held</span>}
       </div>
-      <p className="text-ink-soft">
+      <p className={`text-ink-soft ${status === 'confirmed' ? 'text-[11px]' : ''}`}>
         Order phone: <a href={`tel:${order.customer.phone}`} className="font-mono font-bold text-ink text-sm">{order.customer.phone}</a>
         {check && status !== 'confirmed' && <span className="block text-ink-muted">The message &ldquo;Confirm my order {order.id} · code {check.code}&rdquo; should come from this number.</span>}
         {check?.openedAt && status === 'awaiting' && <span className="block text-ink-muted">Customer opened WhatsApp at {when(check.openedAt)}.</span>}
@@ -150,8 +152,8 @@ export function OrderWhatsAppCheck({ order, onOrderChanged, shopName }: { order:
         </form>
       )}
       {status === 'confirmed' && order.status !== 'cancelled' && order.status !== 'delivered' && (
-        <details className="text-ink-soft">
-          <summary className="min-h-9 flex items-center cursor-pointer font-semibold">Correct the phone number</summary>
+        <details className="text-ink-soft order-last">
+          <summary className="min-h-8 inline-flex items-center cursor-pointer font-semibold text-[11px]">Correct the phone number</summary>
           <form
             className="mt-1 flex flex-col min-[380px]:flex-row gap-2"
             onSubmit={(e) => {
@@ -179,13 +181,13 @@ export function OrderWhatsAppCheck({ order, onOrderChanged, shopName }: { order:
       {status === 'confirmed' && reply && order.status !== 'cancelled' && (
         <div className="space-y-1.5" data-testid="whatsapp-confirmed-reply">
           <div className="flex flex-wrap gap-2">
-            <a href={reply} target="_blank" rel="noopener noreferrer" className={`${button} bg-whatsapp text-paper w-full min-[380px]:w-auto inline-flex`}>
+            <a href={reply} target="_blank" rel="noopener noreferrer" title={`Sends: “${confirmedReply(order.id, trackLink ? '…' : undefined, safeFirstName(order.customer.fullName)).replace('\n', ' · ')}” The link shows the order’s status and courier tracking at any time, without the phone number.`} className={`${small} bg-whatsapp text-paper inline-flex`}>
               <MessageCircle className="w-4 h-4" aria-hidden="true" /> Send confirmation &amp; tracking link
             </a>
             {trackLink && (
               <button
                 type="button"
-                className={`${button} bg-surface text-ink border border-line-strong w-full min-[380px]:w-auto`}
+                className={`${small} bg-surface text-ink border border-line-strong`}
                 onClick={() => {
                   void navigator.clipboard?.writeText(trackLink).then(() => {
                     setCopiedTrack(true);
@@ -197,9 +199,6 @@ export function OrderWhatsAppCheck({ order, onOrderChanged, shopName }: { order:
               </button>
             )}
           </div>
-          <p className="text-ink-muted break-anywhere">
-            Sends: &ldquo;{confirmedReply(order.id, trackLink ? '…' : undefined, safeFirstName(order.customer.fullName)).replace('\n', ' · ')}&rdquo; The link shows the order&rsquo;s status and courier tracking at any time, without the phone number.
-          </p>
         </div>
       )}
       {problem && <p role="alert" className="text-danger font-semibold">{problem}</p>}

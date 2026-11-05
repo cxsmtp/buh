@@ -10,6 +10,41 @@ import { useLiveUpdates } from '@/lib/client/live';
 import { INITIAL_BRAND_SETTINGS } from '@/data/initialData';
 import { getJson, postJson } from '@/lib/apiClient';
 import { applyUpdate, checkForUpdate, registerServiceWorker, useUpdateWaiting } from '@/lib/client/pwa';
+import { LocaleProvider, useLocale, useT, type Words } from '@/lib/i18n';
+import { LocaleBoot } from '@/components/common/LocaleBoot';
+
+const LOAD_FAILED = 'The shop could not be loaded. Please check your connection and refresh.';
+
+/** The shop's own words, in English and UAE Arabic (src/lib/i18n). */
+const WORDS = {
+  loadFailed: { en: LOAD_FAILED, ar: 'تعذّر تحميل المتجر. يرجى التحقق من الاتصال وتحديث الصفحة.' },
+  newVersion: { en: 'New version ready', ar: 'نسخة جديدة جاهزة' },
+  refresh: { en: 'Refresh', ar: 'تحديث' },
+  bagKept: { en: '(your bag is kept)', ar: '(سلتك محفوظة)' },
+  photoTitle: { en: 'Have a photo of one of our pieces?', ar: 'لديك صورة لإحدى قطعنا؟' },
+  photoText: { en: 'Agreed on WhatsApp? Order it here: upload the photo, the amount and your address.', ar: 'اتفقنا عبر واتساب؟ اطلبها من هنا: ارفع الصورة والمبلغ وعنوانك.' },
+  piece: { en: '{n} piece', ar: 'قطعة واحدة' },
+  pieces: { en: '{n} pieces', ar: '{n} قطعة' },
+  filterSort: { en: 'Filter and sort', ar: 'التصفية والترتيب' },
+  filterSortOn: { en: 'Filter and sort, {n} on', ar: 'التصفية والترتيب، {n} مفعّل' },
+  filter: { en: 'Filter', ar: 'تصفية' },
+  filtersOn: { en: 'Filters on', ar: 'عوامل التصفية المفعّلة' },
+  removeFilter: { en: 'Remove filter: {label}', ar: 'إزالة التصفية: {label}' },
+  removeSort: { en: 'Remove sort: {label}', ar: 'إزالة الترتيب: {label}' },
+  clearAll: { en: 'Clear all', ar: 'مسح الكل' },
+  collectionGone: { en: 'These pieces have all found homes. Have a look at the rest of the shop.', ar: 'وجدت كل هذه القطع بيوتها. ألقِ نظرة على بقية المتجر.' },
+  noMatch: { en: 'Nothing matches these filters.', ar: 'لا توجد نتائج تطابق هذه الخيارات.' },
+  comingSoon: { en: 'New pieces are on their way. Please check back soon.', ar: 'قطع جديدة في الطريق. يرجى العودة قريباً.' },
+  browse: { en: 'Browse the shop', ar: 'تصفّح المتجر' },
+  showAll: { en: 'Show everything', ar: 'عرض الكل' },
+  promise: { en: 'Our promise', ar: 'وعدنا' },
+  promiseTitle: { en: 'Made slowly, delivered with care', ar: 'صُنعت بتأنٍّ، وتصلك بعناية' },
+  promiseText: {
+    en: 'Every set is made with slow handcraft, fitted for deep Gulf mattresses, and delivered to your door in all seven emirates, with cash on delivery or bank transfer.',
+    ar: 'كل طقم مصنوع يدوياً بتأنٍّ، ومناسب للمراتب الخليجية العميقة، ويصلك إلى باب بيتك في الإمارات السبع، مع الدفع عند الاستلام أو التحويل البنكي.',
+  },
+  terms: { en: 'Terms & Conditions', ar: 'الشروط والأحكام' },
+} as const satisfies Words;
 
 /** Catalogue + public settings from the server (no React state here). */
 async function fetchCatalog() {
@@ -57,7 +92,7 @@ import { MarqueeBar } from '@/components/common/MarqueeBar';
 import { BottomNav } from '@/components/common/BottomNav';
 import { HeroBanner } from '@/components/store/HeroBanner';
 import { StoryChips } from '@/components/store/StoryChips';
-import { FilterSheet } from '@/components/store/FilterSheet';
+import { FilterSheet, catalogLabel } from '@/components/store/FilterSheet';
 import { SearchSheet } from '@/components/store/SearchSheet';
 import { ProductCard } from '@/components/store/ProductCard';
 import { CollectionHeader, type ShopCollection } from '@/components/store/CollectionHeader';
@@ -95,7 +130,19 @@ function writeSearch(search: string, mode: 'push' | 'replace') {
  * own page at the owner's private link (src/lib/server/frontGate.ts), so nothing in the shop's
  * pages or scripts leads to it.
  */
-export function ShopApp({
+type ShopAppProps = Parameters<typeof ShopAppInner>[0];
+
+/** The storefront in the visitor's language (English or UAE Arabic, right to left): src/lib/i18n. */
+export function ShopApp(props: ShopAppProps = {}) {
+  return (
+    <LocaleProvider>
+      <LocaleBoot />
+      <ShopAppInner {...props} />
+    </LocaleProvider>
+  );
+}
+
+function ShopAppInner({
   initialProductId,
   collection,
   festivalLink,
@@ -117,6 +164,8 @@ export function ShopApp({
   /** Links to the category and festival pages (rendered on the server): above the shop's promise. */
   explore?: React.ReactNode;
 } = {}) {
+  const t = useT(WORDS);
+  const { locale } = useLocale();
   // What the shop shows (search, filters, sort): mirrored in the address bar so it can be shared and Back works.
   const [filters, setFilters] = useState<Filters>(EMPTY_FILTERS);
   const [filterOpen, setFilterOpen] = useState(false);
@@ -179,7 +228,7 @@ export function ShopApp({
       setCart((prev) => refreshCart(prev, res.data.products));
       setCatalogError('');
     } else {
-      setCatalogError('The shop could not be loaded. Please check your connection and refresh.');
+      setCatalogError(LOAD_FAILED);
     }
     if (settings.ok) {
       setBrandSettings(settings.data.brand);
@@ -460,9 +509,9 @@ export function ShopApp({
     <div className="min-h-screen flex flex-col font-sans px-safe" data-festive={festival?.festivalId ? '' : undefined} style={festival?.festivalId ? festiveVars(festival.theme) : undefined}>
       {newVersion && (
         <div role="status" className="bg-ink text-paper text-xs px-3 py-1.5 flex items-center justify-center gap-3">
-          <span>New version ready</span>
-          <button type="button" className="font-bold underline min-h-8" onClick={() => applyUpdate()}>Refresh</button>
-          <span className="opacity-60 hidden sm:inline">(your bag is kept)</span>
+          <span>{t('newVersion')}</span>
+          <button type="button" className="font-bold underline min-h-8" onClick={() => applyUpdate()}>{t('refresh')}</button>
+          <span className="opacity-60 hidden sm:inline">{t('bagKept')}</span>
         </div>
       )}
       {/* The announcement bar and the header stay at the top together while the page scrolls. */}
@@ -491,14 +540,14 @@ export function ShopApp({
               type="button"
               onClick={() => setPhotoSheetOpen(true)}
               data-testid="photo-order-banner"
-              className="photo-order-glow w-full min-h-14 flex items-center gap-3 rounded-2xl border border-gold bg-ivory px-4 py-3 text-left hover:border-gold-deep focus:outline-none focus-visible:ring-2 focus-visible:ring-gold"
+              className="photo-order-glow w-full min-h-14 flex items-center gap-3 rounded-2xl border border-gold bg-ivory px-4 py-3 hover:border-gold-deep focus:outline-none focus-visible:ring-2 focus-visible:ring-gold text-start"
             >
               <Camera className="w-6 h-6 shrink-0 text-gold-deep" strokeWidth={1.5} aria-hidden="true" />
               <span className="min-w-0 flex-1">
-                <span className="block text-sm font-semibold text-ink">Have a photo of one of our pieces?</span>
-                <span className="block text-xs text-ink-soft">Agreed on WhatsApp? Order it here: upload the photo, the amount and your address.</span>
+                <span className="block text-sm font-semibold text-ink">{t('photoTitle')}</span>
+                <span className="block text-xs text-ink-soft">{t('photoText')}</span>
               </span>
-              <ChevronRight className="w-5 h-5 shrink-0 text-ink-soft" aria-hidden="true" />
+              <ChevronRight className="w-5 h-5 shrink-0 text-ink-soft rtl:-scale-x-100" aria-hidden="true" />
             </button>
           )}
           {festivalLink}
@@ -518,18 +567,18 @@ export function ShopApp({
             {!collection && (
             <div className="flex flex-wrap items-center justify-between gap-3 border-t border-line pt-4">
               <p className="label-caps text-ink-muted" aria-live="polite">
-                {catalogLoaded ? `${filteredProducts.length} ${filteredProducts.length === 1 ? 'piece' : 'pieces'}` : ''}
+                {catalogLoaded ? t(filteredProducts.length === 1 ? 'piece' : 'pieces', { n: filteredProducts.length }) : ''}
               </p>
               <div className="flex items-center gap-2">
               <button
                 type="button"
                 onClick={() => setFilterOpen(true)}
                 aria-haspopup="dialog"
-                aria-label={filterCount ? `Filter and sort, ${filterCount} on` : 'Filter and sort'}
+                aria-label={filterCount ? t('filterSortOn', { n: filterCount }) : t('filterSort')}
                 className="inline-flex items-center gap-2 h-10 px-4 rounded-full border border-line-strong bg-transparent text-[13px] tracking-[0.04em] text-ink hover:border-ink-muted min-w-0"
               >
                 <SlidersHorizontal className="w-4 h-4 shrink-0" aria-hidden="true" strokeWidth={1.5} />
-                <span>Filter</span>
+                <span>{t('filter')}</span>
                 {filterCount > 0 && (
                   <span className="min-w-5 h-5 px-1 rounded-full bg-ink text-paper text-[11px] font-bold flex items-center justify-center" aria-hidden="true">
                     {filterCount}
@@ -541,16 +590,16 @@ export function ShopApp({
             )}
 
             {!collection && (chips.length > 0 || filters.sort !== 'featured') && (
-              <div className="flex flex-wrap items-center gap-2" role="group" aria-label="Filters on">
+              <div className="flex flex-wrap items-center gap-2" role="group" aria-label={t('filtersOn')}>
                 {chips.map((chip) => (
                   <button
                     key={chip.key}
                     type="button"
                     onClick={() => showFilters(chip.without)}
-                    aria-label={`Remove filter: ${chip.label}`}
-                    className="inline-flex items-center gap-1 pl-3 pr-2 h-8 rounded-full bg-sand border border-line text-xs font-medium text-ink hover:border-line-strong max-w-full"
+                    aria-label={t('removeFilter', { label: catalogLabel(chip.label, locale) })}
+                    className="inline-flex items-center gap-1 ps-3 pe-2 h-8 rounded-full bg-sand border border-line text-xs font-medium text-ink hover:border-line-strong max-w-full"
                   >
-                    <span className="truncate">{chip.label}</span>
+                    <span className="truncate">{catalogLabel(chip.label, locale)}</span>
                     <X className="w-3.5 h-3.5 shrink-0" aria-hidden="true" />
                   </button>
                 ))}
@@ -558,23 +607,23 @@ export function ShopApp({
                   <button
                     type="button"
                     onClick={() => showFilters({ ...filters, sort: 'featured' })}
-                    aria-label={`Remove sort: ${SORTS.find((x) => x.id === filters.sort)?.label}`}
-                    className="inline-flex items-center gap-1 pl-3 pr-2 h-8 rounded-full bg-surface border border-line-strong text-xs font-medium text-ink hover:border-ink-muted"
+                    aria-label={t('removeSort', { label: catalogLabel(SORTS.find((x) => x.id === filters.sort)?.label ?? '', locale) })}
+                    className="inline-flex items-center gap-1 ps-3 pe-2 h-8 rounded-full bg-surface border border-line-strong text-xs font-medium text-ink hover:border-ink-muted"
                   >
-                    <span>{SORTS.find((x) => x.id === filters.sort)?.label}</span>
+                    <span>{catalogLabel(SORTS.find((x) => x.id === filters.sort)?.label ?? '', locale)}</span>
                     <X className="w-3.5 h-3.5" aria-hidden="true" />
                   </button>
                 )}
                 {chips.length + (filters.sort !== 'featured' ? 1 : 0) > 1 && (
                   <button type="button" onClick={() => showFilters(EMPTY_FILTERS)} className="h-8 px-2 text-xs font-semibold text-ink underline underline-offset-4">
-                    Clear all
+                    {t('clearAll')}
                   </button>
                 )}
               </div>
             )}
 
             {catalogError && (
-              <p role="alert" className="text-sm text-danger bg-danger-soft border border-danger-line rounded-xl px-3 py-2">{catalogError}</p>
+              <p role="alert" className="text-sm text-danger bg-danger-soft border border-danger-line rounded-xl px-3 py-2">{catalogError === LOAD_FAILED ? t('loadFailed') : catalogError}</p>
             )}
 
             {/* The feed: big photos (on phones one per row, edge to edge, or two across) */}
@@ -598,14 +647,14 @@ export function ShopApp({
               </div>
             ) : catalogLoaded ? (
               <div className="rounded-2xl border border-dashed border-line-strong px-4 py-10 text-center space-y-3">
-                <p className="text-sm text-ink">{collection ? 'These pieces have all found homes. Have a look at the rest of the shop.' : products.length ? 'Nothing matches these filters.' : 'New pieces are on their way. Please check back soon.'}</p>
+                <p className="text-sm text-ink">{collection ? t('collectionGone') : products.length ? t('noMatch') : t('comingSoon')}</p>
                 {collection ? (
                   <Link href="/" className="inline-block rounded-full bg-ink text-paper text-sm font-semibold px-5 py-2.5">
-                    Browse the shop
+                    {t('browse')}
                   </Link>
                 ) : products.length > 0 && (
                   <button type="button" onClick={() => showFilters(EMPTY_FILTERS)} className="rounded-full bg-ink text-paper text-sm font-semibold px-5 py-2.5">
-                    Show everything
+                    {t('showAll')}
                   </button>
                 )}
               </div>
@@ -616,15 +665,18 @@ export function ShopApp({
 
           {/* The shop's promise */}
           <div className="border-y border-line px-5 py-10 sm:py-12 text-center my-8 space-y-3">
-            <p className="label-caps text-gold-deep">Our promise</p>
-            <h2 className="font-serif text-2xl sm:text-3xl text-ink">Made slowly, delivered with care</h2>
-            <p className="text-ink-soft text-[13px] sm:text-sm max-w-xl mx-auto leading-relaxed">
-              Every set is made with slow handcraft, fitted for deep Gulf mattresses, and delivered to your door in all seven emirates, with cash on delivery or bank transfer.
-            </p>
+            <p className="label-caps text-gold-deep">{t('promise')}</p>
+            <h2 className="font-serif text-2xl sm:text-3xl text-ink">{t('promiseTitle')}</h2>
+            <p className="text-ink-soft text-[13px] sm:text-sm max-w-xl mx-auto leading-relaxed">{t('promiseText')}</p>
           </div>
 
           {/* The version: in the footer on phones (never over the feed), bottom left on wider screens */}
-          <footer className="pb-2">
+          <footer className="pb-2 space-y-2">
+            <p className="text-center text-xs">
+              <Link href="/terms" data-testid="footer-terms" className="text-ink-soft underline underline-offset-4 hover:text-ink">
+                {t('terms')}
+              </Link>
+            </p>
             <VersionBadge inFooter />
           </footer>
         </div>

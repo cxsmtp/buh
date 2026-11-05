@@ -172,7 +172,7 @@ export function matchesSearch(p: Product, q: string, categories: Category[] = []
   const label = categories.find((c) => c.id === p.category)?.label ?? '';
   // A simple product's options are words shoppers search for ("bath towel", "50 x 50").
   const options = p.productType === 'simple' ? p.profiles.flatMap((s) => [s.name, s.dimensions ?? '']) : [];
-  const hay = fold([p.title, label, p.material, p.productType === 'simple' ? '' : p.weave, ...p.colors.map((c) => c.name), ...options].join(' '));
+  const hay = fold([p.title, p.titleAr ?? '', label, p.material, p.productType === 'simple' ? '' : p.weave, ...p.colors.map((c) => c.name), ...options].join(' '));
   return words.every((w) => hay.includes(w));
 }
 

@@ -633,6 +633,48 @@ const MIGRATIONS: Array<(db: DB) => void> = [
     `);
     ensureChangeTriggers(db);
   },
+  // 20: invoice_revisions (invoices.ts: the earlier versions of a regenerated invoice), and
+  //     courier_shipments (courierCharges.ts): what the courier says about each shipment, from its
+  //     own replies or its statement: status, the COD it collected and paid out, and what it
+  //     charged (each charge also an expense in Money, "Courier & delivery"). One row per carrier +
+  //     AWB. Add-only: a new table, watched with the expenses.
+  (db) => {
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS courier_shipments (
+        carrier          TEXT NOT NULL,
+        awb              TEXT NOT NULL,
+        order_id         TEXT,
+        status           TEXT,
+        status_at        TEXT,
+        delivered_on     TEXT,
+        charge_fils      INTEGER,
+        charge_source    TEXT,
+        charged_on       TEXT,
+        expense_id       TEXT,
+        cod_fils         INTEGER,
+        cod_source       TEXT,
+        remitted_fils    INTEGER,
+        remitted_on      TEXT,
+        remittance_ref   TEXT,
+        updated_at       TEXT NOT NULL,
+        updated_by       TEXT NOT NULL,
+        PRIMARY KEY (carrier, awb)
+      );
+      CREATE INDEX IF NOT EXISTS courier_shipments_charged ON courier_shipments (charged_on);
+      CREATE INDEX IF NOT EXISTS courier_shipments_order ON courier_shipments (order_id);
+      -- "Regenerate invoice" (invoices.ts): each earlier version of an invoice, as it was sent.
+      CREATE TABLE IF NOT EXISTS invoice_revisions (
+        number      TEXT NOT NULL,
+        revision    INTEGER NOT NULL,
+        replaced_at TEXT NOT NULL,
+        replaced_by TEXT NOT NULL,
+        total_fils  INTEGER NOT NULL,
+        data        TEXT NOT NULL,
+        PRIMARY KEY (number, revision)
+      );
+    `);
+    ensureChangeTriggers(db);
+  },
 ];
 
 // ── What changed since the last backup: the triggers (migration 16) ─────────
@@ -660,6 +702,7 @@ const WATCHED: Array<[string, string, string[], string?]> = [
   ['vat_credit_notes', 'vat', []],
   ['photo_deals', 'orders', []],
   ['invoices', 'orders', []],
+  ['invoice_revisions', 'orders', []],
   ['stripe_events', 'payments', []],
   ['card_refunds', 'payments', []],
   // products.stock is kept in step by product_stock's own triggers: counted there, as stock. Every
@@ -674,6 +717,7 @@ const WATCHED: Array<[string, string, string[], string?]> = [
   ['expenses', 'expenses', []],
   ['expense_versions', 'expenses', []],
   ['expense_bills', 'expenses', []],
+  ['courier_shipments', 'expenses', []],
   ['admin_recovery_codes', 'accounts', []],
   // A sign-in moves the passkey's counter and last use: not a change to back up.
   ['admin_passkeys', 'accounts', ['public_key', 'transports', 'name', 'rp_id', 'device_type', 'backed_up', 'created_at']],

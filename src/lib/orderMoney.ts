@@ -25,3 +25,39 @@ export function heldFils(o: Pick<Order, 'paymentMethod' | 'total' | 'card' | 'ba
   else if (o.paymentMethod === 'bank_transfer' && o.bankTransfer?.state === 'paid') paid = fils(o.total) - fils(o.extraCharge?.amount);
   return Math.max(0, paid - creditOutFils(o));
 }
+
+export interface OrderClass {
+  counted: boolean;
+  /** Why not counted ('' when counted). */
+  reason: string;
+  paid: boolean;
+}
+
+/** How an order counts in the books (Money → Reports, src/lib/server/reports.ts; the hub's Sales figure). */
+export function classifyOrder(o: Order): OrderClass {
+  const card = o.paymentMethod === 'online_card' ? o.card : undefined;
+  const cardTaken = card ? fils(card.paidAmount) > 0 && ['paid', 'refund_pending', 'refunded'].includes(card.state) : false;
+  const paid =
+    o.paymentMethod === 'online_card'
+      ? cardTaken
+      : o.paymentMethod === 'bank_transfer'
+      ? o.bankTransfer?.state === 'paid' || o.paymentStatus === 'verified' || o.paymentStatus === 'paid'
+      : o.paymentStatus === 'paid' || o.paymentStatus === 'verified';
+  let reason = '';
+  if (card?.mode === 'test') reason = 'Stripe test mode (not real money)';
+  else if (o.status === 'pending_payment') reason = 'waiting for the card payment';
+  else if (o.status === 'cancelled' && !cardTaken) reason = 'cancelled';
+  return { counted: !reason, reason, paid };
+}
+
+/**
+ * What an order adds to the shop's sales, in fils: its total when it counts (not cancelled unpaid,
+ * not waiting for its card payment, not a Stripe test), less the card refunds made and less a
+ * payment moved onto another order (counted there). The hub's "Sales" figure; Money → Reports
+ * books refunds by the day they were made.
+ */
+export function saleFils(o: Order): number {
+  if (!classifyOrder(o).counted) return 0;
+  const refunded = o.paymentMethod === 'online_card' ? fils(o.card?.refundedAmount) : 0;
+  return Math.max(0, fils(o.total) - refunded - creditOutFils(o));
+}

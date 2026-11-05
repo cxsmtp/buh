@@ -10,8 +10,8 @@
 #
 # (`buh-updater setup … --proxy DOMAIN` starts it exactly so and keeps it up to date.)
 # Built from the repository root: docker build -f deploy/proxy/Dockerfile .
-# caddy:2.11.7-alpine, pinned by digest (a moved tag cannot change what is built; Dependabot proposes updates).
-FROM caddy:2.11.7-alpine@sha256:e70b164da81ef698b3ad19af799ea6086ce6d9e48ed4079eb9fe26f6fbf14ee5
+# caddy:2.11.8-alpine, pinned by digest (a moved tag cannot change what is built; Dependabot proposes updates).
+FROM caddy:2.11.8-alpine@sha256:f6228111e5fafa1a5238258d0858e103f10599b8d1659a146e7726681a002bb9
 
 # Not root: the caddy binary carries the one capability it needs (binding 80 and 443),
 # which the container must grant (--cap-add NET_BIND_SERVICE).
@@ -20,7 +20,11 @@ FROM caddy:2.11.7-alpine@sha256:e70b164da81ef698b3ad19af799ea6086ce6d9e48ed4079e
 # so that a release does not restart the proxy (see container.yml).
 # curl (and the libraries only it uses) is not needed by Caddy: removed, so there is less to patch.
 # apk logs the time it ran in /var/log/apk.log: removed too, so the image stays the same.
-RUN apk del --no-cache --no-network curl \
+# caddy 2.11.8's image no longer marks the binary with that capability, so it is set here
+# (setcap is added for this one step and removed again).
+RUN apk add --no-cache libcap-setcap \
+ && setcap cap_net_bind_service=+ep /usr/bin/caddy \
+ && apk del --no-cache --no-network libcap-setcap curl \
  && rm -f /var/log/apk.log \
  && printf 'buhproxy:x:1000:1000::/nonexistent:/sbin/nologin\n' >> /etc/passwd \
  && printf 'buhproxy:x:1000:\n' >> /etc/group \

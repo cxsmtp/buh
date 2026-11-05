@@ -1,7 +1,7 @@
 'use client';
 
 import React, { useState } from 'react';
-import { Download, FileText, Loader2, Mail, MessageCircle } from 'lucide-react';
+import { Download, FileText, Loader2, Mail, MessageCircle, RefreshCw } from 'lucide-react';
 import type { Order } from '@/types';
 import { postJson } from '@/lib/apiClient';
 import { safeFirstName } from '@/lib/bankMessages';
@@ -25,30 +25,32 @@ const when = (iso: string) => new Date(iso).toLocaleString('en-GB', { day: 'nume
  */
 export function OrderInvoice({ order, shopName }: { order: Order; shopName?: string }) {
   const [invoice, setInvoice] = useState<Invoice | undefined>(order.invoice);
-  const [busy, setBusy] = useState<'' | 'issue' | 'email'>('');
+  const [busy, setBusy] = useState<'' | 'issue' | 'email' | 'regenerate'>('');
   const [problem, setProblem] = useState('');
   const [note, setNote] = useState('');
   const current = invoice ?? order.invoice;
   if (!current && !invoiceReady(order)) return null;
 
-  const act = async (action: 'issue' | 'email' | 'shared') => {
+  const act = async (action: 'issue' | 'email' | 'shared' | 'regenerate') => {
+    if (action === 'regenerate' && !window.confirm(`Regenerate ${current?.number ?? 'the invoice'} from the order as it is now? It keeps its number; the earlier version is kept, and the PDF says "Revised". Send it to the customer again after.`)) return;
     if (action !== 'shared') setBusy(action);
     setProblem('');
     setNote('');
-    const { ok, data } = await postJson<{ invoice?: Invoice; emailed?: boolean; message?: string }>(`/api/admin/orders/${encodeURIComponent(order.id)}/invoice-pdf`, { action });
+    const { ok, data } = await postJson<{ invoice?: Invoice; emailed?: boolean; changed?: boolean; message?: string }>(`/api/admin/orders/${encodeURIComponent(order.id)}/invoice-pdf`, { action });
     setBusy('');
     if (data.invoice) setInvoice(data.invoice);
     if (!ok) return setProblem(data.message || 'Not done. Please try again.');
     if (action === 'email' && data.emailed) setNote(`Emailed to ${order.customer.email}.`);
+    if (action === 'regenerate') setNote(data.changed ? 'Regenerated: open or send the PDF again.' : 'Nothing changed: the invoice is already up to date.');
   };
 
   const link = current ? current.pdfUrl ?? (typeof window === 'undefined' ? undefined : `${window.location.origin}${current.pdfPath}`) : undefined;
   const wa = current && link ? waMeLink(order.customer.phone, `Dear ${safeFirstName(order.customer.fullName) || 'customer'}, here is your invoice ${current.number} for order ${order.id}${shopName ? ` from ${shopName}` : ''}: ${link}`) : null;
-  const button = 'min-h-10 px-3 rounded-lg text-xs font-semibold inline-flex items-center justify-center gap-1.5 disabled:opacity-50 focus:outline-none focus-visible:ring-2 focus-visible:ring-gold';
+  const button = 'min-h-8 px-2.5 rounded-lg text-xs font-semibold inline-flex items-center justify-center gap-1.5 disabled:opacity-50 focus:outline-none focus-visible:ring-2 focus-visible:ring-gold';
 
   return (
-    <div data-testid="order-invoice" className="rounded-xl border border-line bg-ivory p-3 space-y-2 text-xs min-w-0">
-      <p className="flex flex-wrap items-center gap-x-2 gap-y-1">
+    <div data-testid="order-invoice" className="rounded-xl border border-line bg-ivory px-3 py-2 space-y-1.5 text-xs min-w-0 sm:flex sm:flex-wrap sm:items-center sm:justify-between sm:gap-2 sm:space-y-0">
+      <p className="flex flex-wrap items-center gap-x-2 gap-y-1 min-w-0">
         <FileText className="w-4 h-4 text-gold-deep shrink-0" aria-hidden="true" />
         {current ? (
           <>
@@ -77,6 +79,11 @@ export function OrderInvoice({ order, shopName }: { order: Order; shopName?: str
             {order.customer.email && (
               <button type="button" disabled={Boolean(busy)} onClick={() => void act('email')} className={`${button} bg-surface text-ink border border-line-strong`}>
                 {busy === 'email' ? <Loader2 className="w-4 h-4 animate-spin" aria-hidden="true" /> : <Mail className="w-4 h-4" aria-hidden="true" />} {current.emailedAt ? 'Email again' : 'Email to customer'}
+              </button>
+            )}
+            {order.status !== 'cancelled' && current.number.startsWith('INV-') && (
+              <button type="button" disabled={Boolean(busy)} onClick={() => void act('regenerate')} className={`${button} bg-surface text-ink border border-line-strong`} data-testid="invoice-regenerate">
+                {busy === 'regenerate' ? <Loader2 className="w-4 h-4 animate-spin" aria-hidden="true" /> : <RefreshCw className="w-4 h-4" aria-hidden="true" />} Regenerate
               </button>
             )}
             {wa && (

@@ -139,6 +139,12 @@ test('at 375 and 1280 px: the optional invoice fields; "Make invoice (PDF)", "Op
     const wa = decodeURIComponent((await done.getByRole('link', { name: 'Send on WhatsApp' }).getAttribute('href')) ?? '');
     assert.match(wa, /here is your invoice INV-\d{4}-\d{6} for order BUH-/);
     assert.match(wa, /\/invoice\/BUH-[A-Z0-9-]+\.[A-Za-z0-9_-]{43}\/pdf/);
+    // "Regenerate": asks first; nothing changed since it was made, so it says so and keeps the number.
+    const number = (await done.textContent())?.match(/INV-\d{4}-\d{6}/)?.[0];
+    hp.once('dialog', (d) => void d.accept().catch(() => undefined));
+    await done.getByTestId('invoice-regenerate').click();
+    await done.getByText('Nothing changed: the invoice is already up to date.').waitFor();
+    assert.ok(number && ((await done.textContent()) ?? '').includes(number));
     assert.equal(await overflow(hp), false, `orders at ${width}: no sideways scroll`);
     if (process.env.SHOTS) await done.screenshot({ path: `${process.env.SHOTS}/invoice-hub-${width}.png` });
     assert.deepEqual(errors, []);

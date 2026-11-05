@@ -73,7 +73,7 @@ services:
     profiles: ["green"]
 
   caddy:
-    image: caddy:2.11.7-alpine@sha256:e70b164da81ef698b3ad19af799ea6086ce6d9e48ed4079eb9fe26f6fbf14ee5
+    image: caddy:2.11.8-alpine@sha256:f6228111e5fafa1a5238258d0858e103f10599b8d1659a146e7726681a002bb9
     restart: unless-stopped
     # No depends_on: Caddy health-checks both copies itself and serves whichever is up.
     env_file:
@@ -105,7 +105,7 @@ services:
   updater:
     # Opt-in: the Docker socket gives it control of the host (docs/security.md).
     profiles: ["autoupdate"]
-    image: docker:29.9.2-cli@sha256:5e6baf67325a79f64ed3bed6863954d5e05d0f3d4e57cbdb14809346814bbfdb
+    image: docker:29.9.3-cli@sha256:2357639ad1ea7d0194134bf3292622fd4e562483966ed674e5d7c945b5f3b28d
     restart: unless-stopped
     entrypoint: ["/bin/sh", "/updater/updater.sh"]
     command: ["daemon"]

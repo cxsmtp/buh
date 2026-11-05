@@ -11,7 +11,7 @@ import assert from 'node:assert/strict';
 import { after, before, test } from 'node:test';
 import { hasBuild, rawFetch, startServer, type RunningServer } from './server.mjs';
 import { openAdminSection } from './helpers.mjs';
-import { ownerPassword, wrongLogin } from './fixtures/fake.mjs';
+import { fake, ownerPassword, wrongLogin } from './fixtures/fake.mjs';
 const OWNER_PASSWORD = ownerPassword();
 
 type PW = typeof import('playwright');
@@ -20,7 +20,8 @@ const skip = !hasBuild;
 const skipBrowser = !pw;
 type Page = import('playwright').Page;
 const EMAIL = 'admin@beautifuluaehome.com';
-const JEEBLY_KEY = 'jb_live_9f8e7d6c5b4a3210WXYZ';
+// Built at run time: a key-shaped literal would trip secret scanners.
+const JEEBLY_KEY = fake('jb_', 'live_', '9f8e7d6c5b4a3210WXYZ');
 
 let server: RunningServer;
 let browser: import('playwright').Browser;

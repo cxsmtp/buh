@@ -6,6 +6,7 @@ import type { ChatMessage } from '@/types';
 import { getJson, postJson } from '@/lib/apiClient';
 import { OPEN_CHAT_EVENT, askWhatsAppLink, instagramLink, useShop } from '@/lib/client/shop';
 import { InstagramIcon } from '@/components/common/InstagramIcon';
+import { useT, type Words } from '@/lib/i18n';
 
 /**
  * The floating help button. With the chat switched on it opens the shop
@@ -28,7 +29,38 @@ interface View {
 }
 
 const KEY = 'buh_chat_v1';
-const SUGGESTIONS = ['Sizes & measurements', 'How long is delivery?', 'Any discount?', 'How do I wash it?'];
+const SUGGESTIONS = ['s1', 's2', 's3', 's4'] as const;
+
+const WORDS = {
+  s1: { en: 'Sizes & measurements', ar: 'المقاسات والأبعاد' },
+  s2: { en: 'How long is delivery?', ar: 'كم يستغرق التوصيل؟' },
+  s3: { en: 'Any discount?', ar: 'هل يوجد خصم؟' },
+  s4: { en: 'How do I wash it?', ar: 'كيف أغسله؟' },
+  waChat: { en: 'Chat with us on WhatsApp', ar: 'تواصل معنا على واتساب' },
+  igChat: { en: 'Message us on Instagram', ar: 'راسلنا على إنستغرام' },
+  sendFailed: { en: 'Could not send. Please try again.', ar: 'تعذّر الإرسال. حاول مرة أخرى.' },
+  helpChat: { en: 'Help and chat', ar: 'المساعدة والدردشة' },
+  help: { en: 'Help', ar: 'مساعدة' },
+  newReply: { en: 'New reply', ar: 'رد جديد' },
+  chatShop: { en: 'Chat with the shop', ar: 'دردشة مع المتجر' },
+  asking: { en: 'Asking the team…', ar: 'نسأل الفريق…' },
+  teamHere: { en: 'The team is here', ar: 'الفريق معك الآن' },
+  instant: { en: 'Replies instantly · a person when you need one', ar: 'رد فوري · وموظف عند الحاجة' },
+  newChat: { en: 'Start a new chat', ar: 'ابدأ دردشة جديدة' },
+  closeChat: { en: 'Close chat', ar: 'إغلاق الدردشة' },
+  getBack: { en: 'So we can get back to you:', ar: 'لنتمكن من الرد عليك:' },
+  name: { en: 'Your name', ar: 'اسمك' },
+  contact: { en: 'Phone (WhatsApp) or email', ar: 'الهاتف (واتساب) أو البريد الإلكتروني' },
+  contactPh: { en: '050 123 4567 or you@example.com', ar: '050 123 4567 أو you@example.com' },
+  save: { en: 'Save my details', ar: 'احفظ بياناتي' },
+  writing: { en: 'Writing…', ar: 'يكتب…' },
+  person: { en: 'Talk to a person', ar: 'تحدث مع موظف' },
+  yourMsg: { en: 'Your message', ar: 'رسالتك' },
+  typePh: { en: 'Type your question…', ar: 'اكتب سؤالك…' },
+  send: { en: 'Send', ar: 'إرسال' },
+  orOn: { en: 'Or message us on', ar: 'أو راسلنا على' },
+  team: { en: 'The team', ar: 'الفريق' },
+} as const satisfies Words;
 
 function loadSaved(): { id: string; token: string } | null {
   try {
@@ -40,6 +72,7 @@ function loadSaved(): { id: string; token: string } | null {
 }
 
 export function HelpLauncher() {
+  const tr = useT(WORDS);
   const { store, chat } = useShop();
   const [open, setOpen] = useState(false);
   const [view, setView] = useState<View | null>(null);
@@ -141,7 +174,7 @@ export function HelpLauncher() {
     // The chat is off: the plain WhatsApp button, as before.
     if (!floatingWa) return null;
     return (
-      <a href={floatingWa} target="_blank" rel="noopener noreferrer" aria-label="Chat with us on WhatsApp" className="fixed z-[41] right-1 bottom-[calc(0.25rem+env(safe-area-inset-bottom,0px))] w-16 h-12 rounded-2xl md:right-6 md:bottom-6 md:w-12 md:h-12 md:rounded-full bg-whatsapp text-paper md:shadow-lg flex items-center justify-center hover:brightness-110 focus:outline-none focus-visible:ring-4 focus-visible:ring-success-line">
+      <a href={floatingWa} target="_blank" rel="noopener noreferrer" aria-label={tr('waChat')} className="fixed z-[41] end-1 bottom-[calc(0.25rem+env(safe-area-inset-bottom,0px))] w-16 h-12 rounded-2xl md:end-6 md:bottom-6 md:w-12 md:h-12 md:rounded-full bg-whatsapp text-paper md:shadow-lg flex items-center justify-center hover:brightness-110 focus:outline-none focus-visible:ring-4 focus-visible:ring-success-line">
         <MessageCircle className="w-6 h-6" />
       </a>
     );
@@ -162,7 +195,7 @@ export function HelpLauncher() {
         setView(null);
         if (body.action === 'send') return call({ message: body.message });
       }
-      setError(res.data.message || 'Could not send. Please try again.');
+      setError(res.data.message || tr('sendFailed'));
       return false;
     }
     if (!s && res.data.token) {
@@ -207,35 +240,35 @@ export function HelpLauncher() {
             setOpen(true);
             setUnseen(false);
           }}
-          aria-label="Help and chat"
-          className="fixed z-[41] right-1 bottom-[calc(0.25rem+env(safe-area-inset-bottom,0px))] w-16 h-12 flex-col justify-center gap-0.5 rounded-2xl md:right-6 md:bottom-6 md:w-auto md:flex-row md:gap-2 md:pl-3.5 md:pr-4 md:rounded-full bg-ink text-paper md:shadow-lg flex items-center hover:brightness-110 focus:outline-none focus-visible:ring-4 focus-visible:ring-warning-line"
+          aria-label={tr('helpChat')}
+          className="fixed z-[41] end-1 bottom-[calc(0.25rem+env(safe-area-inset-bottom,0px))] w-16 h-12 flex-col justify-center gap-0.5 rounded-2xl md:end-6 md:bottom-6 md:w-auto md:flex-row md:gap-2 md:ps-3.5 md:pe-4 md:rounded-full bg-ink text-paper md:shadow-lg flex items-center hover:brightness-110 focus:outline-none focus-visible:ring-4 focus-visible:ring-warning-line"
         >
           <MessagesSquare className="w-5 h-5 text-gold-light" />
-          <span className="text-xs font-semibold">Help</span>
-          {unseen && <span className="absolute top-1 right-1 w-2.5 h-2.5 rounded-full bg-danger" aria-label="New reply" />}
+          <span className="text-xs font-semibold">{tr('help')}</span>
+          {unseen && <span className="absolute top-1 end-1 w-2.5 h-2.5 rounded-full bg-danger" aria-label={tr('newReply')} />}
         </button>
       )}
 
       {open && (
         <section
           role="dialog"
-          aria-label="Chat with the shop"
-          className="fixed z-50 inset-x-2 bottom-[calc(0.5rem+env(safe-area-inset-bottom,0px))] top-[calc(4rem+env(safe-area-inset-top,0px))] overscroll-contain sm:inset-auto sm:right-6 sm:bottom-6 sm:w-[380px] sm:h-[600px] sm:max-h-[calc(100vh-3rem)] bg-surface rounded-3xl border border-line flex flex-col overflow-hidden"
+          aria-label={tr('chatShop')}
+          className="fixed z-50 inset-x-2 bottom-[calc(0.5rem+env(safe-area-inset-bottom,0px))] top-[calc(4rem+env(safe-area-inset-top,0px))] overscroll-contain sm:inset-auto sm:end-6 sm:bottom-6 sm:w-[380px] sm:h-[600px] sm:max-h-[calc(100vh-3rem)] bg-surface rounded-3xl border border-line flex flex-col overflow-hidden"
         >
           <header className="flex items-center gap-2 px-4 py-3 bg-ink text-paper">
             <Bot className="w-5 h-5 text-gold-light" />
             <div className="min-w-0">
               <div className="text-sm font-semibold truncate">{chat.name}</div>
               <div className="text-[10px] opacity-75">
-                {view?.status === 'waiting' ? 'Asking the team…' : view?.status === 'human' ? 'The team is here' : 'Replies instantly · a person when you need one'}
+                {view?.status === 'waiting' ? tr('asking') : view?.status === 'human' ? tr('teamHere') : tr('instant')}
               </div>
             </div>
             {view && (
-              <button type="button" onClick={startOver} className="ml-auto p-1.5 rounded-lg hover:bg-surface/10" aria-label="Start a new chat" title="Start a new chat">
+              <button type="button" onClick={startOver} className="ms-auto p-1.5 rounded-lg hover:bg-surface/10" aria-label={tr('newChat')} title={tr('newChat')}>
                 <RotateCcw className="w-4 h-4" />
               </button>
             )}
-            <button type="button" onClick={() => setOpen(false)} className={`${view ? '' : 'ml-auto'} p-1.5 rounded-lg hover:bg-surface/10`} aria-label="Close chat">
+            <button type="button" onClick={() => setOpen(false)} className={`${view ? '' : 'ms-auto'} p-1.5 rounded-lg hover:bg-surface/10`} aria-label={tr('closeChat')}>
               <X className="w-5 h-5" />
             </button>
           </header>
@@ -253,21 +286,21 @@ export function HelpLauncher() {
                 }}
                 className="bg-surface border border-warning-line rounded-2xl p-3 space-y-2 text-xs"
               >
-                <p className="font-semibold text-ink">So we can get back to you:</p>
+                <p className="font-semibold text-ink">{tr('getBack')}</p>
                 <label className="block">
-                  <span className="text-ink-soft">Your name</span>
+                  <span className="text-ink-soft">{tr('name')}</span>
                   <input value={contact.name} onChange={(e) => setContact((c) => ({ ...c, name: e.target.value }))} maxLength={80} autoComplete="name" className="mt-0.5 w-full px-3 py-2 rounded-xl border border-line-strong text-sm" />
                 </label>
                 <label className="block">
-                  <span className="text-ink-soft">Phone (WhatsApp) or email</span>
-                  <input value={contact.contact} onChange={(e) => setContact((c) => ({ ...c, contact: e.target.value }))} required maxLength={254} placeholder="050 123 4567 or you@example.com" className="mt-0.5 w-full px-3 py-2 rounded-xl border border-line-strong text-sm" />
+                  <span className="text-ink-soft">{tr('contact')}</span>
+                  <input value={contact.contact} onChange={(e) => setContact((c) => ({ ...c, contact: e.target.value }))} required maxLength={254} placeholder={tr('contactPh')} className="mt-0.5 w-full px-3 py-2 rounded-xl border border-line-strong text-sm" />
                 </label>
-                <button type="submit" disabled={busy} className="w-full py-2 rounded-xl bg-ink text-paper font-semibold disabled:opacity-50">Save my details</button>
+                <button type="submit" disabled={busy} className="w-full py-2 rounded-xl bg-ink text-paper font-semibold disabled:opacity-50">{tr('save')}</button>
               </form>
             )}
             {busy && (
               <div className="flex items-center gap-1.5 text-xs text-ink-muted">
-                <span className="sr-only">Writing…</span>
+                <span className="sr-only">{tr('writing')}</span>
                 <span aria-hidden="true" className="inline-flex items-center gap-1 rounded-2xl bg-sand px-3 py-2">
                   <span className="typing-dot w-1.5 h-1.5 rounded-full bg-ink-muted" />
                   <span className="typing-dot w-1.5 h-1.5 rounded-full bg-ink-muted" />
@@ -281,13 +314,13 @@ export function HelpLauncher() {
           {(!view || view.status === 'bot') && (
             <div className="px-3 pt-2 flex gap-1.5 overflow-x-auto no-scrollbar bg-surface border-t border-line">
               {SUGGESTIONS.map((s) => (
-                <button key={s} type="button" disabled={busy} onClick={() => void send(s)} className="shrink-0 px-2.5 py-1.5 rounded-full border border-line-strong text-[11px] font-semibold text-ink-soft bg-surface hover:bg-ivory">
-                  {s}
+                <button key={s} type="button" disabled={busy} onClick={() => void send(tr(s))} className="shrink-0 px-2.5 py-1.5 rounded-full border border-line-strong text-[11px] font-semibold text-ink-soft bg-surface hover:bg-ivory">
+                  {tr(s)}
                 </button>
               ))}
               {view && (
                 <button type="button" disabled={busy} onClick={() => void call({ action: 'person' })} className="shrink-0 px-2.5 py-1.5 rounded-full border border-warning-line text-[11px] font-semibold text-warning bg-warning-soft inline-flex items-center gap-1">
-                  <UserRound className="w-3 h-3" /> Talk to a person
+                  <UserRound className="w-3 h-3" /> {tr('person')}
                 </button>
               )}
             </div>
@@ -300,7 +333,7 @@ export function HelpLauncher() {
             }}
             className="p-3 bg-surface flex items-end gap-2"
           >
-            <label htmlFor="chat-input" className="sr-only">Your message</label>
+            <label htmlFor="chat-input" className="sr-only">{tr('yourMsg')}</label>
             <textarea
               id="chat-input"
               ref={input}
@@ -314,25 +347,25 @@ export function HelpLauncher() {
               }}
               rows={1}
               maxLength={1000}
-              placeholder="Type your question…"
+              placeholder={tr('typePh')}
               className="flex-1 min-w-0 resize-none px-3 py-2.5 rounded-2xl border border-line-strong text-sm focus:outline-none focus:ring-2 focus:ring-gold"
             />
-            <button type="submit" disabled={busy || !draft.trim()} aria-label="Send" className="w-10 h-10 rounded-full bg-ink text-paper flex items-center justify-center disabled:opacity-40">
-              <Send className="w-4 h-4" />
+            <button type="submit" disabled={busy || !draft.trim()} aria-label={tr('send')} className="w-10 h-10 rounded-full bg-ink text-paper flex items-center justify-center disabled:opacity-40">
+              <Send className="w-4 h-4 rtl:-scale-x-100" />
             </button>
           </form>
           {error && <p role="alert" className="px-3 pb-2 text-xs text-danger bg-surface">{error}</p>}
 
           {(wa || ig) && (
             <div className="px-3 pb-3 bg-surface flex flex-wrap items-center gap-2 text-[11px] text-ink-muted">
-              <span>Or message us on</span>
+              <span>{tr('orOn')}</span>
               {wa && (
-                <a href={wa} target="_blank" rel="noopener noreferrer" aria-label="Chat with us on WhatsApp" className="inline-flex items-center gap-1 px-2 py-1 rounded-full bg-success-soft text-success border border-success-line font-semibold">
+                <a href={wa} target="_blank" rel="noopener noreferrer" aria-label={tr('waChat')} className="inline-flex items-center gap-1 px-2 py-1 rounded-full bg-success-soft text-success border border-success-line font-semibold">
                   <MessageCircle className="w-3.5 h-3.5" /> WhatsApp
                 </a>
               )}
               {ig && (
-                <a href={ig} target="_blank" rel="noopener noreferrer" aria-label="Message us on Instagram" className="inline-flex items-center gap-1 px-2 py-1 rounded-full bg-rose-soft text-rose-deep border border-rose-soft font-semibold">
+                <a href={ig} target="_blank" rel="noopener noreferrer" aria-label={tr('igChat')} className="inline-flex items-center gap-1 px-2 py-1 rounded-full bg-rose-soft text-rose-deep border border-rose-soft font-semibold">
                   <InstagramIcon className="w-3.5 h-3.5" /> Instagram
                 </a>
               )}
@@ -350,14 +383,15 @@ function fromTeam(author: ChatMessage['author']): boolean {
 }
 
 function Bubble({ author, body }: { author: ChatMessage['author']; body: string }) {
+  const tr = useT(WORDS);
   if (author === 'system') {
     return <p className="text-center text-[11px] text-ink-muted px-4 py-1 whitespace-pre-wrap">{body}</p>;
   }
   const mine = author === 'customer';
   return (
     <div className={`flex ${mine ? 'justify-end' : 'justify-start'}`}>
-      <div className={`max-w-[85%] rounded-2xl px-3 py-2 whitespace-pre-wrap break-words ${mine ? 'bg-ink text-paper rounded-br-md' : fromTeam(author) ? 'bg-warning-soft border border-warning-line text-ink rounded-bl-md' : 'bg-surface border border-line text-ink rounded-bl-md'}`}>
-        {fromTeam(author) && <div className="text-[10px] font-semibold text-warning mb-0.5">The team</div>}
+      <div className={`max-w-[85%] rounded-2xl px-3 py-2 whitespace-pre-wrap break-words ${mine ? 'bg-ink text-paper rounded-ee-md' : fromTeam(author) ? 'bg-warning-soft border border-warning-line text-ink rounded-es-md' : 'bg-surface border border-line text-ink rounded-es-md'}`}>
+        {fromTeam(author) && <div className="text-[10px] font-semibold text-warning mb-0.5">{tr('team')}</div>}
         {body}
       </div>
     </div>

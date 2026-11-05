@@ -5,6 +5,24 @@ import { CheckCircle2, MessageCircle } from 'lucide-react';
 import type { WhatsAppCheck } from '@/types';
 import { useShop } from '@/lib/client/shop';
 import { confirmLink } from '@/lib/whatsappConfirm';
+import { useT, type Words } from '@/lib/i18n';
+
+const WORDS = {
+  confirmOnWa: { en: 'Confirm on WhatsApp', ar: 'أكّد عبر واتساب' },
+  confirmed: { en: 'Your number is confirmed on WhatsApp. Thank you.', ar: 'تم تأكيد رقمك عبر واتساب. شكراً لك.' },
+  again: { en: 'Didn’t send it? Open WhatsApp again', ar: 'لم ترسلها؟ افتح واتساب مرة أخرى' },
+  itSays: { en: 'It says:', ar: 'نص الرسالة:' },
+  tapSend: { en: 'Just tap Send.', ar: 'فقط اضغط إرسال.' },
+  ownWa: { en: 'Please send it from your own WhatsApp', ar: 'يرجى إرسالها من واتساب الخاص بك' },
+  lastStep: { en: 'Last step: confirm on WhatsApp', ar: 'الخطوة الأخيرة: أكّد عبر واتساب' },
+  mismatch: { en: 'Your message came from a different number. Send it from the WhatsApp on the number you ordered with.', ar: 'وصلتنا رسالتك من رقم مختلف. أرسلها من واتساب الرقم الذي طلبت به.' },
+  toConfirm: { en: 'To confirm your order, tap to send us a WhatsApp message.', ar: 'لتأكيد طلبك، اضغط لإرسال رسالة واتساب إلينا.' },
+  yours: { en: 'Tap to send us a WhatsApp message so we know this number is yours.', ar: 'اضغط لإرسال رسالة واتساب إلينا لنتأكد أن هذا الرقم رقمك.' },
+  within: { en: 'Please tap within {open} hours: orders not confirmed within {cancel} hours are cancelled (after {open} hours if WhatsApp is never opened).', ar: 'يرجى الضغط خلال {open} ساعات: الطلبات غير المؤكدة خلال {cancel} ساعة تُلغى (وبعد {open} ساعات إذا لم يُفتح واتساب).' },
+  cancelled: { en: 'Orders not confirmed within {cancel} hours are cancelled.', ar: 'الطلبات غير المؤكدة خلال {cancel} ساعة تُلغى.' },
+  hold: { en: 'We’ll start your order once we get your message.', ar: 'سنبدأ تجهيز طلبك فور وصول رسالتك.' },
+  either: { en: 'Your order is placed either way.', ar: 'طلبك مسجّل في كل الأحوال.' },
+} as const satisfies Words;
 
 /**
  * "Confirm on WhatsApp": one large button that opens the customer's WhatsApp with
@@ -22,7 +40,7 @@ export function WhatsAppConfirm({
   bankDetails = false,
   cancelHours,
   openHours,
-  buttonLabel = 'Confirm on WhatsApp',
+  buttonLabel,
   lead = false,
   tapped = false,
   onTapped,
@@ -51,13 +69,14 @@ export function WhatsAppConfirm({
   /** What screen readers say when the visible label is short ("Tap to confirm →"). */
   ariaLabel?: string;
 }) {
+  const t = useT(WORDS);
   const link = confirmLink(useShop().store.whatsappNumber, orderId, check.code, { bankDetails });
   if (!link) return null;
 
   if (check.status === 'confirmed') {
     return (
       <p role="status" className="flex items-center justify-center gap-1.5 text-xs font-semibold text-success bg-success-soft border border-success-line rounded-xl px-3 py-2">
-        <CheckCircle2 className="w-4 h-4 shrink-0" aria-hidden="true" /> Your number is confirmed on WhatsApp. Thank you.
+        <CheckCircle2 className="w-4 h-4 shrink-0" aria-hidden="true" /> {t('confirmed')}
       </p>
     );
   }
@@ -85,12 +104,12 @@ export function WhatsAppConfirm({
       className={`w-full ${(glow || !lead) && !tapped ? 'cta-glow ' : ''}${lead && !tapped ? 'min-h-14 text-base' : 'min-h-12 text-sm'} ${tapped ? 'bg-surface text-ink border border-success-line hover:bg-success-soft' : 'bg-whatsapp text-paper hover:brightness-110'} font-semibold py-3 px-4 rounded-xl flex items-center justify-center gap-2 transition-all focus:outline-none focus-visible:ring-2 focus-visible:ring-gold focus-visible:ring-offset-2`}
     >
       <MessageCircle className="w-5 h-5 shrink-0" aria-hidden="true" />
-      <span>{tapped ? 'Didn’t send it? Open WhatsApp again' : buttonLabel}</span>
+      <span>{tapped ? t('again') : (buttonLabel ?? t('confirmOnWa'))}</span>
     </a>
   );
   const says = (
     <p className="text-[11px] text-ink-muted text-center break-anywhere">
-      It says: &ldquo;Confirm my order <span className="font-mono">{orderId}</span> · code <span className="font-mono">{check.code}</span>{bankDetails ? ', and please send me the bank details' : ''}&rdquo;. Just tap Send.
+      {t('itSays')} <span lang="en" dir="ltr">&ldquo;Confirm my order <span className="font-mono">{orderId}</span> · code <span className="font-mono">{check.code}</span>{bankDetails ? ', and please send me the bank details' : ''}&rdquo;</span>. {t('tapSend')}
     </p>
   );
 
@@ -104,23 +123,23 @@ export function WhatsAppConfirm({
   }
 
   return (
-    <section aria-labelledby={`wa-confirm-${orderId}`} className="rounded-2xl border border-success-line bg-success-soft/60 p-4 space-y-3 text-left">
+    <section aria-labelledby={`wa-confirm-${orderId}`} className="rounded-2xl border border-success-line bg-success-soft/60 p-4 space-y-3 text-start">
       <h3 id={`wa-confirm-${orderId}`} className="text-sm font-semibold text-ink">
-        {check.status === 'mismatch' ? 'Please send it from your own WhatsApp' : 'Last step: confirm on WhatsApp'}
+        {check.status === 'mismatch' ? t('ownWa') : t('lastStep')}
       </h3>
       <p className="text-xs text-ink-soft leading-relaxed">
         {check.status === 'mismatch'
-          ? 'Your message came from a different number. Send it from the WhatsApp on the number you ordered with.'
+          ? t('mismatch')
           : cancelHours
-            ? 'To confirm your order, tap to send us a WhatsApp message.'
-            : 'Tap to send us a WhatsApp message so we know this number is yours.'}{' '}
+            ? t('toConfirm')
+            : t('yours')}{' '}
         {cancelHours
           ? openHours && openHours < cancelHours
-            ? `Please tap within ${openHours} hours: orders not confirmed within ${cancelHours} hours are cancelled (after ${openHours} hours if WhatsApp is never opened).`
-            : `Orders not confirmed within ${cancelHours} hours are cancelled.`
+            ? t('within', { open: openHours, cancel: cancelHours })
+            : t('cancelled', { cancel: cancelHours })
           : check.hold
-            ? 'We’ll start your order once we get your message.'
-            : 'Your order is placed either way.'}
+            ? t('hold')
+            : t('either')}
       </p>
       {button}
       {says}

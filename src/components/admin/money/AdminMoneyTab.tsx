@@ -6,8 +6,9 @@ import { ExpensesPanel } from './ExpensesPanel';
 import { ReportsPanel } from './ReportsPanel';
 import { AuditPanel } from './AuditPanel';
 import { VatPanel } from './VatPanel';
+import { CourierChargesPanel } from './CourierChargesPanel';
 
-type Section = 'expenses' | 'reports' | 'vat' | 'audit';
+type Section = 'expenses' | 'courier' | 'reports' | 'vat' | 'audit';
 
 /**
  * Money: the shop's expenses (with photos of the bills), the reports for the accountant (and their
@@ -29,13 +30,14 @@ export function AdminMoneyTab({ phone, readOnly = false }: { phone: boolean; rea
   }, []);
   const sections: Array<[Section, string]> = [
     ['expenses', 'Expenses'],
+    ['courier', 'Courier'],
     ['reports', 'Reports'],
     ...(vat.inUse ? ([['vat', 'VAT']] as Array<[Section, string]>) : []),
     ['audit', 'Audit log'],
   ];
   return (
     <div className={`space-y-4 ${phone ? '' : 'max-w-3xl'}`}>
-      <div role="group" aria-label="Money sections" className={`grid ${sections.length === 4 ? 'grid-cols-4' : 'grid-cols-3'} gap-1 rounded-2xl border border-line-strong bg-surface p-1`}>
+      <div role="group" aria-label="Money sections" className={`grid ${sections.length === 5 ? 'grid-cols-5' : 'grid-cols-4'} gap-1 rounded-2xl border border-line-strong bg-surface p-1`}>
         {sections.map(([id, label]) => (
           <button key={id} type="button" aria-pressed={section === id} onClick={() => setSection(id)} className={`min-h-11 rounded-xl text-sm font-semibold ${section === id ? 'bg-ink text-paper' : 'text-ink-soft hover:bg-sand'}`}>
             {label}
@@ -43,6 +45,7 @@ export function AdminMoneyTab({ phone, readOnly = false }: { phone: boolean; rea
         ))}
       </div>
       {section === 'expenses' && <ExpensesPanel readOnly={readOnly} vatOn={vat.on} />}
+      {section === 'courier' && <CourierChargesPanel readOnly={readOnly} />}
       {section === 'reports' && <ReportsPanel readOnly={readOnly} />}
       {section === 'vat' && vat.inUse && <VatPanel />}
       {section === 'audit' && <AuditPanel />}

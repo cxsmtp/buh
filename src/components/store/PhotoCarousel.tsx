@@ -4,6 +4,20 @@ import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { ChevronLeft, ChevronRight, Expand } from 'lucide-react';
 import { PhotoZoom } from './PhotoZoom';
 import { SHEET_SIZES, photoSources } from '@/lib/client/photos';
+import { useT, type Words } from '@/lib/i18n';
+
+const WORDS = {
+  photosOf: { en: 'Photos of {title}', ar: 'صور {title}' },
+  trackLabel: { en: 'Photo {n} of {count}. Use the arrow keys for the others.', ar: 'الصورة {n} من {count}. استخدم مفاتيح الأسهم لعرض البقية.' },
+  slide: { en: '{n} of {count}', ar: '{n} من {count}' },
+  photoN: { en: '{title}, photo {n}', ar: '{title}، الصورة {n}' },
+  styled: { en: 'Styled image', ar: 'صورة منسّقة' },
+  zoom: { en: 'Zoom photo', ar: 'تكبير الصورة' },
+  prev: { en: 'Previous photo', ar: 'الصورة السابقة' },
+  next: { en: 'Next photo', ar: 'الصورة التالية' },
+  show: { en: 'Show photo {n}', ar: 'عرض الصورة {n}' },
+  live: { en: 'Photo {n} of {count}', ar: 'الصورة {n} من {count}' },
+} as const satisfies Words;
 
 interface PhotoCarouselProps {
   images: string[];
@@ -23,6 +37,7 @@ const reducedMotion = () => typeof window !== 'undefined' && window.matchMedia?.
  * expand button) shows it full screen, to pinch and zoom into.
  */
 export function PhotoCarousel({ images, title, styled, children }: PhotoCarouselProps) {
+  const t = useT(WORDS);
   const track = useRef<HTMLDivElement>(null);
   const [index, setIndex] = useState(0);
   const drag = useRef<{ x: number; left: number; from: number } | null>(null);
@@ -133,11 +148,13 @@ export function PhotoCarousel({ images, title, styled, children }: PhotoCarousel
   if (!count) return <div className="aspect-[4/5] bg-sand-deep" />;
 
   return (
-    <div className="relative select-none" role="group" aria-roledescription="carousel" aria-label={`Photos of ${title}`}>
+    <div className="relative select-none" role="group" aria-roledescription="carousel" aria-label={t('photosOf', { title })}>
       <div
         ref={track}
         tabIndex={0}
-        aria-label={`Photo ${index + 1} of ${count}. Use the arrow keys for the others.`}
+        // Left to right in Arabic too: the swiping arithmetic reads scrollLeft.
+        dir="ltr"
+        aria-label={t('trackLabel', { n: index + 1, count })}
         onScroll={onScroll}
         onScrollEnd={onScrollEnd}
         onTouchStart={release}
@@ -157,7 +174,7 @@ export function PhotoCarousel({ images, title, styled, children }: PhotoCarousel
               key={`${img}-${i}`}
               role="group"
               aria-roledescription="slide"
-              aria-label={`${i + 1} of ${count}`}
+              aria-label={t('slide', { n: i + 1, count })}
               className="relative w-full h-full shrink-0 snap-center snap-always cursor-zoom-in"
               onClick={() => {
                 if (dragged.current) {
@@ -172,7 +189,7 @@ export function PhotoCarousel({ images, title, styled, children }: PhotoCarousel
                 src={s.src}
                 srcSet={s.srcSet}
                 sizes={s.srcSet ? SHEET_SIZES : undefined}
-                alt={i === 0 ? title : `${title}, photo ${i + 1}`}
+                alt={i === 0 ? title : t('photoN', { title, n: i + 1 })}
                 width={720}
                 height={900}
                 loading={i === 0 ? 'eager' : 'lazy'}
@@ -182,7 +199,7 @@ export function PhotoCarousel({ images, title, styled, children }: PhotoCarousel
               />
               {styled?.has(img) && (
                 <span className="pointer-events-none absolute left-3 bottom-3 rounded-full bg-surface/90 px-2 py-0.5 text-[11px] font-semibold text-ink shadow-sm" data-testid="styled-tag">
-                  Styled image
+                  {t('styled')}
                 </span>
               )}
             </div>
@@ -193,8 +210,8 @@ export function PhotoCarousel({ images, title, styled, children }: PhotoCarousel
       <button
         type="button"
         onClick={() => setZoom(index)}
-        aria-label="Zoom photo"
-        className="absolute right-3 top-3 w-10 h-10 rounded-full bg-surface/90 text-ink flex items-center justify-center"
+        aria-label={t('zoom')}
+        className="absolute end-3 top-3 w-10 h-10 rounded-full bg-surface/90 text-ink flex items-center justify-center"
       >
         <Expand className="w-4 h-4" aria-hidden="true" />
       </button>
@@ -216,7 +233,7 @@ export function PhotoCarousel({ images, title, styled, children }: PhotoCarousel
             type="button"
             onClick={() => go(index - 1)}
             disabled={index === 0}
-            aria-label="Previous photo"
+            aria-label={t('prev')}
             className="absolute left-2 top-1/2 -translate-y-1/2 w-9 h-9 rounded-full bg-surface/90 text-ink flex items-center justify-center disabled:opacity-0 transition-opacity"
           >
             <ChevronLeft className="w-5 h-5" aria-hidden="true" />
@@ -225,18 +242,18 @@ export function PhotoCarousel({ images, title, styled, children }: PhotoCarousel
             type="button"
             onClick={() => go(index + 1)}
             disabled={index === count - 1}
-            aria-label="Next photo"
+            aria-label={t('next')}
             className="absolute right-2 top-1/2 -translate-y-1/2 w-9 h-9 rounded-full bg-surface/90 text-ink flex items-center justify-center disabled:opacity-0 transition-opacity"
           >
             <ChevronRight className="w-5 h-5" aria-hidden="true" />
           </button>
-          <div className="absolute bottom-2.5 inset-x-0 flex justify-center gap-1">
+          <div className="absolute bottom-2.5 inset-x-0 flex justify-center gap-1" dir="ltr">
             {images.map((_, i) => (
               <button
                 key={i}
                 type="button"
                 onClick={() => go(i)}
-                aria-label={`Show photo ${i + 1}`}
+                aria-label={t('show', { n: i + 1 })}
                 aria-current={i === index ? 'true' : undefined}
                 className="p-1.5 -m-0.5"
               >
@@ -245,7 +262,7 @@ export function PhotoCarousel({ images, title, styled, children }: PhotoCarousel
             ))}
           </div>
           <p className="sr-only" aria-live="polite">
-            Photo {index + 1} of {count}
+            {t('live', { n: index + 1, count })}
           </p>
         </>
       )}

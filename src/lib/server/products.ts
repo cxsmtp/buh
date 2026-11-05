@@ -669,6 +669,10 @@ export function validateProduct(input: unknown): StoredProduct {
     slug: title.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '').slice(0, 80),
     description: text(p.description, 'Description', 4000),
     shortDescription: text(p.shortDescription, 'Short description', 300),
+    // The Arabic shop's words (optional): kept as saved when the browser sends none.
+    titleAr: p.titleAr === undefined ? existing?.titleAr : text(p.titleAr, 'Arabic name', 160) || undefined,
+    shortDescriptionAr: p.shortDescriptionAr === undefined ? existing?.shortDescriptionAr : text(p.shortDescriptionAr, 'Arabic short description', 300) || undefined,
+    descriptionAr: p.descriptionAr === undefined ? existing?.descriptionAr : text(p.descriptionAr, 'Arabic description', 4000) || undefined,
     // The owner's own words for Google (Publish step); empty: the shop writes them.
     seoTitle: seoField(p.seoTitle, 'SEO title', SEO_LIMITS.title),
     seoDescription: seoField(p.seoDescription, 'SEO description', SEO_LIMITS.description),
