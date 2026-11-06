@@ -1,16 +1,16 @@
 # Changelog
 
-## BUH-02.39.00 — 2026-11-06 06:00 UTC · [#72](https://github.com/cxsmtp/buh/pull/72)
+## BUH-02.39.00 — 2026-11-06 09:31 UTC · [#72](https://github.com/cxsmtp/buh/pull/72)
 
 - **A5 at home, A4 when away.** A5 stays the label paper for printing at home (the print button is unchanged). Every label now also has **Away from home: A4 PDF (2 per sheet)**: one landscape A4 sheet with two full-size A5 labels side by side and a dashed cut line down the middle, for a printer that only takes A4 (such as one that prints what is emailed to it). Print at 100% and cut in half.
 - **Label as a PDF.** The label window also has **Label PDF** at your home paper (on a Jeebly booking, **Packing slip PDF**), a file to save, share or print.
 - **Email A4 to printer.** Add your printer's own email address (Epson Connect, HP ePrint) in Couriers → **Printer email**, and labels show **Email A4 to printer**: the shop emails the A4 PDF there and it prints wherever the printer is. For a Jeebly booking, **Email Jeebly label to printer** sends Jeebly's own label. Each send is audited; nothing is sent, or claimed as sent, when the shop's email is not set up.
 - **All labels at once.** When orders are booked and waiting for dispatch, Orders shows **All labels PDF (A5)**, **All labels A4 PDF (2 per sheet)** and **Email all to printer (A4)**, for up to 40 parcels at a time, oldest first. A4 can also be chosen as the home paper in Couriers → Label paper.
 - **Status.**
-  - **Benchmark:** TBD
-  - **Tests:** TBD
-  - **Dependency audit:** TBD
-  - **Security scan:** TBD
+  - **Benchmark:** no failed requests in any round (main first, alternating, 3 rounds); p95 within the runs' spread of main (catalogue 140–160 ms vs 150–159, gift page 84–91 ms vs 175–184, courier 85–86 ms vs 88–100, home page 86–93 ms vs 92–99): only owner buttons and an owner route changed.
+  - **Tests:** the full run had 1171 of 1305 pass; the 134 failures came from the test machine's disk filling up (the shop answered 507 "no room" to uploads). All 17 affected files were run again one by one with room to spare: every test passed, after updating the label print-CSS test to the A5 + A4 rule. The new label tests (PDF, email, route, 375 and 1280 px) pass.
+  - **Dependency audit:** `npm audit --omit=dev`: 0 vulnerabilities; no dependencies changed.
+  - **Security scan:** Checkmarx One could not run (the scanner connection needs signing in again). By hand: the route is the owner's (`requireAdmin`), the body is capped at 4 KB with three allow-listed fields, order ids match a fixed pattern (at most 40), the printer address is only the one saved in Couriers (never from the browser), and every send is audited.
 
 ## BUH-02.38.00 — 2026-11-06 04:37 UTC · [#71](https://github.com/cxsmtp/buh/pull/71)
 
