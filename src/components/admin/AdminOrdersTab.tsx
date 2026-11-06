@@ -465,6 +465,34 @@ export const AdminOrdersTab: React.FC<AdminOrdersTabProps> = ({
         })}
       </div>
 
+      {/* Every label waiting for dispatch in one PDF (A4: two per sheet), or straight to the printer's email */}
+      {(() => {
+        const waiting = orders.filter((o) => o.status === 'confirmed' && o.courier?.awbNumber).length;
+        if (!waiting) return null;
+        const paper = courierSettings.labelPaper ?? 'a5';
+        return (
+          <div data-testid="batch-labels" className="flex flex-wrap items-center gap-2 rounded-2xl border border-line bg-surface p-2.5 text-xs">
+            <span className="text-ink-soft font-semibold">{waiting} label{waiting === 1 ? '' : 's'} waiting for dispatch</span>
+            <a href={`/api/admin/labels?paper=${paper}`} target="_blank" rel="noopener" data-testid="batch-labels-pdf" className="ml-auto px-3 py-1.5 rounded-xl border border-line-strong bg-surface hover:bg-sand font-semibold text-ink focus:outline-none focus-visible:ring-2 focus-visible:ring-gold">
+              All labels PDF{paper === 'a4' ? ' (A4, 2 per sheet)' : ''}
+            </a>
+            {courierSettings.printerEmail && (
+              <button
+                type="button"
+                data-testid="batch-labels-email"
+                onClick={async () => {
+                  const { ok, data } = await postJson<{ to?: string; count?: number; message?: string }>('/api/admin/labels', { paper });
+                  alert(ok ? `${data.count} label${data.count === 1 ? '' : 's'} sent to ${data.to}.` : data.message || 'Not sent. Please try again.');
+                }}
+                className="px-3 py-1.5 rounded-xl bg-ink text-paper font-semibold focus:outline-none focus-visible:ring-2 focus-visible:ring-gold"
+              >
+                Email all to printer
+              </button>
+            )}
+          </div>
+        );
+      })()}
+
       {/* Orders List */}
       <div className="space-y-3">
         {filteredOrders.length === 0 ? (
@@ -1150,6 +1178,7 @@ export const AdminOrdersTab: React.FC<AdminOrdersTabProps> = ({
           shopName={shopName}
           pickup={courierSettings.jeebly}
           paper={courierSettings.labelPaper ?? 'a5'}
+          printerEmail={courierSettings.printerEmail}
         />
       )}
 

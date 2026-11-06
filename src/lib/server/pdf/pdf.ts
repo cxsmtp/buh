@@ -45,10 +45,14 @@ const pdfString = (s: string) => `(${s.replace(/[\\()]/g, (c) => `\\${c}`).repla
 export class PdfDoc {
   private pages: PageData[] = [];
   private used: Record<FontStyle, Map<number, number>> = { regular: new Map(), bold: new Map() };
-  readonly width = A4[0];
-  readonly height = A4[1];
+  readonly width: number;
+  readonly height: number;
 
-  constructor(private info: { title: string; author: string; subject?: string }) {}
+  /** `size`: the page in points (A4 portrait by default; e.g. [841.89, 595.28] for A4 landscape). */
+  constructor(private info: { title: string; author: string; subject?: string }, size: [number, number] = A4) {
+    this.width = size[0];
+    this.height = size[1];
+  }
 
   get pageCount() {
     return this.pages.length;
@@ -121,8 +125,10 @@ export class PdfDoc {
     this.page.ops.push(`BT ${num(r)} ${num(g)} ${num(b)} rg /${style === 'bold' ? 'F2' : 'F1'} ${num(size)} Tf ${num(left)} ${num(this.height - y)} Td <${hex}> Tj ET`);
   }
 
-  line(x1: number, y1: number, x2: number, y2: number, color: RGB = [0.85, 0.82, 0.78], width = 0.75): void {
-    this.page.ops.push(`${num(color[0])} ${num(color[1])} ${num(color[2])} RG ${num(width)} w ${num(x1)} ${num(this.height - y1)} m ${num(x2)} ${num(this.height - y2)} l S`);
+  line(x1: number, y1: number, x2: number, y2: number, color: RGB = [0.85, 0.82, 0.78], width = 0.75, dash?: [number, number]): void {
+    const d = dash ? `[${num(dash[0])} ${num(dash[1])}] 0 d ` : '';
+    const undo = dash ? ' [] 0 d' : '';
+    this.page.ops.push(`${d}${num(color[0])} ${num(color[1])} ${num(color[2])} RG ${num(width)} w ${num(x1)} ${num(this.height - y1)} m ${num(x2)} ${num(this.height - y2)} l S${undo}`);
   }
 
   /** A filled box, its top-left at (x, y). */

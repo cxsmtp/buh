@@ -293,7 +293,10 @@ fieldset {
     print-color-adjust: exact;
   }
   /* A5 is 148 × 210 mm: the 4 × 6 in label × 1.37 is 139 × 209 mm, centred across the page. */
-  #shipping-label-print[data-paper='a5'] #printable-shipping-label {
+  /* A4 (two A5 labels per sheet): one label printed from here fills the left half of a landscape A4
+     sheet (cut in half for an A5 label); the PDF (/api/admin/labels) puts two on each sheet. */
+  #shipping-label-print[data-paper='a5'] #printable-shipping-label,
+  #shipping-label-print[data-paper='a4'] #printable-shipping-label {
     transform: scale(1.37);
     transform-origin: top left;
     margin-left: calc((148mm - 4in * 1.37) / 2);

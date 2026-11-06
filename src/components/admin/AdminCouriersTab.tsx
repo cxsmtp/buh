@@ -239,11 +239,27 @@ export const AdminCouriersTab: React.FC<AdminCouriersTabProps> = ({ settings, se
           </label>
           <label className="block">
             <span className="block text-ink-soft font-semibold mb-1">Label paper</span>
-            <select value={formData.labelPaper ?? 'a5'} onChange={(e) => setFormData({ ...formData, labelPaper: e.target.value === '4x6' ? '4x6' : 'a5' })} className={input} data-testid="label-paper">
+            <select value={formData.labelPaper ?? 'a5'} onChange={(e) => setFormData({ ...formData, labelPaper: e.target.value === '4x6' ? '4x6' : e.target.value === 'a4' ? 'a4' : 'a5' })} className={input} data-testid="label-paper">
               <option value="a5">A5 (148 × 210 mm)</option>
+              <option value="a4">A4: two A5 labels per sheet (cut in half)</option>
               <option value="4x6">4 × 6 in label</option>
             </select>
-            <span className="block text-ink-muted mt-1">The shop&apos;s label and packing slip print on this. Jeebly&apos;s own label is a PDF: choose &ldquo;Fit to page&rdquo; when printing it on A5.</span>
+            <span className="block text-ink-muted mt-1">The shop&apos;s label and packing slip print on this. A4 puts two A5 labels side by side on one landscape A4 sheet with a dashed cut line: print at 100%, cut in half. Jeebly&apos;s own label is a PDF: choose &ldquo;Fit to page&rdquo;.</span>
+          </label>
+          <label className="block">
+            <span className="block text-ink-soft font-semibold mb-1">Printer email (optional)</span>
+            <input
+              type="email"
+              inputMode="email"
+              autoComplete="off"
+              maxLength={120}
+              value={formData.printerEmail ?? ''}
+              onChange={(e) => setFormData({ ...formData, printerEmail: e.target.value.trim() })}
+              placeholder="e.g. yourprinter@print.epsonconnect.com"
+              className={input}
+              data-testid="printer-email"
+            />
+            <span className="block text-ink-muted mt-1">For a printer that prints what is emailed to it (Epson Connect, HP ePrint). Labels then show &ldquo;Email to printer&rdquo;: the PDF goes there from the shop&apos;s email.</span>
           </label>
           <label className="block">
             <span className="block text-ink-soft font-semibold mb-1">Emirate</span>
