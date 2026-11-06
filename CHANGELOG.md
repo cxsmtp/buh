@@ -1,5 +1,15 @@
 # Changelog
 
+## BUH-02.38.00 — 2026-11-06 04:37 UTC · [#71](https://github.com/cxsmtp/buh/pull/71)
+
+- **Handed over in person.** Any open order not booked with a courier (a photo order, a shop order, a bulk order still to deliver) has **Handed over in person**: for an order the customer collected or you brought by hand, it is marked delivered at once, with no courier, and the order shows when and by whom.
+- **Cash taken at the hand-over.** For cash on delivery it asks first, then records the cash due as received and the order as paid (or, if you say the cash is not received yet, delivered and still unpaid); a card order only once Stripe says paid; a photo order only once its amount is confirmed; an order booked with the courier only after that booking is cancelled.
+- **Status.**
+  - **Benchmark:** no failed requests in any round (main first, alternating); p95 within the runs' spread of main (catalogue 148–161 ms vs 139–149, gift page 79–87 ms vs 159–171, courier 77–110 ms vs 86–101, home page 82–98 ms vs 81–99): only an owner button and route changed.
+  - **Tests:** 1308 of 1308 passed in the full run.
+  - **Dependency audit:** `npm audit --omit=dev`: 0 vulnerabilities; no dependencies changed.
+  - **Security scan:** Checkmarx One: 59 findings (9 critical), the same as BUH-02.37.00, nothing new. The route is the owner's, capped at 1 KB, its two fields allow-listed; the cash is worked out on the server in fils and the change audited in the same transaction.
+
 ## BUH-02.37.00 — 2026-11-05 21:54 UTC · [#70](https://github.com/cxsmtp/buh/pull/70)
 
 - **Bulk orders, invoiced.** Money → Invoices → **New bulk invoice**: type in an order you took outside the shop (a hotel, a company, a reseller) with the customer (company and TRN optional), the item lines, delivery, a discount, the date of sale and how it was paid; **Make invoice** makes a numbered invoice from exactly that data.

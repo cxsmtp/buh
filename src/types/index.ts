@@ -236,6 +236,8 @@ export interface Order {
   /** A cancelled order recreated by the owner: the new order's number (and, on the new one, where it came from). */
   recreatedAs?: string;
   recreatedFrom?: string;
+  /** Handed over in person by the owner (no courier): when, by whom, and the cash taken then (AED). */
+  handedOver?: { at: string; by: string; cash?: number; note?: string };
   /** This (cancelled) order's payment moved onto other orders instead of a refund. In AED. */
   creditsOut?: Array<{ toOrderId: string; amount: number; at: string; by: string }>;
   /** UAE VAT added on top (Settings → Payments → VAT with prices excluding VAT), in AED. Part of total. */

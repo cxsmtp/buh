@@ -141,6 +141,24 @@ export const AdminOrdersTab: React.FC<AdminOrdersTabProps> = ({
 }) => {
   const [busyOrderId, setBusyOrderId] = useState('');
 
+  /** "Handed over in person": delivered without a courier; for cash on delivery, the cash taken now. */
+  const handOver = async (order: Order) => {
+    const due = order.paymentMethod === 'cod' ? dueOnDeliveryFils(order) : 0;
+    const money = due ? ` and AED ${(due / 100).toFixed(2)} cash received` : '';
+    if (!window.confirm(`${order.id}: handed over to the customer in person${money}? It is marked delivered; no courier is booked.`)) {
+      if (!due || !window.confirm(`Handed over, but the cash (AED ${(due / 100).toFixed(2)}) is not received yet? It is marked delivered and stays unpaid.`)) return;
+      return void sendHandOver(order, false);
+    }
+    return void sendHandOver(order, true);
+  };
+  const sendHandOver = async (order: Order, cashReceived: boolean) => {
+    setBusyOrderId(order.id);
+    const { ok, data } = await postJson<{ order?: Order; message?: string }>(`/api/admin/orders/${encodeURIComponent(order.id)}/handover`, order.paymentMethod === 'cod' ? { cashReceived } : {});
+    setBusyOrderId('');
+    if (ok && data.order) onOrderChanged(data.order);
+    else alert(data.message || 'The order could not be updated.');
+  };
+
   const patchOrder = async (order: Order, changes: Partial<Pick<Order, 'status' | 'paymentStatus' | 'adminNotes'>> & { clearAttention?: true; shipUnconfirmed?: true }, confirmText?: string) => {
     if (confirmText && !window.confirm(confirmText)) return;
     setBusyOrderId(order.id);
@@ -571,6 +589,12 @@ export const AdminOrdersTab: React.FC<AdminOrdersTabProps> = ({
                         AWB: {order.courier.awbNumber}
                       </span>
                     )}
+                    {order.handedOver && (
+                      <span data-testid="handed-over-badge" className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-success-soft text-success border border-success-line">
+                        Handed over in person {new Date(order.handedOver.at).toLocaleString('en-GB', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })}
+                        {order.handedOver.cash ? ` · AED ${order.handedOver.cash.toFixed(2)} cash` : ''}
+                      </span>
+                    )}
                     {order.courier.simulated && (
                       <span data-testid="test-booking-badge" className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-danger-soft text-danger border border-danger-line">
                         Test booking – not sent to the courier
@@ -724,6 +748,18 @@ export const AdminOrdersTab: React.FC<AdminOrdersTabProps> = ({
                         </button>
                       )}
                     </>
+                  )}
+                  {!['delivered', 'cancelled', 'pending_payment'].includes(order.status) && !realBooking(order) && (
+                    <button
+                      type="button"
+                      disabled={busyOrderId === order.id}
+                      onClick={() => void handOver(order)}
+                      data-testid="order-handover"
+                      title="Collected by the customer or brought by hand: delivered without a courier"
+                      className="px-2 py-1 rounded-lg font-semibold border border-success-line bg-success-soft text-success hover:opacity-90 disabled:opacity-50"
+                    >
+                      Handed over in person
+                    </button>
                   )}
                   {(heldForWhatsApp(order) ? [] : NEXT_ACTIONS[order.status] || []).map((action) => (
                     <button
