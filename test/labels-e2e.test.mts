@@ -94,8 +94,8 @@ test('the route: the owner’s, checked; an A4 PDF with two labels a sheet', { s
   assert.equal(all.status, 200, 'every waiting label');
 });
 
-test('at 375 and 1280 px: the label PDF, Email to printer, and all labels at once', { skip: skip || skipBrowser }, async () => {
-  assert.equal((await api('PUT', '/api/admin/settings/courier', { settings: { labelPaper: 'a4', printerEmail: 'printer@print.example.com' } })).status, 200);
+test('asked: A5 stays for home, A4 offered as well for away; at 375 and 1280 px: both PDFs, Email A4 to printer, all labels at once', { skip: skip || skipBrowser }, async () => {
+  assert.equal((await api('PUT', '/api/admin/settings/courier', { settings: { printerEmail: 'printer@print.example.com' } })).status, 200);
   for (const width of [375, 1280]) {
     const o = await bookedOrder(`JB-5500${width}`);
     const hub = await browser.newContext({ viewport: { width, height: 900 }, hasTouch: width < 800 });
@@ -113,15 +113,18 @@ test('at 375 and 1280 px: the label PDF, Email to printer, and all labels at onc
     await openAdminSection(hp, /^Orders/);
     const batch = hp.getByTestId('batch-labels-pdf');
     await batch.waitFor();
-    assert.match((await batch.getAttribute('href')) ?? '', /^\/api\/admin\/labels\?paper=a4$/);
-    assert.match((await batch.textContent()) ?? '', /A4, 2 per sheet/);
+    assert.equal(await batch.getAttribute('href'), '/api/admin/labels?paper=a4');
+    assert.match((await batch.textContent()) ?? '', /A4 PDF \(2 per sheet\)/);
+    assert.equal(await hp.getByTestId('batch-labels-home').getAttribute('href'), '/api/admin/labels?paper=a5', 'home: A5 kept');
     await hp.getByTestId('batch-labels-email').waitFor();
     assert.equal(await overflow(hp), false, `orders at ${width}: no sideways scroll`);
     await hp.getByRole('button', { name: /Print Shipping Label/ }).first().click();
     const pdfLink = hp.getByTestId('label-pdf');
     await pdfLink.waitFor();
-    const href = (await pdfLink.getAttribute('href')) ?? '';
-    assert.equal(href, `/api/admin/labels?ids=${encodeURIComponent(o.id)}&paper=a4`);
+    assert.equal(await pdfLink.getAttribute('href'), `/api/admin/labels?ids=${encodeURIComponent(o.id)}&paper=a5`, 'home: A5 kept');
+    assert.match((await hp.getByRole('dialog').getByRole('button', { name: /Print .*\(A5\)/ }).textContent()) ?? '', /A5/, 'the A5 print button stays');
+    const href = (await hp.getByTestId('label-pdf-a4').getAttribute('href')) ?? '';
+    assert.equal(href, `/api/admin/labels?ids=${encodeURIComponent(o.id)}&paper=a4`, 'away: A4 as well');
     const got = await hp.evaluate(async (u) => {
       const r = await fetch(u);
       return [r.status, r.headers.get('content-type')];

@@ -244,7 +244,7 @@ export const AdminCouriersTab: React.FC<AdminCouriersTabProps> = ({ settings, se
               <option value="a4">A4: two A5 labels per sheet (cut in half)</option>
               <option value="4x6">4 × 6 in label</option>
             </select>
-            <span className="block text-ink-muted mt-1">The shop&apos;s label and packing slip print on this. A4 puts two A5 labels side by side on one landscape A4 sheet with a dashed cut line: print at 100%, cut in half. Jeebly&apos;s own label is a PDF: choose &ldquo;Fit to page&rdquo;.</span>
+            <span className="block text-ink-muted mt-1">The shop&apos;s label and packing slip print on this. Keep A5 for printing at home. Away from home, every label also has an A4 PDF (two A5 labels side by side on a landscape A4 sheet, with a dashed cut line: print at 100%, cut in half), whatever is chosen here. Jeebly&apos;s own label is a PDF: choose &ldquo;Fit to page&rdquo;.</span>
           </label>
           <label className="block">
             <span className="block text-ink-soft font-semibold mb-1">Printer email (optional)</span>
@@ -259,7 +259,7 @@ export const AdminCouriersTab: React.FC<AdminCouriersTabProps> = ({ settings, se
               className={input}
               data-testid="printer-email"
             />
-            <span className="block text-ink-muted mt-1">For a printer that prints what is emailed to it (Epson Connect, HP ePrint). Labels then show &ldquo;Email to printer&rdquo;: the PDF goes there from the shop&apos;s email.</span>
+            <span className="block text-ink-muted mt-1">For a printer that prints what is emailed to it (Epson Connect, HP ePrint). Labels then show &ldquo;Email A4 to printer&rdquo;: the A4 PDF (two labels per sheet) goes there from the shop&apos;s email, so you can print when away from home.</span>
           </label>
           <label className="block">
             <span className="block text-ink-soft font-semibold mb-1">Emirate</span>

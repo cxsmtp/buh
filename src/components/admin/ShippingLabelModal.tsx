@@ -173,10 +173,12 @@ export const ShippingLabelModal: React.FC<ShippingLabelModalProps> = ({ order, o
   const carrierPdf = jeeblyLabel ? `/api/admin/orders/${encodeURIComponent(order.id)}/carrier-label` : undefined;
   // Our label as a PDF file (A4: two A5 labels per sheet, cut in half), for any printer or its email address.
   const ourPdf = `/api/admin/labels?ids=${encodeURIComponent(order.id)}&paper=${paper}`;
+  // Away from home: always offered, whatever the home paper (A5 stays the home choice).
+  const a4Pdf = `/api/admin/labels?ids=${encodeURIComponent(order.id)}&paper=a4`;
   const toPrinter = async (carrier: boolean) => {
     setSending(true);
     setSent('');
-    const { ok, data } = await postJson<{ to?: string; message?: string }>('/api/admin/labels', { ids: [order.id], paper, ...(carrier ? { carrier: true } : {}) });
+    const { ok, data } = await postJson<{ to?: string; message?: string }>('/api/admin/labels', { ids: [order.id], paper: 'a4', ...(carrier ? { carrier: true } : {}) });
     setSending(false);
     setSent(ok ? `Sent to ${data.to}: it prints in a minute.` : data.message || 'Not sent. Please try again.');
   };
@@ -236,10 +238,16 @@ export const ShippingLabelModal: React.FC<ShippingLabelModalProps> = ({ order, o
             <FileText className="w-4 h-4" aria-hidden="true" />
             <span>{carrierPdf ? 'Packing slip' : 'Label'} PDF ({paperName})</span>
           </a>
+          {paper !== 'a4' && (
+            <a href={a4Pdf} target="_blank" rel="noopener" data-testid="label-pdf-a4" className="flex items-center gap-1.5 font-semibold text-xs px-3.5 py-2 rounded-xl border border-line-strong bg-surface hover:bg-sand text-ink focus:outline-none focus-visible:ring-2 focus-visible:ring-gold">
+              <FileText className="w-4 h-4" aria-hidden="true" />
+              <span>Away from home: A4 PDF (2 per sheet)</span>
+            </a>
+          )}
           {printerEmail && (
             <button type="button" disabled={sending} onClick={() => void toPrinter(Boolean(carrierPdf))} data-testid="label-to-printer" className="flex items-center gap-1.5 font-semibold text-xs px-3.5 py-2 rounded-xl border border-line-strong bg-surface hover:bg-sand text-ink disabled:opacity-50 focus:outline-none focus-visible:ring-2 focus-visible:ring-gold">
               <Mail className="w-4 h-4" aria-hidden="true" />
-              <span>{sending ? 'Sending…' : carrierPdf ? 'Email Jeebly label to printer' : 'Email to printer'}</span>
+              <span>{sending ? 'Sending…' : carrierPdf ? 'Email Jeebly label to printer' : 'Email A4 to printer'}</span>
             </button>
           )}
           {carrierPdf && (

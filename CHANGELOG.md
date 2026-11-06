@@ -2,10 +2,10 @@
 
 ## BUH-02.39.00 — 2026-11-06 06:00 UTC · [#72](https://github.com/cxsmtp/buh/pull/72)
 
-- **Labels on A4, two per sheet.** Couriers → Label paper has **A4: two A5 labels per sheet (cut in half)**: each A4 sheet is printed landscape with two full-size A5 labels side by side and a dashed cut line down the middle, so a printer loaded with A4 (such as one that only prints what is emailed to it) gives two ready labels per sheet.
-- **Label as a PDF.** The label window has **Label PDF** (on a Jeebly booking, **Packing slip PDF**), a file at the chosen paper size (A4, A5 or 4 × 6 in) to save, share or send to any printer at 100%.
-- **Email to printer.** Add your printer's own email address (Epson Connect, HP ePrint) in Couriers → **Printer email**, and labels show **Email to printer**: the shop emails the PDF there and it prints. For a Jeebly booking, **Email Jeebly label to printer** sends Jeebly's own label. Each send is audited; nothing is sent, or claimed as sent, when the shop's email is not set up.
-- **All labels at once.** When orders are booked and waiting for dispatch, Orders shows **All labels PDF** (on A4, two per sheet) and **Email all to printer**, for up to 40 parcels at a time, oldest first.
+- **A5 at home, A4 when away.** A5 stays the label paper for printing at home (the print button is unchanged). Every label now also has **Away from home: A4 PDF (2 per sheet)**: one landscape A4 sheet with two full-size A5 labels side by side and a dashed cut line down the middle, for a printer that only takes A4 (such as one that prints what is emailed to it). Print at 100% and cut in half.
+- **Label as a PDF.** The label window also has **Label PDF** at your home paper (on a Jeebly booking, **Packing slip PDF**), a file to save, share or print.
+- **Email A4 to printer.** Add your printer's own email address (Epson Connect, HP ePrint) in Couriers → **Printer email**, and labels show **Email A4 to printer**: the shop emails the A4 PDF there and it prints wherever the printer is. For a Jeebly booking, **Email Jeebly label to printer** sends Jeebly's own label. Each send is audited; nothing is sent, or claimed as sent, when the shop's email is not set up.
+- **All labels at once.** When orders are booked and waiting for dispatch, Orders shows **All labels PDF (A5)**, **All labels A4 PDF (2 per sheet)** and **Email all to printer (A4)**, for up to 40 parcels at a time, oldest first. A4 can also be chosen as the home paper in Couriers → Label paper.
 - **Status.**
   - **Benchmark:** TBD
   - **Tests:** TBD

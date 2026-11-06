@@ -5,8 +5,8 @@ import { getSettings } from '@/lib/server/settings';
 import type { LabelPaper } from '@/types';
 
 const PAPERS: LabelPaper[] = ['a4', 'a5', '4x6'];
-const paperOf = (v: unknown): LabelPaper => {
-  if (v === undefined || v === null || v === '') return getSettings('courier').labelPaper ?? 'a5';
+const paperOf = (v: unknown, fallback?: LabelPaper): LabelPaper => {
+  if (v === undefined || v === null || v === '') return fallback ?? getSettings('courier').labelPaper ?? 'a5';
   if (!PAPERS.includes(v as LabelPaper)) throw new HttpError(400, 'Paper: a4, a5 or 4x6.');
   return v as LabelPaper;
 };
@@ -30,7 +30,10 @@ export async function GET(req: Request) {
   }
 }
 
-/** "Email to printer": { ids?, paper?, carrier? } → the PDF (ours, or with carrier: Jeebly's own) to Couriers → Printer email. */
+/**
+ * "Email to printer": { ids?, paper?, carrier? } → the PDF (ours, or with carrier: Jeebly's own) to Couriers → Printer email.
+ * Paper defaults to A4 (two A5 labels a sheet): printers that print what is emailed take A4.
+ */
 export async function POST(req: Request) {
   try {
     const session = await requireAdmin(req);
@@ -38,7 +41,7 @@ export async function POST(req: Request) {
     allowFields(body, ['ids', 'paper', 'carrier']);
     if (body.carrier !== undefined && typeof body.carrier !== 'boolean') throw new HttpError(400, 'carrier must be true or false.');
     if (body.ids !== undefined && !Array.isArray(body.ids)) throw new HttpError(400, 'ids must be a list.');
-    const result = await emailLabels(await ordersForLabels(body.ids), paperOf(body.paper), session.email, { carrier: body.carrier === true });
+    const result = await emailLabels(await ordersForLabels(body.ids), paperOf(body.paper, 'a4'), session.email, { carrier: body.carrier === true });
     return json({ emailed: true, ...result });
   } catch (err) {
     return handleRouteError(err, 'admin/labels/email');

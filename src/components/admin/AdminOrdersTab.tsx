@@ -473,20 +473,25 @@ export const AdminOrdersTab: React.FC<AdminOrdersTabProps> = ({
         return (
           <div data-testid="batch-labels" className="flex flex-wrap items-center gap-2 rounded-2xl border border-line bg-surface p-2.5 text-xs">
             <span className="text-ink-soft font-semibold">{waiting} label{waiting === 1 ? '' : 's'} waiting for dispatch</span>
-            <a href={`/api/admin/labels?paper=${paper}`} target="_blank" rel="noopener" data-testid="batch-labels-pdf" className="ml-auto px-3 py-1.5 rounded-xl border border-line-strong bg-surface hover:bg-sand font-semibold text-ink focus:outline-none focus-visible:ring-2 focus-visible:ring-gold">
-              All labels PDF{paper === 'a4' ? ' (A4, 2 per sheet)' : ''}
+            {paper !== 'a4' && (
+              <a href={`/api/admin/labels?paper=${paper}`} target="_blank" rel="noopener" data-testid="batch-labels-home" className="ml-auto px-3 py-1.5 rounded-xl border border-line-strong bg-surface hover:bg-sand font-semibold text-ink focus:outline-none focus-visible:ring-2 focus-visible:ring-gold">
+                All labels PDF ({paper === '4x6' ? '4 × 6 in' : 'A5'})
+              </a>
+            )}
+            <a href="/api/admin/labels?paper=a4" target="_blank" rel="noopener" data-testid="batch-labels-pdf" className={`${paper === 'a4' ? 'ml-auto ' : ''}px-3 py-1.5 rounded-xl border border-line-strong bg-surface hover:bg-sand font-semibold text-ink focus:outline-none focus-visible:ring-2 focus-visible:ring-gold`}>
+              All labels A4 PDF (2 per sheet)
             </a>
             {courierSettings.printerEmail && (
               <button
                 type="button"
                 data-testid="batch-labels-email"
                 onClick={async () => {
-                  const { ok, data } = await postJson<{ to?: string; count?: number; message?: string }>('/api/admin/labels', { paper });
+                  const { ok, data } = await postJson<{ to?: string; count?: number; message?: string }>('/api/admin/labels', { paper: 'a4' });
                   alert(ok ? `${data.count} label${data.count === 1 ? '' : 's'} sent to ${data.to}.` : data.message || 'Not sent. Please try again.');
                 }}
                 className="px-3 py-1.5 rounded-xl bg-ink text-paper font-semibold focus:outline-none focus-visible:ring-2 focus-visible:ring-gold"
               >
-                Email all to printer
+                Email all to printer (A4)
               </button>
             )}
           </div>
