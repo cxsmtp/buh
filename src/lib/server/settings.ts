@@ -674,13 +674,18 @@ const VALIDATORS: { [K in SettingsKey]: (input: Obj, current: SettingsMap[K]) =>
     if (!Number.isInteger(packaging) || packaging < 0 || packaging > 5000) throw new HttpError(400, 'Packaging weight must be whole grams from 0 to 5000.');
     const pieceIn = input.photoPieceGrams === undefined || input.photoPieceGrams === null || input.photoPieceGrams === '' ? current.photoPieceGrams ?? 1000 : Number(input.photoPieceGrams);
     if (!Number.isInteger(pieceIn) || pieceIn < 1 || pieceIn > 20_000) throw new HttpError(400, 'Weight per piece (order from a photo) must be whole grams from 1 to 20000.');
-    // The label paper: A5 (default) or a 4 × 6 in label; nothing else.
-    if (input.labelPaper !== undefined && input.labelPaper !== 'a5' && input.labelPaper !== '4x6') throw new HttpError(400, 'Label paper: A5 or 4 × 6 in.');
-    const labelPaper = input.labelPaper === 'a5' || input.labelPaper === '4x6' ? input.labelPaper : current.labelPaper ?? 'a5';
+    // The label paper: A5 (default), a 4 × 6 in label, or A4 with two A5 labels per sheet; nothing else.
+    const papers = ['a5', '4x6', 'a4'];
+    if (input.labelPaper !== undefined && !papers.includes(input.labelPaper as string)) throw new HttpError(400, 'Label paper: A5, 4 × 6 in or A4 (two A5 labels).');
+    const labelPaper = papers.includes(input.labelPaper as string) ? (input.labelPaper as 'a5' | '4x6' | 'a4') : current.labelPaper ?? 'a5';
+    // The printer's own email address (empty: none): one plain address, nothing else.
+    const printerEmail = input.printerEmail === undefined ? current.printerEmail ?? '' : text(input.printerEmail, 'Printer email', 254, '');
+    if (printerEmail && !/^[^\s@<>",;()[\]\\]+@[^\s@<>",;()[\]\\]+\.[^\s@<>",;()[\]\\]+$/.test(printerEmail)) throw new HttpError(400, 'Printer email: one address, like yourprinter@hpeprint.com.');
     return {
       packagingGrams: packaging,
       photoPieceGrams: pieceIn,
       labelPaper,
+      printerEmail,
       autoAssignRules: {
         codCourier: provider(rules.codCourier, current.autoAssignRules.codCourier),
         prepaidCourier: provider(rules.prepaidCourier, current.autoAssignRules.prepaidCourier),

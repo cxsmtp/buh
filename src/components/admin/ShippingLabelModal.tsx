@@ -4,7 +4,8 @@ import { dueOnDeliveryFils } from '@/lib/orderMoney';
 import React, { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { CourierSettings, LabelPaper, Order } from '@/types';
-import { X, Printer, AlertTriangle, FileText } from 'lucide-react';
+import { X, Printer, AlertTriangle, FileText, Mail } from 'lucide-react';
+import { postJson } from '@/lib/apiClient';
 import { aed2, carrierLabel } from '@/lib/courierMode';
 import { Barcode128 } from './Barcode128';
 import { labelContents as contentsOf } from '@/lib/labelContents';
@@ -18,10 +19,11 @@ interface ShippingLabelModalProps {
   pickup?: Partial<CourierSettings['jeebly']>;
   /** Couriers → Label paper: A5 (the default) or a 4 × 6 in label. */
   paper?: LabelPaper;
+  printerEmail?: string;
 }
 
 /** What each paper is called on the buttons. */
-const PAPER_NAME: Record<LabelPaper, string> = { a5: 'A5', '4x6': '4 × 6 in' };
+const PAPER_NAME: Record<LabelPaper, string> = { a5: 'A5', '4x6': '4 × 6 in', a4: 'A4, 2 per sheet' };
 
 /** 4 × 6 in at 96 CSS px per inch: the label is laid out at its printed size. */
 const W = 384;
@@ -135,7 +137,9 @@ export function Label({ order, shopName, pickup }: { order: Order; shopName: str
   );
 }
 
-export const ShippingLabelModal: React.FC<ShippingLabelModalProps> = ({ order, onClose, shopName = 'Beautiful UAE Home', pickup = {}, paper = 'a5' }) => {
+export const ShippingLabelModal: React.FC<ShippingLabelModalProps> = ({ order, onClose, shopName = 'Beautiful UAE Home', pickup = {}, paper = 'a5', printerEmail = '' }) => {
+  const [sent, setSent] = useState('');
+  const [sending, setSending] = useState(false);
   const paperName = PAPER_NAME[paper] ?? 'A5';
   const frame = useRef<HTMLDivElement>(null);
   const printButton = useRef<HTMLElement>(null);
@@ -167,6 +171,17 @@ export const ShippingLabelModal: React.FC<ShippingLabelModalProps> = ({ order, o
   // Jeebly makes its own label for an API booking (or one typed in from its portal): the main action.
   const jeeblyLabel = c.provider === 'jeebly' && Boolean(c.awbNumber) && c.testKind !== 'practice' && (c.bookingState === 'booked' || c.testKind === 'sandbox');
   const carrierPdf = jeeblyLabel ? `/api/admin/orders/${encodeURIComponent(order.id)}/carrier-label` : undefined;
+  // Our label as a PDF file (A4: two A5 labels per sheet, cut in half), for any printer or its email address.
+  const ourPdf = `/api/admin/labels?ids=${encodeURIComponent(order.id)}&paper=${paper}`;
+  // Away from home: always offered, whatever the home paper (A5 stays the home choice).
+  const a4Pdf = `/api/admin/labels?ids=${encodeURIComponent(order.id)}&paper=a4`;
+  const toPrinter = async (carrier: boolean) => {
+    setSending(true);
+    setSent('');
+    const { ok, data } = await postJson<{ to?: string; message?: string }>('/api/admin/labels', { ids: [order.id], paper: 'a4', ...(carrier ? { carrier: true } : {}) });
+    setSending(false);
+    setSent(ok ? `Sent to ${data.to}: it prints in a minute.` : data.message || 'Not sent. Please try again.');
+  };
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-scrim/45 p-3 sm:p-4 overscroll-contain" role="dialog" aria-modal="true" aria-labelledby="label-title">
@@ -219,6 +234,22 @@ export const ShippingLabelModal: React.FC<ShippingLabelModalProps> = ({ order, o
             <Printer className="w-4 h-4" aria-hidden="true" />
             <span>{carrierPdf ? (test ? 'Print TEST packing slip' : `Print packing slip (${paperName})`) : test ? 'Print TEST label (not a shipment)' : `Print label (${paperName})`}</span>
           </button>
+          <a href={ourPdf} target="_blank" rel="noopener" data-testid="label-pdf" className="flex items-center gap-1.5 font-semibold text-xs px-3.5 py-2 rounded-xl border border-line-strong bg-surface hover:bg-sand text-ink focus:outline-none focus-visible:ring-2 focus-visible:ring-gold">
+            <FileText className="w-4 h-4" aria-hidden="true" />
+            <span>{carrierPdf ? 'Packing slip' : 'Label'} PDF ({paperName})</span>
+          </a>
+          {paper !== 'a4' && (
+            <a href={a4Pdf} target="_blank" rel="noopener" data-testid="label-pdf-a4" className="flex items-center gap-1.5 font-semibold text-xs px-3.5 py-2 rounded-xl border border-line-strong bg-surface hover:bg-sand text-ink focus:outline-none focus-visible:ring-2 focus-visible:ring-gold">
+              <FileText className="w-4 h-4" aria-hidden="true" />
+              <span>Away from home: A4 PDF (2 per sheet)</span>
+            </a>
+          )}
+          {printerEmail && (
+            <button type="button" disabled={sending} onClick={() => void toPrinter(Boolean(carrierPdf))} data-testid="label-to-printer" className="flex items-center gap-1.5 font-semibold text-xs px-3.5 py-2 rounded-xl border border-line-strong bg-surface hover:bg-sand text-ink disabled:opacity-50 focus:outline-none focus-visible:ring-2 focus-visible:ring-gold">
+              <Mail className="w-4 h-4" aria-hidden="true" />
+              <span>{sending ? 'Sending…' : carrierPdf ? 'Email Jeebly label to printer' : 'Email A4 to printer'}</span>
+            </button>
+          )}
           {carrierPdf && (
             <a
               ref={printButton as unknown as React.Ref<HTMLAnchorElement>}
@@ -232,12 +263,17 @@ export const ShippingLabelModal: React.FC<ShippingLabelModalProps> = ({ order, o
             </a>
           )}
         </div>
+        {sent && (
+          <p role="status" className="text-xs font-semibold text-ink text-right">
+            {sent}
+          </p>
+        )}
       </div>
 
       {/* What the printer gets: only this, on A5 (enlarged to fill it) or on a 4 × 6 in label (src/app/globals.css). Opened from a click, so always in the browser. */}
       {createPortal(
           <div id="shipping-label-print" data-paper={paper} aria-hidden="true">
-            <style>{paper === '4x6' ? '@media print { @page { size: 4in 6in; margin: 0; } }' : '@media print { @page { size: A5 portrait; margin: 0; } }'}</style>
+            <style>{paper === '4x6' ? '@media print { @page { size: 4in 6in; margin: 0; } }' : paper === 'a4' ? '@media print { @page { size: A4 landscape; margin: 0; } }' : '@media print { @page { size: A5 portrait; margin: 0; } }'}</style>
             <div id="printable-shipping-label">
               <Label order={order} shopName={shopName} pickup={pickup} />
             </div>

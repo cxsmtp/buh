@@ -535,7 +535,8 @@ export interface BankTransferDetails {
 }
 
 /** Label paper (Couriers → Label paper). */
-export type LabelPaper = 'a5' | '4x6';
+/** Label paper: A5, a 4 × 6 in label, or A4 with two A5 labels side by side (cut in half). */
+export type LabelPaper = 'a5' | '4x6' | 'a4';
 
 export interface CourierSettings {
   /** Packaging allowance added to every parcel's weight, in grams (default 200). */
@@ -544,6 +545,8 @@ export interface CourierSettings {
   photoPieceGrams?: number;
   /** The paper the shipping label / packing slip prints on: A5 (the default) or a 4 × 6 in label. */
   labelPaper?: LabelPaper;
+  /** A printer's own email address (HP ePrint and the like): "Email to printer" sends the label PDF there. */
+  printerEmail?: string;
   autoAssignRules: {
     codCourier: CourierProvider; // Defaults to 'jeebly'
     prepaidCourier: CourierProvider; // Defaults to 'echo'

@@ -54,13 +54,15 @@ test('sandbox keys are write-only: masked in what the hub reads, kept on the ser
   assert.equal(getSettings('courier').jeebly.sandboxApiKey, fake('SB-', 'KEY-123456'));
 });
 
-test('label paper (reported: the printer holds A5): A5 by default, 4 × 6 in on request, nothing else', async () => {
+test('label paper (reported: the printer holds A5; email printing takes A4): A5 by default, A4 (two per sheet) or 4 × 6 in on request, nothing else', async () => {
   assert.equal(getSettings('courier').labelPaper, 'a5');
   await updateSettings('courier', { labelPaper: '4x6' });
   assert.equal(getSettings('courier').labelPaper, '4x6');
   await updateSettings('courier', { packagingGrams: 250 });
   assert.equal(getSettings('courier').labelPaper, '4x6', 'kept when another field is saved');
-  for (const bad of ['a4', 'A5', '', 5]) await assert.rejects(updateSettings('courier', { labelPaper: bad }), (e: { status?: number }) => e.status === 400, String(bad));
+  await updateSettings('courier', { labelPaper: 'a4' });
+  assert.equal(getSettings('courier').labelPaper, 'a4');
+  for (const bad of ['A4', 'a3', 'A5', '', 5]) await assert.rejects(updateSettings('courier', { labelPaper: bad }), (e: { status?: number }) => e.status === 400, String(bad));
   await updateSettings('courier', { labelPaper: 'a5', packagingGrams: 200 });
 });
 
