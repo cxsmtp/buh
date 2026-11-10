@@ -6,11 +6,12 @@
 - **A compact order card.** All of an order's buttons (tracking, receipt, label, WhatsApp, handed over, dispatched, cancel) sit in one line, the invoice and photo-deal rows are one line each with small pictures, and the extra white space is gone.
 - **Edit a photo deal link.** Until the customer orders, **Edit** on a link changes its pictures (remove, keep, add), what it is, for whom, pieces, the price, the ways to pay and how long it works; the link stays the same. A customer who opened the page before a price change is asked to reload at checkout, so nobody pays a price they didn't see.
 - **Photo orders tab.** Orders shows only the latest 3 photo deal links; **See all** opens the new **Photo orders** tab with every link and every order from a photo, which then follow the normal order steps.
+- **Security updates.** The mail library (nodemailer) is updated to 10.5.0, which fixes an address-parsing flaw that could send an email to a different address than the one checked; and the updater and proxy images now install zlib 1.4 (the shop's own image already did), past the build flagged by CVE-2026-4738.
 - **Status.**
   - **Benchmark:** no failed requests in any round (main first, alternating, 3 rounds); p95 within the runs' spread of main (catalogue 123–141 ms vs 122–150, gift page 81–97 ms vs 165–179, courier 69–90 ms vs 79–90, home page 75–91 ms vs 72–124): only owner screens and owner routes changed.
   - **Tests:** 1322 of 1322 passed in the full run (in six batches, each with its own temporary folder, so the test machine's disk could not fill up again). `invoices-e2e` failed once in an earlier spot run and passed in every run after, including the full run; the cause of that one failure is not known.
-  - **Dependency audit:** `npm audit --omit=dev`: 0 vulnerabilities; no dependencies changed.
-  - **Security scan:** Checkmarx One could not run (the scanner connection needs signing in again). By hand: both changed routes are the owner's (`requireAdmin`), size-capped and allow-listed; the deal edit is re-checked and audited inside its transaction; a Jeebly booking is cancelled with Jeebly (its answer audited) before an order is marked delivered, and the owner's own confirmation is recorded as theirs.
+  - **Dependency audit:** `npm audit --omit=dev`: 0 vulnerabilities; nodemailer 10.3.1 → 10.5.0 (below).
+  - **Security scan:** Checkmarx One (SAST, SCA, KICS, containers, secrets): no new finding in the code. Two new outside ones, published today, are fixed here (above); the scan is run again on the fixed commit before the merge.
 
 ## BUH-02.39.00 — 2026-11-06 09:31 UTC · [#72](https://github.com/cxsmtp/buh/pull/72)
 
