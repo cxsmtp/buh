@@ -2927,15 +2927,29 @@ export function listBulkOrders(limit = 200): Order[] {
  * "Handed over in person": the owner gave the order to the customer (collected, or brought by hand),
  * so no courier is involved. The order goes straight to delivered, from any open status; for cash on
  * delivery the cash taken is recorded (what was due on delivery) and the order marked paid, unless
- * the owner says it is not paid yet. Refused for an order booked with a courier (cancel that booking
- * first), a card payment Stripe has not confirmed, or an order from a photo whose amount is not
+ * the owner says it is not paid yet. An order booked with a courier is handed over only once that
+ * booking is cancelled: by Jeebly (the route cancels it first, through its API) or, with
+ * { courierCancelled: true }, by the owner in the courier's portal (recorded as the owner's word).
+ * Refused for a card payment Stripe has not confirmed, or an order from a photo whose amount is not
  * confirmed. The customer was there, so a WhatsApp confirmation still open does not hold it back.
  * Audited in the same transaction; asking again changes nothing.
  */
+const HANDOVER_FIELDS = ['cashReceived', 'note', 'cancelCourier', 'courierCancelled'];
+
+/** A real courier booking still stands (not a test, not cancelled with the carrier). */
+export function courierStillBooked(order: Order): boolean {
+  const c = order.courier;
+  if (!c.awbNumber || c.simulated || c.status === 'Cancelled with the carrier') return false;
+  return c.bookingState === 'booked' || c.bookingState === 'uncertain' || Boolean(c.enteredByHand);
+}
+
 export function handOverOrder(id: string, body: Obj, actor: string): { order: Order; changed: boolean } {
-  const unknown = Object.keys(body).filter((k) => !['cashReceived', 'note'].includes(k));
+  const unknown = Object.keys(body).filter((k) => !HANDOVER_FIELDS.includes(k));
   if (unknown.length) throw new HttpError(400, `Unknown field: ${unknown[0].slice(0, 40)}.`);
-  if (body.cashReceived !== undefined && typeof body.cashReceived !== 'boolean') throw new HttpError(400, 'cashReceived must be true or false.');
+  for (const k of ['cashReceived', 'cancelCourier', 'courierCancelled']) {
+    if (body[k] !== undefined && typeof body[k] !== 'boolean') throw new HttpError(400, `${k} must be true or false.`);
+  }
+  const ownerCancelled = body.courierCancelled === true;
   const note = text(body.note, 'Note', 300);
   const result = auditedTransaction((auditOrThrow) => {
     const order = getOrder(id);
@@ -2943,7 +2957,8 @@ export function handOverOrder(id: string, body: Obj, actor: string): { order: Or
     if (order.status === 'delivered' && order.handedOver) return { order, changed: false };
     if (order.status === 'delivered' || order.status === 'cancelled') throw new HttpError(409, `${id} is ${order.status}.`, {}, { code: 'order_closed' });
     const c = order.courier;
-    if (c.awbNumber && !c.simulated && (c.bookingState === 'booked' || c.bookingState === 'uncertain' || c.enteredByHand)) {
+    const booked = courierStillBooked(order);
+    if (booked && !ownerCancelled) {
       throw new HttpError(409, `${id} is booked with the courier (AWB ${c.awbNumber}): cancel that booking first, so the courier does not come for it.`, {}, { code: 'courier_booked' });
     }
     if (order.photoOrder && !order.photoOrder.confirmedAt) {
@@ -2956,15 +2971,17 @@ export function handOverOrder(id: string, body: Obj, actor: string): { order: Or
     const cashFils = cashReceived ? dueOnDeliveryFils(order) : 0;
     const from = order.status;
     order.status = 'delivered';
-    order.courier = { ...c, status: 'Handed over in person (no courier)', deliveredAt: now };
+    order.courier = { ...c, status: 'Handed over in person (no courier)', deliveredAt: now, ...(booked ? { bookingState: undefined } : {}) };
     order.handedOver = { at: now, by: actor, ...(cashReceived ? { cash: aed(cashFils) } : {}), ...(note ? { note } : {}) };
     if (cashReceived) {
       order.paymentStatus = 'paid';
       order.courier.codAmountCollected = aed(cashFils);
     }
     writeOrder(order);
-    logEvent(id, actor, 'handed_over', { from, cashFils, note: note || undefined });
-    auditOrThrow('order.handed_over', { by: actor, orderId: id, from, cashFils, paymentMethod: order.paymentMethod, paymentStatus: order.paymentStatus });
+    // The owner cancelled the booking in the portal: the "cancel it in the portal" flag is done.
+    if (booked && order.attention?.kind === 'booked_after_cancel') getDb().prepare('UPDATE orders SET needs_attention = NULL WHERE id = ?').run(id);
+    logEvent(id, actor, 'handed_over', { from, cashFils, note: note || undefined, ...(booked ? { courierCancelledBy: 'owner', awb: c.awbNumber } : {}) });
+    auditOrThrow('order.handed_over', { by: actor, orderId: id, from, cashFils, paymentMethod: order.paymentMethod, paymentStatus: order.paymentStatus, ...(booked ? { courierCancelled: 'owner_confirmed', awb: c.awbNumber } : c.status === 'Cancelled with the carrier' ? { courierCancelled: 'carrier_confirmed', awb: c.awbNumber } : {}) });
     return { order: getOrder(id)!, changed: true };
   });
   if (result.changed) bump('orders');

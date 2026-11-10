@@ -3,7 +3,8 @@ import { callJeebly, fetchJeeblyLabel, JEEBLY_API, jeeblyOk, jeeblySaid, mapJeeb
 import { auditOrThrow } from './audit';
 import { noteJeeblyReply } from './courierCharges';
 import { redact } from './log';
-import { getOrder, noteCarrierCancel } from './orders';
+import { HttpError } from './http';
+import { courierStillBooked, getOrder, handOverOrder, noteCarrierCancel } from './orders';
 import { rateLimit } from './rateLimit';
 import { getSettings } from './settings';
 
@@ -152,4 +153,23 @@ export async function cancelJeeblyAfterRefund(orderId: string): Promise<void> {
       // The flag set with the refund stays.
     }
   }
+}
+
+/**
+ * "Handed over in person" for any open order (src/lib/server/orders.ts handOverOrder). Still booked
+ * with Jeebly and { cancelCourier: true }: the booking is cancelled with Jeebly first (its answer
+ * audited) and the order handed over only if Jeebly confirms; otherwise 409 courier_not_cancelled and
+ * nothing changes. Another courier can't be cancelled from here: the owner cancels it in its portal
+ * and says so ({ courierCancelled: true }).
+ */
+export async function handOverInPerson(id: string, body: Record<string, unknown>, actor: string): Promise<{ order: Order; changed: boolean }> {
+  const order = getOrder(id);
+  if (order && body.cancelCourier === true && body.courierCancelled !== true && courierStillBooked(order) && order.status !== 'delivered' && order.status !== 'cancelled') {
+    if (!jeeblyBooking(order)) {
+      throw new HttpError(409, `${id} is booked with ${order.courier.carrierName || 'the courier'} (AWB ${order.courier.awbNumber}), which the shop can't cancel for you: cancel it in their portal, then confirm.`, {}, { code: 'courier_not_cancelled' });
+    }
+    const cancel = await cancelJeeblyBooking(order, actor);
+    if (!cancel.cancelled) throw new HttpError(409, cancel.message || 'Jeebly did not cancel the booking.', {}, { code: 'courier_not_cancelled' });
+  }
+  return handOverOrder(id, body, actor);
 }

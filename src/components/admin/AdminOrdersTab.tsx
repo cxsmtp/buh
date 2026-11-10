@@ -59,6 +59,13 @@ export function bookingModeOf(provider: CourierProvider, settings: CourierSettin
 }
 
 /** A booking the carrier really has (not a test, not an unanswered attempt). */
+/** A real courier booking still stands (kept in step with courierStillBooked in src/lib/server/orders.ts). */
+export function courierBooked(order: Order): boolean {
+  const c = order.courier;
+  if (!c.awbNumber || c.simulated || c.status === 'Cancelled with the carrier') return false;
+  return c.bookingState === 'booked' || c.bookingState === 'uncertain' || Boolean(c.enteredByHand);
+}
+
 export function realBooking(order: Order): boolean {
   return order.courier.bookingState === 'booked' && !order.courier.simulated && Boolean(order.courier.awbNumber);
 }
@@ -145,15 +152,30 @@ export const AdminOrdersTab: React.FC<AdminOrdersTabProps> = ({
   const handOver = async (order: Order) => {
     const due = order.paymentMethod === 'cod' ? dueOnDeliveryFils(order) : 0;
     const money = due ? ` and AED ${(due / 100).toFixed(2)} cash received` : '';
-    if (!window.confirm(`${order.id}: handed over to the customer in person${money}? It is marked delivered; no courier is booked.`)) {
+    const booked = courierBooked(order);
+    const courier = booked
+      ? order.courier.provider === 'jeebly'
+        ? ` Its Jeebly booking (AWB ${order.courier.awbNumber}) is cancelled with Jeebly first, so nobody comes to collect it.`
+        : ` It is booked with ${carrierLabel(order.courier.provider, order.courier.carrierName)} (AWB ${order.courier.awbNumber}): cancel that in their portal too.`
+      : ' No courier is booked.';
+    if (!window.confirm(`${order.id}: handed over to the customer in person${money}? It is marked delivered.${courier}`)) {
       if (!due || !window.confirm(`Handed over, but the cash (AED ${(due / 100).toFixed(2)}) is not received yet? It is marked delivered and stays unpaid.`)) return;
-      return void sendHandOver(order, false);
+      return void sendHandOver(order, false, booked);
     }
-    return void sendHandOver(order, true);
+    return void sendHandOver(order, true, booked);
   };
-  const sendHandOver = async (order: Order, cashReceived: boolean) => {
+  const sendHandOver = async (order: Order, cashReceived: boolean, booked: boolean) => {
     setBusyOrderId(order.id);
-    const { ok, data } = await postJson<{ order?: Order; message?: string }>(`/api/admin/orders/${encodeURIComponent(order.id)}/handover`, order.paymentMethod === 'cod' ? { cashReceived } : {});
+    const url = `/api/admin/orders/${encodeURIComponent(order.id)}/handover`;
+    const body = { ...(order.paymentMethod === 'cod' ? { cashReceived } : {}), ...(booked ? { cancelCourier: true } : {}) };
+    let { ok, data } = await postJson<{ order?: Order; message?: string; code?: string }>(url, body);
+    // The courier could not be cancelled from here: only on the owner's word that it is cancelled in the portal.
+    if (!ok && data.code === 'courier_not_cancelled' && window.confirm(`${data.message}\n\nDid you cancel it in the courier's portal yourself? OK marks the order delivered (handed over in person).`)) {
+      ({ ok, data } = await postJson<{ order?: Order; message?: string; code?: string }>(url, { ...body, courierCancelled: true }));
+    } else if (!ok && data.code === 'courier_not_cancelled') {
+      setBusyOrderId('');
+      return;
+    }
     setBusyOrderId('');
     if (ok && data.order) onOrderChanged(data.order);
     else alert(data.message || 'The order could not be updated.');
@@ -236,7 +258,7 @@ export const AdminOrdersTab: React.FC<AdminOrdersTabProps> = ({
   /** "Mark as handled" on a note that needed the owner (a failed refund, a booking after a cancel…). */
   const handled = (order: Order) => patchOrder(order, { clearAttention: true });
 
-  const [filter, setFilter] = useState<'all' | 'pending' | 'whatsapp' | 'transfer' | 'card' | 'confirmed' | 'dispatched'>('all');
+  const [filter, setFilter] = useState<'all' | 'pending' | 'whatsapp' | 'transfer' | 'card' | 'photo' | 'confirmed' | 'dispatched'>('all');
   // Orders the owner has just answered stay in "Awaiting WhatsApp" (or "Transfer to check") for now, so the reply link is right there.
   const [justChecked, setJustChecked] = useState<string[]>([]);
   const whatsappChecked = (o: Order) => {
@@ -269,6 +291,7 @@ export const AdminOrdersTab: React.FC<AdminOrdersTabProps> = ({
     if (filter === 'whatsapp') return awaitingWhatsApp(o) || justChecked.includes(o.id);
     if (filter === 'transfer') return transferToCheck(o) || justChecked.includes(o.id);
     if (filter === 'card') return o.paymentMethod === 'online_card';
+    if (filter === 'photo') return Boolean(o.photoOrder);
     if (filter === 'confirmed') return o.status === 'confirmed';
     if (filter === 'dispatched') return o.status === 'dispatched';
     return true;
@@ -421,8 +444,8 @@ export const AdminOrdersTab: React.FC<AdminOrdersTabProps> = ({
 
   return (
     <div className="space-y-4">
-      {/* The owner's photo deal links (pictures, fixed price, allowed payments) */}
-      <PhotoDeals />
+      {/* The owner's photo deal links (pictures, fixed price, allowed payments): the latest 3 here, all of them under Photo orders */}
+      {filter === 'photo' ? <PhotoDeals key="all" /> : <PhotoDeals key="latest" limit={3} onShowAll={() => setFilter('photo')} />}
       {/* Filter Tabs */}
       <div className="flex items-center gap-2 overflow-x-auto no-scrollbar pb-1">
         {[
@@ -431,6 +454,7 @@ export const AdminOrdersTab: React.FC<AdminOrdersTabProps> = ({
           { id: 'whatsapp', label: 'Awaiting WhatsApp' },
           { id: 'transfer', label: 'Transfer to check' },
           { id: 'card', label: 'Card payments' },
+          { id: 'photo', label: 'Photo orders' },
           { id: 'confirmed', label: 'Confirmed & AWB Ready' },
           { id: 'dispatched', label: 'Dispatched / In Transit' },
         ].filter((tab) => (tab.id !== 'whatsapp' || orders.some((o) => o.whatsappCheck)) && (tab.id !== 'transfer' || orders.some((o) => o.bankTransfer)) && (tab.id !== 'card' || orders.some((o) => o.paymentMethod === 'online_card'))).map((tab) => {
@@ -439,6 +463,7 @@ export const AdminOrdersTab: React.FC<AdminOrdersTabProps> = ({
             if (tab.id === 'whatsapp') return awaitingWhatsApp(o);
             if (tab.id === 'transfer') return transferToCheck(o);
             if (tab.id === 'card') return o.paymentMethod === 'online_card';
+            if (tab.id === 'photo') return Boolean(o.photoOrder);
             if (tab.id === 'confirmed') return o.status === 'confirmed';
             if (tab.id === 'dispatched') return o.status === 'dispatched';
             return true;
@@ -516,10 +541,10 @@ export const AdminOrdersTab: React.FC<AdminOrdersTabProps> = ({
             return (
               <div
                 key={order.id}
-                className="bg-surface rounded-2xl p-3 sm:p-4 border border-line hover:border-line-strong shadow-sm space-y-2 transition-all"
+                className="bg-surface rounded-2xl p-2.5 sm:p-3 border border-line hover:border-line-strong shadow-sm space-y-1.5 transition-all"
               >
                 {/* Top Strip */}
-                <div className="flex flex-wrap items-start justify-between gap-2 border-b border-line pb-2.5">
+                <div className="flex flex-wrap items-start justify-between gap-2 border-b border-line pb-1.5">
                   <div className="min-w-0">
                     <div className="flex items-center gap-2">
                       <span className="font-mono font-bold text-sm text-ink">
@@ -647,56 +672,6 @@ export const AdminOrdersTab: React.FC<AdminOrdersTabProps> = ({
                   </div>
                 </div>
 
-                {/* Booked, or not yet: book with the courier, or type in a number from its portal */}
-                {SHIPPING_STATUSES.includes(order.status) && !realBooking(order) && (
-                  <div className="flex flex-wrap items-center gap-2 text-[11px]">
-                    {order.courier.simulated && modeFor('jeebly') !== 'live' ? (
-                      <span className="text-ink-muted">To book for real, run the Sandbox check and turn on Live mode in Couriers.</span>
-                    ) : (
-                      <button
-                        type="button"
-                        onClick={() => openConfirmationModal(order)}
-                        className="px-2 py-1 rounded-lg font-semibold border border-line-strong bg-ink text-paper hover:bg-ink-2"
-                      >
-                        {order.courier.simulated ? 'Book for real' : 'Book courier'}
-                      </button>
-                    )}
-                    <button
-                      type="button"
-                      onClick={() => setTrackingOrder(order)}
-                      className="px-2 py-1 rounded-lg font-semibold border border-line-strong bg-surface text-ink hover:bg-sand"
-                    >
-                      Enter tracking number
-                    </button>
-                  </div>
-                )}
-                {SHIPPING_STATUSES.includes(order.status) && realBooking(order) && (
-                  <div className="flex flex-wrap items-center gap-2 text-[11px]">
-                    {order.courier.provider === 'jeebly' && (
-                      <button
-                        type="button"
-                        disabled={busyOrderId === order.id}
-                        onClick={() => void refreshTracking(order)}
-                        className="px-2 py-1 rounded-lg font-semibold border border-line-strong bg-surface text-ink hover:bg-sand disabled:opacity-50"
-                      >
-                        Refresh tracking
-                      </button>
-                    )}
-                    <button
-                      type="button"
-                      onClick={() => setTrackingOrder(order)}
-                      className="px-2 py-1 rounded-lg font-semibold border border-line bg-surface text-ink-soft hover:bg-sand"
-                    >
-                      Change tracking number
-                    </button>
-                    {safeHref(order.courier.trackingUrl) && (
-                      <a href={safeHref(order.courier.trackingUrl)} target="_blank" rel="noopener noreferrer" className="inline-flex items-center gap-1 px-2 py-1 rounded-lg font-semibold border border-line bg-surface text-ink-soft hover:bg-sand">
-                        Tracking page <ExternalLink className="w-3 h-3" aria-hidden="true" />
-                      </a>
-                    )}
-                  </div>
-                )}
-
                 {tracking[order.id] && (
                   <div data-testid="carrier-tracking" role="status" className="rounded-xl border border-line bg-ivory p-2.5 text-[11px] space-y-1">
                     {'error' in tracking[order.id] ? (
@@ -741,8 +716,132 @@ export const AdminOrdersTab: React.FC<AdminOrdersTabProps> = ({
                   </div>
                 )}
 
+
+                {/* Every action in one wrapping line (asked by the owner: compact) */}
+                <div className="flex flex-wrap items-center gap-1.5 text-[11px]" data-testid="order-actions">
+                {/* Booked, or not yet: book with the courier, or type in a number from its portal */}
+                {SHIPPING_STATUSES.includes(order.status) && !realBooking(order) && (
+                  <>
+                    {order.courier.simulated && modeFor('jeebly') !== 'live' ? (
+                      <span className="text-ink-muted">To book for real, run the Sandbox check and turn on Live mode in Couriers.</span>
+                    ) : (
+                      <button
+                        type="button"
+                        onClick={() => openConfirmationModal(order)}
+                        className="px-2 py-1 rounded-lg font-semibold border border-line-strong bg-ink text-paper hover:bg-ink-2"
+                      >
+                        {order.courier.simulated ? 'Book for real' : 'Book courier'}
+                      </button>
+                    )}
+                    <button
+                      type="button"
+                      onClick={() => setTrackingOrder(order)}
+                      className="px-2 py-1 rounded-lg font-semibold border border-line-strong bg-surface text-ink hover:bg-sand"
+                    >
+                      Enter tracking number
+                    </button>
+                  </>
+                )}
+                {SHIPPING_STATUSES.includes(order.status) && realBooking(order) && (
+                  <>
+                    {order.courier.provider === 'jeebly' && (
+                      <button
+                        type="button"
+                        disabled={busyOrderId === order.id}
+                        onClick={() => void refreshTracking(order)}
+                        className="px-2 py-1 rounded-lg font-semibold border border-line-strong bg-surface text-ink hover:bg-sand disabled:opacity-50"
+                      >
+                        Refresh tracking
+                      </button>
+                    )}
+                    <button
+                      type="button"
+                      onClick={() => setTrackingOrder(order)}
+                      className="px-2 py-1 rounded-lg font-semibold border border-line bg-surface text-ink-soft hover:bg-sand"
+                    >
+                      Change tracking number
+                    </button>
+                    {safeHref(order.courier.trackingUrl) && (
+                      <a href={safeHref(order.courier.trackingUrl)} target="_blank" rel="noopener noreferrer" className="inline-flex items-center gap-1 px-2 py-1 rounded-lg font-semibold border border-line bg-surface text-ink-soft hover:bg-sand">
+                        Tracking page <ExternalLink className="w-3 h-3" aria-hidden="true" />
+                      </a>
+                    )}
+                  </>
+                )}
+
+                {/* Edit before the label; recreate a cancelled cash order (asked by the owner). */}
+                {(orderEditable(order) || (order.status === 'cancelled' && order.paymentMethod === 'cod')) && (
+                  <span className="contents" data-testid="order-edit-actions">
+                    {orderEditable(order) && (
+                      <button type="button" onClick={() => setEditing(order)} className="px-2 py-1 rounded-lg font-semibold border border-line-strong bg-surface text-ink hover:bg-sand">
+                        Edit order
+                      </button>
+                    )}
+                    {order.status === 'cancelled' && order.paymentMethod === 'cod' && (
+                      <>
+                        <button type="button" disabled={recreating === order.id} onClick={() => void recreate(order)} className="px-2 py-1 rounded-lg font-semibold border border-line-strong bg-surface text-ink hover:bg-sand disabled:opacity-50">
+                          {order.recreatedAs ? `Recreated as ${order.recreatedAs} · recreate again` : 'Recreate order'}
+                        </button>
+                      </>
+                    )}
+                    {order.recreatedFrom && <span className="text-ink-muted">Recreated from {order.recreatedFrom}</span>}
+                  </span>
+                )}
+
+                {/* Action Buttons */}
+                    {/* The order's printable receipt (a tax invoice with VAT on): the server decides which. */}
+                    <a
+                      href={`/api/admin/orders/${order.id}/invoice`}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      data-testid="order-invoice-link"
+                      className="flex items-center gap-1.5 text-[11px] text-ink bg-surface hover:bg-sand border border-line-strong font-semibold px-2 py-1 rounded-lg"
+                    >
+                      <Printer className="w-3 h-3 text-gold" aria-hidden="true" />
+                      <span>Receipt / invoice</span>
+                    </a>
+                    {/* Print Label only once the carrier has issued the AWB */}
+                    {order.courier.awbNumber && order.courier.labelGenerated && (
+                      <button
+                        onClick={() => setLabelOrder(order)}
+                        className="flex items-center gap-1.5 text-[11px] text-ink bg-sand hover:bg-sand-deep border border-line-strong font-semibold px-2 py-1 rounded-lg transition-colors"
+                        title={order.courier.simulated ? 'Test label: not a real shipment' : 'Print the 4 × 6 in shipping label'}
+                      >
+                        <Printer className="w-3 h-3 text-gold" />
+                        <span>{order.courier.simulated ? 'Test label' : 'Print Shipping Label'}</span>
+                      </button>
+                    )}
+
+                    {/* WhatsApp notification */}
+                    <button
+                      onClick={() => sendWhatsAppUpdate(order)}
+                      className="flex items-center gap-1.5 text-[11px] text-success bg-success-soft hover:bg-success-soft border border-success-line font-semibold px-2 py-1 rounded-lg transition-colors"
+                      title="Send WhatsApp update to customer"
+                    >
+                      <MessageCircle className="w-3 h-3" />
+                      <span>WhatsApp Customer</span>
+                    </button>
+                  {/* Confirm Order Action (Primary) */}
+                  {isCard && cardUnpaid ? (
+                    <span className="text-warning font-semibold">Not paid yet: nothing to confirm until Stripe says paid</span>
+                  ) : isPending && heldForWhatsApp(order) ? (
+                    <span className="text-warning font-semibold">Held until confirmed on WhatsApp</span>
+                  ) : isPending ? (
+                    <button
+                      onClick={() => openConfirmationModal(order)}
+                      className="flex items-center gap-1.5 bg-ink hover:bg-ink text-paper font-bold text-[11px] px-3 py-1 rounded-lg transition-all shadow active:scale-95"
+                    >
+                      <CheckCircle2 className="w-4 h-4 text-gold-light" />
+                      <span>Confirm & Assign Courier</span>
+                    </button>
+                  ) : order.status === 'confirmed' ? (
+                    <span className="text-success font-semibold flex items-center gap-1">
+                      <CheckCircle2 className="w-3.5 h-3.5" />
+                      Ready for Dispatch
+                    </span>
+                  ) : null}
                 {/* Payment & progress */}
-                <div className="flex flex-wrap items-center gap-2 text-[11px]">
+                <>
                   {card && (
                     <span data-testid="card-badge" className={`px-2 py-1 rounded-lg font-semibold border break-anywhere ${TONES[card.tone]}`}>
                       {card.text}
@@ -782,13 +881,13 @@ export const AdminOrdersTab: React.FC<AdminOrdersTabProps> = ({
                       )}
                     </>
                   )}
-                  {!['delivered', 'cancelled', 'pending_payment'].includes(order.status) && !realBooking(order) && (
+                  {!['delivered', 'cancelled', 'pending_payment'].includes(order.status) && (
                     <button
                       type="button"
                       disabled={busyOrderId === order.id}
                       onClick={() => void handOver(order)}
                       data-testid="order-handover"
-                      title="Collected by the customer or brought by hand: delivered without a courier"
+                      title={courierBooked(order) ? 'Collected by the customer or brought by hand: the courier booking is cancelled, then the order is delivered' : 'Collected by the customer or brought by hand: delivered without a courier'}
                       className="px-2 py-1 rounded-lg font-semibold border border-success-line bg-success-soft text-success hover:opacity-90 disabled:opacity-50"
                     >
                       Handed over in person
@@ -837,86 +936,10 @@ export const AdminOrdersTab: React.FC<AdminOrdersTabProps> = ({
                       Cancel order
                     </button>
                   )}
+                </>
                 </div>
-
-                {/* Edit before the label; recreate a cancelled cash order (asked by the owner). */}
-                {(orderEditable(order) || (order.status === 'cancelled' && order.paymentMethod === 'cod')) && (
-                  <div className="flex flex-wrap items-center gap-2 text-[11px]" data-testid="order-edit-actions">
-                    {orderEditable(order) && (
-                      <button type="button" onClick={() => setEditing(order)} className="px-2 py-1 min-h-9 rounded-lg font-semibold border border-line-strong bg-surface text-ink hover:bg-sand">
-                        Edit order
-                      </button>
-                    )}
-                    {order.status === 'cancelled' && order.paymentMethod === 'cod' && (
-                      <>
-                        <button type="button" disabled={recreating === order.id} onClick={() => void recreate(order)} className="px-2 py-1 min-h-9 rounded-lg font-semibold border border-line-strong bg-surface text-ink hover:bg-sand disabled:opacity-50">
-                          {order.recreatedAs ? `Recreated as ${order.recreatedAs} · recreate again` : 'Recreate order'}
-                        </button>
-                      </>
-                    )}
-                    {order.recreatedFrom && <span className="text-ink-muted">Recreated from {order.recreatedFrom}</span>}
-                  </div>
-                )}
 
                 <OrderTimeline orderId={order.id} />
-
-                {/* Action Buttons */}
-                <div className="flex items-center justify-between gap-2 pt-1">
-                  <div className="flex items-center gap-2 flex-wrap">
-                    {/* The order's printable receipt (a tax invoice with VAT on): the server decides which. */}
-                    <a
-                      href={`/api/admin/orders/${order.id}/invoice`}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      data-testid="order-invoice-link"
-                      className="flex items-center gap-1.5 text-xs text-ink bg-surface hover:bg-sand border border-line-strong font-semibold px-3 py-1.5 rounded-xl"
-                    >
-                      <Printer className="w-3.5 h-3.5 text-gold" aria-hidden="true" />
-                      <span>Receipt / invoice</span>
-                    </a>
-                    {/* Print Label only once the carrier has issued the AWB */}
-                    {order.courier.awbNumber && order.courier.labelGenerated && (
-                      <button
-                        onClick={() => setLabelOrder(order)}
-                        className="flex items-center gap-1.5 text-xs text-ink bg-sand hover:bg-sand-deep border border-line-strong font-semibold px-3 py-1.5 rounded-xl transition-colors"
-                        title={order.courier.simulated ? 'Test label: not a real shipment' : 'Print the 4 × 6 in shipping label'}
-                      >
-                        <Printer className="w-3.5 h-3.5 text-gold" />
-                        <span>{order.courier.simulated ? 'Test label' : 'Print Shipping Label'}</span>
-                      </button>
-                    )}
-
-                    {/* WhatsApp notification */}
-                    <button
-                      onClick={() => sendWhatsAppUpdate(order)}
-                      className="flex items-center gap-1.5 text-xs text-success bg-success-soft hover:bg-success-soft border border-success-line font-semibold px-3 py-1.5 rounded-xl transition-colors"
-                      title="Send WhatsApp update to customer"
-                    >
-                      <MessageCircle className="w-3.5 h-3.5" />
-                      <span>WhatsApp Customer</span>
-                    </button>
-                  </div>
-
-                  {/* Confirm Order Action (Primary) */}
-                  {isCard && cardUnpaid ? (
-                    <span className="text-[11px] text-warning font-semibold text-right">Not paid yet: nothing to confirm until Stripe says paid</span>
-                  ) : isPending && heldForWhatsApp(order) ? (
-                    <span className="text-[11px] text-warning font-semibold text-right">Held until confirmed on WhatsApp</span>
-                  ) : isPending ? (
-                    <button
-                      onClick={() => openConfirmationModal(order)}
-                      className="flex items-center gap-1.5 bg-ink hover:bg-ink text-paper font-bold text-xs px-4 py-2 rounded-xl transition-all shadow active:scale-95"
-                    >
-                      <CheckCircle2 className="w-4 h-4 text-gold-light" />
-                      <span>Confirm & Assign Courier</span>
-                    </button>
-                  ) : order.status === 'confirmed' ? (
-                    <span className="text-[11px] text-success font-semibold flex items-center gap-1">
-                      <CheckCircle2 className="w-3.5 h-3.5" />
-                      Ready for Dispatch
-                    </span>
-                  ) : null}
-                </div>
               </div>
             );
           })

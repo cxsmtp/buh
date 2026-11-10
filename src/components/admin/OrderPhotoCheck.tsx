@@ -52,6 +52,44 @@ export function OrderPhotoCheck({ order, onOrderChanged }: { order: Order; onOrd
         </div>
   );
 
+  // Confirmed: one compact line (small pictures, what it is, the price); the editor stays a click away.
+  if (p.confirmedAt) {
+    return (
+      <div data-testid="photo-order-check" className="rounded-xl border border-success-line bg-success-soft px-2.5 py-1.5 text-[11px] flex flex-wrap items-center gap-x-2 gap-y-1 min-w-0">
+        <Camera className="w-3.5 h-3.5 text-gold-deep shrink-0" aria-hidden="true" />
+        <strong className="text-success">{fromDeal ? `Photo deal ${p.dealId} · your fixed price` : 'From a photo · amount confirmed'}</strong>
+        <ul className="flex flex-wrap gap-1">
+          {Array.from({ length: p.photos }, (_, i) => {
+            const src = `/api/admin/orders/${encodeURIComponent(order.id)}/photos/${i + 1}`;
+            return (
+              <li key={i}>
+                <a href={src} target="_blank" rel="noopener noreferrer" className="block rounded focus:outline-none focus-visible:ring-2 focus-visible:ring-gold" aria-label={`Open photo ${i + 1} of ${order.id}`}>
+                  {/* eslint-disable-next-line @next/next/no-img-element */}
+                  <img src={src} alt={fromDeal ? `Picture ${i + 1} of the deal` : `Photo ${i + 1} from the customer`} className="w-7 h-7 object-cover rounded border border-line bg-surface" loading="lazy" />
+                </a>
+              </li>
+            );
+          })}
+        </ul>
+        {p.note && <span className="text-ink break-anywhere min-w-0">&ldquo;{p.note}&rdquo;</span>}
+        <span className="text-ink-soft">
+          {p.pieces} {p.pieces === 1 ? 'pc' : 'pcs'} · <strong className="text-ink">AED {p.agreedTotal}</strong>
+          {!fromDeal && line.totalPrice !== p.agreedTotal ? ` · confirmed AED ${line.totalPrice}` : ''}
+        </span>
+        {!closed && (
+          <details className="text-ink-soft basis-full sm:basis-auto">
+            <summary className="inline-flex items-center cursor-pointer font-semibold underline">Change amount</summary>
+            {editor}
+          </details>
+        )}
+        {problem && (
+          <p role="alert" className="basis-full font-semibold text-danger">
+            {problem}
+          </p>
+        )}
+      </div>
+    );
+  }
   return (
     <div data-testid="photo-order-check" className={`rounded-xl border text-xs ${p.confirmedAt ? 'px-3 py-2 space-y-1.5' : 'p-3 space-y-2'} ${p.confirmedAt ? 'border-success-line bg-success-soft' : 'border-warning-line bg-warning-soft'}`}>
       <p className="flex flex-wrap items-center gap-x-2 gap-y-1">

@@ -1,5 +1,17 @@
 # Changelog
 
+## BUH-02.40.00 — 2026-11-10 12:00 UTC · [#73](https://github.com/cxsmtp/buh/pull/73)
+
+- **Handed over in person, even when booked.** Every open order now has **Handed over in person**, also one already booked with Jeebly: the shop first cancels the Jeebly booking with Jeebly (so nobody comes to collect it), then marks the order delivered with the cash taken. If Jeebly can't be reached or refuses, nothing changes until you confirm you cancelled it in the Jeebly portal yourself; no label is needed.
+- **A compact order card.** All of an order's buttons (tracking, receipt, label, WhatsApp, handed over, dispatched, cancel) sit in one line, the invoice and photo-deal rows are one line each with small pictures, and the extra white space is gone.
+- **Edit a photo deal link.** Until the customer orders, **Edit** on a link changes its pictures (remove, keep, add), what it is, for whom, pieces, the price, the ways to pay and how long it works; the link stays the same. A customer who opened the page before a price change is asked to reload at checkout, so nobody pays a price they didn't see.
+- **Photo orders tab.** Orders shows only the latest 3 photo deal links; **See all** opens the new **Photo orders** tab with every link and every order from a photo, which then follow the normal order steps.
+- **Status.**
+  - **Benchmark:** TBD
+  - **Tests:** TBD
+  - **Dependency audit:** TBD
+  - **Security scan:** TBD
+
 ## BUH-02.39.00 — 2026-11-06 09:31 UTC · [#72](https://github.com/cxsmtp/buh/pull/72)
 
 - **A5 at home, A4 when away.** A5 stays the label paper for printing at home (the print button is unchanged). Every label now also has **Away from home: A4 PDF (2 per sheet)**: one landscape A4 sheet with two full-size A5 labels side by side and a dashed cut line down the middle, for a printer that only takes A4 (such as one that prints what is emailed to it). Print at 100% and cut in half.
