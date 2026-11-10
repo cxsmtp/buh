@@ -11,7 +11,7 @@
   - **Benchmark:** no failed requests in any round (main first, alternating, 3 rounds); p95 within the runs' spread of main (catalogue 123–141 ms vs 122–150, gift page 81–97 ms vs 165–179, courier 69–90 ms vs 79–90, home page 75–91 ms vs 72–124): only owner screens and owner routes changed.
   - **Tests:** 1322 of 1322 passed in the full run (in six batches, each with its own temporary folder, so the test machine's disk could not fill up again). `invoices-e2e` failed once in an earlier spot run and passed in every run after, including the full run; the cause of that one failure is not known.
   - **Dependency audit:** `npm audit --omit=dev`: 0 vulnerabilities; nodemailer 10.3.1 → 10.5.0 (below).
-  - **Security scan:** Checkmarx One (SAST, SCA, KICS, containers, secrets): no new finding in the code. Two new outside ones, published today, are fixed here (above); the scan is run again on the fixed commit before the merge.
+  - **Security scan:** Checkmarx One (SAST, SCA, KICS, containers, secrets): no new finding in the code. Two outside ones published today were fixed here (above); on the fixed commit, 63 findings (13 critical), none new: nodemailer is gone, and the zlib one is still counted against the base images as published (the scan reads them before the build; the images built here carry zlib 1.4). The rest are the ones known since BUH-02.36.00 (test fixtures, S3 field-name false positives, Node 24 image advisories with no fix).
 
 ## BUH-02.39.00 — 2026-11-06 09:31 UTC · [#72](https://github.com/cxsmtp/buh/pull/72)
 
