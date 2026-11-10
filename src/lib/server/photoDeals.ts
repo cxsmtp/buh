@@ -226,6 +226,114 @@ export function createDeal(input: unknown, actor: string): PhotoDeal {
   return getDeal(id)!;
 }
 
+/**
+ * The owner edits a deal until it is ordered (asked by the owner): what it is, for whom, pieces, the
+ * price, the ways to pay, how long the link works (from now), and its pictures: { keep: [numbers of
+ * the pictures kept, in order], photos: [new pictures, added after them] }. The link stays the same.
+ * A customer who opened the page before a price change is stopped at checkout (the total they saw no
+ * longer matches), so nobody pays a price they didn't see. Allow-listed, audited, refused once ordered
+ * or stopped.
+ */
+export function updateDeal(id: string, input: unknown, actor: string): PhotoDeal {
+  if (!input || typeof input !== 'object' || Array.isArray(input)) throw new HttpError(400, 'The deal must be an object.');
+  const o = input as Obj;
+  const unknown = Object.keys(o).filter((k) => ![...DEAL_FIELDS, 'keep'].includes(k));
+  if (unknown.length) throw new HttpError(400, `Unknown field: ${unknown[0].slice(0, 40)}.`);
+  const before = getDeal(id);
+  if (!before) throw new HttpError(404, 'Deal not found.');
+  if (before.state === 'ordered') throw new HttpError(409, `${id} is already ordered (${before.orderId}): change the order instead.`, {}, { code: 'deal_ordered' });
+  if (before.state === 'cancelled') throw new HttpError(409, `${id} was stopped: make a new link.`, {}, { code: 'deal_cancelled' });
+
+  const set: Record<string, string | number | null> = {};
+  if (o.note !== undefined) set.note = cleanText(o.note, 'What it is', DEAL_LIMITS.noteMax) || null;
+  if (o.forWhom !== undefined) set.for_whom = cleanText(o.forWhom, 'For', DEAL_LIMITS.forMax) || null;
+  if (o.pieces !== undefined) {
+    if (typeof o.pieces !== 'number' || !Number.isInteger(o.pieces) || o.pieces < 1 || o.pieces > DEAL_LIMITS.maxPieces) throw new HttpError(400, `Pieces: a whole number from 1 to ${DEAL_LIMITS.maxPieces}.`);
+    set.pieces = o.pieces;
+  }
+  if (o.amount !== undefined) set.amount_fils = amountFils(o.amount);
+  if (o.payments !== undefined) {
+    if (!Array.isArray(o.payments) || !o.payments.length || o.payments.some((p) => typeof p !== 'string' || !(DEAL_PAYMENTS as string[]).includes(p))) {
+      throw new HttpError(400, 'Payments: choose at least one of cash on delivery, bank transfer and card.');
+    }
+    set.payments = DEAL_PAYMENTS.filter((p) => (o.payments as string[]).includes(p)).join(',');
+  }
+  if (o.days !== undefined) {
+    if (typeof o.days !== 'number' || !Number.isInteger(o.days) || o.days < DEAL_LIMITS.minDays || o.days > DEAL_LIMITS.maxDays) throw new HttpError(400, `Link valid for: ${DEAL_LIMITS.minDays} to ${DEAL_LIMITS.maxDays} days.`);
+    set.expires_at = new Date(Date.now() + o.days * 24 * 3600 * 1000).toISOString();
+  }
+
+  // The pictures: the ones kept (by number, in the order given), then the new ones.
+  let files: { ext: 'png' | 'jpg' | 'webp'; bytes: Buffer }[] | null = null;
+  if (o.keep !== undefined || o.photos !== undefined) {
+    const keep = o.keep === undefined ? Array.from({ length: before.photos }, (_, i) => i + 1) : o.keep;
+    if (!Array.isArray(keep) || keep.some((n) => typeof n !== 'number' || !Number.isInteger(n) || n < 1 || n > before.photos) || new Set(keep).size !== keep.length) {
+      throw new HttpError(400, 'keep: the numbers of the pictures to keep.');
+    }
+    const added = o.photos === undefined ? [] : o.photos;
+    if (!Array.isArray(added)) throw new HttpError(400, 'photos must be a list.');
+    if (keep.length + added.length < 1) throw new HttpError(400, 'Keep or add at least one picture.', {}, { code: 'photo_missing' });
+    if (keep.length + added.length > DEAL_LIMITS.maxPhotos) throw new HttpError(400, `At most ${DEAL_LIMITS.maxPhotos} pictures.`);
+    files = [];
+    for (const n of keep as number[]) {
+      const photo = readDealPhoto(id, n);
+      if (!photo) throw new HttpError(409, `Picture ${n} is missing: remove it and add it again.`);
+      files.push({ ext: PHOTO_TYPES[photo.mime], bytes: photo.bytes });
+    }
+    for (const p of added) {
+      const { mime, bytes } = parseImageDataUrl(p, DEAL_LIMITS.maxPhotoBytes);
+      files.push({ ext: PHOTO_TYPES[mime], bytes });
+    }
+    const room = folderRoomProblem(dealsDir(), files.reduce((n, f) => n + f.bytes.length, 0), ROOM_LIMITS, 'receipts');
+    if (room) throw new HttpError(507, `There is no room for the pictures right now (${room}). Free some space, then try again.`, {}, { code: 'no_room' });
+    set.photos = files.length;
+  }
+  if (!Object.keys(set).length) return before;
+
+  // New pictures are written beside the old ones first, then swapped in once the change is saved.
+  const staged: string[] = [];
+  try {
+    files?.forEach((f, i) => {
+      const file = `${photoPath(id, i + 1, f.ext)}.new`;
+      fs.writeFileSync(file, f.bytes, { mode: 0o600 });
+      staged.push(file);
+    });
+    auditedTransaction((auditOrThrow) => {
+      // Re-checked inside the transaction: an order made meanwhile wins, and the edit is refused.
+      const now = getDeal(id);
+      if (!now || now.state === 'ordered' || now.state === 'cancelled') throw new HttpError(409, `${id} was just ordered or stopped: nothing changed.`, {}, { code: 'deal_ordered' });
+      const cols = Object.keys(set);
+      getDb()
+        .prepare(`UPDATE photo_deals SET ${cols.map((c) => `${c} = ?`).join(', ')} WHERE id = ?`)
+        .run(...cols.map((c) => set[c]), id);
+      auditOrThrow('deal.updated', {
+        by: actor,
+        dealId: id,
+        changed: cols,
+        ...(set.amount_fils !== undefined ? { amountFilsBefore: Math.round(before.amount * 100), amountFils: set.amount_fils } : {}),
+        ...(set.photos !== undefined ? { photosBefore: before.photos, photos: set.photos } : {}),
+      });
+    });
+  } catch (err) {
+    for (const f of staged) fs.rmSync(f, { force: true });
+    throw err;
+  }
+  if (files) {
+    // Out with the old pictures (every type), in with the new ones.
+    for (let n = 1; n <= Math.max(before.photos, files.length); n++) {
+      for (const ext of Object.values(PHOTO_TYPES)) {
+        const file = photoPath(id, n, ext);
+        if (!staged.includes(`${file}.new`)) fs.rmSync(file, { force: true });
+      }
+    }
+    for (const f of staged) fs.renameSync(f, f.slice(0, -'.new'.length));
+  }
+  markChanged('orders');
+  bump('orders');
+  logEvent('info', 'deal_updated', { dealId: id, changed: Object.keys(set) });
+  return getDeal(id)!;
+}
+
 export function getDeal(id: string, now = Date.now()): PhotoDeal | null {
   const r = getDb().prepare(`${SELECT} WHERE d.id = ?`).get(id) as DealRow | undefined;
   return r ? toDeal(r, now) : null;

@@ -46,12 +46,12 @@ export function OrderInvoice({ order, shopName }: { order: Order; shopName?: str
 
   const link = current ? current.pdfUrl ?? (typeof window === 'undefined' ? undefined : `${window.location.origin}${current.pdfPath}`) : undefined;
   const wa = current && link ? waMeLink(order.customer.phone, `Dear ${safeFirstName(order.customer.fullName) || 'customer'}, here is your invoice ${current.number} for order ${order.id}${shopName ? ` from ${shopName}` : ''}: ${link}`) : null;
-  const button = 'min-h-8 px-2.5 rounded-lg text-xs font-semibold inline-flex items-center justify-center gap-1.5 disabled:opacity-50 focus:outline-none focus-visible:ring-2 focus-visible:ring-gold';
+  const button = 'min-h-8 px-2 rounded-lg text-[11px] font-semibold inline-flex items-center justify-center gap-1.5 disabled:opacity-50 focus:outline-none focus-visible:ring-2 focus-visible:ring-gold';
 
   return (
-    <div data-testid="order-invoice" className="rounded-xl border border-line bg-ivory px-3 py-2 space-y-1.5 text-xs min-w-0 sm:flex sm:flex-wrap sm:items-center sm:justify-between sm:gap-2 sm:space-y-0">
+    <div data-testid="order-invoice" className="rounded-xl border border-line bg-ivory px-2.5 py-1.5 text-[11px] min-w-0 flex flex-wrap items-center justify-between gap-x-2 gap-y-1">
       <p className="flex flex-wrap items-center gap-x-2 gap-y-1 min-w-0">
-        <FileText className="w-4 h-4 text-gold-deep shrink-0" aria-hidden="true" />
+        <FileText className="w-3.5 h-3.5 text-gold-deep shrink-0" aria-hidden="true" />
         {current ? (
           <>
             <strong className="text-ink">Invoice {current.number}</strong>
@@ -65,7 +65,7 @@ export function OrderInvoice({ order, shopName }: { order: Order; shopName?: str
           <strong className="text-ink">Invoice: not made yet</strong>
         )}
       </p>
-      <div className="flex flex-wrap gap-2">
+      <div className="flex flex-wrap gap-1.5">
         {!current && (
           <button type="button" disabled={Boolean(busy)} onClick={() => void act('issue')} className={`${button} bg-ink text-paper`}>
             {busy === 'issue' ? <Loader2 className="w-4 h-4 animate-spin" aria-hidden="true" /> : <FileText className="w-4 h-4" aria-hidden="true" />} Make invoice (PDF)

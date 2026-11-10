@@ -1,5 +1,18 @@
 # Changelog
 
+## BUH-02.40.00 — 2026-11-10 18:57 UTC · [#73](https://github.com/cxsmtp/buh/pull/73)
+
+- **Handed over in person, even when booked.** Every open order now has **Handed over in person**, also one already booked with Jeebly: the shop first cancels the Jeebly booking with Jeebly (so nobody comes to collect it), then marks the order delivered with the cash taken. If Jeebly can't be reached or refuses, nothing changes until you confirm you cancelled it in the Jeebly portal yourself; no label is needed.
+- **A compact order card.** All of an order's buttons (tracking, receipt, label, WhatsApp, handed over, dispatched, cancel) sit in one line, the invoice and photo-deal rows are one line each with small pictures, and the extra white space is gone.
+- **Edit a photo deal link.** Until the customer orders, **Edit** on a link changes its pictures (remove, keep, add), what it is, for whom, pieces, the price, the ways to pay and how long it works; the link stays the same. A customer who opened the page before a price change is asked to reload at checkout, so nobody pays a price they didn't see.
+- **Photo orders tab.** Orders shows only the latest 3 photo deal links; **See all** opens the new **Photo orders** tab with every link and every order from a photo, which then follow the normal order steps.
+- **Security updates.** The mail library (nodemailer) is updated to 10.5.0, which fixes an address-parsing flaw that could send an email to a different address than the one checked; and the updater and proxy images now install zlib 1.4 (the shop's own image already did), past the build flagged by CVE-2026-4738.
+- **Status.**
+  - **Benchmark:** no failed requests in any round (main first, alternating, 3 rounds); p95 within the runs' spread of main (catalogue 123–141 ms vs 122–150, gift page 81–97 ms vs 165–179, courier 69–90 ms vs 79–90, home page 75–91 ms vs 72–124): only owner screens and owner routes changed.
+  - **Tests:** 1322 of 1322 passed in the full run (in six batches, each with its own temporary folder, so the test machine's disk could not fill up again). `invoices-e2e` failed once in an earlier spot run and passed in every run after, including the full run; the cause of that one failure is not known.
+  - **Dependency audit:** `npm audit --omit=dev`: 0 vulnerabilities; nodemailer 10.3.1 → 10.5.0 (below).
+  - **Security scan:** Checkmarx One (SAST, SCA, KICS, containers, secrets): no new finding in the code. Two outside ones published today were fixed here (above); on the fixed commit, 63 findings (13 critical), none new: nodemailer is gone, and the zlib one is still counted against the base images as published (the scan reads them before the build; the images built here carry zlib 1.4). The rest are the ones known since BUH-02.36.00 (test fixtures, S3 field-name false positives, Node 24 image advisories with no fix).
+
 ## BUH-02.39.00 — 2026-11-06 09:31 UTC · [#72](https://github.com/cxsmtp/buh/pull/72)
 
 - **A5 at home, A4 when away.** A5 stays the label paper for printing at home (the print button is unchanged). Every label now also has **Away from home: A4 PDF (2 per sheet)**: one landscape A4 sheet with two full-size A5 labels side by side and a dashed cut line down the middle, for a printer that only takes A4 (such as one that prints what is emailed to it). Print at 100% and cut in half.

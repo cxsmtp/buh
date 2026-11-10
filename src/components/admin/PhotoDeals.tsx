@@ -1,7 +1,7 @@
 'use client';
 
 import React, { useCallback, useEffect, useId, useState } from 'react';
-import { Camera, Copy, ImagePlus, Link2, Loader2, MessageCircle, Plus, X } from 'lucide-react';
+import { Camera, Copy, ImagePlus, Link2, Loader2, MessageCircle, Pencil, Plus, X } from 'lucide-react';
 import { getJson, postJson, sendJson } from '@/lib/apiClient';
 import { shrinkPhoto } from '@/lib/shrinkPhoto';
 import { PHOTO_URL_MAX } from '@/components/store/PhotoOrderSheet';
@@ -37,14 +37,21 @@ const STATE: Record<Deal['state'], { text: string; cls: string }> = {
   cancelled: { text: 'Stopped', cls: 'bg-sand text-ink-soft border-line' },
 };
 
+/** Days the link still works (1 when expired: saving makes it work again), for the edit form. */
+function daysLeft(expiresAt: string): number {
+  return Math.max(1, Math.min(LIMITS.maxDays, Math.ceil((Date.parse(expiresAt) - Date.now()) / 86_400_000) || 1));
+}
+
 const message = (d: Pick<Deal, 'amount' | 'url'>) => `Here is your order: AED ${d.amount}, delivery included. See the pictures, add your address and pay here: ${d.url}`;
 
 /**
  * Orders → Photo deals: the owner's own "order from a photo". Pictures (up to 12), what it is, the
  * fixed price with delivery, the ways the customer may pay and how long the link works; then a
- * private link to send on WhatsApp. The customer can't change the price. Owner only.
+ * private link to send on WhatsApp. The customer can't change the price. Owner only. A link can be
+ * edited (pictures, price, ways to pay, how long it works) until it is ordered; the link stays the same.
+ * limit: only the latest few (the Orders page shows 3; "See all" opens the Photo orders tab).
  */
-export function PhotoDeals() {
+export function PhotoDeals({ limit, onShowAll }: { limit?: number; onShowAll?: () => void } = {}) {
   const id = useId();
   const [open, setOpen] = useState(false);
   const [deals, setDeals] = useState<Deal[] | null>(null);
@@ -59,6 +66,9 @@ export function PhotoDeals() {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
   const [made, setMade] = useState<Deal | null>(null);
+  // Editing a deal: its id, and the numbers of its own pictures kept (the new ones are in photos).
+  const [editing, setEditing] = useState<Deal | null>(null);
+  const [keep, setKeep] = useState<number[]>([]);
   const [copied, setCopied] = useState('');
   // The customer upload page (/order-by-photo): the same switches as Settings → Store & contact, here too.
   const [page, setPage] = useState<{ photoOrders: boolean; photoOrdersOnHome: boolean; photoOrdersCard?: boolean; whatsappNumber: string } | null>(null);
@@ -84,14 +94,14 @@ export function PhotoDeals() {
   const add = async (files: FileList | null) => {
     if (!files?.length) return;
     setError('');
-    const room = LIMITS.maxPhotos - photos.length;
+    const room = LIMITS.maxPhotos - photos.length - keep.length;
     const picked = Array.from(files).slice(0, Math.max(0, room));
     if (files.length > room) setError(`At most ${LIMITS.maxPhotos} pictures.`);
     setPreparing((n) => n + picked.length);
     for (const file of picked) {
       try {
         const url = await shrinkPhoto(file, 1400, PHOTO_URL_MAX);
-        setPhotos((list) => (list.length < LIMITS.maxPhotos ? [...list, url] : list));
+        setPhotos((list) => (list.length + keep.length < LIMITS.maxPhotos ? [...list, url] : list));
       } catch (err) {
         setError(err instanceof Error ? err.message : 'This picture could not be read. Please try another one.');
       } finally {
@@ -101,6 +111,8 @@ export function PhotoDeals() {
   };
 
   const reset = () => {
+    setEditing(null);
+    setKeep([]);
     setPhotos([]);
     setNote('');
     setForWhom('');
@@ -113,25 +125,36 @@ export function PhotoDeals() {
   const create = async (e: React.FormEvent) => {
     e.preventDefault();
     const price = Number(amount.replace(/,/g, ''));
-    if (!photos.length) return setError('Add at least one picture.');
+    if (!photos.length && !keep.length) return setError('Add at least one picture.');
     if (!Number.isFinite(price) || price < 1 || price > LIMITS.maxAmount) return setError(`Price: from AED 1 to AED ${LIMITS.maxAmount.toLocaleString('en-US')}.`);
     if (!pays.length) return setError('Choose at least one way to pay.');
     setBusy(true);
     setError('');
-    const { ok, data } = await postJson<{ deal?: Deal; message?: string }>('/api/admin/deals', {
-      photos,
-      note: note.trim(),
-      forWhom: forWhom.trim(),
-      pieces: Number(pieces),
-      amount: Math.round(price * 100) / 100,
-      payments: pays,
-      days: Number(days),
-    });
+    const fields = { note: note.trim(), forWhom: forWhom.trim(), pieces: Number(pieces), amount: Math.round(price * 100) / 100, payments: pays, days: Number(days) };
+    const { ok, data } = editing
+      ? await sendJson<{ deal?: Deal; message?: string }>('PATCH', `/api/admin/deals/${encodeURIComponent(editing.id)}`, { ...fields, keep, photos })
+      : await postJson<{ deal?: Deal; message?: string }>('/api/admin/deals', { ...fields, photos });
     setBusy(false);
     if (!ok || !data.deal) return setError(data.message || 'Not saved. Please try again.');
     setMade(data.deal);
+    setOpen(false);
     reset();
     void load();
+  };
+
+  // Edit: the form, filled in with the deal; its pictures kept unless removed.
+  const edit = (d: Deal) => {
+    reset();
+    setEditing(d);
+    setKeep(Array.from({ length: d.photos }, (_, i) => i + 1));
+    setNote(d.note ?? '');
+    setForWhom(d.forWhom ?? '');
+    setPieces(String(d.pieces));
+    setAmount(String(d.amount));
+    setPays(d.payments);
+    setDays(String(daysLeft(d.expiresAt)));
+    setMade(null);
+    setOpen(true);
   };
 
   const copy = async (d: Deal, what: 'link' | 'message') => {
@@ -167,17 +190,17 @@ export function PhotoDeals() {
 
   const field = 'w-full min-w-0 px-3 py-2 min-h-11 rounded-xl border border-line-strong bg-surface text-ink text-sm focus:outline-none focus:ring-2 focus:ring-gold';
   const pick = 'min-h-11 rounded-xl border border-ink bg-surface text-ink text-sm font-semibold flex items-center justify-center gap-2 cursor-pointer focus-within:ring-2 focus-within:ring-gold';
-  const small = 'min-h-10 px-3 rounded-lg border border-line-strong bg-surface text-ink text-xs font-semibold inline-flex items-center gap-1.5 focus:outline-none focus-visible:ring-2 focus-visible:ring-gold';
+  const small = 'min-h-9 px-2.5 rounded-lg border border-line-strong bg-surface text-ink text-xs font-semibold inline-flex items-center gap-1.5 focus:outline-none focus-visible:ring-2 focus-visible:ring-gold';
   const shareButtons = (d: Deal) =>
     d.url && (
-      <div className="flex flex-wrap gap-2">
+      <>
         <a href={`https://wa.me/?text=${encodeURIComponent(message(d))}`} target="_blank" rel="noopener noreferrer" className={`${small} !bg-success !text-paper !border-success`}>
           <MessageCircle className="w-4 h-4" aria-hidden="true" /> Send on WhatsApp
         </a>
         <button type="button" className={small} onClick={() => void copy(d, 'link')}>
           <Copy className="w-4 h-4" aria-hidden="true" /> {copied === `${d.id}:link` ? 'Copied' : 'Copy link'}
         </button>
-      </div>
+      </>
     );
 
   return (
@@ -186,7 +209,7 @@ export function PhotoDeals() {
         <h2 id={`${id}-title`} className="text-sm font-bold text-ink flex items-center gap-1.5">
           <Link2 className="w-4 h-4 text-gold-deep" aria-hidden="true" /> Orders from a photo
         </h2>
-        <button type="button" onClick={() => { setOpen((v) => !v); setMade(null); }} aria-expanded={open} className="min-h-11 px-3 rounded-xl bg-ink text-paper text-xs font-bold inline-flex items-center gap-1.5 focus:outline-none focus-visible:ring-2 focus-visible:ring-gold">
+        <button type="button" onClick={() => { setOpen((v) => !v); setMade(null); reset(); }} aria-expanded={open} className="min-h-11 px-3 rounded-xl bg-ink text-paper text-xs font-bold inline-flex items-center gap-1.5 focus:outline-none focus-visible:ring-2 focus-visible:ring-gold">
           {open ? <X className="w-4 h-4" aria-hidden="true" /> : <Plus className="w-4 h-4" aria-hidden="true" />} {open ? 'Close' : 'New photo deal'}
         </button>
       </div>
@@ -230,23 +253,38 @@ export function PhotoDeals() {
         <div role="status" data-testid="deal-made" className="rounded-xl border border-success-line bg-success-soft p-3 space-y-2 text-xs">
           <p className="font-semibold text-success">Link ready for {made.forWhom || made.id}: AED {made.amount}, delivery included.</p>
           <code className="block min-w-0 break-all rounded-lg bg-surface px-2 py-1 text-ink" data-testid="deal-link">{made.url}</code>
-          {shareButtons(made)}
+          <div className="flex flex-wrap gap-2">{shareButtons(made)}</div>
         </div>
       )}
 
       {open && (
         <form onSubmit={create} className="space-y-3 border-t border-line pt-3" data-testid="deal-form">
+          {editing && (
+            <p className="text-xs font-semibold text-ink" data-testid="deal-editing">
+              Editing {editing.forWhom || editing.id}: the link stays the same. A customer who already opened it sees the new details when they reload.
+            </p>
+          )}
           <fieldset className="space-y-2">
             <legend className="text-sm font-semibold text-ink">
               Pictures <span className="font-normal text-ink-soft">(1 to {LIMITS.maxPhotos}: the whole piece, a close-up of the print, how it looks on the bed)</span>
             </legend>
-            {photos.length > 0 && (
+            {photos.length + keep.length > 0 && (
               <ul className="flex flex-wrap gap-2" data-testid="deal-form-photos">
+                {editing &&
+                  keep.map((n) => (
+                    <li key={`kept-${n}`} className="relative w-20">
+                      {/* eslint-disable-next-line @next/next/no-img-element */}
+                      <img src={`/api/admin/deals/${encodeURIComponent(editing.id)}/photos/${n}`} alt={`Picture ${n}`} className="w-20 h-20 object-cover rounded-xl border border-line" />
+                      <button type="button" onClick={() => setKeep((list) => list.filter((x) => x !== n))} className="absolute -top-2 -right-2 w-8 h-8 rounded-full bg-surface border border-line-strong flex items-center justify-center" aria-label={`Remove picture ${n}`}>
+                        <X className="w-4 h-4" aria-hidden="true" />
+                      </button>
+                    </li>
+                  ))}
                 {photos.map((src, i) => (
                   <li key={i} className="relative w-20">
                     {/* eslint-disable-next-line @next/next/no-img-element */}
-                    <img src={src} alt={`Picture ${i + 1}`} className="w-20 h-20 object-cover rounded-xl border border-line" />
-                    <button type="button" onClick={() => setPhotos((list) => list.filter((_, j) => j !== i))} className="absolute -top-2 -right-2 w-8 h-8 rounded-full bg-surface border border-line-strong flex items-center justify-center" aria-label={`Remove picture ${i + 1}`}>
+                    <img src={src} alt={`New picture ${i + 1}`} className="w-20 h-20 object-cover rounded-xl border border-line" />
+                    <button type="button" onClick={() => setPhotos((list) => list.filter((_, j) => j !== i))} className="absolute -top-2 -right-2 w-8 h-8 rounded-full bg-surface border border-line-strong flex items-center justify-center" aria-label={`Remove new picture ${i + 1}`}>
                       <X className="w-4 h-4" aria-hidden="true" />
                     </button>
                   </li>
@@ -258,7 +296,7 @@ export function PhotoDeals() {
                 <Loader2 className="w-4 h-4 animate-spin" aria-hidden="true" /> Preparing the picture…
               </p>
             )}
-            {photos.length < LIMITS.maxPhotos && (
+            {photos.length + keep.length < LIMITS.maxPhotos && (
               <div className="grid grid-cols-2 gap-2 max-w-sm">
                 <label className={pick}>
                   <Camera className="w-4 h-4" aria-hidden="true" /> Camera
@@ -314,15 +352,15 @@ export function PhotoDeals() {
             </p>
           )}
           <button type="submit" disabled={busy || preparing > 0} className="w-full sm:w-auto min-h-11 px-4 rounded-xl bg-ink text-paper text-sm font-bold inline-flex items-center justify-center gap-2 disabled:opacity-50">
-            {busy && <Loader2 className="w-4 h-4 animate-spin" aria-hidden="true" />} Make the link
+            {busy && <Loader2 className="w-4 h-4 animate-spin" aria-hidden="true" />} {editing ? 'Save changes' : 'Make the link'}
           </button>
         </form>
       )}
 
       {deals && deals.length > 0 && (
         <ul className="divide-y divide-line border-t border-line" data-testid="deal-list">
-          {deals.slice(0, 10).map((d) => (
-            <li key={d.id} className="py-2.5 flex flex-wrap items-start gap-3 text-xs min-w-0">
+          {deals.slice(0, limit ?? deals.length).map((d) => (
+            <li key={d.id} className="py-2 flex items-start gap-2.5 text-xs min-w-0">
               {d.photos > 0 && (
                 // eslint-disable-next-line @next/next/no-img-element
                 <img src={`/api/admin/deals/${encodeURIComponent(d.id)}/photos/1`} alt="" className="w-12 h-12 object-cover rounded-lg border border-line shrink-0" loading="lazy" />
@@ -337,9 +375,12 @@ export function PhotoDeals() {
                   {d.note ? ` · ${d.note.length > 50 ? `${d.note.slice(0, 49)}…` : d.note}` : ''}
                   {d.orderId ? ` · order ${d.orderId}` : d.state === 'open' ? ` · until ${new Date(d.expiresAt).toLocaleDateString('en-GB', { day: 'numeric', month: 'short' })}` : ''}
                 </p>
-                {d.state === 'open' && (
-                  <div className="flex flex-wrap gap-2">
+                {(d.state === 'open' || d.state === 'expired') && (
+                  <div className="flex flex-wrap gap-1.5">
                     {shareButtons(d)}
+                    <button type="button" className={small} onClick={() => edit(d)} data-testid="deal-edit">
+                      <Pencil className="w-4 h-4" aria-hidden="true" /> Edit
+                    </button>
                     <button type="button" className={small} onClick={() => void stop(d)}>
                       <X className="w-4 h-4" aria-hidden="true" /> Stop link
                     </button>
@@ -349,6 +390,11 @@ export function PhotoDeals() {
             </li>
           ))}
         </ul>
+      )}
+      {limit !== undefined && deals && deals.length > limit && onShowAll && (
+        <button type="button" onClick={onShowAll} data-testid="deal-see-all" className="min-h-10 text-xs font-semibold text-ink underline focus:outline-none focus-visible:ring-2 focus-visible:ring-gold rounded">
+          See all {deals.length} photo deal links in Photo orders
+        </button>
       )}
     </section>
   );

@@ -17,7 +17,10 @@ FROM alpine:3.24.3@sha256:be2656061b536c1883c4034790e21d0a09c5aaaf51968b89368a3c
 COPY --from=cli /usr/local/bin/docker /usr/local/bin/docker
 COPY deploy/updater/updater.sh /updater/updater.sh
 COPY deploy/updater/bin/ /updater/bin/
-RUN chmod 0555 /updater/updater.sh /updater/bin/* && chmod 0555 /updater /updater/bin
+# zlib upgraded past the base image's 1.3.2-r1 (CVE-2026-4738, flagged by the security scan);
+# apk's own log is removed so a rebuild comes out the same.
+RUN apk upgrade --no-cache zlib && rm -f /var/log/apk.log \
+ && chmod 0555 /updater/updater.sh /updater/bin/* && chmod 0555 /updater /updater/bin
 
 # Single-container mode; the compose (blue/green) set-up mounts the script into the plain
 # docker CLI image instead and does not use this image.
