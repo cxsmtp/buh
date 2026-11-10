@@ -1,16 +1,16 @@
 # Changelog
 
-## BUH-02.40.00 — 2026-11-10 12:00 UTC · [#73](https://github.com/cxsmtp/buh/pull/73)
+## BUH-02.40.00 — 2026-11-10 18:57 UTC · [#73](https://github.com/cxsmtp/buh/pull/73)
 
 - **Handed over in person, even when booked.** Every open order now has **Handed over in person**, also one already booked with Jeebly: the shop first cancels the Jeebly booking with Jeebly (so nobody comes to collect it), then marks the order delivered with the cash taken. If Jeebly can't be reached or refuses, nothing changes until you confirm you cancelled it in the Jeebly portal yourself; no label is needed.
 - **A compact order card.** All of an order's buttons (tracking, receipt, label, WhatsApp, handed over, dispatched, cancel) sit in one line, the invoice and photo-deal rows are one line each with small pictures, and the extra white space is gone.
 - **Edit a photo deal link.** Until the customer orders, **Edit** on a link changes its pictures (remove, keep, add), what it is, for whom, pieces, the price, the ways to pay and how long it works; the link stays the same. A customer who opened the page before a price change is asked to reload at checkout, so nobody pays a price they didn't see.
 - **Photo orders tab.** Orders shows only the latest 3 photo deal links; **See all** opens the new **Photo orders** tab with every link and every order from a photo, which then follow the normal order steps.
 - **Status.**
-  - **Benchmark:** TBD
-  - **Tests:** TBD
-  - **Dependency audit:** TBD
-  - **Security scan:** TBD
+  - **Benchmark:** no failed requests in any round (main first, alternating, 3 rounds); p95 within the runs' spread of main (catalogue 123–141 ms vs 122–150, gift page 81–97 ms vs 165–179, courier 69–90 ms vs 79–90, home page 75–91 ms vs 72–124): only owner screens and owner routes changed.
+  - **Tests:** 1322 of 1322 passed in the full run (in six batches, each with its own temporary folder, so the test machine's disk could not fill up again). `invoices-e2e` failed once in an earlier spot run and passed in every run after, including the full run; the cause of that one failure is not known.
+  - **Dependency audit:** `npm audit --omit=dev`: 0 vulnerabilities; no dependencies changed.
+  - **Security scan:** Checkmarx One could not run (the scanner connection needs signing in again). By hand: both changed routes are the owner's (`requireAdmin`), size-capped and allow-listed; the deal edit is re-checked and audited inside its transaction; a Jeebly booking is cancelled with Jeebly (its answer audited) before an order is marked delivered, and the owner's own confirmation is recorded as theirs.
 
 ## BUH-02.39.00 — 2026-11-06 09:31 UTC · [#72](https://github.com/cxsmtp/buh/pull/72)
 
