@@ -136,10 +136,11 @@ export function PhotoDeals({ limit, onShowAll }: { limit?: number; onShowAll?: (
       : await postJson<{ deal?: Deal; message?: string }>('/api/admin/deals', { ...fields, photos });
     setBusy(false);
     if (!ok || !data.deal) return setError(data.message || 'Not saved. Please try again.');
+    // The list first, so it never shows the old price beside "Link ready" with the new one.
+    await load();
     setMade(data.deal);
     setOpen(false);
     reset();
-    void load();
   };
 
   // Edit: the form, filled in with the deal; its pictures kept unless removed.
