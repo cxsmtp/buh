@@ -1,5 +1,16 @@
 # Changelog
 
+## BUH-02.41.00 — 2026-11-12 12:00 UTC · [#74](https://github.com/cxsmtp/buh/pull/74)
+
+- **Node.js 26 LTS.** The shop now runs on Node.js 26.13.1 (the long-term-support line, with security fixes until 2029) instead of 24; nothing changes in how it looks or works.
+- **Why now.** On 26.13.0 a refused oversized request made the connection drop, so the next request through the proxy failed; 26.13.1 with Next.js 16.4.6 keeps it open (checked on the built app, and again by CI on the real image).
+- **Next.js 16.4.6.** The web framework moves from 16.4.3 to 16.4.6 (bug and security fixes in the 16.4 line).
+- **Status.**
+  - **Benchmark:** TBD
+  - **Tests:** TBD
+  - **Dependency audit:** TBD
+  - **Security scan:** TBD
+
 ## BUH-02.40.00 — 2026-11-10 18:57 UTC · [#73](https://github.com/cxsmtp/buh/pull/73)
 
 - **Handed over in person, even when booked.** Every open order now has **Handed over in person**, also one already booked with Jeebly: the shop first cancels the Jeebly booking with Jeebly (so nobody comes to collect it), then marks the order delivered with the cash taken. If Jeebly can't be reached or refuses, nothing changes until you confirm you cancelled it in the Jeebly portal yourself; no label is needed.
