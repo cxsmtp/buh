@@ -1,15 +1,16 @@
 # Changelog
 
-## BUH-02.41.00 — 2026-11-12 12:00 UTC · [#74](https://github.com/cxsmtp/buh/pull/74)
+## BUH-02.41.00 — 2026-11-12 10:47 UTC · [#74](https://github.com/cxsmtp/buh/pull/74)
 
 - **Node.js 26 LTS.** The shop now runs on Node.js 26.13.1 (the long-term-support line, with security fixes until 2029) instead of 24; nothing changes in how it looks or works.
 - **Why now.** On 26.13.0 a refused oversized request made the connection drop, so the next request through the proxy failed; 26.13.1 with Next.js 16.4.6 keeps it open (checked on the built app, and again by CI on the real image).
 - **Next.js 16.4.6.** The web framework moves from 16.4.3 to 16.4.6 (bug and security fixes in the 16.4 line).
+- **Photo deal edit.** After saving an edit, the list of links now shows the new price at the same moment as the "Link ready" note (it briefly showed the old one).
 - **Status.**
-  - **Benchmark:** TBD
-  - **Tests:** TBD
-  - **Dependency audit:** TBD
-  - **Security scan:** TBD
+  - **Benchmark:** no failed requests in any round (main first, alternating, 3 rounds). Note: this test machine's own Node is 22, so main ran on Node 22 and this release on Node 26.13.1 (the live shop runs main on Node 24). Node 26 was faster in every scenario: p95 catalogue 93–119 ms vs 144–150, gift page 53–66 ms vs 169–191, courier 68–78 ms vs 89–96, home page 57–68 ms vs 78–141; about 40% more requests per second.
+  - **Tests:** 1322 of 1322 passed on Node 26.13.1 (in six batches, each with its own temporary folder). The first full run lost its results to a full test disk (backups refused to run) and to Node 26's new default test output; the second run had one failure, the photo-deal edit above (the list refreshed after the note), fixed here and passed 3 times in a row with the photo-deal browser tests. CI ran the connection check on the real Node 26 image: passed.
+  - **Dependency audit:** `npm audit --omit=dev`: 0 vulnerabilities; next and eslint-config-next 16.4.3 → 16.4.6, nothing else.
+  - **Security scan:** Checkmarx One could not run (its connection needs signing in again). The image base moves to a newer, supported Node line; the code change is the photo-deal list refresh above.
 
 ## BUH-02.40.00 — 2026-11-10 18:57 UTC · [#73](https://github.com/cxsmtp/buh/pull/73)
 
