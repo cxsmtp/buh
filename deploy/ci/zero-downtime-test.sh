@@ -31,8 +31,8 @@ id_of() { docker image inspect -f '{{.Id}}' "$1"; }
 # used to hang until the 25 s stop timeout on Node 26, cutting off the requests still on it.
 stopped_quickly() {
   local from to
-  from=$(grep -m1 'stopping app-' "$1" | awk '{print $1}')
-  to=$(grep -A1 -m1 'stopping app-' "$1" | tail -n 1 | awk '{print $1}')
+  from=$(grep -m1 'Z stopping app-' "$1" | awk '{print $1}')
+  to=$(grep -A1 -m1 'Z stopping app-' "$1" | tail -n 1 | awk '{print $1}')
   [ -n "$from" ] && [ -n "$to" ] || fail "no stop in the updater's log"
   local took=$(( $(date -d "$to" +%s) - $(date -d "$from" +%s) ))
   echo "the old copy stopped in ${took}s"
