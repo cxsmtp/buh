@@ -5,6 +5,7 @@
 - **Confirmed on WhatsApp: one line.** Once an order is confirmed, its WhatsApp box is a single line (who, when, the phone and small buttons); "Send confirmation & tracking link" is no longer offered once the order is delivered.
 - **Payment received: one line.** A bank transfer marked received is a single line with the amount, reference, time, the screenshot and "Tell the customer"; the private pay link and on-request note, no longer needed once paid, are left out.
 - **No empty "use it on another order" box.** The box for moving a payment to another order shows only when there is an order to move it to (or a move to show), as one line.
+- **Update test paced.** The blue/green update test now paces its load (about 200 requests a second): on a fast test machine it opened so many connections that the machine ran out of ports and counted those as failed requests, though the shop answered every one it received.
 - **Status.**
   - **Benchmark:** TBD
   - **Tests:** TBD

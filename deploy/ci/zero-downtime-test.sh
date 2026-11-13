@@ -41,6 +41,10 @@ start_load() {
       while [ ! -f "$LOAD_DIR/stop" ]; do
         for p in / /api/health /api/products; do
           curl -s -o /dev/null --max-time 60 -w "%{http_code} %{time_total}s $p\n" "$URL$p" >> "$LOAD_DIR/codes.$n" || true
+          # Paced: each request is a new connection, whose local port stays in TIME_WAIT for 60 s; at
+          # full speed a faster runner used up its ~28k ports in the longest step and curl failed
+          # (000) without reaching Caddy. About 200 requests/s across the 4 loops still catches any gap.
+          sleep 0.02
         done
       done
     ) &
