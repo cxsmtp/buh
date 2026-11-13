@@ -28,6 +28,7 @@ import {
 } from 'lucide-react';
 import type { CatalogSettings, Product } from '@/types';
 import { getJson, postJson, sendJson } from '@/lib/apiClient';
+import { QrPanel } from './inventory/QrPanel';
 import { DEFAULT_LOW_STOCK, isLow, isSoldOut, newKey, shortSizeName, stockAlerts, stockLevel, type StockLevel } from '@/lib/client/stock';
 import { Sheet } from '@/components/common/Sheet';
 import { ProductEditor } from './inventory/ProductEditor';
@@ -218,6 +219,7 @@ export const AdminInventoryTab: React.FC<AdminInventoryTabProps> = ({ products, 
           <Plus className="w-4 h-4" aria-hidden="true" /> Add product
         </button>
       </div>
+      <QrPanel catalog={catalog} />
       {auto.status && visibleJobs(auto.status.jobs, 'inventory').length > 0 && (
         <section className="space-y-2 rounded-2xl border border-line bg-sand p-3" aria-label="Being made by AI">
           <h3 className="text-sm font-bold text-ink">Being made by AI</h3>

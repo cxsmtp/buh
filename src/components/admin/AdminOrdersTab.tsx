@@ -3,6 +3,7 @@
 import React, { useState } from 'react';
 import { BankTransferDetails, Order, CourierProvider, CourierSettings } from '@/types';
 import { ShippingLabelModal } from './ShippingLabelModal';
+import { OrderPackCheck } from './OrderPackCheck';
 import { 
   CheckCircle2, 
   Truck, 
@@ -258,6 +259,8 @@ export const AdminOrdersTab: React.FC<AdminOrdersTabProps> = ({
   /** "Mark as handled" on a note that needed the owner (a failed refund, a booking after a cancel…). */
   const handled = (order: Order) => patchOrder(order, { clearAttention: true });
 
+  // The order being checked with the scanner (one at a time).
+  const [packing, setPacking] = useState('');
   const [filter, setFilter] = useState<'all' | 'pending' | 'whatsapp' | 'transfer' | 'card' | 'photo' | 'confirmed' | 'dispatched'>('all');
   // Orders the owner has just answered stay in "Awaiting WhatsApp" (or "Transfer to check") for now, so the reply link is right there.
   const [justChecked, setJustChecked] = useState<string[]>([]);
@@ -719,6 +722,11 @@ export const AdminOrdersTab: React.FC<AdminOrdersTabProps> = ({
 
                 {/* Every action in one wrapping line (asked by the owner: compact) */}
                 <div className="flex flex-wrap items-center gap-1.5 text-[11px]" data-testid="order-actions">
+                  {['pending_confirmation', 'confirmed', 'dispatched'].includes(order.status) && order.items.some((i) => i.productId) && (
+                    <button type="button" onClick={() => setPacking(packing === order.id ? '' : order.id)} aria-expanded={packing === order.id} data-testid="order-pack-check" className="px-2 py-1 rounded-lg font-semibold border border-line-strong bg-surface text-ink hover:bg-sand">
+                      Scan to check
+                    </button>
+                  )}
                 {/* Booked, or not yet: book with the courier, or type in a number from its portal */}
                 {SHIPPING_STATUSES.includes(order.status) && !realBooking(order) && (
                   <>
@@ -938,6 +946,8 @@ export const AdminOrdersTab: React.FC<AdminOrdersTabProps> = ({
                   )}
                 </>
                 </div>
+
+                {packing === order.id && <OrderPackCheck order={order} onClose={() => setPacking('')} />}
 
                 <OrderTimeline orderId={order.id} />
               </div>

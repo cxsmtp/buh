@@ -1,5 +1,17 @@
 # Changelog
 
+## BUH-02.43.00 — 2026-11-13 12:00 UTC · [#76](https://github.com/cxsmtp/buh/pull/76)
+
+- **QR stickers for the inventory.** Inventory → **QR stickers** makes a PDF of stickers, 40 to an A4 sheet (4 across, 10 down, 52.5 × 29.7 mm: the common ready-made sticker sheet): one per piece in stock (or one per design and size), for the whole inventory or one category, starting at any sticker on a part-used sheet. Each has a QR code, the stock code in large letters, the name and the size.
+- **Any phone opens the item.** The QR code is the item's own shop link with its size, so any phone camera opens it in the shop; it never holds the Admin Hub's private link.
+- **Scan an item.** Inventory → **Scan an item** uses the phone's camera (or the stock code typed in): it shows the item's photo, size and how many are in stock, and the open orders waiting for it.
+- **Scan to check an order.** On an open order, **Scan to check** opens the camera: each sticker scanned is ticked off against the order's items, design and size; one that is not in the order is flagged at once ("Not in this order: put it back"); "All checked: ready to pack" when every piece is there. Stock is not touched by scanning.
+- **Status.**
+  - **Benchmark:** TBD
+  - **Tests:** TBD
+  - **Dependency audit:** TBD
+  - **Security scan:** TBD
+
 ## BUH-02.42.00 — 2026-11-13 06:52 UTC · [#75](https://github.com/cxsmtp/buh/pull/75)
 
 - **Confirmed on WhatsApp: one line.** Once an order is confirmed, its WhatsApp box is a single line (who, when, the phone and small buttons); "Send confirmation & tracking link" is no longer offered once the order is delivered.
