@@ -1,5 +1,16 @@
 # Changelog
 
+## BUH-02.42.00 — 2026-11-13 12:00 UTC · [#75](https://github.com/cxsmtp/buh/pull/75)
+
+- **Confirmed on WhatsApp: one line.** Once an order is confirmed, its WhatsApp box is a single line (who, when, the phone and small buttons); "Send confirmation & tracking link" is no longer offered once the order is delivered.
+- **Payment received: one line.** A bank transfer marked received is a single line with the amount, reference, time, the screenshot and "Tell the customer"; the private pay link and on-request note, no longer needed once paid, are left out.
+- **No empty "use it on another order" box.** The box for moving a payment to another order shows only when there is an order to move it to (or a move to show), as one line.
+- **Status.**
+  - **Benchmark:** TBD
+  - **Tests:** TBD
+  - **Dependency audit:** TBD
+  - **Security scan:** TBD
+
 ## BUH-02.41.00 — 2026-11-12 10:47 UTC · [#74](https://github.com/cxsmtp/buh/pull/74)
 
 - **Node.js 26 LTS.** The shop now runs on Node.js 26.13.1 (the long-term-support line, with security fixes until 2029) instead of 24; nothing changes in how it looks or works.

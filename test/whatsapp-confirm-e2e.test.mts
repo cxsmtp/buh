@@ -274,7 +274,7 @@ for (const [width, phone] of [[375, '050 771 2001'], [1280, '055 771 2002']] as 
     assert.ok(await card.getByText(order.customer.phone).first().isVisible(), 'the phone to compare with the sender');
     assert.deepEqual(await overflow(hp), [], 'hub: no sideways scroll');
     await card.getByRole('button', { name: 'Confirmed on WhatsApp' }).click();
-    await hp.getByText(/Confirmed on WhatsApp by admin@beautifuluaehome\.com/).first().waitFor();
+    await hp.getByText(/Confirmed on WhatsApp by admin\b/).first().waitFor();
     const reply = hp.getByRole('link', { name: 'Send confirmation & tracking link' }).first();
     const digits = order.customer.phone.replace(/\D/g, '');
     const replyHref = (await reply.getAttribute("href")) ?? "";
