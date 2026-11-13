@@ -100,6 +100,8 @@ test('a good new image: snapshot first, start the idle colour, then stop the old
     'up app-green ' + NEW,
     `tag buh:last-good ${NEW}`,
     `tag buh:previous ${OLD}`,
+    // The old copy is told it is being replaced (its health answers 503: Caddy moves off it), then stopped.
+    'drain app-blue',
     'stop app-blue',
     'prune',
   ]);
@@ -253,6 +255,7 @@ test('rollback goes back to the previous image without downtime, and keeps auto-
     'stop app-blue',
     'rm app-blue',
     'up app-blue ' + OLD,
+    'drain app-green',
     'stop app-green',
   ]);
   assert.equal(read(path.join(e.state, 'last-good')).trim(), OLD);

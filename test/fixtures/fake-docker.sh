@@ -205,6 +205,7 @@ case $cmd in
         [ ! -f "$D/proxy-fails" ] || exit 1
         case $(cat "$D/c/$c/image") in *broken*) exit 1 ;; *) exit 0 ;; esac
         ;;
+      'touch /tmp/buh-draining') ev "drain $who" ;;
       'test -f scripts/backup-now.mjs') [ ! -f "$D/no-backup-script" ] ;;
       'node scripts/backup-now.mjs')
         [ -f "$D/backup-fails" ] && { echo "disk full"; exit 1; }

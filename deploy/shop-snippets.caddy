@@ -45,8 +45,9 @@
 	lb_try_duration 30s
 	lb_try_interval 250ms
 
-	# Active health checks: traffic goes only to a copy whose /api/health answers 200.
-	health_uri /api/health
+	# Active health checks: traffic goes only to a copy whose /api/health answers 200 (?lb=1: a copy
+	# being replaced answers 503 there, so Caddy moves off it before it is stopped).
+	health_uri /api/health?lb=1
 	health_interval 2s
 	health_timeout 2s
 	health_status 200
