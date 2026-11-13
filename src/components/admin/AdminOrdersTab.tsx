@@ -767,7 +767,7 @@ export const AdminOrdersTab: React.FC<AdminOrdersTabProps> = ({
                       onClick={() => setTrackingOrder(order)}
                       className="px-2 py-1 rounded-lg font-semibold border border-line bg-surface text-ink-soft hover:bg-sand"
                     >
-                      Change tracking number
+                      Change AWB
                     </button>
                     {safeHref(order.courier.trackingUrl) && (
                       <a href={safeHref(order.courier.trackingUrl)} target="_blank" rel="noopener noreferrer" className="inline-flex items-center gap-1 px-2 py-1 rounded-lg font-semibold border border-line bg-surface text-ink-soft hover:bg-sand">
@@ -816,7 +816,7 @@ export const AdminOrdersTab: React.FC<AdminOrdersTabProps> = ({
                         title={order.courier.simulated ? 'Test label: not a real shipment' : 'Print the 4 × 6 in shipping label'}
                       >
                         <Printer className="w-3 h-3 text-gold" />
-                        <span>{order.courier.simulated ? 'Test label' : 'Print Shipping Label'}</span>
+                        <span>{order.courier.simulated ? 'Test label' : 'Print label'}</span>
                       </button>
                     )}
 

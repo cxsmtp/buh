@@ -437,7 +437,9 @@ test('install offer on Android: shown once after a few seconds, Install asks the
   assert.equal(await card.count(), 0, 'not straight away');
   await card.waitFor({ timeout: 9000 });
   await card.getByText(/Open the shop from your home screen/).waitFor();
-  // Above the tab bar, covering none of it.
+  // Above the tab bar, covering none of it, once it has finished rising into place (rise-in, 0.28 s:
+  // measured mid-way it is still 1rem lower, which made this check fail now and then).
+  await card.evaluate((el) => Promise.all(el.getAnimations().map((a) => a.finished)));
   const c = (await card.boundingBox())!;
   const nav = (await page.getByRole('navigation', { name: 'Shop' }).boundingBox())!;
   assert.ok(c.y + c.height <= nav.y, 'above the tab bar');
