@@ -118,7 +118,7 @@ test('asked: A5 stays for home, A4 offered as well for away; at 375 and 1280 px:
     assert.equal(await hp.getByTestId('batch-labels-home').getAttribute('href'), '/api/admin/labels?paper=a5', 'home: A5 kept');
     await hp.getByTestId('batch-labels-email').waitFor();
     assert.equal(await overflow(hp), false, `orders at ${width}: no sideways scroll`);
-    await hp.getByRole('button', { name: /Print Shipping Label/ }).first().click();
+    await hp.getByRole('button', { name: /^Print label$/ }).first().click();
     const pdfLink = hp.getByTestId('label-pdf');
     await pdfLink.waitFor();
     assert.equal(await pdfLink.getAttribute('href'), `/api/admin/labels?ids=${encodeURIComponent(o.id)}&paper=a5`, 'home: A5 kept');

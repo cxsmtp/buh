@@ -1,5 +1,19 @@
 # Changelog
 
+## BUH-02.43.00 — 2026-11-13 07:56 UTC · [#76](https://github.com/cxsmtp/buh/pull/76)
+
+- **QR stickers for the inventory.** Inventory → **QR stickers** makes a PDF of stickers, 40 to an A4 sheet (4 across, 10 down, 52.5 × 29.7 mm: the common ready-made sticker sheet): one per piece in stock (or one per design and size), for the whole inventory or one category, starting at any sticker on a part-used sheet. Each has a QR code, the stock code in large letters, the name and the size.
+- **Any phone opens the item.** The QR code is the item's own shop link with its size, so any phone camera opens it in the shop; it never holds the Admin Hub's private link.
+- **Scan an item.** Inventory → **Scan an item** uses the phone's camera (or the stock code typed in): it shows the item's photo, size and how many are in stock, and the open orders waiting for it.
+- **Scan to check an order.** On an open order, **Scan to check** opens the camera: each sticker scanned is ticked off against the order's items, design and size; one that is not in the order is flagged at once ("Not in this order: put it back"); "All checked: ready to pack" when every piece is there. Stock is not touched by scanning.
+- **Shorter order buttons.** "Print Shipping Label" is now **Print label** and "Change tracking number" **Change AWB**, so the new **Scan to check** fits and an order's buttons stay on one or two lines.
+- **Updates without a dropped request (blue/green set-up).** Since Node 26, replacing the shop in the blue/green (Compose) set-up could leave the old copy waiting the full 25 s to stop and cut off a couple of requests still on it. The updater now tells the old copy it is being replaced first; Caddy moves every request to the new copy within 2 s, and the old one then stops at once. The single-container set-up (the VPS) stopped quickly already and is unchanged.
+- **Status.**
+  - **Benchmark:** no failed requests in any round (main first, alternating, 3 rounds, both on Node 26.13.1). p95 within the runs' spread of main: catalogue 91–103 ms vs 92–100, gift page 56–62 ms vs 154–173, courier 59–69 ms vs 65–71, home page 55–59 ms vs 63–97.
+  - **Tests:** 1326 of 1328 in the full run, file by file; the 2: the order buttons took a third line at 1280 px with Scan to check (labels shortened above; passes), and the install-offer position measured while it was still rising into place (the test now waits for the 0.28 s rise; passed 3 times in a row; the earlier "no cause found" in BUH-02.42.00 was this). New: QR codes decoded back to their links with jsQR; the routes and the screens at 375 and 1280 px; the health probe while draining; the updater drains before it stops. CI: the blue/green test failed once (2 requests cut off while the old copy hung 25 s before it was stopped): fixed above, and the test now also fails if the old copy takes more than 10 s to stop.
+  - **Dependency audit:** `npm audit --omit=dev`: 0 vulnerabilities; added qrcode 1.5.4 and jsqr 1.4.0 (both pinned, a year old), @types/qrcode for development.
+  - **Security scan:** Checkmarx One could not run (its connection needs signing in again). By hand: both routes are the owner's (`requireAdmin`), read only, their options allow-listed and checked (ids, category, copies, start; a scan is parsed to a product link or a stock code, anything else refused); a sticker holds only the public product link.
+
 ## BUH-02.42.00 — 2026-11-13 06:52 UTC · [#75](https://github.com/cxsmtp/buh/pull/75)
 
 - **Confirmed on WhatsApp: one line.** Once an order is confirmed, its WhatsApp box is a single line (who, when, the phone and small buttons); "Send confirmation & tracking link" is no longer offered once the order is delivered.

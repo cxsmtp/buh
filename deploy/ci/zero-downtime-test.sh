@@ -27,6 +27,18 @@ cid_of() { docker ps -q --filter "label=com.docker.compose.service=app-$1" --fil
 image_of() { docker inspect -f '{{.Image}}' "$1"; }
 id_of() { docker image inspect -f '{{.Id}}' "$1"; }
 
+# stopped_quickly LOG: the old copy, told it is being replaced (drained), stopped within 10 s; it
+# used to hang until the 25 s stop timeout on Node 26, cutting off the requests still on it.
+stopped_quickly() {
+  local from to
+  from=$(grep -m1 'Z stopping app-' "$1" | awk '{print $1}')
+  to=$(grep -A1 -m1 'Z stopping app-' "$1" | tail -n 1 | awk '{print $1}')
+  [ -n "$from" ] && [ -n "$to" ] || fail "no stop in the updater's log"
+  local took=$(( $(date -d "$to" +%s) - $(date -d "$from" +%s) ))
+  echo "the old copy stopped in ${took}s"
+  [ "$took" -le 10 ] || fail "the old copy took ${took}s to stop (drained, it should close at once)"
+}
+
 updater() { # updater IMAGE [command]: one run of deploy/updater/updater.sh as the compose service
   local image=$1
   shift
@@ -99,9 +111,10 @@ updater buh:test
 step "(a) good image, blue → green, under load"
 start_load
 sleep 3
-updater buh:ci-good
+updater buh:ci-good | tee "$LOAD_DIR/switch-a.log"
 sleep 3
 stop_load
+stopped_quickly "$LOAD_DIR/switch-a.log"
 [ -n "$(cid_of green)" ] || fail "app-green is not running"
 [ -z "$(cid_of blue)" ] || fail "app-blue is still running"
 [ "$(image_of "$(cid_of green)")" = "$(id_of buh:ci-good)" ] || fail "app-green does not run the new image"
@@ -133,9 +146,10 @@ grep -q 'failed before' "$LOAD_DIR/skip.log" || fail "a rejected image was retri
 step "(a) second good image, green → blue, under load"
 start_load
 sleep 3
-updater buh:ci-good2
+updater buh:ci-good2 | tee "$LOAD_DIR/switch-b.log"
 sleep 3
 stop_load
+stopped_quickly "$LOAD_DIR/switch-b.log"
 [ -n "$(cid_of blue)" ] || fail "app-blue is not running"
 [ -z "$(cid_of green)" ] || fail "app-green is still running"
 [ "$(image_of "$(cid_of blue)")" = "$(id_of buh:ci-good2)" ] || fail "app-blue does not run the second image"

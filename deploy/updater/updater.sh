@@ -421,6 +421,16 @@ start_colour() {
   [ "$start_rc" = 0 ] && [ -n "$(cid_of "$1")" ]
 }
 
+# drain_colour COLOUR: tell app-COLOUR it is being replaced (its /api/health then answers 503), so
+# Caddy sends everything to the new copy and stops reusing connections to it; when stopped it can
+# then close at once. Without this, Node 26 kept Caddy's busy connections open until the stop timed
+# out and the requests still on them were cut off. Best effort: an older image ignores the mark.
+drain_colour() {
+  drain_cid=$(cid_of "$1")
+  [ -n "$drain_cid" ] || return 0
+  docker exec "$drain_cid" touch /tmp/buh-draining > /dev/null 2>&1 || true
+}
+
 stop_colour() {
   stop_cid=$(cid_of "$1" all)
   [ -n "$stop_cid" ] || return 0
@@ -545,6 +555,7 @@ switch_to() {
   record_install "$sw_new"
   if [ "$sw_old" != "$sw_new" ]; then docker tag "$sw_old" "$PREVIOUS" > /dev/null; fi
   printf '%s\n' "$sw_idle" > "$STATE_DIR/active"
+  drain_colour "$sw_active"
   sleep "$SETTLE_SECONDS"
   stop_colour "$sw_active"
   docker image prune -f --filter "label=$IMAGE_SOURCE_LABEL" > /dev/null 2>&1 || true
