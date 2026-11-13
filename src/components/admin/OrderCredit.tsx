@@ -60,10 +60,12 @@ export function OrderCredit({ order, orders, onOrderChanged }: { order: Order; o
   };
 
   const field = 'w-full min-w-0 min-h-10 px-3 rounded-xl border border-line-strong bg-surface text-ink text-xs focus:outline-none focus:ring-2 focus:ring-gold';
+  // Nothing to do (no open order to use it on, nothing moved yet): no box at all.
+  if (movable && !targets.length && !history.length) return null;
   return (
-    <div data-testid="order-credit" className="rounded-xl border border-line bg-ivory p-3 space-y-2 text-xs min-w-0">
+    <div data-testid="order-credit" className={`rounded-xl border border-line bg-ivory text-[11px] min-w-0 ${show ? 'p-3 space-y-2' : 'px-2.5 py-1.5 flex flex-wrap items-center gap-x-2 gap-y-1'}`}>
       <p className="flex flex-wrap items-center gap-x-2 gap-y-1">
-        <ArrowRightLeft className="w-4 h-4 text-gold-deep shrink-0" aria-hidden="true" />
+        <ArrowRightLeft className="w-3.5 h-3.5 text-gold-deep shrink-0" aria-hidden="true" />
         {movable ? <strong className="text-ink">AED {aed(held)} paid on this order can be used on another order</strong> : <strong className="text-ink">Payment moved</strong>}
       </p>
       {history.length > 0 && (
@@ -74,7 +76,7 @@ export function OrderCredit({ order, orders, onOrderChanged }: { order: Order; o
         </ul>
       )}
       {movable && !show && (
-        <button type="button" onClick={() => setShow(true)} disabled={!targets.length} className="min-h-10 px-3 rounded-lg border border-line-strong bg-surface text-ink font-semibold disabled:opacity-50" title={targets.length ? undefined : 'No open order with something to collect on delivery'}>
+        <button type="button" onClick={() => setShow(true)} disabled={!targets.length} className="min-h-8 px-2 rounded-lg border border-line-strong bg-surface text-ink font-semibold disabled:opacity-50 ml-auto" title={targets.length ? undefined : 'No open order with something to collect on delivery'}>
           Use it on another order
         </button>
       )}

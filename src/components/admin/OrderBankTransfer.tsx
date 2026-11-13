@@ -71,8 +71,11 @@ export function OrderBankTransfer({ order, bank, shopName, onOrderChanged }: { o
   const button = 'min-h-11 px-3 py-2 rounded-xl text-xs font-bold flex items-center justify-center gap-1.5 disabled:opacity-50 focus:outline-none focus-visible:ring-2 focus-visible:ring-gold';
   const receipt = safeLinkHref(order.paymentReceiptUrl) || `/api/admin/orders/${encodeURIComponent(order.id)}/receipt`;
 
+  // Paid: one compact line (asked by the owner: "too much white space").
+  const paid = bt.state === 'paid';
+  const small = 'min-h-8 px-2 py-1 rounded-lg text-[11px] font-bold inline-flex items-center justify-center gap-1.5 focus:outline-none focus-visible:ring-2 focus-visible:ring-gold';
   return (
-    <div data-testid="bank-transfer" className={`rounded-xl border p-3 space-y-2 text-xs ${badge.tone}`}>
+    <div data-testid="bank-transfer" className={`rounded-xl border text-xs ${paid ? 'px-2.5 py-1.5 flex flex-wrap items-center gap-x-2 gap-y-1 text-[11px]' : 'p-3 space-y-2'} ${badge.tone}`}>
       <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
         <Building2 className="w-4 h-4 text-gold-deep shrink-0" aria-hidden="true" />
         <strong data-testid="bank-badge" className={`flex items-center gap-1 ${badge.ink}`}>
@@ -80,18 +83,18 @@ export function OrderBankTransfer({ order, bank, shopName, onOrderChanged }: { o
         </strong>
         <span className="text-ink-soft">AED {order.total} · reference <span className="font-mono">{order.id}</span></span>
       </div>
-      {onRequest && (
+      {onRequest && !paid && (
         <p data-testid="bank-on-request" className="font-semibold text-ink flex items-center gap-1.5">
           <MessageCircle className="w-3.5 h-3.5 text-whatsapp shrink-0" aria-hidden="true" /> Bank transfer: customer will ask for details on WhatsApp
         </p>
       )}
-      {bt.state === 'paid' && bt.checkedAt && <p className="text-ink-soft">Marked received{bt.checkedBy ? ` by ${bt.checkedBy}` : ''} at {when(bt.checkedAt)}.</p>}
+      {paid && bt.checkedAt && <span className="text-ink-soft" title={bt.checkedBy ? `Marked received by ${bt.checkedBy}` : undefined}>· {when(bt.checkedAt)}</span>}
       {bt.uploads > 0 && (
-        <div className="flex flex-wrap items-center gap-2">
-          <a href={receipt} target="_blank" rel="noopener noreferrer" className={`${button} bg-surface text-ink border border-line-strong`}>
+        <div className={`flex flex-wrap items-center gap-2 ${paid ? 'contents' : ''}`}>
+          <a href={receipt} target="_blank" rel="noopener noreferrer" className={`${paid ? small : button} bg-surface text-ink border border-line-strong`}>
             <Eye className="w-4 h-4" aria-hidden="true" /> View transfer screenshot
           </a>
-          {bt.uploadedAt && <span className="text-ink-muted">Uploaded {when(bt.uploadedAt)}</span>}
+          {bt.uploadedAt && !paid && <span className="text-ink-muted">Uploaded {when(bt.uploadedAt)}</span>}
           {bt.uploads > 1 && (
             <span className="flex flex-wrap gap-x-2 text-ink-muted">
               Earlier:
@@ -117,10 +120,10 @@ export function OrderBankTransfer({ order, bank, shopName, onOrderChanged }: { o
           )}
         </div>
       )}
-      <div className="flex flex-wrap gap-2">
-        {reply && (
-          <a href={reply} target="_blank" rel="noopener noreferrer" className={`${button} bg-whatsapp text-paper`}>
-            <MessageCircle className="w-4 h-4" aria-hidden="true" /> Tell the customer on WhatsApp
+      <div className={`flex flex-wrap gap-2 ${paid ? 'ml-auto' : ''}`}>
+        {reply && !(paid && order.status === 'delivered') && (
+          <a href={reply} target="_blank" rel="noopener noreferrer" className={`${paid ? small : button} bg-whatsapp text-paper`}>
+            <MessageCircle className={paid ? 'w-3.5 h-3.5' : 'w-4 h-4'} aria-hidden="true" /> Tell the customer on WhatsApp
           </a>
         )}
         {bt.state !== 'paid' && !cancelled && details && (
@@ -129,7 +132,7 @@ export function OrderBankTransfer({ order, bank, shopName, onOrderChanged }: { o
           </a>
         )}
       </div>
-      {link && (
+      {link && !paid && (
         <div className="flex items-center gap-2 min-w-0">
           <span className="text-ink-muted shrink-0">Private link:</span>
           <a href={safeLinkHref(link)} target="_blank" rel="noopener noreferrer" className="font-mono text-[11px] text-ink-soft truncate min-w-0">{link}</a>
@@ -138,7 +141,7 @@ export function OrderBankTransfer({ order, bank, shopName, onOrderChanged }: { o
           </button>
         </div>
       )}
-      {!link && bt.payPath && (
+      {!link && bt.payPath && !paid && (
         <p data-testid="bank-no-shop-url" className="text-ink-muted">
           The private link is left out of messages until the shop&apos;s address is set (NEXT_PUBLIC_APP_URL in the shop&apos;s settings file, see the deployment guide).
         </p>

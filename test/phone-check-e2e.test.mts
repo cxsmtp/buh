@@ -274,7 +274,7 @@ for (const [width, phone] of [[375, '050 881 2001'], [1280, '055 881 2002']] as 
     assert.equal(await ask.getAttribute('href'), `https://wa.me/${digits}?text=${encodeURIComponent(`Hello Hind, please confirm your order ${id} from Beautiful UAE Home by replying YES. Thank you!`)}`);
     assert.deepEqual(await overflow(hp), [], 'hub: no sideways scroll');
     await card.getByRole('button', { name: 'Confirmed by phone call' }).click();
-    await hp.getByText(/Confirmed by phone call by admin@beautifuluaehome\.com/).first().waitFor();
+    await hp.getByText(/Confirmed by phone call by admin\b/).first().waitFor();
     assert.equal((await adminOrder(id!)).order.whatsappCheck!.method, 'call');
     // "Correct the phone number": the confirm dialog shows the number as the server will store it.
     const done = hp.getByTestId('whatsapp-check').filter({ hasText: order.customer.phone }).first();

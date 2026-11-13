@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState } from 'react';
+import React, { useRef, useState } from 'react';
 import { Check, Copy, ExternalLink } from 'lucide-react';
 import { sendJson } from '@/lib/apiClient';
 
@@ -82,12 +82,21 @@ export function DriveSetupWizard({ wizard, onChange }: { wizard: DriveWizard; on
   const links = wizardLinks(wizard.projectId);
   const doneCount = wizard.done.length;
 
-  // Shown at once (a tick answers the tap), then saved; put back if the server refuses.
+  // Shown at once (a tick answers the tap), then saved; put back if the server refuses. Only the
+  // latest save's answer is shown: two quick ticks could otherwise come back in the other order and
+  // the older answer undo the newer tick on screen.
+  const latest = useRef(0);
+  const queue = useRef<Promise<void>>(Promise.resolve());
   const save = async (patch: Partial<DriveWizard>) => {
     setError('');
     const before = wizard;
+    const mine = ++latest.current;
     onChange({ ...wizard, ...patch });
-    const { ok, data } = await sendJson<{ wizard?: DriveWizard; message?: string }>('PUT', '/api/admin/backup/drive/wizard', patch);
+    // One save at a time, in the order they were made, so the server keeps the newest.
+    const sent = queue.current.then(() => sendJson<{ wizard?: DriveWizard; message?: string }>('PUT', '/api/admin/backup/drive/wizard', patch));
+    queue.current = sent.then(() => undefined, () => undefined);
+    const { ok, data } = await sent;
+    if (mine !== latest.current) return;
     if (!ok || !data.wizard) {
       onChange(before);
       setError(data.message || 'Could not save. Please try again.');

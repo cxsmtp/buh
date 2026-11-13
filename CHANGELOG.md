@@ -1,5 +1,18 @@
 # Changelog
 
+## BUH-02.42.00 — 2026-11-13 06:52 UTC · [#75](https://github.com/cxsmtp/buh/pull/75)
+
+- **Confirmed on WhatsApp: one line.** Once an order is confirmed, its WhatsApp box is a single line (who, when, the phone and small buttons); "Send confirmation & tracking link" is no longer offered once the order is delivered.
+- **Payment received: one line.** A bank transfer marked received is a single line with the amount, reference, time, the screenshot and "Tell the customer"; the private pay link and on-request note, no longer needed once paid, are left out.
+- **No empty "use it on another order" box.** The box for moving a payment to another order shows only when there is an order to move it to (or a move to show), as one line.
+- **Update test paced.** The blue/green update test now paces its load (about 200 requests a second): on a fast test machine it opened so many connections that the machine ran out of ports and counted those as failed requests, though the shop answered every one it received.
+- **Google Drive set-up: quick ticks stay ticked.** Ticking two steps of the Google Drive set-up quickly could show one as not done again (the answer to the first save came back last and replaced the screen); now only the latest answer is shown and the saves reach the server in order.
+- **Status.**
+  - **Benchmark:** no failed requests in any round (main first, alternating, 3 rounds, both on Node 26.13.1). p95 within the runs' spread of main: catalogue 88–98 ms vs 99–103, courier 59–71 ms vs 60–67, home page 54–85 ms vs 51–70; the gift page (untouched here) 156–191 ms vs 155–162, its tail varying round to round in both.
+  - **Tests:** all passed. The full run: the first batch 238 of 238; the rest run file by file (after one batch stalled in the Drive set-up test) 1081 of 1084, the 3 being the Drive set-up race fixed above, with a test that fails before the fix and passes after (twice, with the Drive tests). The install-offer test failed once in the stalled batch and passed in the file-by-file run; no cause found. CI: the blue/green test failed once from the runner running out of ports (paced, above), then passed.
+  - **Dependency audit:** `npm audit --omit=dev`: 0 vulnerabilities; no dependencies changed.
+  - **Security scan:** Checkmarx One could not run (its connection needs signing in again). Screen changes only, plus the CI test's pacing; no route or data change.
+
 ## BUH-02.41.00 — 2026-11-12 10:47 UTC · [#74](https://github.com/cxsmtp/buh/pull/74)
 
 - **Node.js 26 LTS.** The shop now runs on Node.js 26.13.1 (the long-term-support line, with security fixes until 2029) instead of 24; nothing changes in how it looks or works.
