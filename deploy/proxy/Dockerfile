@@ -24,7 +24,7 @@ FROM caddy:2.11.9-alpine@sha256:003a97808e781aa9f7e75cc2f43d34d461099031faf5e20f
 # (setcap is added for this one step and removed again). zlib is upgraded past the base image's
 # 1.3.2-r1 (CVE-2026-4738, flagged by the security scan) to the release's fixed build.
 RUN apk upgrade --no-cache zlib \
- && apk add --no-cache libcap-setcap \
+ && apk add --no-cache libcap-setcap~2 \
  && setcap cap_net_bind_service=+ep /usr/bin/caddy \
  && apk del --no-cache --no-network libcap-setcap curl \
  && rm -f /var/log/apk.log \
