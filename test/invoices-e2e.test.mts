@@ -117,9 +117,13 @@ test('at 375 and 1280 px: the optional invoice fields; "Make invoice (PDF)", "Op
     hp.on('pageerror', (e) => errors.push(e.message));
     await hp.goto(server.adminUrl, { waitUntil: 'domcontentloaded' });
     // Settings → Store & contact: the optional fields.
+    // The hub's settings have arrived (a card opened before that is re-created with them when they do).
+    await hp.waitForFunction(() => performance.getEntriesByType('resource').some((e) => /\/api\/admin\/settings(\?|$)/.test(e.name) && (e as PerformanceResourceTiming).responseEnd > 0), undefined, { timeout: 20_000 });
+    await hp.waitForTimeout(300);
     await openAdminSection(hp, /^Settings/);
     await hp.getByRole('navigation', { name: 'Settings sections' }).getByRole('button', { name: 'Store & contact', exact: true }).click();
     const fields = hp.getByTestId('invoice-details');
+    await fields.waitFor();
     await fields.scrollIntoViewIfNeeded();
     await fields.getByLabel('Trade licence number').fill(`TL-${width}`);
     await fields.getByLabel('Issuing authority').fill('Dubai DET');
@@ -137,9 +141,19 @@ test('at 375 and 1280 px: the optional invoice fields; "Make invoice (PDF)", "Op
     const box = hp.locator('[data-testid="order-invoice"]').filter({ hasText: 'not made yet' }).first();
     await box.waitFor();
     const make = box.getByRole('button', { name: 'Make invoice (PDF)' });
+    // The invoices already there (the other width made one): the new one is told apart by its number,
+    // so the test follows this invoice however the list is drawn again after a change.
+    const numbersNow = async () => (await hp.locator('[data-testid="order-invoice"]').allTextContents()).flatMap((t) => t.match(/INV-\d{4}-\d{6}/g) ?? []);
+    const before = new Set(await numbersNow());
     await make.focus();
     await hp.keyboard.press('Enter');
-    const done = hp.locator('[data-testid="order-invoice"]').filter({ hasText: /Invoice INV-\d{4}-\d{6}/ }).first();
+    let made = '';
+    for (let i = 0; i < 100 && !made; i++) {
+      made = (await numbersNow()).find((n) => !before.has(n)) ?? '';
+      if (!made) await hp.waitForTimeout(200);
+    }
+    assert.ok(made, 'the new invoice shows with its number');
+    const done = hp.locator('[data-testid="order-invoice"]').filter({ hasText: made }).first();
     await done.waitFor();
     const open = done.getByRole('link', { name: 'Open PDF' });
     assert.match((await open.getAttribute('href')) ?? '', /\/api\/admin\/orders\/BUH-[^/]+\/invoice-pdf$/);
@@ -147,7 +161,7 @@ test('at 375 and 1280 px: the optional invoice fields; "Make invoice (PDF)", "Op
     assert.match(wa, /here is your invoice INV-\d{4}-\d{6} for order BUH-/);
     assert.match(wa, /\/invoice\/BUH-[A-Z0-9-]+\.[A-Za-z0-9_-]{43}\/pdf/);
     // "Regenerate": asks first; nothing changed since it was made, so it says so and keeps the number.
-    const number = (await done.textContent())?.match(/INV-\d{4}-\d{6}/)?.[0];
+    const number = made;
     hp.once('dialog', (d) => void d.accept().catch(() => undefined));
     await done.getByTestId('invoice-regenerate').click();
     await done.getByText('Nothing changed: the invoice is already up to date.').waitFor();
