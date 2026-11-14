@@ -1,5 +1,24 @@
 # Changelog
 
+## BUH-02.45.00 — 2026-11-14 09:00 UTC · [#80](https://github.com/cxsmtp/buh/pull/80)
+
+Second of three releases fixing what the production-readiness review found: keeping the shop up, backed up and told when something is wrong.
+
+- **A shop that can't read its database is never switched to.** The health check now fails when the database can't be read, so an update that would leave checkout broken is rolled back instead of going live, and a shop that breaks later is restarted and reported. A database that failed to open once is opened again on the next request.
+- **Nothing is published without its tests.** Every release now runs the whole test suite before the images are published; until now only the build was checked.
+- **Restore in one command, safely.** `podman exec beautifuluaehome-updater sh /updater/updater.sh restore <backup file name>` stops the shop, restores the backup, and starts the shop again; the data as it was is kept aside. The restore tool now refuses to run over a shop that is still running (orders placed afterwards used to be lost). The backup email and the "database check failed" alert give this command.
+- **Backups can't fill the disk and stop.** Local backups are also kept by size (at most a quarter of the disk, the newest three always), and when there is no room the oldest go until there is. One record the spreadsheets can't read no longer stops a backup: the database is always in it.
+- **You are told.** What the updater raises (rolled back, the shop did not start, the registry login expired) is emailed to you, and so is an updater that has gone silent. A failed copy to S3 storage is reported and no longer counts as "a copy off the server". An alert or daily summary that could not be emailed is sent again within the hour. Phone codes left in test mode on a real shop are reported.
+- **Stripe edge cases.** A dispute (chargeback) is flagged on its order and emailed. A refund notice that arrives before the payment notice is no longer lost. A payment that arrives after its order was cancelled is flagged. Unpaid card orders are closed when Stripe refuses the saved key, instead of waiting forever. Forged posts can no longer crowd out Stripe's real notices.
+- **After an outage, customers get an hour more to confirm.** Orders whose time to confirm on WhatsApp ran out while the shop was down are no longer cancelled the moment it starts.
+- **Shorter pause at an update.** The shop ends its open live connections at once when it is being replaced, and the proxy waits up to 60 s for the new copy.
+- **Privacy and access.** The proxy log no longer keeps working tracking, receipt or photo-deal links, or the chat's key. A password-reset link is only ever built from the shop's own address. Shoppers no longer receive stock codes, camera originals, AI prompts or (never shown) ratings. An address that only ends in a slash after decoding no longer slips past the admin door's "unknown address" answer.
+- **Status.**
+  - **Benchmark:** BENCH_PLACEHOLDER
+  - **Tests:** TESTS_PLACEHOLDER
+  - **Dependency audit:** AUDIT_PLACEHOLDER
+  - **Security scan:** Checkmarx One could not run (its connection needs signing in again; the owner will reconnect it after these fixes). By hand: no new route; the updater's `restore` takes a plain file name only (no path, checked before anything is stopped) and runs the restore with no network; the backup password is passed by name, never logged. Not done, from the review's low findings: a nonce-based content security policy, asking for the password again when saving payment or bank settings, and a stronger password hash (an older version could not read it after a rollback).
+
 ## BUH-02.44.00 — 2026-11-14 08:05 UTC · [#79](https://github.com/cxsmtp/buh/pull/79)
 
 First of three releases fixing what the production-readiness review found: money, checkout and shipping.
