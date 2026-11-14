@@ -14,7 +14,9 @@ import { HttpError } from './http';
 import { parseImageDataUrl, parseReceiptDataUrl } from './imageInput';
 import { verifyPhoneToken } from './phoneToken';
 import { getProduct, invalidateProducts, listProducts } from './products';
-import { bump } from './live';
+import { bump, versions } from './live';
+import { hubTotalsOf, orderSearchTerms, type HubTotals } from '@/lib/hubToday';
+import { dubaiToday } from '@/lib/reportPeriods';
 import { bankTransferMode, cardFeePercent, cardPaymentsReady, getSettings, phoneCheckMode, phoneCodesOn } from './settings';
 import { cardFeeFils, vatOnTopFils } from '@/lib/money';
 import { checkoutVat, orderVat, recordOrderVat, syncVatDocumentsQuietly, vatSettings } from './vat';
@@ -291,6 +293,118 @@ export function allOrders(): Order[] {
     out.push(fromRow(r));
   }
   return out;
+}
+
+// ── The Admin Hub's lists (review finding 1: orders past the newest 500 vanished) ───────────────
+
+const FINISHED = "status IN ('delivered', 'cancelled')";
+/**
+ * Orders the owner still has something to do on: not delivered and not cancelled, or flagged for
+ * the owner, or delivered with a transfer screenshot or a WhatsApp confirmation still to check.
+ */
+const HUB_OPEN = `(status NOT IN ('delivered', 'cancelled') OR needs_attention IS NOT NULL OR (status = 'delivered' AND (bank_state = 'uploaded' OR phone_check IN ('awaiting', 'mismatch'))))`;
+const NEWEST = 'ORDER BY created_at DESC, id DESC';
+
+/** Where a page of orders ended ("created_at|id"), for the next page. */
+const cursorOf = (r: Pick<Row, 'id'> & { created_at: string }) => `${r.created_at}|${r.id}`;
+function parseCursor(before: string | undefined): { at: string; id: string } | null {
+  if (!before) return null;
+  const cut = before.lastIndexOf('|');
+  const at = before.slice(0, cut);
+  const id = before.slice(cut + 1);
+  if (cut < 1 || !/^\d{4}-\d{2}-\d{2}T[\d:.]{8,12}Z$/.test(at) || !/^[A-Za-z0-9-]{1,40}$/.test(id)) throw new HttpError(400, 'That page of orders is not known. Please search again.');
+  return { at, id };
+}
+const likeText = (v: string) => `%${v.replace(/[\\%_]/g, (c) => `\\${c}`)}%`;
+
+/**
+ * The orders the hub keeps in step: EVERY open order (however many orders the shop has), the
+ * newest finished ones, and finished ones changed in the last day (so an old order just delivered
+ * or cancelled stays in view). `older` is where the finished ones continue (searchOrders), or
+ * null when the hub has them all.
+ */
+export function listHubOrders({ recent = 200, now = Date.now() }: { recent?: number; now?: number } = {}): { orders: Order[]; older: string | null } {
+  const n = Math.min(Math.max(1, Math.floor(recent)), 1000);
+  type R = Row & { created_at: string };
+  const db = getDb();
+  const open = db.prepare(`SELECT ${COLUMNS}, created_at FROM orders WHERE ${HUB_OPEN} ${NEWEST}`).all() as R[];
+  const finished = db.prepare(`SELECT ${COLUMNS}, created_at FROM orders WHERE ${FINISHED} ${NEWEST} LIMIT ?`).all(n + 1) as R[];
+  const older = finished.length > n ? cursorOf(finished[n - 1]) : null;
+  const touched = db
+    .prepare(`SELECT ${COLUMNS}, created_at FROM orders WHERE ${FINISHED} AND updated_at > ? ORDER BY updated_at DESC LIMIT 100`)
+    .all(new Date(now - 86_400_000).toISOString()) as R[];
+  const rows = new Map<string, R>();
+  for (const r of [...open, ...finished.slice(0, n), ...touched]) rows.set(r.id, r);
+  const sorted = [...rows.values()].sort((a, b) => b.created_at.localeCompare(a.created_at) || b.id.localeCompare(a.id));
+  return { orders: sorted.map(fromRow), older };
+}
+
+export interface OrderSearch {
+  /** Order number, customer name or phone (src/lib/hubToday.ts orderSearchTerms). */
+  q?: string;
+  /** One status, or 'finished' (delivered or cancelled). */
+  status?: string;
+  kind?: 'card' | 'photo';
+  /** The `next` of the page before. */
+  before?: string;
+  limit?: number;
+}
+
+/** Any order, however old: a page of matches, newest first, and where the next page starts (null: no more). */
+export function searchOrders({ q = '', status, kind, before, limit = 30 }: OrderSearch = {}): { orders: Order[]; next: string | null } {
+  const n = Math.min(Math.max(1, Math.floor(limit) || 30), 100);
+  const where: string[] = [];
+  const args: unknown[] = [];
+  if (status === 'finished') where.push(FINISHED);
+  else if (status) {
+    if (!ORDER_STATUSES.includes(status as OrderStatus)) throw new HttpError(400, 'That order status is not known.');
+    where.push('status = ?');
+    args.push(status);
+  }
+  if (kind === 'card') where.push("payment_method = 'online_card'");
+  else if (kind === 'photo') where.push("json_extract(data, '$.photoOrder') IS NOT NULL");
+  else if (kind) throw new HttpError(400, 'That kind of order is not known.');
+  const terms = orderSearchTerms(q);
+  if (q.trim() && !terms) throw new HttpError(400, 'Type at least two letters or digits to search.');
+  if (terms) {
+    const match = ["id LIKE ? ESCAPE '\\'", "json_extract(data, '$.customer.fullName') LIKE ? ESCAPE '\\'"];
+    args.push(likeText(terms.text), likeText(terms.text));
+    if (terms.phone) {
+      match.push("phone LIKE ? ESCAPE '\\'");
+      args.push(likeText(terms.phone));
+    }
+    where.push(`(${match.join(' OR ')})`);
+  }
+  const from = parseCursor(before);
+  if (from) {
+    where.push('(created_at < ? OR (created_at = ? AND id < ?))');
+    args.push(from.at, from.at, from.id);
+  }
+  const rows = getDb()
+    .prepare(`SELECT ${COLUMNS}, created_at FROM orders ${where.length ? `WHERE ${where.join(' AND ')}` : ''} ${NEWEST} LIMIT ?`)
+    .all(...args, n + 1) as Array<Row & { created_at: string }>;
+  return { orders: rows.slice(0, n).map(fromRow), next: rows.length > n ? cursorOf(rows[n - 1]) : null };
+}
+
+let totalsCache: { key: string; at: number; totals: HubTotals } | undefined;
+/**
+ * The hub's header, badges, to-dos and money highlights, counted over every order (the hub's own
+ * list is only the open orders and the newest finished ones). Worked out again only when an order
+ * changed (the live counter, shared by both running copies during an update), the UAE day turned,
+ * or five minutes passed.
+ */
+export function hubTotals(now = Date.now()): HubTotals {
+  const key = `${versions().orders}|${dubaiToday(now)}`;
+  if (totalsCache && totalsCache.key === key && now - totalsCache.at < 300_000 && now >= totalsCache.at) return totalsCache.totals;
+  const rows = getDb().prepare(`SELECT ${COLUMNS} FROM orders`).iterate() as IterableIterator<Row>;
+  const totals = hubTotalsOf(
+    (function* () {
+      for (const r of rows) yield fromRow(r);
+    })(),
+    now
+  );
+  totalsCache = { key, at: now, totals };
+  return totals;
 }
 
 function writeOrder(order: Order, idempotencyKey?: string) {
@@ -2919,6 +3033,73 @@ export function listCustomers(): Customer[] {
     byPhone.set(o.customer.phone, c);
   }
   return [...byPhone.values()].sort((a, b) => b.lastOrderDate.localeCompare(a.lastOrderDate));
+}
+
+export interface CustomerPage {
+  customers: Customer[];
+  /** Every customer the shop has (not only the ones matching the search). */
+  total: number;
+  /** The `offset` of the next page, or null when this was the last. */
+  next: number | null;
+}
+
+/**
+ * A page of customers (one per phone, the latest order's name and address, cancelled orders not
+ * counted), newest order first, worked out by the database: no order is read into the hub for it.
+ * `q` looks in the name, phone, emirate and area. The same figures as listCustomers() (the backup's
+ * customers.csv), which reads every order.
+ */
+export function customersPage({ q = '', offset = 0, limit = 60 }: { q?: string; offset?: number; limit?: number } = {}): CustomerPage {
+  const n = Math.min(Math.max(1, Math.floor(limit) || 60), 200);
+  const skip = Math.min(Math.max(0, Math.floor(offset) || 0), 1_000_000);
+  const text = q.trim().slice(0, 60);
+  const digits = /^[\d\s+()-]+$/.test(text) ? text.replace(/\D/g, '').replace(/^0+/, '') : '';
+  const like = likeText(text);
+  const db = getDb();
+  // SQLite gives the other columns of the row MAX() picked: the customer's latest order.
+  const rows = db
+    .prepare(
+      `WITH c AS (
+         SELECT phone, data, MAX(created_at) AS last,
+           SUM(status <> 'cancelled') AS n,
+           SUM(CASE WHEN status <> 'cancelled' THEN CAST(ROUND(json_extract(data, '$.total') * 100) AS INTEGER) ELSE 0 END) AS spent
+         FROM orders GROUP BY phone)
+       SELECT phone, data, last, n, spent FROM c
+       WHERE ? = '' OR json_extract(data, '$.customer.fullName') LIKE ? ESCAPE '\\' OR json_extract(data, '$.customer.emirate') LIKE ? ESCAPE '\\'
+         OR json_extract(data, '$.customer.area') LIKE ? ESCAPE '\\' OR (? <> '' AND phone LIKE ? ESCAPE '\\')
+       ORDER BY last DESC, phone LIMIT ? OFFSET ?`
+    )
+    .all(text, like, like, like, digits, likeText(digits), n + 1, skip) as Array<{ phone: string; data: string; last: string; n: number; spent: number }>;
+  const emailOf = db.prepare("SELECT json_extract(data, '$.customer.email') AS email FROM orders WHERE phone = ? AND COALESCE(json_extract(data, '$.customer.email'), '') <> '' ORDER BY created_at DESC LIMIT 1");
+  const customers = rows.slice(0, n).map((r): Customer => {
+    const c = (JSON.parse(r.data) as Order).customer;
+    return {
+      id: `cust-${r.phone.replace(/\D/g, '')}`,
+      fullName: c.fullName,
+      phone: r.phone,
+      email: c.email || (emailOf.get(r.phone) as { email?: string } | undefined)?.email || undefined,
+      emirate: c.emirate,
+      area: c.area,
+      totalOrders: r.n,
+      totalSpent: aed(r.spent),
+      lastOrderDate: r.last,
+      defaultAddress: { buildingVilla: c.buildingVilla, flatVillaNo: c.flatVillaNo, streetAddress: c.streetAddress, landmark: c.landmark },
+    };
+  });
+  const total = (db.prepare('SELECT COUNT(DISTINCT phone) AS n FROM orders').get() as { n: number }).n;
+  return { customers, total, next: rows.length > n ? skip + n : null };
+}
+
+/** Every order of one customer (by phone), newest first, a page at a time: the Customers tab's history. */
+export function customerOrders(phone: string, { before, limit = 30 }: { before?: string; limit?: number } = {}): { orders: Order[]; next: string | null } {
+  const n = Math.min(Math.max(1, Math.floor(limit) || 30), 100);
+  const from = parseCursor(before);
+  const rows = (
+    from
+      ? getDb().prepare(`SELECT ${COLUMNS}, created_at FROM orders WHERE phone = ? AND (created_at < ? OR (created_at = ? AND id < ?)) ${NEWEST} LIMIT ?`).all(phone, from.at, from.at, from.id, n + 1)
+      : getDb().prepare(`SELECT ${COLUMNS}, created_at FROM orders WHERE phone = ? ${NEWEST} LIMIT ?`).all(phone, n + 1)
+  ) as Array<Row & { created_at: string }>;
+  return { orders: rows.slice(0, n).map(fromRow), next: rows.length > n ? cursorOf(rows[n - 1]) : null };
 }
 
 // ── Bulk orders (Money → Invoices) ──────────────────────────────────────────

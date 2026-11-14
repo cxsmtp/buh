@@ -5,12 +5,15 @@ import { formatAed } from '@/lib/money';
 import React from 'react';
 import { PALETTE } from '@/lib/design/tokens';
 import { Store, Clock, TrendingUp, Layers, Users, LogOut } from 'lucide-react';
-import { Order, Product, Customer, BrandSettings } from '@/types';
+import { Order, Product, BrandSettings } from '@/types';
+import type { HubTotals } from '@/lib/hubToday';
 
 interface AdminHeaderProps {
+  /** The hub's own list (every open order and the newest finished ones): used only until the totals arrive. */
   orders: Order[];
+  /** Counted by the server over every order the shop has (GET /api/admin/orders). */
+  totals: HubTotals | null;
   products: Product[];
-  customers: Customer[];
   onExitAdmin: () => void;
   onLogoutAdmin?: () => void;
   brandSettings?: BrandSettings;
@@ -18,15 +21,16 @@ interface AdminHeaderProps {
 
 export const AdminHeader: React.FC<AdminHeaderProps> = ({
   orders,
+  totals,
   products,
-  customers,
   onExitAdmin,
   onLogoutAdmin,
   brandSettings,
 }) => {
-  const pendingOrders = orders.filter((o) => o.status === 'pending_confirmation');
+  // From the server's totals (every order), never from the hub's own shortened list.
+  const pendingCount = totals ? totals.toConfirm : orders.filter((o) => o.status === 'pending_confirmation').length;
   // Sales as Money → Reports counts them: no cancelled or unpaid-card orders, no Stripe tests, less refunds.
-  const salesFils = orders.reduce((sum, o) => sum + saleFils(o), 0);
+  const salesFils = totals ? totals.salesFils : orders.reduce((sum, o) => sum + saleFils(o), 0);
 
   return (
     <div className="bg-ink text-paper p-4 pt-[max(1rem,env(safe-area-inset-top,0px))] border-b border-gold/25">
@@ -97,7 +101,7 @@ export const AdminHeader: React.FC<AdminHeaderProps> = ({
             <Clock className="w-3.5 h-3.5 text-gold" />
             <div className="text-[11px] leading-tight">
               <span className="text-sand block text-[9px]">Needs Confirmation</span>
-              <strong className="text-gold-light font-bold">{pendingOrders.length} Orders</strong>
+              <strong className="text-gold-light font-bold">{pendingCount} Orders</strong>
             </div>
           </div>
 
@@ -123,8 +127,8 @@ export const AdminHeader: React.FC<AdminHeaderProps> = ({
           <div className="flex items-center gap-2 bg-surface/5 border border-white/10 px-3 py-1.5 rounded-xl shrink-0">
             <Users className="w-3.5 h-3.5 text-ink-muted" />
             <div className="text-[11px] leading-tight">
-              <span className="text-sand block text-[9px]">Registered CRM</span>
-              <strong className="text-paper font-bold">{customers.length} Profiles</strong>
+              <span className="text-sand block text-[9px]">Customers</span>
+              <strong className="text-paper font-bold" data-testid="hub-customers">{totals ? totals.customers : '…'}</strong>
             </div>
           </div>
 

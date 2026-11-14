@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { BankTransferDetails, Order, CourierProvider, CourierSettings } from '@/types';
 import { ShippingLabelModal } from './ShippingLabelModal';
 import { OrderPackCheck } from './OrderPackCheck';
@@ -22,7 +22,8 @@ import {
   CreditCard,
   X,
 } from 'lucide-react';
-import { postJson, safeHref, safeLinkHref, sendJson } from '@/lib/apiClient';
+import { getJson, postJson, safeHref, safeLinkHref, sendJson } from '@/lib/apiClient';
+import { orderMatchesSearch, orderSearchTerms, type HubTotals } from '@/lib/hubToday';
 import { awaitingWhatsApp, heldForWhatsApp, OrderTimeline, OrderWhatsAppCheck } from './OrderWhatsAppCheck';
 import { OrderBankTransfer, transferToCheck } from './OrderBankTransfer';
 import { OrderPhotoCheck } from './OrderPhotoCheck';
@@ -37,7 +38,12 @@ import { aed2, BLOCKED_MESSAGE, carrierLabel, ECO_LIVE_NOT_CONNECTED, jeeblyMode
 import { EnterTrackingDialog } from './EnterTrackingDialog';
 
 interface AdminOrdersTabProps {
+  /** The hub's list: EVERY open order (not delivered, not cancelled) and the newest finished ones. */
   orders: Order[];
+  /** Where the finished orders continue on the server (/api/admin/orders/search), or null: the list has them all. */
+  older?: string | null;
+  /** The server's counts over every order (the chips' numbers). */
+  totals?: HubTotals | null;
   /** An order changed on the server (status, payment, courier): replace it in the list. */
   onOrderChanged: (order: Order) => void;
   courierSettings: CourierSettings;
@@ -104,6 +110,23 @@ const MODE_TEXT: Record<BookingMode, { tone: 'success' | 'warning' | 'danger'; l
 /** Statuses where a courier can be booked or a tracking number entered (src/lib/server/orders.ts). */
 const SHIPPING_STATUSES: Order['status'][] = ['confirmed', 'dispatched', 'out_for_delivery'];
 
+type OrderFilter = 'all' | 'pending' | 'whatsapp' | 'transfer' | 'card' | 'photo' | 'confirmed' | 'dispatched' | 'delivered' | 'cancelled';
+/**
+ * The finished orders a filter can also show, asked from the server a page at a time (the hub's own
+ * list holds every open order, so filters of open orders need nothing more).
+ */
+const OLDER_OF: Partial<Record<OrderFilter, { status: string; kind?: 'card' | 'photo' }>> = {
+  all: { status: 'finished' },
+  delivered: { status: 'delivered' },
+  cancelled: { status: 'cancelled' },
+  card: { status: 'finished', kind: 'card' },
+  photo: { status: 'finished', kind: 'photo' },
+};
+/** Order cards drawn at a time (the rest behind "Show more orders"). */
+export const ORDERS_PAGE = 30;
+/** A tap target 44 px tall on a phone; compact (as the owner asked) from 768 px, where a mouse is used. */
+const TAP = 'min-h-11 md:min-h-0';
+
 /** A card order's payment, as the hub shows it (only Stripe's word moves it: src/lib/server/payments.ts). */
 export function cardBadge(order: Order): { text: string; tone: 'success' | 'warning' | 'danger' | 'muted' } | null {
   const c = order.card;
@@ -143,7 +166,9 @@ const NEXT_ACTIONS: Partial<Record<Order['status'], Array<{ to: Order['status'];
 
 export const AdminOrdersTab: React.FC<AdminOrdersTabProps> = ({
   orders,
-  onOrderChanged,
+  older = null,
+  totals = null,
+  onOrderChanged: tellHub,
   courierSettings,
   bank,
   shopName,
@@ -266,7 +291,53 @@ export const AdminOrdersTab: React.FC<AdminOrdersTabProps> = ({
 
   // The order being checked with the scanner (one at a time).
   const [packing, setPacking] = useState('');
-  const [filter, setFilter] = useState<'all' | 'pending' | 'whatsapp' | 'transfer' | 'card' | 'photo' | 'confirmed' | 'dispatched'>('all');
+  const [filter, setFilterNow] = useState<OrderFilter>('all');
+  // Search (order number, name, phone): the hub's own list at once, older finished orders from the server.
+  const [query, setQuery] = useState('');
+  const [visible, setVisible] = useState(ORDERS_PAGE);
+  // Older finished orders fetched for this filter and search. next: undefined = not asked yet, null = no more.
+  const [found, setFound] = useState<{ orders: Order[]; next?: string | null; loading: boolean; error: string }>({ orders: [], loading: false, error: '' });
+  const view = useRef({ key: 'all|', timer: undefined as ReturnType<typeof setTimeout> | undefined });
+  useEffect(() => {
+    const v = view.current;
+    return () => clearTimeout(v.timer);
+  }, []);
+  const terms = orderSearchTerms(query);
+
+  /** The next page of older finished orders for a filter and search (from where the hub's own list ends). */
+  const fetchOlder = async (f: OrderFilter, q: string, before: string | null | undefined) => {
+    const scope = OLDER_OF[f];
+    const key = `${f}|${q}`;
+    if (!scope || !before || view.current.key !== key) return;
+    setFound((x) => ({ ...x, loading: true, error: '' }));
+    const params = new URLSearchParams({ status: scope.status, before, limit: String(ORDERS_PAGE) });
+    if (scope.kind) params.set('kind', scope.kind);
+    if (q) params.set('q', q);
+    const { ok, data } = await getJson<{ orders?: Order[]; next?: string | null; message?: string }>(`/api/admin/orders/search?${params.toString()}`);
+    if (view.current.key !== key) return; // the filter or search changed meanwhile
+    if (!ok || !data.orders) return setFound((x) => ({ ...x, loading: false, error: data.message || 'Older orders could not be loaded. Please try again.' }));
+    const more = data.orders;
+    setFound((x) => ({ orders: [...x.orders, ...more.filter((o) => !x.orders.some((y) => y.id === o.id))], next: data.next ?? null, loading: false, error: '' }));
+  };
+  /** A new filter or search: the list starts again; a search also asks the server (after a pause in typing). */
+  const show = (f: OrderFilter, q: string) => {
+    const searchText = orderSearchTerms(q) ? q.trim() : '';
+    const key = `${f}|${searchText}`;
+    setFilterNow(f);
+    setQuery(q);
+    if (key === view.current.key) return;
+    clearTimeout(view.current.timer);
+    view.current.key = key;
+    setVisible(ORDERS_PAGE);
+    setFound({ orders: [], loading: Boolean(searchText && OLDER_OF[f] && older), error: '' });
+    if (searchText) view.current.timer = setTimeout(() => void fetchOlder(f, searchText, older), 300);
+  };
+  const setFilter = (f: OrderFilter) => show(f, query);
+  /** An order changed: also in the older ones fetched here, then the hub's list. */
+  const onOrderChanged = (o: Order) => {
+    setFound((x) => (x.orders.some((y) => y.id === o.id) ? { ...x, orders: x.orders.map((y) => (y.id === o.id ? o : y)) } : x));
+    tellHub(o);
+  };
   // Orders the owner has just answered stay in "Awaiting WhatsApp" (or "Transfer to check") for now, so the reply link is right there.
   const [justChecked, setJustChecked] = useState<string[]>([]);
   const whatsappChecked = (o: Order) => {
@@ -294,16 +365,41 @@ export const AdminOrdersTab: React.FC<AdminOrdersTabProps> = ({
   const [extraNote, setExtraNote] = useState<string>('');
   const [isDispatching, setIsDispatching] = useState<boolean>(false);
 
-  const filteredOrders = orders.filter((o) => {
-    if (filter === 'pending') return o.status === 'pending_confirmation';
-    if (filter === 'whatsapp') return awaitingWhatsApp(o) || justChecked.includes(o.id);
-    if (filter === 'transfer') return transferToCheck(o) || justChecked.includes(o.id);
-    if (filter === 'card') return o.paymentMethod === 'online_card';
-    if (filter === 'photo') return Boolean(o.photoOrder);
-    if (filter === 'confirmed') return o.status === 'confirmed';
-    if (filter === 'dispatched') return o.status === 'dispatched';
+  const inFilter = (o: Order, f: OrderFilter) => {
+    if (f === 'pending') return o.status === 'pending_confirmation';
+    if (f === 'whatsapp') return awaitingWhatsApp(o) || justChecked.includes(o.id);
+    if (f === 'transfer') return transferToCheck(o) || justChecked.includes(o.id);
+    if (f === 'card') return o.paymentMethod === 'online_card';
+    if (f === 'photo') return Boolean(o.photoOrder);
+    if (f === 'confirmed') return o.status === 'confirmed';
+    if (f === 'dispatched') return o.status === 'dispatched';
+    if (f === 'delivered') return o.status === 'delivered';
+    if (f === 'cancelled') return o.status === 'cancelled';
     return true;
-  });
+  };
+  // The hub's own list first (its copy of an order is the freshest), then the older ones fetched; newest first.
+  const own = orders.filter((o) => inFilter(o, filter) && (!terms || orderMatchesSearch(o, terms)));
+  const filteredOrders = [...own, ...found.orders.filter((o) => inFilter(o, filter) && !orders.some((y) => y.id === o.id))].sort((a, b) => b.createdAt.localeCompare(a.createdAt) || b.id.localeCompare(a.id));
+  // More on the server? (Only finished orders: every open one is already here.)
+  const olderFrom = OLDER_OF[filter] ? (found.next === undefined ? older : found.next) : null;
+  const shownOrders = filteredOrders.slice(0, visible);
+  const showMore = () => {
+    if (visible >= filteredOrders.length && olderFrom) void fetchOlder(filter, terms ? query.trim() : '', olderFrom);
+    setVisible((n) => n + ORDERS_PAGE);
+  };
+  /** The number on a chip: the server's count of every order where it has one. */
+  const chipCount = (f: OrderFilter): number => {
+    const s = totals?.byStatus;
+    if (f === 'all') return totals?.orders ?? orders.length;
+    if (f === 'card' && totals) return totals.card;
+    if (f === 'photo' && totals) return totals.photo;
+    if (s && f === 'pending') return s.pending_confirmation;
+    if (s && (f === 'confirmed' || f === 'dispatched' || f === 'delivered' || f === 'cancelled')) return s[f];
+    return orders.filter((o) => (f === 'whatsapp' ? awaitingWhatsApp(o) : f === 'transfer' ? transferToCheck(o) : inFilter(o, f))).length;
+  };
+
+  // How many there are in all: the server's count where it has one; unknown while a search still has older pages.
+  const knownTotal = !terms && totals && OLDER_OF[filter] ? Math.max(chipCount(filter), filteredOrders.length) : olderFrom ? null : filteredOrders.length;
 
   const openConfirmationModal = (order: Order) => {
     setSelectedOrderForConfirm(order);
@@ -454,48 +550,55 @@ export const AdminOrdersTab: React.FC<AdminOrdersTabProps> = ({
     <div className="space-y-4">
       {/* The owner's photo deal links (pictures, fixed price, allowed payments): the latest 3 here, all of them under Photo orders */}
       {filter === 'photo' ? <PhotoDeals key="all" /> : <PhotoDeals key="latest" limit={3} onShowAll={() => setFilter('photo')} />}
-      {/* Filter Tabs */}
-      <div className="flex items-center gap-2 overflow-x-auto no-scrollbar pb-1">
-        {[
-          { id: 'all', label: 'All Orders' },
-          { id: 'pending', label: 'Needs Confirmation' },
-          { id: 'whatsapp', label: 'Awaiting WhatsApp' },
-          { id: 'transfer', label: 'Transfer to check' },
-          { id: 'card', label: 'Card payments' },
-          { id: 'photo', label: 'Photo orders' },
-          { id: 'confirmed', label: 'Confirmed & AWB Ready' },
-          { id: 'dispatched', label: 'Dispatched / In Transit' },
-        ].filter((tab) => (tab.id !== 'whatsapp' || orders.some((o) => o.whatsappCheck)) && (tab.id !== 'transfer' || orders.some((o) => o.bankTransfer)) && (tab.id !== 'card' || orders.some((o) => o.paymentMethod === 'online_card'))).map((tab) => {
-          const count = orders.filter((o) => {
-            if (tab.id === 'pending') return o.status === 'pending_confirmation';
-            if (tab.id === 'whatsapp') return awaitingWhatsApp(o);
-            if (tab.id === 'transfer') return transferToCheck(o);
-            if (tab.id === 'card') return o.paymentMethod === 'online_card';
-            if (tab.id === 'photo') return Boolean(o.photoOrder);
-            if (tab.id === 'confirmed') return o.status === 'confirmed';
-            if (tab.id === 'dispatched') return o.status === 'dispatched';
-            return true;
-          }).length;
+      {/* Search: any order, however old */}
+      <div role="search">
+        <label htmlFor="order-search" className="sr-only">Search orders</label>
+        <input
+          id="order-search"
+          type="search"
+          inputMode="search"
+          autoComplete="off"
+          maxLength={60}
+          value={query}
+          onChange={(e) => show(filter, e.target.value)}
+          placeholder="Search: order number, name or phone"
+          data-testid="order-search"
+          className="w-full min-h-11 px-3.5 rounded-xl border border-line-strong bg-surface text-sm text-ink placeholder:text-ink-muted focus:outline-none focus:ring-2 focus:ring-gold"
+        />
+      </div>
 
-          return (
+      {/* Filter Tabs */}
+      <div className="flex items-center gap-2 overflow-x-auto no-scrollbar pb-1" role="group" aria-label="Show orders">
+        {(
+          [
+            { id: 'all', label: 'All Orders' },
+            { id: 'pending', label: 'Needs Confirmation' },
+            { id: 'whatsapp', label: 'Awaiting WhatsApp' },
+            { id: 'transfer', label: 'Transfer to check' },
+            { id: 'card', label: 'Card payments' },
+            { id: 'photo', label: 'Photo orders' },
+            { id: 'confirmed', label: 'Confirmed & AWB Ready' },
+            { id: 'dispatched', label: 'Dispatched / In Transit' },
+            { id: 'delivered', label: 'Delivered' },
+            { id: 'cancelled', label: 'Cancelled' },
+          ] as Array<{ id: OrderFilter; label: string }>
+        )
+          .filter((tab) => (tab.id !== 'whatsapp' || orders.some((o) => o.whatsappCheck)) && (tab.id !== 'transfer' || orders.some((o) => o.bankTransfer)) && (tab.id !== 'card' || (totals ? totals.card > 0 : orders.some((o) => o.paymentMethod === 'online_card'))))
+          .map((tab) => (
             <button
               key={tab.id}
-              onClick={() => setFilter(tab.id as typeof filter)}
-              className={`px-3 py-1.5 rounded-xl text-xs font-semibold whitespace-nowrap transition-all flex items-center gap-1.5 ${
-                filter === tab.id
-                  ? 'bg-ink text-paper shadow-sm'
-                  : 'bg-surface text-ink-soft hover:bg-sand border border-line'
+              type="button"
+              onClick={() => setFilter(tab.id)}
+              aria-pressed={filter === tab.id}
+              data-testid={`order-filter-${tab.id}`}
+              className={`${TAP} px-3 py-1.5 rounded-xl text-xs font-semibold whitespace-nowrap transition-all flex items-center gap-1.5 ${
+                filter === tab.id ? 'bg-ink text-paper shadow-sm' : 'bg-surface text-ink-soft hover:bg-sand border border-line'
               }`}
             >
               <span>{tab.label}</span>
-              <span className={`text-[10px] px-1.5 py-0.2 rounded-full ${
-                filter === tab.id ? 'bg-gold text-ink font-bold' : 'bg-sand-deep text-ink-soft'
-              }`}>
-                {count}
-              </span>
+              <span className={`text-[10px] px-1.5 py-0.2 rounded-full ${filter === tab.id ? 'bg-gold text-ink font-bold' : 'bg-sand-deep text-ink-soft'}`}>{chipCount(tab.id)}</span>
             </button>
-          );
-        })}
+          ))}
       </div>
 
       {/* Every label waiting for dispatch in one PDF (A4: two per sheet), or straight to the printer's email */}
@@ -507,11 +610,11 @@ export const AdminOrdersTab: React.FC<AdminOrdersTabProps> = ({
           <div data-testid="batch-labels" className="flex flex-wrap items-center gap-2 rounded-2xl border border-line bg-surface p-2.5 text-xs">
             <span className="text-ink-soft font-semibold">{waiting} label{waiting === 1 ? '' : 's'} waiting for dispatch</span>
             {paper !== 'a4' && (
-              <a href={`/api/admin/labels?paper=${paper}`} target="_blank" rel="noopener" data-testid="batch-labels-home" className="ml-auto px-3 py-1.5 rounded-xl border border-line-strong bg-surface hover:bg-sand font-semibold text-ink focus:outline-none focus-visible:ring-2 focus-visible:ring-gold">
+              <a href={`/api/admin/labels?paper=${paper}`} target="_blank" rel="noopener" data-testid="batch-labels-home" className="ml-auto min-h-11 md:min-h-0 inline-flex items-center px-3 py-1.5 rounded-xl border border-line-strong bg-surface hover:bg-sand font-semibold text-ink focus:outline-none focus-visible:ring-2 focus-visible:ring-gold">
                 All labels PDF ({paper === '4x6' ? '4 × 6 in' : 'A5'})
               </a>
             )}
-            <a href="/api/admin/labels?paper=a4" target="_blank" rel="noopener" data-testid="batch-labels-pdf" className={`${paper === 'a4' ? 'ml-auto ' : ''}px-3 py-1.5 rounded-xl border border-line-strong bg-surface hover:bg-sand font-semibold text-ink focus:outline-none focus-visible:ring-2 focus-visible:ring-gold`}>
+            <a href="/api/admin/labels?paper=a4" target="_blank" rel="noopener" data-testid="batch-labels-pdf" className={`${paper === 'a4' ? 'ml-auto ' : ''}min-h-11 md:min-h-0 inline-flex items-center px-3 py-1.5 rounded-xl border border-line-strong bg-surface hover:bg-sand font-semibold text-ink focus:outline-none focus-visible:ring-2 focus-visible:ring-gold`}>
               All labels A4 PDF (2 per sheet)
             </a>
             {courierSettings.printerEmail && (
@@ -522,7 +625,7 @@ export const AdminOrdersTab: React.FC<AdminOrdersTabProps> = ({
                   const { ok, data } = await postJson<{ to?: string; count?: number; message?: string }>('/api/admin/labels', { paper: 'a4' });
                   alert(ok ? `${data.count} label${data.count === 1 ? '' : 's'} sent to ${data.to}.` : data.message || 'Not sent. Please try again.');
                 }}
-                className="px-3 py-1.5 rounded-xl bg-ink text-paper font-semibold focus:outline-none focus-visible:ring-2 focus-visible:ring-gold"
+                className="min-h-11 md:min-h-0 px-3 py-1.5 rounded-xl bg-ink text-paper font-semibold focus:outline-none focus-visible:ring-2 focus-visible:ring-gold"
               >
                 Email all to printer (A4)
               </button>
@@ -534,11 +637,11 @@ export const AdminOrdersTab: React.FC<AdminOrdersTabProps> = ({
       {/* Orders List */}
       <div className="space-y-3">
         {filteredOrders.length === 0 ? (
-          <div className="bg-surface rounded-2xl p-8 text-center border border-line text-ink-muted text-xs">
-            No orders found under this filter.
+          <div className="bg-surface rounded-2xl p-8 text-center border border-line text-ink-muted text-xs" data-testid="orders-empty" role="status">
+            {found.loading ? 'Searching…' : terms ? `No order matches “${query.trim()}”${filter === 'all' ? '' : ' under this filter'}.` : 'No orders found under this filter.'}
           </div>
         ) : (
-          filteredOrders.map((order) => {
+          shownOrders.map((order) => {
             const isPending = order.status === 'pending_confirmation';
             const isCod = order.paymentMethod === 'cod';
             const isCard = order.paymentMethod === 'online_card';
@@ -549,6 +652,8 @@ export const AdminOrdersTab: React.FC<AdminOrdersTabProps> = ({
             return (
               <div
                 key={order.id}
+                data-testid="order-card"
+                data-order-id={order.id}
                 className="bg-surface rounded-2xl p-2.5 sm:p-3 border border-line hover:border-line-strong shadow-sm space-y-1.5 transition-all"
               >
                 {/* Top Strip */}
@@ -717,7 +822,7 @@ export const AdminOrdersTab: React.FC<AdminOrdersTabProps> = ({
                       type="button"
                       disabled={busyOrderId === order.id}
                       onClick={() => void handled(order)}
-                      className="px-2 py-1 rounded-lg font-semibold border border-danger-line bg-surface text-danger hover:bg-ivory disabled:opacity-50"
+                      className="min-h-11 md:min-h-0 inline-flex items-center px-2 py-1 rounded-lg font-semibold border border-danger-line bg-surface text-danger hover:bg-ivory disabled:opacity-50"
                     >
                       Mark as handled
                     </button>
@@ -728,7 +833,7 @@ export const AdminOrdersTab: React.FC<AdminOrdersTabProps> = ({
                 {/* Every action in one wrapping line (asked by the owner: compact) */}
                 <div className="flex flex-wrap items-center gap-1.5 text-[11px]" data-testid="order-actions">
                   {['pending_confirmation', 'confirmed', 'dispatched'].includes(order.status) && order.items.some((i) => i.productId) && (
-                    <button type="button" onClick={() => setPacking(packing === order.id ? '' : order.id)} aria-expanded={packing === order.id} data-testid="order-pack-check" className="px-2 py-1 rounded-lg font-semibold border border-line-strong bg-surface text-ink hover:bg-sand">
+                    <button type="button" onClick={() => setPacking(packing === order.id ? '' : order.id)} aria-expanded={packing === order.id} data-testid="order-pack-check" className="min-h-11 md:min-h-0 inline-flex items-center px-2 py-1 rounded-lg font-semibold border border-line-strong bg-surface text-ink hover:bg-sand">
                       Scan to check
                     </button>
                   )}
@@ -741,7 +846,7 @@ export const AdminOrdersTab: React.FC<AdminOrdersTabProps> = ({
                       <button
                         type="button"
                         onClick={() => openConfirmationModal(order)}
-                        className="px-2 py-1 rounded-lg font-semibold border border-line-strong bg-ink text-paper hover:bg-ink-2"
+                        className="min-h-11 md:min-h-0 inline-flex items-center px-2 py-1 rounded-lg font-semibold border border-line-strong bg-ink text-paper hover:bg-ink-2"
                       >
                         {order.courier.simulated ? 'Book for real' : 'Book courier'}
                       </button>
@@ -749,7 +854,7 @@ export const AdminOrdersTab: React.FC<AdminOrdersTabProps> = ({
                     <button
                       type="button"
                       onClick={() => setTrackingOrder(order)}
-                      className="px-2 py-1 rounded-lg font-semibold border border-line-strong bg-surface text-ink hover:bg-sand"
+                      className="min-h-11 md:min-h-0 inline-flex items-center px-2 py-1 rounded-lg font-semibold border border-line-strong bg-surface text-ink hover:bg-sand"
                     >
                       Enter tracking number
                     </button>
@@ -762,7 +867,7 @@ export const AdminOrdersTab: React.FC<AdminOrdersTabProps> = ({
                         type="button"
                         disabled={busyOrderId === order.id}
                         onClick={() => void refreshTracking(order)}
-                        className="px-2 py-1 rounded-lg font-semibold border border-line-strong bg-surface text-ink hover:bg-sand disabled:opacity-50"
+                        className="min-h-11 md:min-h-0 inline-flex items-center px-2 py-1 rounded-lg font-semibold border border-line-strong bg-surface text-ink hover:bg-sand disabled:opacity-50"
                       >
                         Refresh tracking
                       </button>
@@ -770,12 +875,12 @@ export const AdminOrdersTab: React.FC<AdminOrdersTabProps> = ({
                     <button
                       type="button"
                       onClick={() => setTrackingOrder(order)}
-                      className="px-2 py-1 rounded-lg font-semibold border border-line bg-surface text-ink-soft hover:bg-sand"
+                      className="min-h-11 md:min-h-0 inline-flex items-center px-2 py-1 rounded-lg font-semibold border border-line bg-surface text-ink-soft hover:bg-sand"
                     >
                       Change AWB
                     </button>
                     {safeHref(order.courier.trackingUrl) && (
-                      <a href={safeHref(order.courier.trackingUrl)} target="_blank" rel="noopener noreferrer" className="inline-flex items-center gap-1 px-2 py-1 rounded-lg font-semibold border border-line bg-surface text-ink-soft hover:bg-sand">
+                      <a href={safeHref(order.courier.trackingUrl)} target="_blank" rel="noopener noreferrer" className="min-h-11 md:min-h-0 inline-flex items-center gap-1 px-2 py-1 rounded-lg font-semibold border border-line bg-surface text-ink-soft hover:bg-sand">
                         Tracking page <ExternalLink className="w-3 h-3" aria-hidden="true" />
                       </a>
                     )}
@@ -786,13 +891,13 @@ export const AdminOrdersTab: React.FC<AdminOrdersTabProps> = ({
                 {(orderEditable(order) || (order.status === 'cancelled' && order.paymentMethod === 'cod')) && (
                   <span className="contents" data-testid="order-edit-actions">
                     {orderEditable(order) && (
-                      <button type="button" onClick={() => setEditing(order)} className="px-2 py-1 rounded-lg font-semibold border border-line-strong bg-surface text-ink hover:bg-sand">
+                      <button type="button" onClick={() => setEditing(order)} className="min-h-11 md:min-h-0 inline-flex items-center px-2 py-1 rounded-lg font-semibold border border-line-strong bg-surface text-ink hover:bg-sand">
                         Edit order
                       </button>
                     )}
                     {order.status === 'cancelled' && order.paymentMethod === 'cod' && (
                       <>
-                        <button type="button" disabled={recreating === order.id} onClick={() => void recreate(order)} className="px-2 py-1 rounded-lg font-semibold border border-line-strong bg-surface text-ink hover:bg-sand disabled:opacity-50">
+                        <button type="button" disabled={recreating === order.id} onClick={() => void recreate(order)} className="min-h-11 md:min-h-0 inline-flex items-center px-2 py-1 rounded-lg font-semibold border border-line-strong bg-surface text-ink hover:bg-sand disabled:opacity-50">
                           {order.recreatedAs ? `Recreated as ${order.recreatedAs} · recreate again` : 'Recreate order'}
                         </button>
                       </>
@@ -808,7 +913,7 @@ export const AdminOrdersTab: React.FC<AdminOrdersTabProps> = ({
                       target="_blank"
                       rel="noopener noreferrer"
                       data-testid="order-invoice-link"
-                      className="flex items-center gap-1.5 text-[11px] text-ink bg-surface hover:bg-sand border border-line-strong font-semibold px-2 py-1 rounded-lg"
+                      className="min-h-11 md:min-h-0 flex items-center gap-1.5 text-[11px] text-ink bg-surface hover:bg-sand border border-line-strong font-semibold px-2 py-1 rounded-lg"
                     >
                       <Printer className="w-3 h-3 text-gold" aria-hidden="true" />
                       <span>Receipt / invoice</span>
@@ -817,7 +922,7 @@ export const AdminOrdersTab: React.FC<AdminOrdersTabProps> = ({
                     {order.courier.awbNumber && order.courier.labelGenerated && (
                       <button
                         onClick={() => setLabelOrder(order)}
-                        className="flex items-center gap-1.5 text-[11px] text-ink bg-sand hover:bg-sand-deep border border-line-strong font-semibold px-2 py-1 rounded-lg transition-colors"
+                        className="min-h-11 md:min-h-0 flex items-center gap-1.5 text-[11px] text-ink bg-sand hover:bg-sand-deep border border-line-strong font-semibold px-2 py-1 rounded-lg transition-colors"
                         title={order.courier.simulated ? 'Test label: not a real shipment' : 'Print the 4 × 6 in shipping label'}
                       >
                         <Printer className="w-3 h-3 text-gold" />
@@ -828,7 +933,7 @@ export const AdminOrdersTab: React.FC<AdminOrdersTabProps> = ({
                     {/* WhatsApp notification */}
                     <button
                       onClick={() => sendWhatsAppUpdate(order)}
-                      className="flex items-center gap-1.5 text-[11px] text-success bg-success-soft hover:bg-success-soft border border-success-line font-semibold px-2 py-1 rounded-lg transition-colors"
+                      className="min-h-11 md:min-h-0 flex items-center gap-1.5 text-[11px] text-success bg-success-soft hover:bg-success-soft border border-success-line font-semibold px-2 py-1 rounded-lg transition-colors"
                       title="Send WhatsApp update to customer"
                     >
                       <MessageCircle className="w-3 h-3" />
@@ -842,7 +947,7 @@ export const AdminOrdersTab: React.FC<AdminOrdersTabProps> = ({
                   ) : isPending ? (
                     <button
                       onClick={() => openConfirmationModal(order)}
-                      className="flex items-center gap-1.5 bg-ink hover:bg-ink text-paper font-bold text-[11px] px-3 py-1 rounded-lg transition-all shadow active:scale-95"
+                      className="min-h-11 md:min-h-0 flex items-center gap-1.5 bg-ink hover:bg-ink text-paper font-bold text-[11px] px-3 py-1 rounded-lg transition-all shadow active:scale-95"
                     >
                       <CheckCircle2 className="w-4 h-4 text-gold-light" />
                       <span>Confirm & Assign Courier</span>
@@ -877,7 +982,7 @@ export const AdminOrdersTab: React.FC<AdminOrdersTabProps> = ({
                           href={safeLinkHref(order.paymentReceiptUrl)}
                           target="_blank"
                           rel="noopener noreferrer"
-                          className="px-2 py-1 rounded-lg font-semibold border border-line-strong bg-surface text-ink hover:bg-sand"
+                          className="min-h-11 md:min-h-0 inline-flex items-center px-2 py-1 rounded-lg font-semibold border border-line-strong bg-surface text-ink hover:bg-sand"
                         >
                           View receipt
                         </a>
@@ -887,7 +992,7 @@ export const AdminOrdersTab: React.FC<AdminOrdersTabProps> = ({
                           type="button"
                           disabled={busyOrderId === order.id}
                           onClick={() => void bankReceived(order)}
-                          className="px-2 py-1 rounded-lg font-semibold border border-success-line bg-success-soft text-success hover:bg-success-soft disabled:opacity-50"
+                          className="min-h-11 md:min-h-0 inline-flex items-center px-2 py-1 rounded-lg font-semibold border border-success-line bg-success-soft text-success hover:bg-success-soft disabled:opacity-50"
                         >
                           Mark payment received
                         </button>
@@ -901,7 +1006,7 @@ export const AdminOrdersTab: React.FC<AdminOrdersTabProps> = ({
                       onClick={() => void handOver(order)}
                       data-testid="order-handover"
                       title={courierBooked(order) ? 'Collected by the customer or brought by hand: the courier booking is cancelled, then the order is delivered' : 'Collected by the customer or brought by hand: delivered without a courier'}
-                      className="px-2 py-1 rounded-lg font-semibold border border-success-line bg-success-soft text-success hover:opacity-90 disabled:opacity-50"
+                      className="min-h-11 md:min-h-0 inline-flex items-center px-2 py-1 rounded-lg font-semibold border border-success-line bg-success-soft text-success hover:opacity-90 disabled:opacity-50"
                     >
                       Handed over in person
                     </button>
@@ -912,7 +1017,7 @@ export const AdminOrdersTab: React.FC<AdminOrdersTabProps> = ({
                       type="button"
                       disabled={busyOrderId === order.id}
                       onClick={() => patchOrder(order, { status: action.to })}
-                      className="px-2 py-1 rounded-lg font-semibold border border-line bg-ivory text-ink hover:bg-sand disabled:opacity-50"
+                      className="min-h-11 md:min-h-0 inline-flex items-center px-2 py-1 rounded-lg font-semibold border border-line bg-ivory text-ink hover:bg-sand disabled:opacity-50"
                     >
                       {action.label}
                     </button>
@@ -922,7 +1027,7 @@ export const AdminOrdersTab: React.FC<AdminOrdersTabProps> = ({
                       type="button"
                       disabled={busyOrderId === order.id}
                       onClick={() => void refundOrder(order)}
-                      className="px-2 py-1 rounded-lg font-semibold border border-danger-line bg-surface text-danger hover:bg-danger-soft disabled:opacity-50 ml-auto"
+                      className="min-h-11 md:min-h-0 inline-flex items-center px-2 py-1 rounded-lg font-semibold border border-danger-line bg-surface text-danger hover:bg-danger-soft disabled:opacity-50 ml-auto"
                     >
                       {order.status === 'cancelled' ? `Refund AED ${cardLeft(order)} to the card` : `Cancel & refund AED ${cardLeft(order)} to the card`}
                     </button>
@@ -944,7 +1049,7 @@ export const AdminOrdersTab: React.FC<AdminOrdersTabProps> = ({
                               : '')
                         )
                       }
-                      className="px-2 py-1 rounded-lg font-semibold border border-danger-line bg-surface text-danger hover:bg-danger-soft disabled:opacity-50 ml-auto"
+                      className="min-h-11 md:min-h-0 inline-flex items-center px-2 py-1 rounded-lg font-semibold border border-danger-line bg-surface text-danger hover:bg-danger-soft disabled:opacity-50 ml-auto"
                     >
                       Cancel order
                     </button>
@@ -958,6 +1063,21 @@ export const AdminOrdersTab: React.FC<AdminOrdersTabProps> = ({
               </div>
             );
           })
+        )}
+        {/* A page at a time: never hundreds of cards at once; older finished orders come from the server */}
+        {found.error && <p role="alert" className="text-xs text-danger">{found.error}</p>}
+        {filteredOrders.length > 0 && (
+          <div className="flex flex-wrap items-center gap-3 text-xs text-ink-soft" data-testid="orders-paging">
+            <span role="status" data-testid="orders-shown">
+              Showing {shownOrders.length}
+              {knownTotal !== null ? ` of ${knownTotal}` : ''}
+            </span>
+            {(visible < filteredOrders.length || olderFrom) && (
+              <button type="button" onClick={showMore} disabled={found.loading} data-testid="orders-more" className="min-h-11 px-4 rounded-xl border border-line-strong bg-surface text-ink font-semibold hover:bg-sand disabled:opacity-50 focus:outline-none focus-visible:ring-2 focus-visible:ring-gold">
+                {found.loading ? 'Loading…' : visible < filteredOrders.length ? 'Show more orders' : 'Load older orders'}
+              </button>
+            )}
+          </div>
         )}
       </div>
 

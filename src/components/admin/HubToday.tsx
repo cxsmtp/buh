@@ -4,13 +4,13 @@ import React, { useMemo } from 'react';
 import { AlertTriangle, ClipboardCheck, PackageX, Truck, Wallet } from 'lucide-react';
 import type { Order, Product } from '@/types';
 import { formatAed } from '@/lib/money';
-import { moneyHighlights, todayTodos } from '@/lib/hubToday';
+import { moneyHighlights, todayTodos, todosFrom, type HubTotals } from '@/lib/hubToday';
 
 type Go = (tab: 'orders' | 'inventory' | 'money') => void;
 
 /** Today's to-dos: orders to confirm, to dispatch, and stock sold out or running low. */
-export function TodayTodos({ orders, products, lowStockThreshold, onGo }: { orders: Order[]; products: Array<Product & { archived?: boolean }>; lowStockThreshold: number; onGo: Go }) {
-  const t = useMemo(() => todayTodos(orders, products, lowStockThreshold), [orders, products, lowStockThreshold]);
+export function TodayTodos({ orders, totals, products, lowStockThreshold, onGo }: { orders: Order[]; /** The server's count of every order; the hub's own list is used only until it arrives. */ totals?: HubTotals | null; products: Array<Product & { archived?: boolean }>; lowStockThreshold: number; onGo: Go }) {
+  const t = useMemo(() => (totals ? todosFrom(totals, products, lowStockThreshold) : todayTodos(orders, products, lowStockThreshold)), [orders, totals, products, lowStockThreshold]);
   const items: Array<{ key: string; n: number; label: string; tab: 'orders' | 'inventory'; Icon: typeof Truck; tone: string }> = [
     { key: 'confirm', n: t.toConfirm, label: t.toConfirm === 1 ? 'order to confirm' : 'orders to confirm', tab: 'orders', Icon: ClipboardCheck, tone: 'border-warning-line bg-warning-soft text-warning' },
     { key: 'dispatch', n: t.toDispatch, label: 'to dispatch', tab: 'orders', Icon: Truck, tone: 'border-line-strong bg-surface text-ink' },
@@ -44,11 +44,11 @@ export function TodayTodos({ orders, products, lowStockThreshold, onGo }: { orde
 }
 
 /** The laptop's landing page: today's to-dos and the money highlights. */
-export function HubOverview({ orders, products, lowStockThreshold, onGo }: { orders: Order[]; products: Array<Product & { archived?: boolean }>; lowStockThreshold: number; onGo: Go }) {
-  const money = useMemo(() => moneyHighlights(orders), [orders]);
+export function HubOverview({ orders, totals, products, lowStockThreshold, onGo }: { orders: Order[]; totals?: HubTotals | null; products: Array<Product & { archived?: boolean }>; lowStockThreshold: number; onGo: Go }) {
+  const money = useMemo(() => (totals ? totals.highlights : moneyHighlights(orders)), [orders, totals]);
   return (
     <div className="space-y-6 max-w-4xl" data-testid="hub-overview">
-      <TodayTodos orders={orders} products={products} lowStockThreshold={lowStockThreshold} onGo={onGo} />
+      <TodayTodos orders={orders} totals={totals} products={products} lowStockThreshold={lowStockThreshold} onGo={onGo} />
       <section aria-labelledby="money-highlights-title" className="space-y-2">
         <div className="flex items-center gap-2">
           <h2 id="money-highlights-title" className="font-serif font-bold text-lg text-ink flex items-center gap-2">

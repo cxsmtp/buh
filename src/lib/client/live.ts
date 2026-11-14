@@ -14,7 +14,15 @@ type Versions = { catalog?: number; settings?: number; orders?: number; chats?: 
 
 export function useLiveUpdates(
   url: string | null,
-  handlers: { onCatalog?: () => void; onSettings?: () => void; onOrders?: () => void; onChats?: () => void; onNewVersion?: () => void }
+  handlers: {
+    onCatalog?: () => void;
+    onSettings?: () => void;
+    onOrders?: () => void;
+    onChats?: () => void;
+    onNewVersion?: () => void;
+    /** The stream opened (true) or dropped (false): a page may poll slowly only while it is down. */
+    onStatus?: (connected: boolean) => void;
+  }
 ) {
   const ref = useRef(handlers);
   useEffect(() => {
@@ -34,10 +42,12 @@ export function useLiveUpdates(
       source = new EventSource(url);
       source.onopen = () => {
         delay = 5000;
+        ref.current.onStatus?.(true);
       };
       // EventSource gives up for good after an HTTP error (a 502 during a restart, a 429):
       // open a new one, waiting longer each time (up to 5 minutes).
       source.onerror = () => {
+        ref.current.onStatus?.(false);
         if (source.readyState !== EventSource.CLOSED || stopped) return;
         retry = setTimeout(open, delay);
         delay = Math.min(delay * 2, 300_000);
@@ -68,6 +78,7 @@ export function useLiveUpdates(
       stopped = true;
       clearTimeout(retry);
       source.close();
+      ref.current.onStatus?.(false);
     };
   }, [url]);
 }
