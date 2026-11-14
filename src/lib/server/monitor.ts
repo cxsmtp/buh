@@ -149,10 +149,15 @@ export function currentProblems(now = Date.now()): Problem[] {
   return problems;
 }
 
+/** The shop's own name (Settings → Branding), on one line: it goes into the emails' subject and heading. */
+function shopName(): string {
+  return String(getSettings('brand').storeName || '').replace(/[\r\n\t]+/g, ' ').trim().slice(0, 80) || 'Beautiful UAE Home';
+}
+
 async function sendOwner(subject: string, text: string, html?: string): Promise<boolean> {
   if (!emailConfigured()) return false;
   try {
-    await (await transport()).sendMail({ from: sender(), to: ownerEmail(), subject: `[Beautiful UAE Home] ${subject}`, text, ...(html ? { html } : {}) });
+    await (await transport()).sendMail({ from: sender(), to: ownerEmail(), subject: `[${shopName()}] ${subject}`, text, ...(html ? { html } : {}) });
     return true;
   } catch (err) {
     logEvent('warn', 'owner_email_failed', { error: err instanceof Error ? err.message : String(err) });
@@ -385,7 +390,7 @@ export function dailySummary(now = new Date()): { subject: string; text: string;
   ];
 
   const text = [
-    `Beautiful UAE Home: your summary for ${day}`,
+    `${shopName()}: your summary for ${day}`,
     '',
     ...sections.flatMap((sec) => [sec.title.toUpperCase(), ...sec.items.map((i) => `  • ${i.text}`), '']),
     'Every item above is in the Admin Hub too; nothing else needs your attention.',
@@ -417,7 +422,7 @@ function summaryHtml(day: string, sections: SummarySection[]): string {
     )
     .join('\n');
   return `<!doctype html><html><body style="margin:0;background:${P.ivory}"><div style="max-width:560px;margin:0 auto;padding:20px 16px;background:${P.paper}">
-<p style="font:600 18px/1.3 Georgia,serif;color:${P.ink};margin:0">Beautiful UAE Home</p>
+<p style="font:600 18px/1.3 Georgia,serif;color:${P.ink};margin:0">${esc(shopName())}</p>
 <p style="font:13px/1.4 Arial,sans-serif;color:${P["ink-muted"]};margin:4px 0 0">Your summary for ${esc(day)}</p>
 ${blocks}
 <p style="font:12px/1.5 Arial,sans-serif;color:${P["ink-muted"]};margin:24px 0 0">Every item above is in the Admin Hub too; nothing else needs your attention.</p>

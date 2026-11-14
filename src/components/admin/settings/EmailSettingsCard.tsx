@@ -38,10 +38,11 @@ export function EmailSettingsCard({
   const autosave = useAutoSave({ settingsKey: 'email', value: { ...d, smtpPass: '', imapPass: '' }, enabled: Boolean(auto), ...auto });
 
   const save = async () => {
-    autosave.cancel();
+    // With autosave on, the Save button goes through it too: the same check that the settings were not changed elsewhere.
+    if (!auto) autosave.cancel();
     setSaving(true);
     setStatus(null);
-    const problem = await onSave(d);
+    const problem = auto ? await autosave.save(d) : await onSave(d);
     setSaving(false);
     if (!problem) setD((x) => ({ ...x, smtpPass: '', imapPass: '' }));
     setStatus(problem ? { ok: false, text: problem } : { ok: true, text: 'Saved. Use "Send a test email" to check it works.' });

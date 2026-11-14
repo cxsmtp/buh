@@ -11,6 +11,7 @@ import { Sheet } from '@/components/common/Sheet';
 import { measurementRows, sizeFromPreset, standardMeasurements } from '@/lib/measurements';
 import { DEFAULT_WEAVES } from '@/data/catalogDefaults';
 import { blankVariant, defaultTypeFor, productTypeOf } from '@/lib/productType';
+import { MAX_PHOTOS, rebaseDraft, touchedKeys, type Draft } from './draftMerge';
 import { StageInBedroom } from './StageInBedroom';
 import { SetPiecesField, type SetPieceKind } from './SetPiecesField';
 import { WriteFromPhoto } from './WriteFromPhoto';
@@ -37,61 +38,16 @@ import { ProductSeoFields } from '../SnippetPreview';
  * nothing is lost to a phone call; it can be finished on another device. Stock
  * edits are sent with the figures the owner saw, so a sale made meanwhile is never
  * overwritten (the server answers 409 and the current figures are shown).
+ *
+ * The product itself is guarded the same way. A save carries the version of the product the
+ * editor loaded (its updatedAt); if it was saved meanwhile (another device, the Picture studio),
+ * the server refuses, and the owner's own changes are put on top of the current product to check
+ * and save again. A draft remembers the version it was made against and which fields the owner
+ * changed: a draft found against an older version is never applied by itself; the owner chooses
+ * to keep their changes on top of the current product, or to discard the draft.
  */
 
-const MAX_PHOTOS = 8;
 const STEPS = ['Photos', 'Details', 'Sizes', 'Publish'] as const;
-
-interface Draft {
-  step: number;
-  /** Bed linen (bed sizes) or other (plain variants). */
-  productType: ProductType;
-  title: string;
-  sku: string;
-  /** The SKU is the shop's suggestion (it follows the name and category until the owner types one). */
-  skuAuto: boolean;
-  /** Optional words for Google (empty: made by the shop). */
-  seoTitle: string;
-  seoDescription: string;
-  shortDescription: string;
-  description: string;
-  /** The Arabic shop's words (empty: the English shows). */
-  titleAr: string;
-  shortDescriptionAr: string;
-  descriptionAr: string;
-  category: string;
-  material: string;
-  threadCount: string;
-  weave: Product['weave'];
-  price: string;
-  compareAtPrice: string;
-  /** Optional: none means the shop shows no colour choice. */
-  colors: Array<{ name: string; hex: string }>;
-  photos: string[]; // uploaded URLs; first = cover
-  /** The set's sheet has elastic corners (else it is a flat sheet). */
-  fitted: boolean;
-  sizes: BedProfileMeasurement[];
-  stock: Record<string, number>;
-  defaultProfileId: string;
-  active: boolean;
-  isFeatured: boolean;
-  isNewArrival: boolean;
-  /** Stock when editing began: sent as "expected" on save. */
-  seenStock: Record<string, number>;
-  /** What the BUH-02.10 update took off the shop (a standard duvet cover), per size: offered back in one tap. */
-  legacy: NonNullable<Product['legacyMeasurements']>;
-  /** Gift lines by festival id (and "everyday"): the shop shows the themed festival's. */
-  giftLines: Record<string, string>;
-  /** The owner's note for "Style in a bedroom" (kept with the draft). */
-  stagingNotes: string;
-  /** The set's other pieces (the pillow cover, the comforter): the AI pictures copy each from its own photo. */
-  setPhotos: SetPhotos;
-  /** Off by default: a set without a comforter has none in its AI pictures. */
-  hasComforter: boolean;
-  /** The AI's motif and design words: the styling prompt's context. */
-  aiMotif: string;
-  aiDesign: string;
-}
 
 function draftFrom(product: Product | null, catalog: CatalogSettings): Draft {
   if (!product) {
@@ -115,14 +71,16 @@ function draftFrom(product: Product | null, catalog: CatalogSettings): Draft {
       category,
       material: '100% Cotton',
       threadCount: '300',
-      weave: (catalog.weaves ?? DEFAULT_WEAVES).includes('Percale') ? 'Percale' : (catalog.weaves?.[0] ?? 'Percale'),
+      // None until the owner chooses one: the shop shows no weave rather than a guessed one.
+      weave: '',
       price: '',
       compareAtPrice: '',
       colors: [],
       photos: [],
       fitted: false,
       sizes: first ? [first] : [],
-      stock: first ? { [first.id]: 1 } : {},
+      // No pieces until the owner counts them in: a piece that may not exist is never put on sale.
+      stock: first ? { [first.id]: 0 } : {},
       defaultProfileId: first?.id ?? '',
       active: true,
       isFeatured: false,
@@ -159,7 +117,7 @@ function draftFrom(product: Product | null, catalog: CatalogSettings): Draft {
     category: product.category,
     material: product.material,
     threadCount: String(product.threadCount || ''),
-    weave: product.weave,
+    weave: product.weave ?? '',
     price: String(product.price),
     compareAtPrice: product.compareAtPrice ? String(product.compareAtPrice) : '',
     colors: product.colors,
@@ -188,6 +146,25 @@ function setPhotosToSave(d: Pick<Draft, 'setPhotos' | 'hasComforter'>): SetPhoto
   return Object.keys(out).length ? out : null;
 }
 
+/** Plain names for "changed there" in the message after a conflict. */
+const FIELD_NAMES: Partial<Record<keyof Draft, string>> = {
+  title: 'name',
+  price: 'price',
+  compareAtPrice: '“was” price',
+  photos: 'photos',
+  category: 'category',
+  description: 'description',
+  shortDescription: 'short description',
+  sizes: 'sizes',
+  colors: 'colours',
+  active: 'shown or hidden',
+  sku: 'SKU',
+  weave: 'weave',
+  material: 'material',
+  giftLines: 'gift lines',
+  setPhotos: 'set pieces',
+};
+
 /** A saved draft over the starting values (anything missing keeps the starting value). */
 function withSaved(base: Draft, saved: Record<string, unknown>): Draft {
   const out = { ...base } as Record<string, unknown>;
@@ -200,7 +177,7 @@ const label = 'block text-sm font-semibold text-ink mb-1';
 const stepBtn = 'w-12 h-12 rounded-xl border border-line-strong bg-surface flex items-center justify-center disabled:opacity-30';
 
 export function ProductEditor({
-  product,
+  product: opened,
   catalog,
   onClose,
   onSaved,
@@ -214,9 +191,16 @@ export function ProductEditor({
   /** Opens a Settings section (the pictures' setup steps link to Settings → AI pictures). */
   onOpenSettings?: (id: string) => void;
 }) {
+  // The product as the editor has it: the one opened, or (after "changed elsewhere") today's.
+  const [product, setProduct] = useState<Product | null>(opened);
   const draftId = product?.id ?? 'new';
   const titleId = useId();
   const [draft, setDraft] = useState<Draft>(() => draftFrom(product, catalog));
+  /** The starting values the owner's changes are measured against (the product as loaded). */
+  const base = useRef<Draft | null>(null);
+  if (base.current === null) base.current = draftFrom(product, catalog);
+  /** A saved draft made against an older version of the product: the owner decides what happens to it. */
+  const [staleDraft, setStaleDraft] = useState<{ saved: Record<string, unknown>; updatedAt: string } | null>(null);
   const [loaded, setLoaded] = useState(false);
   const [resumedAt, setResumedAt] = useState<string | null>(null);
   const [draftStatus, setDraftStatus] = useState<'idle' | 'saving' | 'saved' | 'error'>('idle');
@@ -231,6 +215,11 @@ export function ProductEditor({
   /** AI pictures among the photos (the product's, and those added here). */
   const styled = useRef(new Set<string>(Object.keys(product?.stagedPhotos ?? {})));
   const lastSaved = useRef('');
+  // The draft autosave: its timer and the request on its way, so a save (or Start over) can wait
+  // for it and nothing lands after the draft was deleted.
+  const draftTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
+  const draftInFlight = useRef<Promise<unknown> | null>(null);
+  const finished = useRef(false);
 
   const set = <K extends keyof Draft>(key: K, value: Draft[K]) => setDraft((d) => ({ ...d, [key]: value }));
   const unusedPresets = useMemo(() => catalog.sizes.filter((s) => !draft.sizes.some((x) => x.id === s.id)), [catalog.sizes, draft.sizes]);
@@ -254,7 +243,18 @@ export function ProductEditor({
     let live = true;
     void getJson<{ draft: { data: Record<string, unknown>; updatedAt: string } | null }>(`/api/admin/products/drafts/${encodeURIComponent(draftId)}`).then(({ ok, data }) => {
       if (!live) return;
-      if (ok && data.draft) {
+      const older = Boolean(ok && data.draft && product && data.draft.data.baseUpdatedAt !== (product.updatedAt ?? ''));
+      if (older && Array.isArray(data.draft!.data.touched) && data.draft!.data.touched.length === 0) {
+        // An older draft in which the owner changed nothing (they only looked): nothing to ask. It
+        // goes, and the product is edited as it is now.
+        lastSaved.current = JSON.stringify(draftFrom(product, catalog));
+        void sendJson('DELETE', `/api/admin/products/drafts/${encodeURIComponent(draftId)}`);
+      } else if (older && data.draft) {
+        // Made against an older version of the product (it was saved since: another device, the
+        // Picture studio): not applied by itself. The owner sees the product as it is and chooses.
+        lastSaved.current = JSON.stringify(draftFrom(product, catalog));
+        setStaleDraft({ saved: data.draft.data, updatedAt: data.draft.updatedAt });
+      } else if (ok && data.draft) {
         const restored = withSaved(draftFrom(product, catalog), data.draft.data);
         lastSaved.current = JSON.stringify(restored);
         setDraft(restored);
@@ -271,26 +271,88 @@ export function ProductEditor({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // 2. Save the draft about a second after each change.
+  // 2. Save the draft about a second after each change, with the version of the product it is
+  //    made against and which fields the owner changed.
   const json = JSON.stringify(draft);
+  const version = product?.updatedAt ?? '';
+  const draftBody = useCallback(
+    (text: string) => {
+      const d = JSON.parse(text) as Draft;
+      return { ...d, baseUpdatedAt: version, touched: touchedKeys(base.current!, d), basePhotos: base.current!.photos };
+    },
+    [version]
+  );
+  const putDraft = useCallback(
+    (text: string) => {
+      const sent = sendJson('PUT', `/api/admin/products/drafts/${encodeURIComponent(draftId)}`, { draft: draftBody(text) });
+      draftInFlight.current = sent;
+      void sent.then(() => {
+        if (draftInFlight.current === sent) draftInFlight.current = null;
+      });
+      return sent;
+    },
+    [draftId, draftBody]
+  );
+  const dirty = useRef({ json, putDraft, loaded: false, stale: false });
   useEffect(() => {
-    if (!loaded || json === lastSaved.current) return;
-    const t = setTimeout(async () => {
+    dirty.current = { json, putDraft, loaded, stale: Boolean(staleDraft) };
+  });
+  useEffect(() => {
+    // Not while the product is being saved (a draft sent now could land after the save deleted it).
+    if (!loaded || saving || staleDraft || finished.current || json === lastSaved.current) return;
+    draftTimer.current = setTimeout(async () => {
+      if (finished.current) return;
       setDraftStatus('saving');
-      const { ok } = await sendJson('PUT', `/api/admin/products/drafts/${encodeURIComponent(draftId)}`, { draft: JSON.parse(json) });
+      const { ok } = await putDraft(json);
       if (ok) lastSaved.current = json;
       setDraftStatus(ok ? 'saved' : 'error');
     }, 1200);
-    return () => clearTimeout(t);
-  }, [json, loaded, draftId]);
+    return () => clearTimeout(draftTimer.current);
+  }, [json, loaded, saving, staleDraft, putDraft]);
+  // Closed within that second: what was typed last is still kept.
+  useEffect(
+    () => () => {
+      const d = dirty.current;
+      if (d.loaded && !d.stale && !finished.current && d.json !== lastSaved.current) void d.putDraft(d.json);
+    },
+    []
+  );
+
+  /** Delete the saved draft, after any autosave still on its way (so it cannot come back). */
+  const deleteDraft = async () => {
+    clearTimeout(draftTimer.current);
+    if (draftInFlight.current) await draftInFlight.current;
+    await sendJson('DELETE', `/api/admin/products/drafts/${encodeURIComponent(draftId)}`);
+  };
 
   const startOver = async () => {
     if (!window.confirm('Throw this draft away and start again?')) return;
-    await sendJson('DELETE', `/api/admin/products/drafts/${encodeURIComponent(draftId)}`);
+    await deleteDraft();
     const fresh = draftFrom(product, catalog);
+    base.current = fresh;
     lastSaved.current = JSON.stringify(fresh);
     setDraft(fresh);
     setResumedAt(null);
+    setDraftStatus('idle');
+  };
+
+  /** The draft from before the product changed: its changes on top of the product as it is now. */
+  const keepStaleDraft = () => {
+    if (!staleDraft) return;
+    const current = draftFrom(product, catalog);
+    const { saved } = staleDraft;
+    // A draft from before drafts remembered their changes: everything in it counts as changed.
+    const touched = Array.isArray(saved.touched) ? (saved.touched as string[]) : Object.keys(saved);
+    const merged = rebaseDraft(current, withSaved(current, saved), touched, Array.isArray(saved.basePhotos) ? (saved.basePhotos as string[]) : undefined);
+    base.current = current;
+    lastSaved.current = ''; // saved again, now against today's product
+    setDraft(merged);
+    setResumedAt(staleDraft.updatedAt);
+    setStaleDraft(null);
+  };
+  const discardStaleDraft = async () => {
+    await deleteDraft();
+    setStaleDraft(null);
     setDraftStatus('idle');
   };
 
@@ -368,15 +430,23 @@ export function ProductEditor({
   const addSize = (id: string) => {
     const preset = catalog.sizes.find((s) => s.id === id);
     if (!preset) return;
-    setDraft((d) => ({ ...d, sizes: [...d.sizes, sizeFromPreset(preset)], stock: { ...d.stock, [id]: d.stock[id] ?? 1 }, defaultProfileId: d.defaultProfileId || id }));
+    setDraft((d) => ({ ...d, sizes: [...d.sizes, sizeFromPreset(preset)], stock: { ...d.stock, [id]: d.stock[id] ?? 0 }, defaultProfileId: d.defaultProfileId || id }));
   };
-  const removeSize = (id: string) =>
+  const removeSize = (id: string) => {
+    // Its pieces go with it (off the books when the product is saved): asked first, by name and number.
+    const size = draft.sizes.find((x) => x.id === id);
+    const qty = Math.max(draft.stock[id] ?? 0, product ? draft.seenStock[id] ?? 0 : 0);
+    if (size && qty > 0) {
+      const name = size.name.trim() || 'this one';
+      if (!window.confirm(`Remove ${name}? It has ${qty} ${qty === 1 ? 'piece' : 'pieces'} in stock: ${qty === 1 ? 'that piece' : `those ${qty} pieces`} will be removed from your stock when you save.`)) return;
+    }
     setDraft((d) => {
       const sizes = d.sizes.filter((s) => s.id !== id);
       const stock = { ...d.stock };
       delete stock[id];
       return { ...d, sizes, stock, defaultProfileId: d.defaultProfileId === id ? sizes[0]?.id ?? '' : d.defaultProfileId };
     });
+  };
   const updateSize = (id: string, patch: Partial<BedProfileMeasurement>) => setDraft((d) => ({ ...d, sizes: d.sizes.map((s) => (s.id === id ? { ...s, ...patch } : s)) }));
   /** "Use standard sizes": the preset's measurements into the fields still empty (the duvet cover only for a duvet product). */
   const applyStandard = (id: string) => {
@@ -405,14 +475,14 @@ export function ProductEditor({
       if (!starting) return { ...d, productType, fitted: productType === 'simple' ? false : d.fitted };
       const king = catalog.sizes.find((x) => x.id === 'king') ?? catalog.sizes[0];
       const first = productType === 'simple' ? blankVariant([]) : king ? sizeFromPreset(king) : null;
-      const qty = d.stock[d.sizes[0].id] ?? 1;
+      const qty = d.stock[d.sizes[0].id] ?? 0;
       return { ...d, productType, fitted: false, sizes: first ? [first] : [], stock: first ? { [first.id]: qty } : {}, defaultProfileId: first?.id ?? '' };
     });
   const addVariant = () =>
     setDraft((d) => {
       if (d.sizes.length >= 12) return d;
       const v = blankVariant(d.sizes.map((x) => x.id), '');
-      return { ...d, sizes: [...d.sizes, v], stock: { ...d.stock, [v.id]: 1 }, defaultProfileId: d.defaultProfileId || v.id };
+      return { ...d, sizes: [...d.sizes, v], stock: { ...d.stock, [v.id]: 0 }, defaultProfileId: d.defaultProfileId || v.id };
     });
   const simple = draft.productType === 'simple';
 
@@ -488,6 +558,8 @@ export function ProductEditor({
       isNewArrival: draft.isNewArrival,
     };
     const seen = draft.seenStock;
+    // The version of the product this was edited from: saved meanwhile elsewhere, the server refuses.
+    if (product?.updatedAt) body.expectedUpdatedAt = product.updatedAt;
     if (product) {
       // Only the sizes whose stock was changed here, with what the owner saw.
       const changed = draft.sizes.filter((s) => (draft.stock[s.id] ?? 0) !== (seen[s.id] ?? 0) || !(s.id in seen));
@@ -503,6 +575,8 @@ export function ProductEditor({
     if (product?.sku && draft.sku.trim().toUpperCase() !== product.sku.toUpperCase()) {
       if (!window.confirm(`Change the SKU from ${product.sku} to ${draft.sku.trim() || 'a new one made by the shop'}? It may already be on labels or marketplace listings.`)) return;
     }
+    // No draft autosave from here on: one landing after the save would leave a stale draft behind.
+    clearTimeout(draftTimer.current);
     setSaving(true);
     const res = product
       ? await sendJson<{ product?: Product; message?: string }>('PATCH', `/api/admin/products/${encodeURIComponent(product.id)}`, { product: body })
@@ -513,6 +587,25 @@ export function ProductEditor({
       const suggestion = (res.data as { suggestion?: string }).suggestion;
       setDraft((d) => ({ ...d, step: 1, ...(suggestion ? { sku: suggestion, skuAuto: false } : {}) }));
       return setError(`${res.data.message || 'Another product has this SKU.'}${suggestion ? ' The free one is filled in: save again to use it.' : ''}`);
+    }
+    if (res.status === 409 && product && (res.data as { code?: string }).code === 'product_changed') {
+      // The product was saved somewhere else meanwhile (another device, the Picture studio): nothing
+      // was overwritten. The owner's own changes go on top of today's product, to check and save again.
+      const fresh = await getJson<{ products: Product[] }>('/api/admin/products');
+      const now = fresh.ok ? fresh.data.products.find((x) => x.id === product.id) : undefined;
+      if (!now) return setError(`${res.data.message || 'This product was changed somewhere else.'} Close the editor and open it again to see it as it is now (your draft is kept).`);
+      const before = base.current!;
+      const current = draftFrom(now, catalog);
+      const mine = touchedKeys(before, draft);
+      const there = (Object.keys(FIELD_NAMES) as Array<keyof Draft>).filter((k) => JSON.stringify(current[k]) !== JSON.stringify(before[k])).map((k) => FIELD_NAMES[k]);
+      for (const u of Object.keys(now.stagedPhotos ?? {})) styled.current.add(u);
+      base.current = current;
+      setProduct(now);
+      lastSaved.current = ''; // the draft is saved again, now against today's product
+      setDraft({ ...rebaseDraft(current, draft, mine, before.photos), step: STEPS.length - 1 });
+      return setError(
+        `This product was changed somewhere else while you were editing it${there.length ? ` (changed there: ${there.join(', ')})` : ''}. Nothing was overwritten: your own changes are now on top of the product as it is today. Check them, then save again.`
+      );
     }
     if (res.status === 409 && product) {
       // A sale (or another phone) changed the stock meanwhile: show today's figures and let them save again.
@@ -529,8 +622,10 @@ export function ProductEditor({
       return setError(`${res.data.message || 'Stock changed meanwhile.'} The current figures are shown; check them and save again.`);
     }
     if (!res.ok || !res.data.product) return setError(res.data.message || 'Could not save the product.');
-    lastSaved.current = json; // nothing left to autosave
-    await sendJson('DELETE', `/api/admin/products/drafts/${encodeURIComponent(draftId)}`);
+    // Saved: nothing left to autosave, and the draft goes (after any autosave still on its way).
+    finished.current = true;
+    lastSaved.current = json;
+    await deleteDraft();
     onSaved(res.data.product);
   };
 
@@ -559,6 +654,7 @@ export function ProductEditor({
               <button
                 type="button"
                 onClick={() => go(i)}
+                disabled={Boolean(staleDraft)}
                 aria-current={i === step ? 'step' : undefined}
                 className={`w-full min-h-11 px-1 text-[11px] sm:text-xs font-semibold border-b-2 flex items-center justify-center gap-1 ${i === step ? 'border-ink text-ink' : 'border-transparent text-ink-soft'}`}
               >
@@ -572,7 +668,37 @@ export function ProductEditor({
         </ol>
       </nav>
 
-      <div className="flex-1 overflow-y-auto px-4 py-4 space-y-4 text-sm">
+      {staleDraft && (
+        <div className="flex-1 overflow-y-auto px-4 py-4 text-sm">
+          <div className="rounded-2xl border border-warning-line bg-warning-soft px-4 py-3 space-y-3 text-ink" role="alertdialog" aria-labelledby="pe-stale-title" data-testid="stale-draft">
+            <h3 id="pe-stale-title" className="font-bold">
+              {staleDraft.saved.baseUpdatedAt === undefined ? 'You have an older draft of this product' : 'This product was changed after you started your draft'}
+            </h3>
+            <p>
+              You have a draft from {new Date(staleDraft.updatedAt).toLocaleString()}.{' '}
+              {staleDraft.saved.baseUpdatedAt === undefined
+                ? 'It was made before drafts kept track of the product they started from, so the product may have changed since (on another phone or computer, or by the Picture studio).'
+                : 'Since then the product itself was saved (on another phone or computer, or by the Picture studio), so the draft is older than the product.'}{' '}
+              It has not been applied.
+            </p>
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+              <button type="button" onClick={keepStaleDraft} className="min-h-12 px-3 rounded-xl bg-ink text-paper font-bold">
+                Keep my draft&apos;s changes
+              </button>
+              <button type="button" onClick={() => void discardStaleDraft()} className="min-h-12 px-3 rounded-xl border border-line-strong bg-surface text-ink font-bold">
+                Discard the draft
+              </button>
+            </div>
+            <p className="text-xs text-ink-soft">
+              {staleDraft.saved.touched === undefined
+                ? 'Keep: everything in the draft is put over the product as it is now (check the price, photos and sizes before you save).'
+                : 'Keep: what you changed in the draft is put on top of the product as it is now; everything else stays as it is today.'}{' '}
+              Nothing is saved until you press Save. Discard: the draft is deleted and you edit the product as it is now.
+            </p>
+          </div>
+        </div>
+      )}
+      <div className={`flex-1 overflow-y-auto px-4 py-4 space-y-4 text-sm ${staleDraft ? 'hidden' : ''}`}>
         {resumedAt && (
           <div className="rounded-xl border border-line-strong bg-surface px-3 py-2 text-xs text-ink flex flex-wrap items-center gap-2">
             <span>Continuing your draft from {new Date(resumedAt).toLocaleString()}.</span>
@@ -811,11 +937,21 @@ export function ProductEditor({
                     Weave
                   </label>
                   <select id="pe-weave" className={field} value={draft.weave} onChange={(e) => set('weave', e.target.value as Product['weave'])}>
+                    <option value="">No weave (none shown)</option>
                     {(catalog.weaves ?? DEFAULT_WEAVES).map((w) => (
                       <option key={w}>{w}</option>
                     ))}
-                    {!(catalog.weaves ?? DEFAULT_WEAVES).includes(draft.weave) && <option value={draft.weave}>{draft.weave} (removed)</option>}
+                    {draft.weave && !(catalog.weaves ?? DEFAULT_WEAVES).includes(draft.weave) && <option value={draft.weave}>{draft.weave} (removed)</option>}
                   </select>
+                  {/* The AI's guess from the photo (quick add): the owner's to accept, never applied by itself. */}
+                  {!draft.weave && product?.weaveSuggestion && (catalog.weaves ?? DEFAULT_WEAVES).includes(product.weaveSuggestion) && (
+                    <p className="mt-1 text-xs text-ink-soft flex flex-wrap items-center gap-2" data-testid="weave-suggestion">
+                      <span>From the photo, the AI thinks this may be {product.weaveSuggestion}. Use it only if that is right.</span>
+                      <button type="button" onClick={() => set('weave', product.weaveSuggestion!)} className="min-h-11 px-3 rounded-xl border border-line-strong bg-surface text-ink font-semibold">
+                        Use {product.weaveSuggestion}
+                      </button>
+                    </p>
+                  )}
                 </div>
                 </>
                 )}
@@ -1090,6 +1226,11 @@ export function ProductEditor({
                 <div className="mt-1 text-xs text-ink">{draft.sizes.map((s) => `${shortSizeName(s)} ${draft.stock[s.id] ?? 0}`).join(' · ')}</div>
               </div>
             </div>
+            {totalStock === 0 && (
+              <p className="rounded-xl border border-warning-line bg-warning-soft px-3 py-2 text-xs text-ink" data-testid="no-stock-note">
+                <strong>No pieces in stock yet.</strong> The shop will show it as sold out until you count them in: go back to {simple ? 'Variants' : 'Sizes'} and set how many you have, or use “Received stock” in Inventory later.
+              </p>
+            )}
             <div className="rounded-2xl border border-line bg-surface divide-y divide-line">
               {(
                 [
@@ -1129,7 +1270,7 @@ export function ProductEditor({
         )}
         <div className="flex gap-2">
           {step > 0 ? (
-            <button type="button" onClick={() => go(step - 1)} className="min-h-12 px-4 rounded-xl border border-line-strong bg-surface text-sm font-semibold flex items-center gap-1">
+            <button type="button" onClick={() => go(step - 1)} disabled={Boolean(staleDraft)} className="min-h-12 px-4 rounded-xl border border-line-strong bg-surface text-sm font-semibold flex items-center gap-1">
               <ArrowLeft className="w-4 h-4" aria-hidden="true" /> Back
             </button>
           ) : (
@@ -1138,11 +1279,11 @@ export function ProductEditor({
             </button>
           )}
           {step < STEPS.length - 1 ? (
-            <button type="button" onClick={() => go(step + 1)} disabled={step === 0 && uploading > 0} className="flex-1 min-h-12 rounded-xl bg-ink text-paper text-sm font-bold flex items-center justify-center gap-1 disabled:opacity-50">
+            <button type="button" onClick={() => go(step + 1)} disabled={Boolean(staleDraft) || (step === 0 && uploading > 0)} className="flex-1 min-h-12 rounded-xl bg-ink text-paper text-sm font-bold flex items-center justify-center gap-1 disabled:opacity-50">
               Next: {STEPS[step + 1]} <ArrowRight className="w-4 h-4" aria-hidden="true" />
             </button>
           ) : (
-            <button type="button" onClick={() => void save()} disabled={saving || uploading > 0} className="flex-1 min-h-12 rounded-xl bg-ink text-paper text-sm font-bold disabled:opacity-50 flex items-center justify-center gap-2">
+            <button type="button" onClick={() => void save()} disabled={saving || uploading > 0 || Boolean(staleDraft)} className="flex-1 min-h-12 rounded-xl bg-ink text-paper text-sm font-bold disabled:opacity-50 flex items-center justify-center gap-2">
               {saving && <Loader2 className="w-4 h-4 animate-spin" aria-hidden="true" />}
               {product ? 'Save changes' : draft.active ? 'Publish' : 'Save hidden'}
             </button>

@@ -68,8 +68,10 @@ export interface Product {
   compareAtPrice?: number;
   material: string; // e.g. "100% Giza Egyptian Cotton"
   threadCount: number; // e.g. 600 TC
-  /** One of the weaves in Settings → Catalogue (built-in: Sateen, Percale, Linen, Jacquard). */
+  /** One of the weaves in Settings → Catalogue (built-in: Sateen, Percale, Linen, Jacquard); empty: none given, none shown. */
   weave: string;
+  /** Admin only: the weave the AI guessed from the photo (quick add). Offered in the editor, never shown to shoppers. */
+  weaveSuggestion?: string;
   colors: { name: string; hex: string }[];
   featuredImage: string;
   galleryImages: string[];
@@ -101,6 +103,8 @@ export interface Product {
   stockBySize: Record<string, number>;
   /** Shown in the shop (false = hidden by the owner). Present on admin reads. */
   active?: boolean;
+  /** Admin reads only: when the product itself was last saved (stock changes don't move it). Sent back by the editor with a save. */
+  updatedAt?: string;
   isFeatured: boolean;
   isNewArrival?: boolean;
   rating: number;

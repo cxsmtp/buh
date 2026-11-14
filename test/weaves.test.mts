@@ -83,8 +83,8 @@ test('products are checked against the list; a product may keep its own weave on
   await settings.updateSettings('catalog', { weaves: [...settings.getSettings('catalog').weaves, 'Chambray'] });
   const p = newProduct({ weave: 'Chambray', title: 'Chambray Set' });
   assert.equal(p.weave, 'Chambray');
-  // No weave given: the first in the list.
-  assert.equal(newProduct({ weave: '' }).weave, settings.getSettings('catalog').weaves[0]);
+  // No weave given: none (the shop never makes one up; it used to take the first in the list).
+  assert.equal(newProduct({ weave: '' }).weave, '');
   // Archived, it no longer blocks removing Chambray; edited later, it keeps it.
   products.setArchived(p.id, true);
   await settings.updateSettings('catalog', { weaves: settings.getSettings('catalog').weaves.filter((w) => w !== 'Chambray') });

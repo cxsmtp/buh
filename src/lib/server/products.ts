@@ -41,6 +41,7 @@ interface Row {
   data: string;
   active: number;
   archived: number;
+  updated_at: string | null;
 }
 
 let cache: StoredProduct[] | null = null;
@@ -196,7 +197,7 @@ function fromRow(r: Row, stock: Record<string, number>): StoredProduct {
   const stockBySize: Record<string, number> = {};
   for (const pr of p.profiles) stockBySize[pr.id] = stock[pr.id] ?? 0;
   const stockCount = Object.values(stockBySize).reduce((a, b) => a + b, 0);
-  return { ...p, stockBySize, stockCount, active: r.active === 1, ...(r.archived ? { archived: true } : {}) };
+  return { ...p, stockBySize, stockCount, active: r.active === 1, ...(r.archived ? { archived: true } : {}), ...(r.updated_at ? { updatedAt: r.updated_at } : {}) };
 }
 
 export function listProducts({ includeHidden = false, includeArchived = false } = {}): StoredProduct[] {
@@ -210,7 +211,7 @@ export function listProducts({ includeHidden = false, includeArchived = false } 
     seedIfEmpty();
     carryOverMeasurementsOnce();
     const stock = stockMap();
-    cache = (getDb().prepare('SELECT id, data, active, archived FROM products ORDER BY position, rowid').all() as Row[]).map((r) => fromRow(r, stock.get(r.id) ?? {}));
+    cache = (getDb().prepare('SELECT id, data, active, archived, updated_at FROM products ORDER BY position, rowid').all() as Row[]).map((r) => fromRow(r, stock.get(r.id) ?? {}));
   }
   return cache.filter((p) => (includeArchived || !p.archived) && (includeHidden || p.active));
 }
@@ -283,6 +284,11 @@ export function createProduct(input: unknown, actor = 'admin'): StoredProduct {
  * Change a product. Stock moves with every sale, so it is only written for the
  * sizes sent, and, with expectedStockBySize (what the admin saw), only if
  * nobody bought one meanwhile: otherwise 409 and nothing is saved.
+ *
+ * With expectedUpdatedAt (the product's updatedAt as the editor loaded it), the save is refused
+ * (409, code product_changed) when the product itself was saved meanwhile: on another device, by
+ * the Picture studio, by the AI. A sale or a stock count is not such a change (stock is kept apart
+ * and has its own check above).
  */
 export function updateProduct(id: string, input: unknown, actor = 'admin'): StoredProduct {
   const existing = getProduct(id);
@@ -291,6 +297,10 @@ export function updateProduct(id: string, input: unknown, actor = 'admin'): Stor
   const expectedBySize = expectedStockFromInput(changes, existing);
   delete changes.expectedStock;
   delete changes.expectedStockBySize;
+  const expectedUpdatedAt = changes.expectedUpdatedAt;
+  delete changes.expectedUpdatedAt;
+  delete changes.updatedAt;
+  if (expectedUpdatedAt !== undefined && expectedUpdatedAt !== null && typeof expectedUpdatedAt !== 'string') throw new HttpError(400, 'The product version must be text.');
   const product = validateProduct({ ...existing, ...changes, stockBySize: undefined });
   const stock = stockFromInput(changes, product);
   const { stockCount, stockBySize, active, ...rest } = { ...product, id: existing.id, createdAt: existing.createdAt };
@@ -299,6 +309,12 @@ export function updateProduct(id: string, input: unknown, actor = 'admin'): Stor
   const db = getDb();
   let movedNow: StockMove | null = null;
   inTransaction(() => {
+    if (typeof expectedUpdatedAt === 'string') {
+      const now = (db.prepare('SELECT updated_at FROM products WHERE id = ?').get(id) as { updated_at: string | null } | undefined)?.updated_at ?? '';
+      if (now !== expectedUpdatedAt) {
+        throw new HttpError(409, 'This product was changed somewhere else while you were editing it (on another phone or computer, or by the Picture studio). Nothing was overwritten.', {}, { code: 'product_changed', updatedAt: now });
+      }
+    }
     // A product saved without an SKU gets one now (older products, on their next save).
     settleSku(rest as Product, id, getProductRaw(id));
     product.sku = rest.sku;
@@ -405,11 +421,13 @@ export function duplicateProduct(id: string, key: string, actor = 'admin'): { pr
   const original = getProduct(id);
   if (!original) throw new HttpError(404, 'Product not found.');
   const copyId = `prod-${crypto.randomBytes(6).toString('hex')}`;
-  const { stockCount, stockBySize, active, archived, ...rest } = original;
+  const { stockCount, stockBySize, active, archived, updatedAt, weaveSuggestion, ...rest } = original;
   void stockCount;
   void stockBySize;
   void active;
   void archived;
+  void updatedAt;
+  void weaveSuggestion;
   const title = `${original.title} (copy)`.slice(0, 160);
   const data = { ...rest, id: copyId, title, sku: undefined, createdAt: new Date().toISOString(), reviewsCount: 0 };
   const db = getDb();
@@ -479,6 +497,26 @@ export function reorderProducts(ids: unknown): void {
   if ((ids as string[]).some((x) => !known.has(x))) throw new HttpError(400, 'Unknown product in the list.');
   const update = getDb().prepare('UPDATE products SET position = ? WHERE id = ?');
   inTransaction(() => (ids as string[]).forEach((pid, i) => update.run(i, pid)));
+  invalidateProducts();
+}
+
+/**
+ * Move up / down in the hub: the two products change places in the shop's order (whatever is
+ * between them stays where it is). The whole order is rewritten 0…n, so equal positions left by
+ * older versions are settled too.
+ */
+export function swapProducts(a: unknown, b: unknown): void {
+  if (typeof a !== 'string' || typeof b !== 'string' || a === b) throw new HttpError(400, 'Give the two products to swap.');
+  const db = getDb();
+  inTransaction(() => {
+    const ids = (db.prepare('SELECT id FROM products ORDER BY position, rowid').all() as Array<{ id: string }>).map((r) => r.id);
+    const i = ids.indexOf(a);
+    const j = ids.indexOf(b);
+    if (i < 0 || j < 0) throw new HttpError(400, 'Unknown product in the list.');
+    [ids[i], ids[j]] = [ids[j], ids[i]];
+    const update = db.prepare('UPDATE products SET position = ? WHERE id = ? AND position IS NOT ?');
+    ids.forEach((pid, n) => update.run(n, pid, n));
+  });
   invalidateProducts();
 }
 
@@ -629,9 +667,14 @@ export function validateProduct(input: unknown): StoredProduct {
   // Checked (and refused when another product has it); empty: the shop makes one when it saves.
   const sku = checkTypedSku(text(p.sku, 'SKU', 60), { productId: typeof p.id === 'string' ? p.id : undefined, current: existing?.sku, title, category });
   // The weaves in Settings → Catalogue; a product may keep one the list no longer has (as with categories).
+  // No weave is fine (the shop's spec line leaves it out): one is never made up here.
   const weaves = getSettings('catalog').weaves;
-  const weave = text(p.weave, 'Weave', 30) || weaves[0] || 'Sateen';
-  if (weave !== existing?.weave && !weaves.includes(weave)) throw new HttpError(400, 'Unknown weave: add it in Settings → Catalogue → Weaves first.');
+  const weave = text(p.weave, 'Weave', 30);
+  if (weave && weave !== existing?.weave && !weaves.includes(weave)) throw new HttpError(400, 'Unknown weave: add it in Settings → Catalogue → Weaves first.');
+  // The AI's guess from the photo (quick add): only ever offered to the owner in the editor, and
+  // only while the product has no weave. Kept as saved when the browser sends none.
+  const guess = p.weaveSuggestion === undefined ? existing?.weaveSuggestion : text(p.weaveSuggestion, 'Suggested weave', 30);
+  const weaveSuggestion = !weave && guess && weaves.includes(guess) ? guess : undefined;
   const price = num(p.price, 'Price', 1, 100_000);
   const compareAt = p.compareAtPrice === undefined || p.compareAtPrice === null || p.compareAtPrice === '' ? undefined : num(p.compareAtPrice, 'Compare-at price', 0, 100_000);
 
@@ -690,6 +733,7 @@ export function validateProduct(input: unknown): StoredProduct {
     material: text(p.material, 'Material', 120),
     threadCount: num(p.threadCount ?? 0, 'Thread count', 0, 3000, { integer: true }),
     weave,
+    ...(weaveSuggestion ? { weaveSuggestion } : {}),
     // Colours are optional: none means the shop shows no colour choice.
     colors,
     featuredImage,
@@ -704,7 +748,8 @@ export function validateProduct(input: unknown): StoredProduct {
     stockBySize: {},
     isFeatured: p.isFeatured === true,
     isNewArrival: p.isNewArrival === true,
-    rating: num(p.rating ?? 5, 'Rating', 0, 5),
+    // The shop collects no reviews and shows no rating: a new product has none (0, never an invented 5).
+    rating: num(p.rating ?? 0, 'Rating', 0, 5),
     reviewsCount: num(p.reviewsCount ?? 0, 'Reviews', 0, 1_000_000, { integer: true }),
     fitted: !simple && p.fitted === true,
     measurementsReview: !simple && p.measurementsReview === true ? true : undefined,

@@ -95,6 +95,9 @@ export function cleanDraft(input: unknown): Record<string, unknown> {
     compareAtPrice: s(d.compareAtPrice, 12),
     shortDescription: s(d.shortDescription, 300),
     description: s(d.description, 4000),
+    titleAr: s(d.titleAr, 160),
+    shortDescriptionAr: s(d.shortDescriptionAr, 300),
+    descriptionAr: s(d.descriptionAr, 4000),
     material: s(d.material, 120),
     threadCount: s(d.threadCount, 6),
     weave: s(d.weave, 30),
@@ -125,6 +128,12 @@ export function cleanDraft(input: unknown): Record<string, unknown> {
     seenStock: d.seenStock && typeof d.seenStock === 'object' && !Array.isArray(d.seenStock)
       ? Object.fromEntries(Object.entries(d.seenStock as Record<string, unknown>).slice(0, 12).filter(([, v]) => n(v, 0, 100_000) !== undefined))
       : undefined,
+    // What the draft was made against: the product's version (its updatedAt) and photos when editing
+    // began, and which fields the owner changed. If the product is saved meanwhile (another device,
+    // the Picture studio), the editor does not put the whole draft over it: only these changes.
+    baseUpdatedAt: s(d.baseUpdatedAt, 40),
+    touched: Array.isArray(d.touched) ? d.touched.filter((k): k is string => typeof k === 'string' && /^[A-Za-z]{1,30}$/.test(k)).slice(0, 60) : undefined,
+    basePhotos: Array.isArray(d.basePhotos) ? d.basePhotos.slice(0, 8).map(photo).filter((x): x is string => x !== null) : undefined,
   };
   for (const k of Object.keys(out)) if (out[k] === undefined) delete out[k];
   if (JSON.stringify(out).length > MAX_BYTES) throw new HttpError(413, 'The draft is too large.');

@@ -37,10 +37,11 @@ export function AssistantSettingsCard({ value, sizes, onSave, auto }: { value: A
   const answer = useMemo(() => (trial.trim() ? reply(trial, d, sizes) : null), [trial, d, sizes]);
 
   const save = async () => {
-    autosave.cancel();
+    // With autosave on, the Save button goes through it too: the same check that the settings were not changed elsewhere.
+    if (!auto) autosave.cancel();
     setSaving(true);
     setStatus(null);
-    const problem = await onSave(d);
+    const problem = auto ? await autosave.save(d) : await onSave(d);
     setSaving(false);
     setStatus(problem ? { ok: false, text: problem } : { ok: true, text: 'Saved. The chat uses it straight away.' });
   };

@@ -191,13 +191,22 @@ export const AdminInventoryTab: React.FC<AdminInventoryTabProps> = ({ products, 
       setNotice({ text: `Copy this link: ${url}` });
     }
   };
+  /**
+   * Move up / down: swaps places with the nearest product in the list as it is shown now (the
+   * filter, the category, the search), so the product visibly moves; products that are not shown
+   * (removed, filtered out) stay where they are.
+   */
   const move = (p: AdminProduct, dir: -1 | 1) => {
-    const ids = products.map((x) => x.id);
-    const i = ids.indexOf(p.id);
-    const j = i + dir;
-    if (j < 0 || j >= ids.length) return;
-    [ids[i], ids[j]] = [ids[j], ids[i]];
-    return run(p.id, () => sendJson('PUT', '/api/admin/products/order', { ids }));
+    const other = shown[shown.findIndex((x) => x.id === p.id) + dir];
+    if (!other || !shown.some((x) => x.id === p.id)) return;
+    return run(p.id, () => sendJson('PUT', '/api/admin/products/order', { swap: [p.id, other.id] }));
+  };
+  /** Sold out: every size to 0, asked first (it takes the product off sale in one tap). */
+  const markSoldOut = (p: AdminProduct) => {
+    const have = p.profiles.map((s) => ({ name: shortSizeName(s), qty: p.stockBySize[s.id] ?? 0 })).filter((x) => x.qty > 0);
+    const pieces = have.reduce((n, x) => n + x.qty, 0);
+    if (!window.confirm(`Mark “${p.title}” as sold out? This sets every size to 0 (${have.map((x) => `${x.name} ${x.qty}`).join(', ')}: ${pieces} ${pieces === 1 ? 'piece' : 'pieces'} now). Customers can no longer order it.`)) return;
+    stock.soldOut(p.id, p.profiles.map((s) => s.id));
   };
 
   const categoryLabel = (id: string) => catalog.categories.find((c) => c.id === id)?.label ?? id;
@@ -419,7 +428,7 @@ export const AdminInventoryTab: React.FC<AdminInventoryTabProps> = ({ products, 
                         </button>
                         <button
                           type="button"
-                          onClick={() => stock.soldOut(p.id, p.profiles.map((s) => s.id))}
+                          onClick={() => markSoldOut(p)}
                           disabled={isSoldOut(p)}
                           className={actionBtn}
                           aria-label={`Sold out: set every size of ${p.title} to 0`}
@@ -435,10 +444,10 @@ export const AdminInventoryTab: React.FC<AdminInventoryTabProps> = ({ products, 
                         <button type="button" onClick={() => setHistory(p)} className={actionBtn} aria-label={`Stock history of ${p.title}`}>
                           <History className="w-4 h-4" aria-hidden="true" /> History
                         </button>
-                        <button type="button" onClick={() => void move(p, -1)} disabled={busy === p.id} className={actionIcon} aria-label={`Move ${p.title} up`}>
+                        <button type="button" onClick={() => void move(p, -1)} disabled={busy === p.id || shown[0]?.id === p.id} className={actionIcon} aria-label={`Move ${p.title} up`}>
                           <ArrowUp className="w-4 h-4" aria-hidden="true" />
                         </button>
-                        <button type="button" onClick={() => void move(p, 1)} disabled={busy === p.id} className={actionIcon} aria-label={`Move ${p.title} down`}>
+                        <button type="button" onClick={() => void move(p, 1)} disabled={busy === p.id || shown[shown.length - 1]?.id === p.id} className={actionIcon} aria-label={`Move ${p.title} down`}>
                           <ArrowDown className="w-4 h-4" aria-hidden="true" />
                         </button>
                         <button type="button" onClick={() => void archive(p, true)} disabled={busy === p.id} className={actionDanger}>

@@ -26,10 +26,11 @@ export function DeliverySettingsCard({ value, onSave, auto }: { value: DeliveryS
   const toggle = (k: 'emirates' | 'sameDayEmirates', e: Emirate) => set(k, d[k].includes(e) ? d[k].filter((x) => x !== e) : [...d[k], e]);
 
   const save = async () => {
-    autosave.cancel();
+    // With autosave on, the Save button goes through it too: the same check that the settings were not changed elsewhere.
+    if (!auto) autosave.cancel();
     setSaving(true);
     setStatus(null);
-    const problem = await onSave({ ...d, notServed: notServed.split(/[\n,]/).map((s) => s.trim()).filter(Boolean) });
+    const problem = auto ? await autosave.save({ ...d, notServed: notServed.split(/[\n,]/).map((s) => s.trim()).filter(Boolean) }) : await onSave({ ...d, notServed: notServed.split(/[\n,]/).map((s) => s.trim()).filter(Boolean) });
     setSaving(false);
     setStatus(problem ? { ok: false, text: problem } : { ok: true, text: 'Saved. Checkout shows it straight away.' });
   };

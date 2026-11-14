@@ -1,6 +1,7 @@
 'use client';
 
 import React, { useState } from 'react';
+import { SettingsNotices } from './useAutoSave';
 
 /**
  * The settings console: one place for every option, grouped into sections
@@ -43,6 +44,9 @@ export function SettingsConsole({ sections, openId }: { sections: SettingsSectio
   };
 
   return (
+    <>
+    {/* A save refused after its section was left, or settings changed on another device. */}
+    <SettingsNotices />
     <div className="grid grid-cols-1 md:grid-cols-[210px_1fr] gap-3">
       <nav aria-label="Settings sections" className="min-w-0 flex md:flex-col gap-1.5 overflow-x-auto no-scrollbar md:overflow-visible -mx-1 px-1 md:mx-0 md:px-0">
         {sections.map((s) => (
@@ -68,5 +72,6 @@ export function SettingsConsole({ sections, openId }: { sections: SettingsSectio
         </section>
       )}
     </div>
+    </>
   );
 }

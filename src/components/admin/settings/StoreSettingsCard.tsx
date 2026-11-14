@@ -23,10 +23,11 @@ export function StoreSettingsCard({ value, onSave, auto }: { value: StoreSetting
   const set = <K extends keyof StoreSettings>(k: K, v: StoreSettings[K]) => setD((x) => ({ ...x, [k]: v }));
 
   const save = async () => {
-    autosave.cancel();
+    // With autosave on, the Save button goes through it too: the same check that the settings were not changed elsewhere.
+    if (!auto) autosave.cancel();
     setSaving(true);
     setStatus(null);
-    const problem = await onSave(d);
+    const problem = auto ? await autosave.save(d) : await onSave(d);
     setSaving(false);
     setStatus(problem ? { ok: false, text: problem } : { ok: true, text: 'Saved. Customers see it straight away.' });
   };

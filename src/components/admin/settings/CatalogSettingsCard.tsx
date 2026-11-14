@@ -1,9 +1,10 @@
 'use client';
 
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { ArrowDown, ArrowUp, Download, Loader2, Plus, Trash2 } from 'lucide-react';
 import { useAutoSave, type AutoSaveHooks } from './useAutoSave';
 import type { BedProfileMeasurement, CatalogSettings } from '@/types';
+import { getJson } from '@/lib/apiClient';
 import { DEFAULT_WEAVES } from '@/data/catalogDefaults';
 import { WeavesEditor } from './WeavesEditor';
 import { SkuSettings } from './SkuSettings';
@@ -28,6 +29,37 @@ export function CatalogSettingsCard({ value, onSave, auto }: { value: CatalogSet
   const [saving, setSaving] = useState(false);
   const [status, setStatus] = useState<{ ok: boolean; text: string } | null>(null);
 
+  // Which products (not removed) are in each category: one that is still used can't be deleted.
+  const [inCategory, setInCategory] = useState<Record<string, string[]> | null>(null);
+  const [categoryNote, setCategoryNote] = useState('');
+  useEffect(() => {
+    let live = true;
+    void getJson<{ products?: Array<{ title: string; category: string; archived?: boolean }> }>('/api/admin/products').then(({ ok, data }) => {
+      if (!live || !ok || !data.products) return;
+      const map: Record<string, string[]> = {};
+      for (const p of data.products) if (!p.archived) (map[p.category] ??= []).push(p.title);
+      setInCategory(map);
+    });
+    return () => {
+      live = false;
+    };
+  }, []);
+  const deleteCategory = (i: number) => {
+    const c = draft.categories[i];
+    if (!c) return;
+    const name = c.label || 'this category';
+    const using = inCategory?.[c.id] ?? [];
+    if (using.length) {
+      // The same rule as the server's (and as weaves): nothing is deleted.
+      return setCategoryNote(
+        `“${name}” is still the category of ${using.length} ${using.length === 1 ? 'product' : 'products'} (${using.slice(0, 5).join(', ')}${using.length > 5 ? ', …' : ''}). Move ${using.length === 1 ? 'it' : 'them'} to another category first (Inventory → Edit), then delete it here.`
+      );
+    }
+    if (!window.confirm(`Delete the category “${name}”? No product uses it.`)) return;
+    setCategoryNote('');
+    setDraft((d) => ({ ...d, categories: d.categories.filter((x) => x !== c) }));
+  };
+
   const setSize = (i: number, patch: Partial<BedProfileMeasurement>) =>
     setDraft((d) => ({ ...d, sizes: d.sizes.map((s, j) => (j === i ? { ...s, ...patch } : s)) }));
   const moveSize = (i: number, to: number) =>
@@ -50,10 +82,11 @@ export function CatalogSettingsCard({ value, onSave, auto }: { value: CatalogSet
   };
 
   const save = async () => {
-    autosave.cancel();
+    // With autosave on, the Save button goes through it too: the same check that the settings were not changed elsewhere.
+    if (!auto) autosave.cancel();
     setSaving(true);
     setStatus(null);
-    const problem = await onSave(draft);
+    const problem = auto ? await autosave.save(draft) : await onSave(draft);
     setSaving(false);
     setStatus(problem ? { ok: false, text: problem } : { ok: true, text: 'Saved. New products use these presets.' });
   };
@@ -162,13 +195,18 @@ export function CatalogSettingsCard({ value, onSave, auto }: { value: CatalogSet
               <option value="bedding">Bed linen</option>
               <option value="simple">Other</option>
             </select>
-            <button type="button" onClick={() => setDraft((d) => ({ ...d, categories: d.categories.filter((_, j) => j !== i) }))} disabled={draft.categories.length === 1} className="p-1.5 text-ink-muted disabled:opacity-30" aria-label={`Delete category ${c.label}`}><Trash2 className="w-3.5 h-3.5" /></button>
+            <button type="button" onClick={() => deleteCategory(i)} disabled={draft.categories.length === 1} className="shrink-0 min-h-11 min-w-11 flex items-center justify-center rounded-lg text-ink-muted hover:text-danger disabled:opacity-30" aria-label={`Delete category ${c.label}`}><Trash2 className="w-4 h-4" aria-hidden="true" /></button>
           </div>
         ))}
         {draft.categories.length < 30 && (
           <button type="button" onClick={() => setDraft((d) => ({ ...d, categories: [...d.categories, { id: `category-${d.categories.length + 1}`, label: '', icon: '🧵' }] }))} className="font-semibold text-ink flex items-center gap-1"><Plus className="w-3.5 h-3.5" /> Add a category</button>
         )}
-        <p className="text-ink-muted">A category with no products is not shown to customers. Deleting one keeps it on the products that use it until you change them.</p>
+        {categoryNote && (
+          <p role="alert" className="rounded-lg border border-warning-line bg-warning-soft px-2.5 py-2 text-ink" data-testid="category-in-use">
+            {categoryNote}
+          </p>
+        )}
+        <p className="text-ink-muted">A category with no products is not shown to customers. A category that products still use can&apos;t be deleted: move them to another category first.</p>
         <p className="text-ink-muted">&ldquo;Bed linen&rdquo; or &ldquo;Other&rdquo;: what a new product in the category starts as. Other (towels, cushions, throws, curtains, decor) has plain variants such as &ldquo;50 × 50 cm&rdquo; instead of bed sizes. You can still change it on each product.</p>
       </section>
 
@@ -191,7 +229,11 @@ export function CatalogSettingsCard({ value, onSave, auto }: { value: CatalogSet
         weaves={draft.weaves ?? [...DEFAULT_WEAVES]}
         onChange={(weaves) => setDraft((d) => ({ ...d, weaves }))}
         // Renamed on the server (products and list): the form follows, so the next save keeps it.
-        onRenamed={(from, to, saved) => setDraft((d) => ({ ...d, weaves: (d.weaves ?? saved).some((w) => w === to) ? (d.weaves ?? saved).filter((w) => w !== from) : (d.weaves ?? saved).map((w) => (w === from ? to : w)) }))}
+        onRenamed={(from, to, saved) => {
+          // The server saved the catalogue itself: this form's next save is on top of that one.
+          autosave.savedElsewhereHere();
+          setDraft((d) => ({ ...d, weaves: (d.weaves ?? saved).some((w) => w === to) ? (d.weaves ?? saved).filter((w) => w !== from) : (d.weaves ?? saved).map((w) => (w === from ? to : w)) }));
+        }}
       />
 
       <section className="space-y-1">

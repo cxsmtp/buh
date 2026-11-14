@@ -454,7 +454,8 @@ async function runJob(job: AutoJob): Promise<void> {
         ...(!fresh.shortDescription && s.shortDescription ? { shortDescription: s.shortDescription } : {}),
         ...(!fresh.description && s.description ? { description: s.description } : {}),
         ...(!fresh.colors.length && s.colors.length ? { colors: s.colors } : {}),
-        ...(s.weave ? { weave: s.weave } : {}),
+        // The AI's guess at the weave is a fact about the fabric: never applied, only offered in the editor.
+        ...(s.weave && !fresh.weave ? { weaveSuggestion: s.weave } : {}),
         ...(s.giftLine
           ? {
               giftLines: {
