@@ -87,6 +87,8 @@ SETTLE_SECONDS=${SETTLE_SECONDS:-10}
 HEAL_CHECK_SECONDS=${HEAL_CHECK_SECONDS:-30}
 UNHEALTHY_LIMIT=${UNHEALTHY_LIMIT:-3}
 STOP_TIMEOUT=${STOP_TIMEOUT:-25}
+# Single mode: how long the old shop gets to end its live connections after it is told (see single_takeover).
+DRAIN_SECONDS=${DRAIN_SECONDS:-3}
 LAST_GOOD=buh:last-good
 PREVIOUS=buh:previous
 IMAGE_SOURCE_LABEL=org.opencontainers.image.source=https://github.com/cxsmtp/buh
@@ -793,6 +795,10 @@ single_takeover() {
   tk_started=$(now)
   if [ "$(state_of "$SHOP_NAME")" = running ]; then
     log "stopping $SHOP_NAME (up to ${STOP_TIMEOUT}s for requests in flight); the shop is closed until the new one answers"
+    # Told first that it is being replaced: it ends its open live connections (one per open page,
+    # up to 10 minutes each) within 2 s, so the stop does not wait its full time for them.
+    docker exec "$SHOP_NAME" touch /tmp/buh-draining > /dev/null 2>&1 || true
+    sleep "$DRAIN_SECONDS"
     docker stop -t "$STOP_TIMEOUT" "$SHOP_NAME" > /dev/null 2>&1 || true
   fi
   if ! docker rename "$SHOP_NAME" "$PREVIOUS_NAME" > /dev/null 2>&1; then

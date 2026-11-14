@@ -52,8 +52,9 @@ function payloadFor(sub: Subscriber, all: Record<Channel, number>): string {
 }
 
 /**
- * This copy is being stopped or replaced: every open stream is ended now (the browsers reconnect
- * by themselves, to the new copy). Found by the review: every open page holds a stream for up to
+ * This copy is being replaced (the updater's mark, seen by the poller within 2 s): every open
+ * stream is ended now (the browsers reconnect by themselves, to the new copy). Not on SIGTERM: a
+ * handler for it here would take over Node's own stop, and the shop would no longer exit. Found by the review: every open page holds a stream for up to
  * 10 minutes, so a stop waited its full 25 s for them and the shop was closed for longer than the
  * proxy holds a request.
  */
@@ -61,12 +62,6 @@ export function closeAllStreams(): number {
   const open = [...subscribers];
   for (const sub of open) sub.close();
   return open.length;
-}
-let stopping = false;
-function watchForStop() {
-  if (stopping) return;
-  stopping = true;
-  process.once('SIGTERM', () => void closeAllStreams());
 }
 const drainMark = () => process.env.BUH_DRAIN_MARK || '/tmp/buh-draining';
 
@@ -92,7 +87,6 @@ function poll() {
 }
 
 function subscribe(sub: Subscriber) {
-  watchForStop();
   subscribers.add(sub);
   if (!poller) {
     poller = setInterval(poll, 2000);
