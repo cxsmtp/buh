@@ -41,6 +41,36 @@ env:
   PROXY_IMAGE: ghcr.io/${{ github.repository_owner }}/buh-proxy
 
 jobs:
+  tests:
+    # Every test (unit and end-to-end, against the real build) on the Node version the image runs.
+    # Nothing is published unless this passes: a release that fails its tests never reaches a shop.
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: 26
+          cache: npm
+
+      - name: Install
+        run: npm ci --no-audit --no-fund
+
+      - name: Types and lint
+        run: npx tsc --noEmit && npx eslint . --quiet
+
+      - name: Build
+        run: npm run build
+
+      - name: Browser for the end-to-end tests
+        run: npx playwright install --with-deps chromium
+
+      - name: All tests (a failed file is run once more; failing twice fails the job)
+        run: node scripts/ci-test.mjs
+
   image:
     runs-on: ubuntu-latest
     timeout-minutes: 30
@@ -153,7 +183,7 @@ jobs:
     # Pushed by digest first; deploy/ci/publish-version.sh then tags it, and refuses when the
     # version tag already names other contents (a version is published once, never changed).
     if: github.ref == 'refs/heads/main' && github.event_name != 'pull_request'
-    needs: image
+    needs: [image, tests]
     runs-on: ubuntu-latest
     timeout-minutes: 30
     permissions:
@@ -208,7 +238,7 @@ jobs:
     # main only, like publish. Reproducible: no version or revision label (the tags carry the
     # version), fixed timestamps, no attestations; an unchanged updater or proxy keeps its image ID.
     if: github.ref == 'refs/heads/main' && github.event_name != 'pull_request'
-    needs: helpers
+    needs: [helpers, tests]
     runs-on: ubuntu-latest
     timeout-minutes: 20
     permissions:

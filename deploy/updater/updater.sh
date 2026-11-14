@@ -220,6 +220,10 @@ alert() {
       chmod 600 "$alert_file" 2>/dev/null || true
     fi
   fi
+  # The last serious one, for the shop to email to the owner (publish_status; the shop's monitor).
+  case $alert_level in
+    error | critical) printf '%s\n%s\n%s\n' "$(stamp)" "$alert_level" "$alert_msg" > "$STATE_DIR/last-alert" 2> /dev/null || true ;;
+  esac
   send_webhook "$alert_level" "$alert_msg"
 }
 
@@ -972,6 +976,56 @@ single_heal() {
   return 1
 }
 
+# restore BACKUP-FILE: put a backup back over the shop's data, safely (single mode). The shop is
+# stopped first (a restore under a running shop loses every order placed afterwards), the updater's
+# lock is held so self-healing does not start it again half-way, the backup is checked and restored
+# by the shop image's own tool in a one-off container on the data volume (no network), and the shop
+# is started again whatever happened. The data as it was is moved aside inside the volume
+# (replaced-<time>/), never deleted; a backup that fails its checks changes nothing.
+restore_backup() {
+  rb_file=$1
+  case $rb_file in
+    '' | */* | .* | *[!A-Za-z0-9._-]*)
+      echo "usage: restore BACKUP-FILE   (a file name from the data volume's backups/ folder, e.g. buh-backup-20261114-0900.tar.gz.enc)" >&2
+      return 2
+      ;;
+  esac
+  rb_state=$(state_of "$SHOP_NAME") || rb_state=''
+  if [ -z "$rb_state" ]; then
+    log "restore: the shop container $SHOP_NAME does not exist; nothing was changed"
+    return 1
+  fi
+  single_guard "$SHOP_NAME" || return 1
+  rb_image=$(container_image "$SHOP_NAME")
+  rb_vol=$(data_volume_of "$SHOP_NAME")
+  if [ -z "$rb_image" ] || [ -z "$rb_vol" ]; then
+    log "restore: could not read the image or the data volume of $SHOP_NAME; nothing was changed"
+    return 1
+  fi
+  log "restore: stopping $SHOP_NAME (the shop is closed until the restore is over)"
+  docker stop -t "$STOP_TIMEOUT" "$SHOP_NAME" > /dev/null 2>&1 || true
+  rb_ok=1
+  set -- run --rm --network none -v "$rb_vol:/data" -e DATA_DIR=/data
+  # A backup made with another password (an older one, another server): typed by the owner, passed on, never logged.
+  if [ -n "${BACKUP_PASSPHRASE:-}" ]; then set -- "$@" -e BACKUP_PASSPHRASE; fi
+  set -- "$@" --read-only --tmpfs /tmp --cap-drop ALL --security-opt no-new-privileges:true --pids-limit 512 "${rb_image#sha256:}" \
+    node scripts/restore-backup.mjs "/data/backups/$rb_file" /data --replace --shop-stopped
+  if docker "$@"; then
+    rb_ok=0
+    log "restore: $rb_file is restored; starting $SHOP_NAME"
+  else
+    log "restore: $rb_file was NOT restored (see the lines above); the data is as it was. Starting $SHOP_NAME"
+  fi
+  if docker start "$SHOP_NAME" > /dev/null 2>&1 && wait_ready "$SHOP_NAME"; then
+    if [ "$rb_ok" = 0 ]; then
+      alert warning "the shop's data was restored from the backup $rb_file; $SHOP_NAME serves again. Sign in with the new one-time password in: podman logs $SHOP_NAME"
+    fi
+    return "$rb_ok"
+  fi
+  alert critical "after a restore ($rb_file), $SHOP_NAME did not start. See: podman logs $SHOP_NAME"
+  return 1
+}
+
 drop_last_empty() {
   awk 'NR > 1 { print prev } { prev = $0 } END { if (NR > 0 && prev != "") print prev }'
 }
@@ -1706,10 +1760,14 @@ publish_status() {
   auto_on || ps_auto=false
   ps_check_at=$(sed -n 1p "$STATE_DIR/last-check" 2> /dev/null || true)
   ps_check=$(sed -n 2p "$STATE_DIR/last-check" 2> /dev/null || true)
-  printf '{"updatedAt":"%s","mode":"%s","running":"%s","lastGood":"%s","previous":"%s","onServer":[%s],"autoUpdateMinutes":%s,"lastRequest":{"request":"%s","result":"%s","message":"%s","at":"%s"},"registryProblem":"%s","auto":%s,"lastCheck":{"at":"%s","result":"%s"},"history":[%s],"digests":[%s],"integrityProblem":"%s"}\n' \
+  ps_alert_at=$(sed -n 1p "$STATE_DIR/last-alert" 2> /dev/null || true)
+  ps_alert_level=$(sed -n 2p "$STATE_DIR/last-alert" 2> /dev/null || true)
+  ps_alert_msg=$(sed -n 3p "$STATE_DIR/last-alert" 2> /dev/null || true)
+  printf '{"updatedAt":"%s","mode":"%s","running":"%s","lastGood":"%s","previous":"%s","onServer":[%s],"autoUpdateMinutes":%s,"lastRequest":{"request":"%s","result":"%s","message":"%s","at":"%s"},"registryProblem":"%s","auto":%s,"lastCheck":{"at":"%s","result":"%s"},"history":[%s],"digests":[%s],"integrityProblem":"%s","lastAlert":{"at":"%s","level":"%s","message":"%s"}}\n' \
     "$(stamp)" "$ps_mode" "$(json_escape "$ps_running")" "$(json_escape "$ps_good")" "$(json_escape "$ps_prev")" "$ps_versions" "$ps_minutes" \
     "$(json_escape "$last_request")" "$last_result" "$(json_escape "$last_message")" "$last_at" "$(json_escape "$(registry_problem)")" \
-    "$ps_auto" "$(json_escape "$ps_check_at")" "$(json_escape "$ps_check")" "$(history_json)" "$(digests_json)" "$(json_escape "$(integrity_problem)")" > "$ps_tmp"
+    "$ps_auto" "$(json_escape "$ps_check_at")" "$(json_escape "$ps_check")" "$(history_json)" "$(digests_json)" "$(json_escape "$(integrity_problem)")" \
+    "$(json_escape "$ps_alert_at")" "$(json_escape "$ps_alert_level")" "$(json_escape "$ps_alert_msg")" > "$ps_tmp"
   chmod 644 "$ps_tmp" 2>/dev/null || true
   mv -f "$ps_tmp" "$PUBLIC_DIR/status.json"
 }
@@ -2552,6 +2610,15 @@ main() {
       trap unlock EXIT
       rollback_to "${2:-$PREVIOUS}"
       ;;
+    restore)
+      if ! is_single; then
+        echo "restore is for UPDATER_MODE=single" >&2
+        exit 2
+      fi
+      wait_for_lock || exit 2
+      trap unlock EXIT
+      restore_backup "${2:-}"
+      ;;
     adopt)
       if ! is_single; then
         echo "adopt is for UPDATER_MODE=single" >&2
@@ -2586,7 +2653,7 @@ main() {
       status
       ;;
     *)
-      echo "usage: updater.sh [daemon | once | update-now | heal | rollback [image] | status | adopt | setup NAME | self-update | update-proxy | selfcheck]" >&2
+      echo "usage: updater.sh [daemon | once | update-now | heal | rollback [image] | restore BACKUP-FILE | status | adopt | setup NAME | self-update | update-proxy | selfcheck]" >&2
       exit 2
       ;;
   esac

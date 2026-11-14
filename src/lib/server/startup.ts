@@ -1,4 +1,6 @@
+import fs from 'node:fs';
 import { sweepChats } from './chat';
+import { dataFile } from './dataDir';
 import { startChatMail } from './chatMail';
 import { ensureAdminAccount } from './adminAuth';
 import { ensureAdminLink } from './adminLinkSetup';
@@ -8,7 +10,7 @@ import { refreshDealHashes } from './photoDeals';
 import { ensureChangeTriggers, getDb } from './db';
 import { migrateDriveSecrets } from './driveBackup';
 import { backupPassphrase } from './backupSecret';
-import { backfillRefundLedger, normalizeBankStates, startUnconfirmedSweep } from './orders';
+import { backfillRefundLedger, graceUnconfirmedOrders, normalizeBankStates, startUnconfirmedSweep } from './orders';
 import { startMonitor } from './monitor';
 import { startCardSweep } from './payments';
 import { auditStaffRestoreOnce } from './staffAuth';
@@ -28,6 +30,7 @@ export async function onStartup() {
 
   // Each step on its own: one that fails (the database busy during an update, a full disk) is
   // logged and never stops the others (backups and monitoring above all).
+  step('running_mark', startRunningMark);
   step('database_open', () => getDb()); // open (and migrate) the database now, not on the first customer's request
   // What changed since the last backup is counted by triggers: any a table rebuild lost are made again.
   step('change_triggers', () => {
@@ -51,7 +54,13 @@ export async function onStartup() {
   // Card orders not paid within 10 minutes: stopped at Stripe, cancelled, pieces back on sale.
   step('card_sweep', startCardSweep);
   // Settings → Phone check "WhatsApp (free)": orders not confirmed in time are cancelled, pieces back on sale.
-  step('unconfirmed_sweep', startUnconfirmedSweep);
+  step('unconfirmed_sweep', () => {
+    if (downMs > DOWNTIME_GRACE_AFTER_MS) {
+      const moved = graceUnconfirmedOrders();
+      if (moved) logEvent('info', 'unconfirmed_grace_after_downtime', { downMinutes: Math.round(downMs / 60_000), deadlinesMoved: moved });
+    }
+    startUnconfirmedSweep();
+  });
   // Restored onto a server with another key: the bank-transfer orders' private links follow it.
   // Bank orders an older version wrote after migration 10 (an update's overlap, a rollback) get
   // their state. Card refunds from before the refunds ledger are filled in. All retried every
@@ -175,6 +184,38 @@ function startBankUpkeep() {
   if (bankUpkeep) return;
   bankUpkeep = setInterval(() => void bankUpkeepOnce(), 60_000);
   bankUpkeep.unref();
+}
+
+/**
+ * "The shop is running on this data": a small file in DATA_DIR, refreshed every 10 s. The restore
+ * tool (scripts/restore-backup.mjs --replace) refuses while it is fresh: restoring under a running
+ * shop loses every order placed afterwards (the shop keeps writing to the files moved aside).
+ */
+export const RUNNING_MARK = '.shop-running';
+let runningMark: ReturnType<typeof setInterval> | null = null;
+let downMs = 0;
+/** Down for longer than this: customers get an hour more to confirm before the auto-cancel. */
+const DOWNTIME_GRACE_AFTER_MS = 10 * 60_000;
+function startRunningMark() {
+  if (runningMark) return;
+  // How long nobody was running on this data (the mark's age at the start): 0 when another copy
+  // is (an update's overlap), or on a first start.
+  try {
+    const last = Number(fs.readFileSync(dataFile(RUNNING_MARK), 'utf8').trim());
+    if (Number.isFinite(last) && last > 0) downMs = Math.max(0, Date.now() - last);
+  } catch {
+    downMs = 0;
+  }
+  const beat = () => {
+    try {
+      fs.writeFileSync(dataFile(RUNNING_MARK), `${Date.now()}\n`, { mode: 0o600 });
+    } catch {
+      // a full or read-only disk: other checks say so
+    }
+  };
+  beat();
+  runningMark = setInterval(beat, 10_000);
+  runningMark.unref();
 }
 
 /** Chat: email the owner and read emailed replies; every 30 s, reassure customers left waiting. */

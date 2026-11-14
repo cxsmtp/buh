@@ -114,9 +114,16 @@ function serializeCookie(c: ReturnType<typeof doorCookie>): string {
 
 /** What to do with this request's address (pure apart from reading the link record). */
 export function decide(rawUrl: string | undefined, cookieHeader: string | undefined, now = Date.now(), req: GateRequest = {}): GateDecision {
-  const { path, query } = normalizePath(rawUrl);
-  // With a trailing slash, Next.js only redirects to the address without it (which comes back here).
-  if (path.length > 1 && path.endsWith('/')) return { kind: 'pass' };
+  const normal = normalizePath(rawUrl);
+  const { query } = normal;
+  let { path } = normal;
+  if (path.length > 1 && path.endsWith('/')) {
+    // With a real trailing slash, Next.js only redirects to the address without it (which comes
+    // back here). One that only appears after decoding (…/x%2F) is not redirected: it is judged
+    // as the address without it, so it can't slip past the door.
+    if ((rawUrl ?? '').split(/[?#]/)[0].endsWith('/')) return { kind: 'pass' };
+    path = path.replace(/\/+$/, '') || '/';
+  }
   const unknown = (api: boolean): GateDecision => ({ kind: 'unknown', url: `${api ? NOWHERE_API : NOWHERE_PAGE}${query}` });
   if (path === HUB_ROUTE || path.startsWith(`${HUB_ROUTE}/`) || path === '/_buh' || path.startsWith('/_buh/') || path.startsWith('/api/_buh')) return unknown(path.startsWith('/api/'));
   if (path.startsWith(`${PAY_ROUTE}/`) || path.startsWith(`/api${PAY_ROUTE}/`)) {

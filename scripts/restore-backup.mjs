@@ -6,6 +6,9 @@
 //   In place, over the current data (STOP THE SHOP FIRST); the current data is moved
 //   aside to replaced-<time>/ (never deleted) and the backups/ folder is kept:
 //     node scripts/restore-backup.mjs buh-backup-….tar.gz /data --replace
+//   It refuses while the shop is running on that data. The safe way on a Podman shop is the updater's
+//   one command, which stops the shop, restores and starts it again:
+//     podman exec beautifuluaehome-updater sh /updater/updater.sh restore buh-backup-….tar.gz
 //   Encrypted backups need their backup password: BACKUP_PASSPHRASE when set, else (inside the
 //   running shop: podman exec beautifuluaehome …) the one chosen in the Admin Hub, read from
 //   DATA_DIR/backup-secret.json. Another one (an older backup, a new server) is typed:
@@ -77,12 +80,14 @@ function neededPassword(meta) {
   return day ? `the backup password set on ${day}` : `another backup password (fingerprint ${fp})`;
 }
 const replace = args.includes('--replace');
+// Only the updater's `restore` passes this: it has just stopped the shop itself.
+const shopStopped = args.includes('--shop-stopped');
 // --from-drive latest | <copy's file name> | <Drive file id> | list: a copy from Google Drive
 // (scripts/restore-from-drive.mjs), downloaded next to the restore, checked, then restored as any
 // other backup. Without a folder, into DATA_DIR (it must be empty unless --replace).
 const driveAt = args.indexOf('--from-drive');
 const fromDrive = driveAt >= 0 ? args[driveAt + 1] || '' : null;
-const positional = args.filter((a, i) => a !== '--replace' && (driveAt < 0 || (i !== driveAt && i !== driveAt + 1)));
+const positional = args.filter((a, i) => a !== '--replace' && a !== '--shop-stopped' && (driveAt < 0 || (i !== driveAt && i !== driveAt + 1)));
 let file = fromDrive === null ? positional[0] : '';
 const finalTarget = fromDrive === null ? positional[1] : positional[0] || process.env.DATA_DIR || '';
 if (fromDrive === 'list') {
@@ -109,6 +114,23 @@ if (fromDrive !== null && !passphrase) {
 if (!replace && fs.existsSync(finalTarget) && fs.readdirSync(finalTarget).length) {
   console.error(`Refusing to restore into ${finalTarget}: it is not empty. Use --replace to restore over the shop's data (stop the shop first).`);
   process.exit(2);
+}
+// Never over a running shop: it would keep writing to the files moved aside, and every order
+// placed after the restore would be lost. The shop marks DATA_DIR every 10 s while it runs.
+if (replace && !shopStopped) {
+  let beat = 0;
+  try {
+    beat = Number(fs.readFileSync(path.join(finalTarget, '.shop-running'), 'utf8').trim());
+  } catch {
+    // no mark: the shop is not running on this data (or is older than the mark)
+  }
+  const age = Date.now() - beat;
+  if (Number.isFinite(beat) && beat > 0 && age < 45_000 && age > -45_000) {
+    console.error(`Refusing to restore over ${finalTarget}: the shop is running on this data (it was ${Math.max(0, Math.round(age / 1000))} s ago). Orders placed after a restore under a running shop would be lost.`);
+    console.error('Use the updater, which stops the shop, restores and starts it again:  podman exec beautifuluaehome-updater sh /updater/updater.sh restore <backup file name>');
+    console.error('Or stop the updater and the shop yourself, wait a minute, and run this again.');
+    process.exit(2);
+  }
 }
 // With --replace, restore next to the data first, and swap only once everything checked out.
 const target = replace ? path.join(finalTarget, `.restore-${Date.now()}`) : finalTarget;

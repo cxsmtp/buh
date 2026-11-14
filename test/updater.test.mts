@@ -557,6 +557,32 @@ test('single: self-healing starts a stopped shop, re-creates a missing one from 
   assert.ok(alerts(f).some((a) => /data volume beautifuluaehome-data does not exist/.test(a.message)), JSON.stringify(alerts(f)));
 });
 
+test('single: restore stops the shop, restores the backup in a one-off container on the data volume, and starts the shop again; a refused backup changes nothing', () => {
+  const e = setup();
+  runningSingle(e);
+  const ok = runSingle(e, ['restore', 'buh-backup-20261114-0900.tar.gz.enc']);
+  assert.equal(ok.code, 0, ok.out);
+  assert.deepEqual(events(e), [`stop ${SHOP}`, `restore ${OLD} data=${SHOP}-data /data/backups/buh-backup-20261114-0900.tar.gz.enc --replace`, `start ${SHOP}`]);
+  assert.equal(statusOf(e, SHOP), 'running');
+  assert.match(alerts(e).at(-1).message, /restored from the backup buh-backup-20261114-0900\.tar\.gz\.enc/);
+
+  // The tool refuses the backup (damaged, wrong password): said, the shop is started again, exit 1.
+  fs.rmSync(path.join(e.fake, 'events'));
+  fs.writeFileSync(path.join(e.fake, 'restore-fails'), '');
+  const bad = runSingle(e, ['restore', 'buh-backup-20261113-0900.tar.gz']);
+  assert.equal(bad.code, 1, bad.out);
+  assert.match(bad.out, /NOT restored/);
+  assert.deepEqual(events(e).map((l) => l.split(' ')[0]), ['stop', 'restore', 'start']);
+  assert.equal(statusOf(e, SHOP), 'running');
+
+  // Only a plain file name from backups/: no path, nothing else; the shop is not touched.
+  fs.rmSync(path.join(e.fake, 'events'));
+  for (const name of ['', '../shop.db', '/etc/passwd', 'a b', '.hidden', 'x;rm -rf']) assert.equal(runSingle(e, ['restore', name]).code, 2, name);
+  assert.deepEqual(events(e), []);
+  // Blue/green (compose) shops restore by hand (deployment guide).
+  assert.equal(run(e, ['restore', 'x.tar.gz']).code, 2);
+});
+
 test('single: a shop that stops answering is restarted; still not answering, it is re-created from last good', () => {
   const e = setup();
   runningSingle(e);

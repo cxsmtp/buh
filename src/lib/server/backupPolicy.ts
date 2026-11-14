@@ -290,3 +290,27 @@ export function localBackupsToRemove(names: string[], now: number, diskTight: bo
   });
   return remove.reverse().slice(0, LOCAL_DELETE_PER_RUN);
 }
+
+/** Whatever the budget, the newest local backups that always stay. */
+export const LOCAL_KEEP_ALWAYS = 3;
+
+/**
+ * Local backups by size as well as by age (found by the review: every backup is a full copy of the
+ * photos and bills, so "the newest 14" of a shop with 2 GB of photos is 28 GB, and a disk that
+ * fills stops every later backup). Which to remove, oldest first, so that together they take no
+ * more than `budgetBytes`: never the newest LOCAL_KEEP_ALWAYS, and never one whose name carries no
+ * time. Google Drive or S3 hold the longer history; the server keeps what fits.
+ */
+export function localBackupsOverBudget(files: Array<{ name: string; bytes: number }>, budgetBytes: number): string[] {
+  const dated = files
+    .map((f) => ({ ...f, t: localBackupTime(f.name) }))
+    .filter((x): x is { name: string; bytes: number; t: number } => x.t !== null)
+    .sort((a, b) => b.t - a.t || (a.name < b.name ? 1 : -1));
+  let total = dated.reduce((n, f) => n + f.bytes, 0);
+  const remove: string[] = [];
+  for (let i = dated.length - 1; i >= LOCAL_KEEP_ALWAYS && total > budgetBytes; i--) {
+    remove.push(dated[i].name);
+    total -= dated[i].bytes;
+  }
+  return remove;
+}

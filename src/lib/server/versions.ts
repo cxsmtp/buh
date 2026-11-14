@@ -140,6 +140,31 @@ export function updaterStatus(now = Date.now()): UpdaterStatus | null {
   }
 }
 
+/**
+ * For the monitor: when the updater last reported (however long ago; null when it never did, or
+ * there is no updater) and its last serious alert (error or critical: "rolled back", "the shop
+ * does not start", "registry login expired"), so the owner hears of it by email.
+ */
+export function updaterReport(): { at: number; alert: { at: number; level: 'error' | 'critical'; message: string } | null } | null {
+  const file = path.join(statusDir(), 'status.json');
+  try {
+    const st = fs.lstatSync(file);
+    if (!st.isFile() || st.size > 64 * 1024) return null;
+    const raw = JSON.parse(fs.readFileSync(file, 'utf8')) as { updatedAt?: unknown; lastAlert?: { at?: unknown; level?: unknown; message?: unknown } };
+    const at = Date.parse(String(raw.updatedAt));
+    if (!Number.isFinite(at)) return null;
+    const a = raw.lastAlert;
+    const alertAt = Date.parse(String(a?.at));
+    const alert =
+      a && Number.isFinite(alertAt) && (a.level === 'error' || a.level === 'critical') && typeof a.message === 'string' && a.message
+        ? { at: alertAt, level: a.level as 'error' | 'critical', message: a.message.replace(/[\u0000-\u001f\u007f]+/g, ' ').slice(0, 500) }
+        : null;
+    return { at, alert };
+  } catch {
+    return null;
+  }
+}
+
 /** A request is waiting for the updater to pick it up. */
 export function pendingRequest(): string | null {
   try {

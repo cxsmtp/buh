@@ -475,3 +475,17 @@ test('money views: an auto-cancelled unconfirmed order is no sale, a flagged unp
   assert.deepEqual(updated.details.status, { from: 'pending_confirmation', to: 'confirmed' });
   closeOpen();
 });
+
+test('found by the review: after the shop was down, orders whose time ran out meanwhile get an hour more, not a cancel at the start', () => {
+  const a = place();
+  due(a.id);
+  assert.equal(orders.graceUnconfirmedOrders(60 * 60_000), 1);
+  assert.equal(orders.sweepUnconfirmedOrders(), 0, 'not cancelled at the start');
+  assert.notEqual(orders.getOrder(a.id)!.status, 'cancelled');
+  const at = Date.parse(getDb().prepare('SELECT wa_cancel_at FROM orders WHERE id = ?').pluck().get(a.id) as string);
+  assert.ok(Math.abs(at - (Date.now() + 60 * 60_000)) < 5000);
+  // Still not confirmed an hour later: cancelled then, as always.
+  assert.equal(orders.sweepUnconfirmedOrders(Date.now() + 61 * 60_000), 1);
+  assert.equal(orders.getOrder(a.id)!.status, 'cancelled');
+  assert.equal(orders.graceUnconfirmedOrders(), 0, 'a cancelled or confirmed order is left alone');
+});
