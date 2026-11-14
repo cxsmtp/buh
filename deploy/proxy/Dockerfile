@@ -10,8 +10,8 @@
 #
 # (`buh-updater setup … --proxy DOMAIN` starts it exactly so and keeps it up to date.)
 # Built from the repository root: docker build -f deploy/proxy/Dockerfile .
-# caddy:2.11.8-alpine, pinned by digest (a moved tag cannot change what is built; Dependabot proposes updates).
-FROM caddy:2.11.8-alpine@sha256:f6228111e5fafa1a5238258d0858e103f10599b8d1659a146e7726681a002bb9
+# caddy:2.11.9-alpine, pinned by digest (a moved tag cannot change what is built; Dependabot proposes updates).
+FROM caddy:2.11.9-alpine@sha256:003a97808e781aa9f7e75cc2f43d34d461099031faf5e20faefb9f61126836f0
 
 # Not root: the caddy binary carries the one capability it needs (binding 80 and 443),
 # which the container must grant (--cap-add NET_BIND_SERVICE).
@@ -20,7 +20,7 @@ FROM caddy:2.11.8-alpine@sha256:f6228111e5fafa1a5238258d0858e103f10599b8d1659a14
 # so that a release does not restart the proxy (see container.yml).
 # curl (and the libraries only it uses) is not needed by Caddy: removed, so there is less to patch.
 # apk logs the time it ran in /var/log/apk.log: removed too, so the image stays the same.
-# caddy 2.11.8's image no longer marks the binary with that capability, so it is set here
+# Since 2.11.8 caddy's image no longer marks the binary with that capability, so it is set here
 # (setcap is added for this one step and removed again). zlib is upgraded past the base image's
 # 1.3.2-r1 (CVE-2026-4738, flagged by the security scan) to the release's fixed build.
 RUN apk upgrade --no-cache zlib \

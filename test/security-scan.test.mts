@@ -73,7 +73,7 @@ test('containers: what the images do not need is not in them', () => {
   assert.match(updater, /^COPY --from=cli \/usr\/local\/bin\/docker \/usr\/local\/bin\/docker$/m);
   assert.doesNotMatch(updater, /cli-plugins/);
   assert.match(read('deploy/proxy/Dockerfile'), /apk del --no-cache --no-network libcap-setcap curl/);
-  // Binding 80 and 443 as a non-root user: the one capability, on the binary (2.11.8's image no longer sets it).
+  // Binding 80 and 443 as a non-root user: the one capability, on the binary (the image no longer sets it since 2.11.8).
   assert.match(read('deploy/proxy/Dockerfile'), /setcap cap_net_bind_service=\+ep \/usr\/bin\/caddy/);
 });
 
