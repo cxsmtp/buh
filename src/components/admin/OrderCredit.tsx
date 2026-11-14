@@ -65,7 +65,7 @@ export function OrderCredit({ order, orders, onOrderChanged }: { order: Order; o
     setTo('');
   };
 
-  const field = 'w-full min-w-0 min-h-10 px-3 rounded-xl border border-line-strong bg-surface text-ink text-xs focus:outline-none focus:ring-2 focus:ring-gold';
+  const field = 'w-full min-w-0 min-h-11 md:min-h-10 px-3 rounded-xl border border-line-strong bg-surface text-ink text-xs focus:outline-none focus:ring-2 focus:ring-gold';
   // Nothing to do (no open order to use it on, nothing moved yet): no box at all.
   if (movable && !targets.length && !history.length) return null;
   return (
@@ -82,7 +82,7 @@ export function OrderCredit({ order, orders, onOrderChanged }: { order: Order; o
         </ul>
       )}
       {movable && !show && (
-        <button type="button" onClick={() => setShow(true)} disabled={!targets.length} className="min-h-8 px-2 rounded-lg border border-line-strong bg-surface text-ink font-semibold disabled:opacity-50 ml-auto" title={targets.length ? undefined : 'No open order with something to collect on delivery'}>
+        <button type="button" onClick={() => setShow(true)} disabled={!targets.length} className="min-h-11 md:min-h-8 px-2 rounded-lg border border-line-strong bg-surface text-ink font-semibold disabled:opacity-50 ml-auto" title={targets.length ? undefined : 'No open order with something to collect on delivery'}>
           Use it on another order
         </button>
       )}
@@ -105,7 +105,7 @@ export function OrderCredit({ order, orders, onOrderChanged }: { order: Order; o
             <label htmlFor={`${id}-amount`} className="block text-[11px] font-semibold text-ink-soft mb-1">Amount (AED)</label>
             <input id={`${id}-amount`} className={field} type="number" inputMode="decimal" min={0.01} step="0.01" max={most / 100} value={amount} onChange={(e) => setAmount(e.target.value)} />
           </div>
-          <button type="button" disabled={busy} onClick={() => void move()} className="min-h-10 px-3 rounded-lg bg-ink text-paper font-semibold inline-flex items-center justify-center gap-1.5 disabled:opacity-50">
+          <button type="button" disabled={busy} onClick={() => void move()} className="min-h-11 md:min-h-10 px-3 rounded-lg bg-ink text-paper font-semibold inline-flex items-center justify-center gap-1.5 disabled:opacity-50">
             {busy && <Loader2 className="w-4 h-4 animate-spin" aria-hidden="true" />} Move
           </button>
         </div>

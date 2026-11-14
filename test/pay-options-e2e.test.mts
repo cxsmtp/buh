@@ -17,7 +17,9 @@ import { after, before, test } from 'node:test';
 import { hasBuild, rawFetch, setPhoneCheck, startServer, type RunningServer } from './server.mjs';
 import { openAdminSection } from './helpers.mjs';
 import { startStripeMock, STRIPE_JS_STUB, TEST_KEYS, type StripeMock } from './stripe-mock.mjs';
-import { wrongLogin } from './fixtures/fake.mjs';
+import { ownerPassword, wrongLogin } from './fixtures/fake.mjs';
+/** The owner password for this run (made up when the tests start). */
+const OWNER_PASSWORD = ownerPassword();
 
 type PW = typeof import('playwright');
 const pw: PW | null = hasBuild ? await import('playwright').catch(() => null) : null;
@@ -44,7 +46,7 @@ before(async () => {
   for (let i = 0; i < 100 && !(once = server.log().match(/Password: (\S+)/)?.[1]); i++) await new Promise((r) => setTimeout(r, 100));
   const login = await fetch(`${server.base}/api/admin/login`, { method: 'POST', headers: h, body: JSON.stringify({ email: 'admin@beautifuluaehome.com', password: once }) });
   const first = (login.headers.get('set-cookie') || '').split(';')[0];
-  const changed = await fetch(`${server.base}/api/admin/password`, { method: 'POST', headers: { ...h, cookie: first }, body: JSON.stringify({ currentPassword: once, newPassword: 'Pay-Options-Pass-1' }) });
+  const changed = await fetch(`${server.base}/api/admin/password`, { method: 'POST', headers: { ...h, cookie: first }, body: JSON.stringify({ currentPassword: once, newPassword: OWNER_PASSWORD }) });
   cookie = (changed.headers.get('set-cookie') || '').split(';')[0];
   assert.ok(cookie);
   for (const [key, settings] of [
@@ -63,8 +65,10 @@ after(async () => {
   await mock?.close();
 });
 
+// The bank, payments, SMS and email settings need the owner again (their password, unless they signed in within the last 10 minutes): sent with each such save.
+const confirmed = (p: string, body: unknown) => (/^\/api\/admin\/settings\/(bank|payments|sms|email)$/.test(p) && body && typeof body === 'object' ? { ...body, currentPassword: OWNER_PASSWORD } : body);
 const api = (method: string, p: string, body?: unknown) =>
-  fetch(`${server.base}${p}`, { method, headers: { 'content-type': 'application/json', origin: server.base, cookie }, body: body === undefined ? undefined : JSON.stringify(body) });
+  fetch(`${server.base}${p}`, { method, headers: { 'content-type': 'application/json', origin: server.base, cookie }, body: body === undefined ? undefined : JSON.stringify(confirmed(p, body)) });
 const shot = async (page: Page, name: string) => {
   if (SHOTS) await page.screenshot({ path: path.join(SHOTS, name), fullPage: false });
 };

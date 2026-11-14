@@ -3,7 +3,7 @@
 import React, { useState } from 'react';
 import { AlertCircle, Loader2, MessageCircle, Smartphone } from 'lucide-react';
 import type { PhoneCheckSettings } from '@/types';
-import { useAutoSave, type AutoSaveHooks } from './useAutoSave';
+import { useAutoSave, type AutoSaveHooks, type FormVersion } from './useAutoSave';
 
 /**
  * Settings → Phone check: how checkout makes sure the phone number is the customer's.
@@ -29,7 +29,7 @@ export function PhoneCheckCard({
   shopWhatsApp: string;
   /** TRUST_PROXY is set (the shop sees each customer's connection); false: stricter limits apply. */
   behindProxy?: boolean;
-  onSave: (v: PhoneCheckSettings) => Promise<string | null>;
+  onSave: (v: PhoneCheckSettings, version?: FormVersion) => Promise<string | null>;
   auto?: AutoSaveHooks;
 }) {
   const [d, setD] = useState<PhoneCheckSettings>(value);
@@ -58,10 +58,10 @@ export function PhoneCheckCard({
       setStatus({ ok: false, text: `If WhatsApp is never opened: a whole number of hours from 2 to ${Math.min(48, hoursNumber)}.` });
       return;
     }
-    autosave.cancel();
     setSaving(true);
     setStatus(null);
-    const problem = await onSave(draft);
+    // With the version this form was loaded from: a change made on another device is not overwritten.
+    const problem = await onSave(draft, await autosave.hold());
     setSaving(false);
     setStatus(problem ? { ok: false, text: problem } : { ok: true, text: 'Saved. Checkout uses it straight away.' });
   };

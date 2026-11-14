@@ -54,8 +54,10 @@ after(async () => {
   await mock?.close();
 });
 
+// The bank, payments, SMS and email settings need the owner again (their password, unless they signed in within the last 10 minutes): sent with each such save.
+const confirmed = (p: string, body: unknown) => (/^\/api\/admin\/settings\/(bank|payments|sms|email)$/.test(p) && body && typeof body === 'object' ? { ...body, currentPassword: OWNER_PASSWORD } : body);
 const api = (method: string, p: string, body?: unknown, headers: Record<string, string> = {}) =>
-  fetch(`${server.base}${p}`, { method, headers: { 'content-type': 'application/json', origin: server.base, cookie, ...headers }, body: body === undefined ? undefined : JSON.stringify(body) });
+  fetch(`${server.base}${p}`, { method, headers: { 'content-type': 'application/json', origin: server.base, cookie, ...headers }, body: body === undefined ? undefined : JSON.stringify(confirmed(p, body)) });
 const post = (p: string, body: unknown, headers: Record<string, string> = {}) =>
   rawFetch(`${server.base}${p}`, { method: 'POST', headers: { 'content-type': 'application/json', origin: server.base, ...headers }, body: typeof body === 'string' ? body : JSON.stringify(body) });
 const hook = (body: string, signature?: string) => rawFetch(`${server.base}/api/stripe/webhook`, { method: 'POST', headers: { 'content-type': 'application/json', ...(signature ? { 'stripe-signature': signature } : {}) }, body });

@@ -63,7 +63,7 @@ export function OrderWhatsAppCheck({ order, onOrderChanged, shopName }: { order:
   const ask = waMeLink(order.customer.phone, askToConfirmMessage(order.id, safeFirstName(order.customer.fullName), shopName));
   const button = 'min-h-11 px-3 py-2 rounded-xl text-xs font-bold flex items-center justify-center gap-1.5 disabled:opacity-50 focus:outline-none focus-visible:ring-2 focus-visible:ring-gold';
   // Done steps stay small (asked by the owner: "too many details").
-  const small = 'min-h-8 px-2 py-1 rounded-lg text-[11px] font-bold flex items-center justify-center gap-1.5 disabled:opacity-50 focus:outline-none focus-visible:ring-2 focus-visible:ring-gold';
+  const small = 'min-h-11 md:min-h-8 px-2 py-1 rounded-lg text-[11px] font-bold flex items-center justify-center gap-1.5 disabled:opacity-50 focus:outline-none focus-visible:ring-2 focus-visible:ring-gold';
   const status = check?.status ?? 'awaiting';
   const open = status !== 'confirmed' && order.status !== 'cancelled';
   const byCall = check?.method === 'call';
@@ -102,7 +102,7 @@ export function OrderWhatsAppCheck({ order, onOrderChanged, shopName }: { order:
       </div>
       <p className="text-ink-soft">
         {status === 'confirmed' ? '· ' : 'Order phone: '}
-        <a href={`tel:${order.customer.phone}`} className={`font-mono font-bold text-ink ${status === 'confirmed' ? '' : 'text-sm'}`}>{order.customer.phone}</a>
+        <a href={`tel:${order.customer.phone}`} className={`min-h-11 md:min-h-0 inline-flex items-center font-mono font-bold text-ink ${status === 'confirmed' ? '' : 'text-sm'}`}>{order.customer.phone}</a>
         {check && status !== 'confirmed' && <span className="block text-ink-muted">The message &ldquo;Confirm my order {order.id} · code {check.code}&rdquo; should come from this number.</span>}
         {check?.openedAt && status === 'awaiting' && <span className="block text-ink-muted">Customer opened WhatsApp at {when(check.openedAt)}.</span>}
       </p>
@@ -145,7 +145,7 @@ export function OrderWhatsAppCheck({ order, onOrderChanged, shopName }: { order:
             placeholder="Number it came from, e.g. 050 123 4567"
             value={sender}
             onChange={(e) => setSender(e.target.value)}
-            className="flex-1 min-w-0 px-3 py-2 rounded-xl border border-line-strong bg-surface text-ink text-xs focus:outline-none focus:ring-2 focus:ring-gold"
+            className="flex-1 min-w-0 min-h-11 md:min-h-0 px-3 py-2 rounded-xl border border-line-strong bg-surface text-ink text-xs focus:outline-none focus:ring-2 focus:ring-gold"
           />
           <button type="submit" disabled={busy || !sender.trim()} className={`${button} bg-ink text-paper`}>
             Use the number it came from
@@ -154,7 +154,7 @@ export function OrderWhatsAppCheck({ order, onOrderChanged, shopName }: { order:
       )}
       {status === 'confirmed' && order.status !== 'cancelled' && order.status !== 'delivered' && (
         <details className="text-ink-soft order-last open:basis-full">
-          <summary className="min-h-8 inline-flex items-center cursor-pointer font-semibold text-[11px] underline">Correct the phone number</summary>
+          <summary className="min-h-11 md:min-h-8 inline-flex items-center cursor-pointer font-semibold text-[11px] underline">Correct the phone number</summary>
           <form
             className="mt-1 flex flex-col min-[380px]:flex-row gap-2"
             onSubmit={(e) => {
@@ -171,7 +171,7 @@ export function OrderWhatsAppCheck({ order, onOrderChanged, shopName }: { order:
               placeholder="Correct number, e.g. 050 123 4567"
               value={correction}
               onChange={(e) => setCorrection(e.target.value)}
-              className="flex-1 min-w-0 px-3 py-2 rounded-xl border border-line-strong bg-surface text-ink text-xs focus:outline-none focus:ring-2 focus:ring-gold"
+              className="flex-1 min-w-0 min-h-11 md:min-h-0 px-3 py-2 rounded-xl border border-line-strong bg-surface text-ink text-xs focus:outline-none focus:ring-2 focus:ring-gold"
             />
             <button type="submit" disabled={busy || !correction.trim()} className={`${button} bg-ink text-paper`}>
               Save the number
@@ -234,6 +234,13 @@ function describe(e: OrderEvent): string {
       return `Cancelled: not confirmed within ${Number(e.detail?.hours) || ''} h (pieces back on sale)`;
     case 'auto_cancelled_unopened':
       return `Cancelled: WhatsApp never opened within ${Number(e.detail?.hours) || ''} h (pieces back on sale)`;
+    case 'stock_not_returned': {
+      // A size removed from the product since the order: its pieces have no stock row to go back to.
+      const lines = Array.isArray(e.detail?.items) ? (e.detail.items as Array<{ title?: unknown; size?: unknown; quantity?: unknown }>) : [];
+      const pieces = Number(e.detail?.pieces) || 0;
+      const which = lines.map((l) => `${Number(l.quantity) || 0} × ${String(l.title ?? '')} (${String(l.size ?? '')})`).join(', ');
+      return `${pieces} ${pieces === 1 ? 'piece' : 'pieces'} not put back on sale: the product no longer has that size${which ? ` — ${which}` : ''}. Count ${pieces === 1 ? 'it' : 'them'} and add ${pieces === 1 ? 'it' : 'them'} to a size in Inventory.`;
+    }
     case 'bank_unconfirmed_flagged':
       return `Bank transfer not confirmed after ${Number(e.detail?.hours) || ''} h: flagged (not cancelled)`;
     case 'bank_email_limited':
@@ -281,7 +288,7 @@ export function OrderTimeline({ orderId }: { orderId: string }) {
   };
   return (
     <div className="text-[11px]">
-      <button type="button" onClick={() => void toggle()} aria-expanded={open} className="min-h-9 flex items-center gap-1 font-semibold text-ink-soft hover:text-ink">
+      <button type="button" onClick={() => void toggle()} aria-expanded={open} className="min-h-11 md:min-h-9 flex items-center gap-1 pr-2 font-semibold text-ink-soft hover:text-ink focus:outline-none focus-visible:ring-2 focus-visible:ring-gold rounded">
         <ChevronRight className={`w-3.5 h-3.5 transition-transform ${open ? 'rotate-90' : ''}`} aria-hidden="true" /> History
       </button>
       {open && (

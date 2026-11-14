@@ -491,6 +491,41 @@ export async function confirmOwner(session: AdminSession, currentPassword: strin
   }
 }
 
+/** A sign-in with the password or a passkey in the last 10 minutes: the owner has just proved it's them. */
+export function isFreshSignIn(session: AdminSession, now = Date.now()): boolean {
+  return (session.method === 'password' || session.method === 'passkey') && now >= session.issuedAt && now - session.issuedAt <= FRESH_PASSKEY_MS;
+}
+
+/** The settings groups that decide where money and messages go: saving one needs the owner again. */
+export const CONFIRMED_SETTINGS: readonly string[] = ['bank', 'payments', 'sms', 'email'];
+
+/**
+ * Before a high-impact change (the bank account, payment keys, the SMS gateway, the mail server,
+ * inviting an accountant): a live session is not enough. The owner signed in within the last 10
+ * minutes (password or passkey), or types the current password with the change. A typed password
+ * is a sign-in like any other (the same pauses after wrong ones): its new session comes back as
+ * `token` for the route to set, so the hub does not ask again for the next 10 minutes.
+ *
+ * Refusals are 400s (the owner is still signed in) with a code the hub reads: `owner_confirm`
+ * (ask for the password), `owner_confirm_wrong` (ask again).
+ */
+export async function confirmOwnerForChange(session: AdminSession, currentPassword: unknown, options: { ip?: string | null } = {}): Promise<{ token?: string }> {
+  if (currentPassword !== undefined && typeof currentPassword !== 'string') throw new HttpError(400, 'The password must be text.');
+  if (!currentPassword) {
+    if (isFreshSignIn(session)) return {};
+    throw new HttpError(400, 'Type your hub password to make this change.', {}, { code: 'owner_confirm' });
+  }
+  if (currentPassword.length > 256) throw new HttpError(400, 'That is not your current password.', {}, { code: 'owner_confirm_wrong' });
+  const account = await loadAccount();
+  try {
+    const signedIn = await signIn(account.email, currentPassword, { ip: options.ip });
+    return { token: signedIn.token };
+  } catch (err) {
+    if (err instanceof HttpError && err.status === 401) throw new HttpError(400, 'That is not your current password.', {}, { code: 'owner_confirm_wrong' });
+    throw err;
+  }
+}
+
 /** Whether this session may choose a new password without typing the old one. */
 export function canSetPasswordWithoutCurrent(session: AdminSession, now = Date.now()): boolean {
   return session.recoveryPending || isFreshPasskeySession(session, now);

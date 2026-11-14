@@ -77,7 +77,7 @@ async function hubPage(cookie: string, width: number) {
 }
 
 test('the setup link: choose a password, straight into the read-only accounts', { skip }, async () => {
-  const inv = (await (await as(owner, 'POST', '/api/admin/staff', { email: 'second@firm.test' })).json()) as { link: string };
+  const inv = (await (await as(owner, 'POST', '/api/admin/staff', { email: 'second@firm.test', currentPassword: OWNER_PASSWORD })).json()) as { link: string };
   const url = inv.link.replace(/^https?:\/\/[^/]+/, server.base);
   const ctx = await browser.newContext({ viewport: { width: 375, height: 860 }, hasTouch: true });
   const page = await ctx.newPage();

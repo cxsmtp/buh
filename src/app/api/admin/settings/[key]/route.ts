@@ -1,5 +1,6 @@
 import { audit } from '@/lib/server/audit';
-import { requireAdmin } from '@/lib/server/guard';
+import { CONFIRMED_SETTINGS, confirmOwnerForChange, sessionCookie } from '@/lib/server/adminAuth';
+import { clientIp, enforceIpLimit, requireAdmin } from '@/lib/server/guard';
 import { handleRouteError, HttpError, json, readJsonBody } from '@/lib/server/http';
 import { auditPaymentOptions, paymentOptions, paymentsModeWarning } from '@/lib/server/payments';
 import { adminView, assertSettingsUnchanged, getSettings, settingsUpdatedAt, undoVersionId, type SettingsKey } from '@/lib/server/settings';
@@ -52,6 +53,14 @@ export async function PUT(req: Request, { params }: { params: Promise<{ key: str
     const body = await readJsonBody(req, key === 'brand' ? 4 * 1024 * 1024 : 64 * 1024);
     // The version the form was loaded from (when sent): a group saved since then is not overwritten (409).
     assertSettingsUnchanged(key as SettingsKey, body.updatedAt);
+    // The bank account, payment keys, the SMS gateway and the mail server: the owner again (a sign-in
+    // in the last 10 minutes, or the password with this save), not only a live session.
+    let confirmed: { token?: string } = {};
+    if (CONFIRMED_SETTINGS.includes(key)) {
+      if (body.currentPassword) enforceIpLimit(req, 'signin', 30, 10 * 60 * 1000, 'Too many attempts from this address. Wait a few minutes.');
+      confirmed = await confirmOwnerForChange(session, body.currentPassword, { ip: clientIp(req) });
+      if (confirmed.token) audit('settings.owner_confirmed', { by: session.email, key });
+    }
     const keyBefore = key === 'payments' ? getSettings('payments').stripeSecretKey : '';
     const optionsBefore = key === 'payments' ? paymentOptions() : null;
     const promptBefore = key === 'aiPrompt' || key === 'aiPictures' ? structuredClone(getSettings(key)) : null;
@@ -64,7 +73,10 @@ export async function PUT(req: Request, { params }: { params: Promise<{ key: str
     // The card fee and the bank-transfer choice change what customers pay and see: from and to.
     if (optionsBefore) auditPaymentOptions(optionsBefore, session.email);
     if (promptBefore) auditPrompts(key as SettingsKey, promptBefore, session.email);
-    return json({ success: true, ...result, undoId: undoVersionId(key as SettingsKey), ...adminView(key as SettingsKey), updatedAt: settingsUpdatedAt(key as SettingsKey), ...(warning ? { warning } : {}) });
+    const res = json({ success: true, ...result, undoId: undoVersionId(key as SettingsKey), ...adminView(key as SettingsKey), updatedAt: settingsUpdatedAt(key as SettingsKey), ...(warning ? { warning } : {}) });
+    // The password was typed: that sign-in's session, so the next saves are not asked again for 10 minutes.
+    if (confirmed.token) res.cookies.set(sessionCookie(confirmed.token));
+    return res;
   } catch (err) {
     return handleRouteError(err, 'admin/settings/update');
   }

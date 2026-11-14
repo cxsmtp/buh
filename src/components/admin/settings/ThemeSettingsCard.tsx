@@ -1,12 +1,13 @@
 'use client';
 
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { Loader2, RefreshCw } from 'lucide-react';
 import type { ThemeSettings } from '@/types';
 import { DEFAULT_THEME, FESTIVALS, themeFor } from '@/lib/festivals/catalog';
 import { FestiveGreeting } from '@/components/store/FestiveGreeting';
 import { FestiveMotif } from '@/components/store/FestiveMotif';
 import { getJson, postJson } from '@/lib/apiClient';
+import type { FormVersion } from './useAutoSave';
 
 /**
  * Settings → Themes. Automatic: each festival's look shows from 3 weeks before
@@ -36,7 +37,9 @@ interface Overview {
 
 const fmt = (iso: string) => new Date(`${iso}T00:00:00Z`).toLocaleDateString(undefined, { day: 'numeric', month: 'short', year: 'numeric', timeZone: 'UTC' });
 
-export function ThemeSettingsCard({ value, onSave }: { value: ThemeSettings; onSave: (v: ThemeSettings) => Promise<string | null> }) {
+export function ThemeSettingsCard({ value, updatedAt, onSave }: { value: ThemeSettings; /** When the themes were last saved, as loaded with this value. */ updatedAt?: string | null; onSave: (v: ThemeSettings, version?: FormVersion) => Promise<string | null> }) {
+  // The version this form was loaded from: sent with every save, so a change made on another device is not overwritten.
+  const version = useRef(updatedAt);
   const [d, setD] = useState<ThemeSettings>(value);
   const [overview, setOverview] = useState<Overview | null>(null);
   const [saving, setSaving] = useState(false);
@@ -55,7 +58,7 @@ export function ThemeSettingsCard({ value, onSave }: { value: ThemeSettings; onS
     setD(next);
     setSaving(true);
     setStatus(null);
-    const problem = await onSave(next);
+    const problem = await onSave(next, version);
     setSaving(false);
     if (problem) setD(before); // show what is really saved
     setStatus(problem ? { ok: false, text: problem } : { ok: true, text: 'Saved. The shop shows it now.' });

@@ -6,6 +6,8 @@ import type { AiSettings, AssistantSettings, BankTransferDetails, BrandSettings,
 import { DEFAULT_AI, DEFAULT_ASSISTANT, DEFAULT_CATALOG, DEFAULT_DELIVERY, DEFAULT_EMAIL_SETTINGS, DEFAULT_STORE, DEFAULT_THEME_SETTINGS } from '@/data/catalogDefaults';
 import { INITIAL_BANK_DETAILS, INITIAL_BRAND_SETTINGS, INITIAL_COURIER_SETTINGS, INITIAL_SMS_SETTINGS } from '@/data/initialData';
 import { getJson, postJson, sendJson, UNAUTHORIZED_EVENT, UNKNOWN_ADDRESS_EVENT } from '@/lib/apiClient';
+import { OwnerConfirmDialog, sendConfirmed } from './OwnerConfirm';
+import { CHANGED_ELSEWHERE, pushSettingsNotice, SettingsNotices, type AutoSaveHooks, type FormVersion } from './settings/useAutoSave';
 import { useLiveUpdates } from '@/lib/client/live';
 import { stockAlerts } from '@/lib/client/stock';
 import type { HubTotals } from '@/lib/hubToday';
@@ -64,7 +66,12 @@ interface AdminSetting<T> {
   secretsSet: Record<string, boolean>;
   /** ••••last4 of a saved key, where the hub may show it (the AI key). */
   secretsHint?: Record<string, string>;
+  /** When this group was last saved (null: never). A form sends it back with its save. */
+  updatedAt?: string | null;
 }
+type SettingsGroup = 'brand' | 'bank' | 'courier' | 'sms' | 'catalog' | 'store' | 'theme' | 'email' | 'assistant' | 'delivery' | 'payments' | 'phoneCheck' | 'ai' | 'aiPrompt' | 'aiPictures';
+/** What the password dialog says is being changed. */
+const CONFIRM_WHAT: Partial<Record<SettingsGroup, string>> = { bank: 'the bank details', payments: 'the payment settings', sms: 'the SMS gateway', email: 'the email settings' };
 interface AdminSettings {
   bank?: AdminSetting<BankTransferDetails>;
   courier: AdminSetting<CourierSettings>;
@@ -116,7 +123,7 @@ interface PhoneCheckInfo {
  */
 const fetchOrders = () => getJson<{ orders: Order[]; older?: string | null; totals?: HubTotals }>('/api/admin/orders');
 const fetchProducts = () => getJson<{ products: Product[] }>('/api/admin/products');
-const fetchSettings = () => getJson<AdminSettings & { phoneCheckInfo?: PhoneCheckInfo }>('/api/admin/settings');
+const fetchSettings = () => getJson<AdminSettings & { brand?: AdminSetting<BrandSettings>; phoneCheckInfo?: PhoneCheckInfo }>('/api/admin/settings');
 const fetchChats = () => getJson<{ waiting: number }>('/api/admin/chats');
 type Loaded = 'orders' | 'products' | 'settings';
 
@@ -188,6 +195,9 @@ export function AdminApp() {
   });
   const [loadFailed, setLoadFailed] = useState<Partial<Record<Loaded, boolean>>>({});
   const [adminSettingsLoaded, setAdminSettingsLoaded] = useState(false);
+  // When each settings group was last saved, as loaded with its values: a form opened now is given
+  // its group's, and sends it back with a save (the server refuses a save of an older version).
+  const [versions, setVersions] = useState<Partial<Record<SettingsGroup, string | null>>>({});
   const [settingsEpoch, setSettingsEpoch] = useState(0);
   const [undone, setUndone] = useState<Record<string, number>>({});
   const [chatsWaiting, setChatsWaiting] = useState(0);
@@ -264,6 +274,11 @@ export function AdminApp() {
     if (!ok) return;
     if (data.bank) setBankDetails(data.bank.value);
     setAdminSettings({ courier: data.courier, sms: data.sms, catalog: data.catalog, store: data.store, theme: data.theme, email: data.email, assistant: data.assistant, delivery: data.delivery, payments: data.payments ?? { value: NO_PAYMENTS, secretsSet: {} }, phoneCheck: data.phoneCheck ?? { value: DEFAULT_PHONE_CHECK, secretsSet: {} }, ai: data.ai ?? { value: DEFAULT_AI, secretsSet: {} }, aiPrompt: data.aiPrompt ?? { value: DEFAULT_AI_PROMPT, secretsSet: {} }, aiPictures: data.aiPictures ?? { value: DEFAULT_AI_PICTURES, secretsSet: {} } });
+    const loaded: Partial<Record<SettingsGroup, string | null>> = {};
+    for (const [group, setting] of Object.entries(data) as Array<[SettingsGroup, AdminSetting<unknown> | undefined]>) {
+      if (setting && typeof setting === 'object' && 'updatedAt' in setting && setting.updatedAt !== undefined) loaded[group] = setting.updatedAt;
+    }
+    setVersions(loaded);
     setAdminSettingsLoaded(true);
     if (data.phoneCheckInfo) setPhoneCheckInfo(data.phoneCheckInfo);
   }, [noteLoad]);
@@ -334,10 +349,28 @@ export function AdminApp() {
     onStatus: setLiveConnected,
   });
 
-  /** Save one settings group on the server; resolves to an error message or null. */
-  const saveSettings = async (key: 'brand' | 'bank' | 'courier' | 'sms' | 'catalog' | 'store' | 'theme' | 'email' | 'assistant' | 'delivery' | 'payments' | 'phoneCheck' | 'ai' | 'aiPrompt' | 'aiPictures', settings: unknown, onWarning?: (warning: string) => void): Promise<string | null> => {
-    const { ok, data } = await sendJson<{ message?: string; warning?: string }>('PUT', `/api/admin/settings/${key}`, { settings });
+  /**
+   * Save one settings group on the server; resolves to an error message or null.
+   *
+   * `version`: the version (updatedAt) the form was loaded from. It is sent with the save and moved
+   * on when saved. If the group was changed somewhere else meanwhile (the phone, while the laptop
+   * had the form open) the server refuses (409): nothing is overwritten, the group is loaded again,
+   * its form is re-created with the current values and the owner is told at the top of Settings.
+   *
+   * The bank, payments, SMS and email groups also need the owner again: the hub asks for the
+   * password once (./OwnerConfirm.tsx) and sends the same save with it.
+   */
+  const saveSettings = async (key: SettingsGroup, settings: unknown, onWarning?: (warning: string) => void, version?: FormVersion): Promise<string | null> => {
+    const loadedAt = version?.current;
+    const { ok, status, data } = await sendConfirmed<{ message?: string; warning?: string; code?: string; updatedAt?: string | null }>('PUT', `/api/admin/settings/${key}`, { settings, ...(loadedAt === undefined ? {} : { updatedAt: loadedAt }) }, CONFIRM_WHAT[key]);
+    if (!ok && status === 409 && data.code === 'changed_elsewhere') {
+      pushSettingsNotice(key, CHANGED_ELSEWHERE);
+      await reloadAll();
+      setUndone((u) => ({ ...u, [key]: (u[key] ?? 0) + 1 }));
+      return CHANGED_ELSEWHERE;
+    }
     if (!ok) return data.message || 'Could not save. Please try again.';
+    if (version && data.updatedAt !== undefined) version.current = data.updatedAt;
     if (data.warning) onWarning?.(data.warning);
     await reloadAll();
     return null;
@@ -349,6 +382,8 @@ export function AdminApp() {
     // Only the section whose settings were restored is re-created (others may hold unsaved typing).
     onUndone: (key: string) => setUndone((u) => ({ ...u, [key]: (u[key] ?? 0) + 1 })),
   };
+  /** The autosave wiring for one group's form, with the version its values were loaded at. */
+  const autoFor = (key: SettingsGroup): AutoSaveHooks => ({ ...autoSaveHooks, updatedAt: versions[key] });
 
   /** Opens one Settings section (from a button elsewhere in the hub). */
   const openSettings = (id: string) => {
@@ -550,6 +585,8 @@ export function AdminApp() {
             }}
           />
           {adminLoadError && <p role="alert" className="text-xs text-danger bg-danger-soft border border-danger-line rounded-xl px-3 py-2">{adminLoadError}</p>}
+          {/* A setting the server refused just as Settings was left: said here, on the tab the owner moved to (Settings shows its own). */}
+          {adminTab !== 'settings' && <SettingsNotices hub />}
 
           {adminTab === 'overview' && <HubOverview orders={orders} totals={totals} products={adminProducts} lowStockThreshold={adminSettings.catalog.value.lowStockThreshold} onGo={setAdminTab} />}
           {adminTab === 'overview' && (
@@ -597,8 +634,8 @@ export function AdminApp() {
                   hint: 'WhatsApp, email, social accounts, address, currency display and the announcement bar.',
                   content: (
                     <>
-                      <StoreSettingsCard key={`store-${adminSettingsLoaded}-${settingsEpoch}-${undone['store'] ?? 0}`} value={adminSettings.store.value} onSave={(v) => saveSettings('store', v)} auto={autoSaveHooks} />
-                      <MarqueeSettingsCard key={`marquee-${publicSettingsLoaded}-${settingsEpoch}-${undone['brand'] ?? 0}`} brand={brandSettings} onSave={(v) => saveSettings('brand', v)} />
+                      <StoreSettingsCard key={`store-${adminSettingsLoaded}-${settingsEpoch}-${undone['store'] ?? 0}`} value={adminSettings.store.value} onSave={(v) => saveSettings('store', v)} auto={autoFor('store')} />
+                      <MarqueeSettingsCard key={`marquee-${publicSettingsLoaded}-${adminSettingsLoaded}-${settingsEpoch}-${undone['brand'] ?? 0}`} brand={brandSettings} updatedAt={versions.brand} onSave={(v, version) => saveSettings('brand', v, undefined, version)} />
                     </>
                   ),
                 },
@@ -607,7 +644,7 @@ export function AdminApp() {
                   label: 'Catalogue',
                   icon: <LayoutGrid />,
                   hint: 'Size presets, categories, weaves and the low-stock warning.',
-                  content: <CatalogSettingsCard key={`catalog-${adminSettingsLoaded}-${settingsEpoch}-${undone['catalog'] ?? 0}`} value={adminSettings.catalog.value} onSave={(v) => saveSettings('catalog', v)} auto={autoSaveHooks} />,
+                  content: <CatalogSettingsCard key={`catalog-${adminSettingsLoaded}-${settingsEpoch}-${undone['catalog'] ?? 0}`} value={adminSettings.catalog.value} onSave={(v) => saveSettings('catalog', v)} auto={autoFor('catalog')} />,
                 },
                 {
                   id: 'branding',
@@ -618,10 +655,11 @@ export function AdminApp() {
                     <AdminBrandingTab
                       key={`branding-${publicSettingsLoaded}-${adminSettingsLoaded}-${settingsEpoch}-${undone['brand'] ?? 0}-${undone['bank'] ?? 0}`}
                       brandSettings={brandSettings}
-                      onUpdateBrandSettings={(s: BrandDraft) => saveSettings('brand', s)}
+                      onUpdateBrandSettings={(s: BrandDraft, version) => saveSettings('brand', s, undefined, version)}
                       bank={bankDetails}
-                      onUpdateBank={(b: BankTransferDetails) => saveSettings('bank', b)}
-                      auto={autoSaveHooks}
+                      onUpdateBank={(b: BankTransferDetails, version) => saveSettings('bank', b, undefined, version)}
+                      auto={autoFor('brand')}
+                      bankAuto={autoFor('bank')}
                     />
                   ),
                 },
@@ -637,7 +675,7 @@ export function AdminApp() {
                   label: 'Festival themes',
                   icon: <Feather />,
                   hint: 'Eid, Diwali, Christmas, Lunar New Year and 30 more: picked automatically, or chosen by you.',
-                  content: <ThemeSettingsCard key={`theme-${adminSettingsLoaded}-${settingsEpoch}`} value={adminSettings.theme.value} onSave={(v) => saveSettings('theme', v)} />,
+                  content: <ThemeSettingsCard key={`theme-${adminSettingsLoaded}-${settingsEpoch}-${undone['theme'] ?? 0}`} value={adminSettings.theme.value} updatedAt={versions.theme} onSave={(v, version) => saveSettings('theme', v, undefined, version)} />,
                 },
                 {
                   id: 'seo',
@@ -658,13 +696,13 @@ export function AdminApp() {
                       value={adminSettings.phoneCheck.value}
                       shopWhatsApp={adminSettings.store.value.whatsappNumber}
                       behindProxy={phoneCheckInfo.behindProxy}
-                      onSave={async (v) => {
-                        const problem = await saveSettings('phoneCheck', v);
+                      onSave={async (v, version) => {
+                        const problem = await saveSettings('phoneCheck', v, undefined, version);
                         // Chosen now: the one-time notice is over.
                         if (!problem) setPhoneCheckInfo((x) => ({ ...x, whatsappNotice: false }));
                         return problem;
                       }}
-                      auto={autoSaveHooks}
+                      auto={autoFor('phoneCheck')}
                     />
                     <h3 className="font-serif font-bold text-base text-ink border-t border-line pt-4">SMS gateway <span className="font-sans text-xs font-normal text-ink-muted">(used only with &ldquo;SMS code&rdquo;)</span></h3>
                     <AdminSmsTab
@@ -672,8 +710,8 @@ export function AdminApp() {
                       smsSettings={adminSettings.sms.value}
                       secretsSet={adminSettings.sms.secretsSet}
                       secretsHint={adminSettings.sms.secretsHint}
-                      onUpdateSmsSettings={(s: SmsGatewaySettings) => saveSettings('sms', s)}
-                      auto={autoSaveHooks}
+                      onUpdateSmsSettings={(s: SmsGatewaySettings, version) => saveSettings('sms', s, undefined, version)}
+                      auto={autoFor('sms')}
                     />
                     </div>
                   ),
@@ -689,9 +727,9 @@ export function AdminApp() {
                       settings={adminSettings.courier.value}
                       secretsSet={adminSettings.courier.secretsSet}
                       secretsHint={adminSettings.courier.secretsHint}
-                      onUpdateSettings={(s: CourierSettings) => saveSettings('courier', s)}
+                      onUpdateSettings={(s: CourierSettings, version) => saveSettings('courier', s, undefined, version)}
                       onReload={() => void reloadAll()}
-                      auto={autoSaveHooks}
+                      auto={autoFor('courier')}
                     />
                   ),
                 },
@@ -710,7 +748,7 @@ export function AdminApp() {
                         bankAccountSaved={bankDetailsSaved(bankDetails)}
                         shopWhatsApp={adminSettings.store.value.whatsappNumber}
                         onSave={(v, onWarning) => saveSettings('payments', v, onWarning)}
-                        auto={autoSaveHooks}
+                        auto={autoFor('payments')}
                       />
                       <VatSettingsCard storeAddress={adminSettings.store.value.storeAddress} />
                     </div>
@@ -721,7 +759,7 @@ export function AdminApp() {
                   label: 'Delivery',
                   icon: <Box />,
                   hint: 'Where you deliver, the time customers see, and same-day delivery with its charge.',
-                  content: <DeliverySettingsCard key={`delivery-${adminSettingsLoaded}-${settingsEpoch}-${undone['delivery'] ?? 0}`} value={adminSettings.delivery.value} onSave={(v) => saveSettings('delivery', v)} auto={autoSaveHooks} />,
+                  content: <DeliverySettingsCard key={`delivery-${adminSettingsLoaded}-${settingsEpoch}-${undone['delivery'] ?? 0}`} value={adminSettings.delivery.value} onSave={(v) => saveSettings('delivery', v)} auto={autoFor('delivery')} />,
                 },
                 {
                   id: 'assistant',
@@ -734,7 +772,7 @@ export function AdminApp() {
                       value={adminSettings.assistant.value}
                       sizes={adminSettings.catalog.value.sizes}
                       onSave={(v) => saveSettings('assistant', v)}
-                      auto={autoSaveHooks}
+                      auto={autoFor('assistant')}
                     />
                   ),
                 },
@@ -752,7 +790,7 @@ export function AdminApp() {
                         secretsHint={adminSettings.ai.secretsHint}
                         onSave={(v) => saveSettings('ai', v)}
                         onOpenPictures={() => openSettings('ai-pictures')}
-                        auto={autoSaveHooks}
+                        auto={autoFor('ai')}
                       />
                       <AiPromptCard
                         key={`ai-prompt-${adminSettingsLoaded}-${settingsEpoch}`}
@@ -795,7 +833,7 @@ export function AdminApp() {
                       passwordSaved={Boolean(adminSettings.email.secretsSet.smtpPass)}
                       imapPasswordSaved={Boolean(adminSettings.email.secretsSet.imapPass)}
                       onSave={(v) => saveSettings('email', v)}
-                      auto={autoSaveHooks}
+                      auto={autoFor('email')}
                     />
                   ),
                 },
@@ -854,6 +892,7 @@ export function AdminApp() {
       </main>
 
       {phone && <AdminBar adminTab={adminTab} onSetAdminTab={setAdminTab} pendingOrdersCount={pendingOrdersCount} chatsWaiting={chatsWaiting} stockAlerts={stockAlertCount} onToggleAdminMode={toShop} />}
+      <OwnerConfirmDialog />
       <VersionBadge
         raised={phone}
         onOpen={() => {

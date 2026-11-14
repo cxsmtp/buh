@@ -277,7 +277,8 @@ test('revoking ends the accountant’s session at once; the owner’s carries on
 });
 
 test('the owner’s "sign out everywhere" signs every accountant out too', { skip }, async () => {
-  const res = await as(owner, 'POST', '/api/admin/staff', { email: 'second@firm.test' });
+  // Inviting needs the owner again (their password, unless they signed in within the last 10 minutes).
+  const res = await as(owner, 'POST', '/api/admin/staff', { email: 'second@firm.test', currentPassword: OWNER_PASSWORD });
   const m = /\/([A-Za-z0-9_-]{43})#setup=([^&]+)$/.exec(((await res.json()) as { link: string }).link)!;
   const hub = await rawFetch(`${server.base}/${m[1]}`, { redirect: 'manual' });
   const door = (hub.headers.getSetCookie?.() ?? []).map((c) => c.split(';')[0]).find((c) => c.startsWith('buh_door='))!;

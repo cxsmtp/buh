@@ -15,7 +15,7 @@ import {
   CheckCircle2,
   Eye,
 } from 'lucide-react';
-import { useAutoSave, type AutoSaveHooks } from './settings/useAutoSave';
+import { useAutoSave, type AutoSaveHooks, type FormVersion } from './settings/useAutoSave';
 import { INITIAL_BRAND_SETTINGS } from '@/data/initialData';
 import { PALETTE } from '@/lib/design/tokens';
 
@@ -25,11 +25,13 @@ export type BrandDraft = Omit<BrandSettings, 'marquee'>;
 interface AdminBrandingTabProps {
   brandSettings: BrandSettings;
   /** Saves on the server; resolves to an error message, or null when saved. */
-  onUpdateBrandSettings: (updated: BrandDraft) => Promise<string | null>;
+  onUpdateBrandSettings: (updated: BrandDraft, version?: FormVersion) => Promise<string | null>;
   bank: BankTransferDetails;
-  onUpdateBank: (bank: BankTransferDetails) => Promise<string | null>;
+  onUpdateBank: (bank: BankTransferDetails, version?: FormVersion) => Promise<string | null>;
   /** Autosave (Admin Hub): branding and bank details save themselves as you type. */
   auto?: AutoSaveHooks;
+  /** The same for the bank details (their own settings group, with its own version). */
+  bankAuto?: AutoSaveHooks;
 }
 
 export const AdminBrandingTab: React.FC<AdminBrandingTabProps> = ({
@@ -38,6 +40,7 @@ export const AdminBrandingTab: React.FC<AdminBrandingTabProps> = ({
   bank,
   onUpdateBank,
   auto,
+  bankAuto,
 }) => {
   const [saveError, setSaveError] = useState('');
   // Local editable state
@@ -99,11 +102,11 @@ export const AdminBrandingTab: React.FC<AdminBrandingTabProps> = ({
   // Save all settings
   const handleSave = async (e?: React.FormEvent) => {
     if (e) e.preventDefault();
-    autosave.cancel();
     const updated = draft();
     if (updated.logoImageUrl?.startsWith('data:')) setSentLogo(updated.logoImageUrl);
     setSaveError('');
-    const error = await onUpdateBrandSettings(updated);
+    // With the version this form was loaded from: a change made on another device is not overwritten.
+    const error = await onUpdateBrandSettings(updated, await autosave.hold());
     if (error) {
       setSaveError(error);
       return;
@@ -124,7 +127,7 @@ export const AdminBrandingTab: React.FC<AdminBrandingTabProps> = ({
       setAccentColor(INITIAL_BRAND_SETTINGS.accentColor);
       // eslint-disable-next-line @typescript-eslint/no-unused-vars
       const { marquee, ...defaults } = INITIAL_BRAND_SETTINGS;
-      void onUpdateBrandSettings(defaults).then((error) => {
+      void autosave.hold().then((version) => onUpdateBrandSettings(defaults, version)).then((error) => {
         if (error) setSaveError(error);
         else {
           setSavedSuccess(true);
@@ -444,7 +447,7 @@ export const AdminBrandingTab: React.FC<AdminBrandingTabProps> = ({
         </div>
       </div>
 
-      <BankDetailsCard bank={bank} onSave={onUpdateBank} auto={auto} />
+      <BankDetailsCard bank={bank} onSave={onUpdateBank} auto={bankAuto ?? auto} />
     </div>
   );
 };

@@ -3,7 +3,7 @@
 import React, { useEffect, useState } from 'react';
 import { CourierSettings, CourierProvider, Emirate } from '@/types';
 import { Truck, CheckCircle2, AlertCircle, RefreshCw, FlaskConical, MapPin, Power, XCircle, MinusCircle } from 'lucide-react';
-import { useAutoSave, type AutoSaveHooks } from './settings/useAutoSave';
+import { useAutoSave, type AutoSaveHooks, type FormVersion } from './settings/useAutoSave';
 import { postJson } from '@/lib/apiClient';
 import { BLOCKED_MESSAGE, ECO_LIVE_NOT_CONNECTED, jeeblyMode, LIVE_OFF_WARNING, LIVE_OVERRIDE_PHRASE } from '@/lib/courierMode';
 
@@ -14,7 +14,7 @@ interface AdminCouriersTabProps {
   /** The saved keys' last 4 characters (from the server), to tell which key is saved. */
   secretsHint?: Record<string, string>;
   /** Saves on the server; resolves to an error message, or null when saved. */
-  onUpdateSettings: (newSettings: CourierSettings) => Promise<string | null>;
+  onUpdateSettings: (newSettings: CourierSettings, version?: FormVersion) => Promise<string | null>;
   /** Settings changed on the server some other way (Live mode switched): reload them. */
   onReload?: () => void;
   auto?: AutoSaveHooks;
@@ -127,15 +127,17 @@ export const AdminCouriersTab: React.FC<AdminCouriersTabProps> = ({ settings, se
     if (!ok) return setLiveError(data.message || 'Not changed. Please try again.');
     setFormData((f) => ({ ...f, jeebly: { ...f.jeebly, isLive: on } }));
     setOverridePhrase('');
+    // The courier settings were just saved by that switch: this form's next save is its own, not someone else's.
+    autosave.savedElsewhereHere();
     onReload?.();
   };
 
   const handleSave = async (e: React.FormEvent) => {
     e.preventDefault();
-    autosave.cancel();
     setSaving(true);
     setSaveError('');
-    const error = await onUpdateSettings(formData);
+    // With the version this form was loaded from: a change made on another device is not overwritten.
+    const error = await onUpdateSettings(formData, await autosave.hold());
     setSaving(false);
     if (error) {
       setSaveError(error);

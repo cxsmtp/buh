@@ -1429,6 +1429,7 @@ export function editOrderDetails(id: string, input: unknown, actor: string): { o
       });
       if (!items.some((x) => x.quantity > 0)) throw new HttpError(400, 'An order keeps at least one line: cancel it instead.');
       // Stock follows the quantities of catalogue pieces (an order from a photo has none).
+      const notReturned: NotReturned[] = [];
       for (const x of items) {
         const it = x.before;
         if (it.productType === 'photo') {
@@ -1447,11 +1448,12 @@ export function editOrderDetails(id: string, input: unknown, actor: string): { o
             throw new HttpError(409, `${it.title} (${it.profileName}): only ${left} more in stock.`, {}, { code: 'stock' });
           }
         } else if (delta < 0) {
-          getDb()
-            .prepare('INSERT INTO product_stock (product_id, size_id, qty) SELECT ?, ?, ? WHERE EXISTS (SELECT 1 FROM products WHERE id = ?) ON CONFLICT(product_id, size_id) DO UPDATE SET qty = qty + excluded.qty')
-            .run(it.productId, it.profileId, -delta, it.productId);
+          // Back on sale, unless the product no longer has that size (then said in the history and the audit log).
+          const left = putBackOnSale(it, -delta);
+          if (left) notReturned.push(left);
         }
       }
+      recordNotReturned(order.id, actor, notReturned);
       const next: Order['items'] = [];
       items.forEach((x, i) => {
         if (x.quantity !== x.before.quantity || x.unit !== fils(x.before.unitPrice)) changes[`line${i + 1}`] = { item: x.before.title.slice(0, 80), from: `${x.before.quantity} × ${x.before.unitPrice}`, to: `${x.quantity} × ${aed(x.unit)}` };
@@ -1915,20 +1917,64 @@ export function updateOrderByAdmin(id: string, patch: unknown, actor: string): O
   return updated;
 }
 
+/** Pieces that could not go back on sale: their size was removed from the product meanwhile. */
+interface NotReturned {
+  productId: string;
+  title: string;
+  sizeId: string;
+  size: string;
+  quantity: number;
+}
+
 /**
- * Put a cancelled order's reserved pieces back, size by size (the row is recreated if the size
- * was removed meanwhile). Only if they never left: once dispatched, the piece is with the courier
+ * Put pieces of one product and size back on sale. Only onto a size the product still offers: a
+ * size removed in the editor keeps no stock row (src/lib/server/products.ts), and making one again
+ * here would count pieces that no page, and no stock screen, shows. Those pieces are handed back
+ * to the caller to record instead. A product that no longer exists gets nothing, as before.
+ */
+function putBackOnSale(item: Order['items'][number], quantity: number): NotReturned | null {
+  const db = getDb();
+  const data = db.prepare('SELECT data FROM products WHERE id = ?').pluck().get(item.productId) as string | undefined;
+  if (data === undefined) return null;
+  let offered = false;
+  try {
+    offered = ((JSON.parse(data) as { profiles?: Array<{ id?: string }> }).profiles ?? []).some((p) => p.id === item.profileId);
+  } catch {
+    offered = false;
+  }
+  if (!offered) return { productId: item.productId, title: String(item.title ?? '').slice(0, 120), sizeId: item.profileId, size: String(item.profileName ?? item.profileId).slice(0, 60), quantity };
+  db.prepare('INSERT INTO product_stock (product_id, size_id, qty) VALUES (?, ?, ?) ON CONFLICT(product_id, size_id) DO UPDATE SET qty = qty + excluded.qty').run(item.productId, item.profileId, quantity);
+  return null;
+}
+
+/**
+ * Said in the order's history and the audit log (inside the caller's transaction: if the audit log
+ * can't be written, nothing else is either): N pieces of a removed size were not put back on sale,
+ * so the owner knows to count them and add them to a size the product has.
+ */
+function recordNotReturned(orderId: string, actor: string, lines: NotReturned[]): void {
+  if (!lines.length) return;
+  const pieces = lines.reduce((n, l) => n + l.quantity, 0);
+  logEvent(orderId, actor, 'stock_not_returned', { pieces, items: lines });
+  auditOrThrow('order.stock_not_returned', { orderId, by: actor, pieces, why: 'size_removed', items: lines });
+}
+
+/**
+ * Put a cancelled order's reserved pieces back, size by size. A size the product no longer has
+ * gets none (no hidden stock row is made or grown): that is written in the order's history and the
+ * audit log instead. Only if they never left: once dispatched, the piece is with the courier
  * (most designs are one of a kind), so the owner adds it back with + when it returns. Called inside
  * the transaction that moves the order to cancelled, once (a cancelled order can't be cancelled again).
  */
 function releaseStock(order: Order, to: OrderStatus, actor = 'shop'): void {
   if (to === 'cancelled') returnCreditsIn(order, actor);
   if (to !== 'cancelled' || !(order.status === 'pending_confirmation' || order.status === 'pending_payment' || order.status === 'confirmed')) return;
+  const notReturned: NotReturned[] = [];
   for (const item of order.items) {
-    getDb()
-      .prepare('INSERT INTO product_stock (product_id, size_id, qty) SELECT ?, ?, ? WHERE EXISTS (SELECT 1 FROM products WHERE id = ?) ON CONFLICT(product_id, size_id) DO UPDATE SET qty = qty + excluded.qty')
-      .run(item.productId, item.profileId, item.quantity, item.productId);
+    const left = putBackOnSale(item, item.quantity);
+    if (left) notReturned.push(left);
   }
+  recordNotReturned(order.id, actor, notReturned);
 }
 
 /**

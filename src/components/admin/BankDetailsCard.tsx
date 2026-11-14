@@ -2,14 +2,14 @@
 
 import React, { useState } from 'react';
 import { BankTransferDetails } from '@/types';
-import { useAutoSave, type AutoSaveHooks } from './settings/useAutoSave';
+import { useAutoSave, type AutoSaveHooks, type FormVersion } from './settings/useAutoSave';
 import { AlertCircle, Building2, CheckCircle2, EyeOff } from 'lucide-react';
 import { bankDetailsEmail, bankDetailsWhatsApp } from '@/lib/bankMessages';
 
 interface BankDetailsCardProps {
   bank: BankTransferDetails;
   /** Saves on the server; resolves to an error message, or null when saved. */
-  onSave: (bank: BankTransferDetails) => Promise<string | null>;
+  onSave: (bank: BankTransferDetails, version?: FormVersion) => Promise<string | null>;
   auto?: AutoSaveHooks;
 }
 
@@ -42,10 +42,10 @@ export const BankDetailsCard: React.FC<BankDetailsCardProps> = ({ bank, onSave, 
   const whatsapp = bankDetailsWhatsApp({ ...SAMPLE, bank: form });
 
   const save = async () => {
-    autosave.cancel();
     setSaving(true);
     setError('');
-    const problem = await onSave(form);
+    // With the version this form was loaded from: a change made on another device is not overwritten.
+    const problem = await onSave(form, await autosave.hold());
     setSaving(false);
     if (problem) setError(problem);
     else {

@@ -73,7 +73,7 @@ export function OrderBankTransfer({ order, bank, shopName, onOrderChanged }: { o
 
   // Paid: one compact line (asked by the owner: "too much white space").
   const paid = bt.state === 'paid';
-  const small = 'min-h-8 px-2 py-1 rounded-lg text-[11px] font-bold inline-flex items-center justify-center gap-1.5 focus:outline-none focus-visible:ring-2 focus-visible:ring-gold';
+  const small = 'min-h-11 md:min-h-8 px-2 py-1 rounded-lg text-[11px] font-bold inline-flex items-center justify-center gap-1.5 focus:outline-none focus-visible:ring-2 focus-visible:ring-gold';
   return (
     <div data-testid="bank-transfer" className={`rounded-xl border text-xs ${paid ? 'px-2.5 py-1.5 flex flex-wrap items-center gap-x-2 gap-y-1 text-[11px]' : 'p-3 space-y-2'} ${badge.tone}`}>
       <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
@@ -100,7 +100,7 @@ export function OrderBankTransfer({ order, bank, shopName, onOrderChanged }: { o
               Earlier:
               {/* The server keeps the latest 5 (src/lib/server/orders.ts: RECEIPT_LIMITS.versions): the 4 before this one. */}
               {Array.from({ length: Math.min(bt.uploads - 1, 4) }, (_, i) => bt.uploads - Math.min(bt.uploads - 1, 4) + i).map((v) => (
-                <a key={v} href={`${receipt}?v=${v}`} target="_blank" rel="noopener noreferrer" className="underline text-ink-soft">
+                <a key={v} href={`${receipt}?v=${v}`} target="_blank" rel="noopener noreferrer" className="min-h-11 md:min-h-0 min-w-11 md:min-w-0 inline-flex items-center justify-center underline text-ink-soft">
                   #{v}
                 </a>
               ))}
@@ -135,8 +135,8 @@ export function OrderBankTransfer({ order, bank, shopName, onOrderChanged }: { o
       {link && !paid && (
         <div className="flex items-center gap-2 min-w-0">
           <span className="text-ink-muted shrink-0">Private link:</span>
-          <a href={safeLinkHref(link)} target="_blank" rel="noopener noreferrer" className="font-mono text-[11px] text-ink-soft truncate min-w-0">{link}</a>
-          <button type="button" onClick={() => void copyLink()} aria-label="Copy the private link" className="shrink-0 min-h-9 px-2.5 rounded-lg border border-line-strong bg-surface font-semibold text-ink inline-flex items-center gap-1 focus:outline-none focus-visible:ring-2 focus-visible:ring-gold">
+          <a href={safeLinkHref(link)} target="_blank" rel="noopener noreferrer" className="min-h-11 md:min-h-0 leading-[2.75rem] md:leading-normal font-mono text-[11px] text-ink-soft truncate min-w-0">{link}</a>
+          <button type="button" onClick={() => void copyLink()} aria-label="Copy the private link" className="shrink-0 min-h-11 md:min-h-9 px-2.5 rounded-lg border border-line-strong bg-surface font-semibold text-ink inline-flex items-center gap-1 focus:outline-none focus-visible:ring-2 focus-visible:ring-gold">
             {copied ? <Check className="w-3.5 h-3.5 text-success" aria-hidden="true" /> : <Copy className="w-3.5 h-3.5" aria-hidden="true" />} {copied ? 'Copied' : 'Copy'}
           </button>
         </div>
