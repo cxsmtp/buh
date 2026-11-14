@@ -263,6 +263,10 @@ async function stopCardPayment(orderId: string, actor: string, reason: string): 
     try {
       const pi = await retrieveIntent(client, order.card.ref);
       if (pi.status === 'canceled') return cancelCardOrder(orderId, actor, reason);
+      // The key may still read payments but no longer stop them (a restricted key): an unpaid one
+      // would stay "waiting for payment" for good. Closed like one the keys can't reach; if it is
+      // paid later all the same, the order says so (paid after cancel).
+      if (isKeyRefused(err) && pi.status !== 'succeeded' && pi.status !== 'processing') return cancelUnreachable(order, actor, reason, KEY_REFUSED_WHY);
       return applyIntent(orderId, pi, actor);
     } catch (err2) {
       if (isMissing(err2)) return cancelUnreachable(order, actor, reason, MISSING_WHY);

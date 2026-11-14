@@ -4,7 +4,7 @@ import { dataFile, writePrivateFile } from './dataDir';
 import { HttpError } from './http';
 import { logEvent } from './log';
 import { _resetServerSecret, serverSecret } from './secrets';
-import { dummyPasswordHash, generatePassword, hashPassword, verifyPassword } from './password';
+import { dummyPasswordHash, generatePassword, hashPassword, passwordNeedsRehash, verifyPassword } from './password';
 
 /**
  * Server-side admin authentication.
@@ -400,7 +400,7 @@ function clearAddressFailures(emailInput: string, ip: string | null | undefined)
  * sign-in is paused for this email (from this address, or everywhere) the
  * password is not checked: everyone gets the same 429.
  */
-export async function signIn(emailInput: string, password: string, options: { ip?: string | null; now?: number } = {}) {
+export async function signIn(emailInput: string, password: string, options: { ip?: string | null; now?: number; upgradeHash?: boolean } = {}) {
   const now = options.now ?? Date.now();
   const account = await loadAccount();
   const email = emailInput.trim().toLowerCase();
@@ -420,6 +420,31 @@ export async function signIn(emailInput: string, password: string, options: { ip
   }
 
   clearAddressFailures(email, options.ip);
+  // The password is right and in hand: a hash made at an older, cheaper cost is replaced by one
+  // at today's (src/lib/server/password.ts). Sessions are tied to the stored hash, so other
+  // devices signed in with the old one sign in again, once. Never a reason to refuse this sign-in.
+  // Only at a real sign-in (upgradeHash), which hands back a new session: a password re-typed to
+  // confirm an action (confirmOwner) keeps the session it was typed in.
+  try {
+    if (!options.upgradeHash) {
+      // nothing to do
+    } else if (staff && passwordNeedsRehash(staff.passwordHash)) {
+      const fresh = await hashPassword(password);
+      if ((await import('./staffAuth')).upgradeStaffPasswordHash(staff.id, staff.passwordHash, fresh)) staff.passwordHash = fresh;
+    } else if (!staff && !account.managedByEnv && passwordNeedsRehash(account.passwordHash)) {
+      const before = account.passwordHash;
+      const fresh = await hashPassword(password);
+      // Only if nothing else changed the password meanwhile (a reset, the other copy of the shop).
+      const current = await loadAccount();
+      if (current === account && account.passwordHash === before) {
+        account.passwordHash = fresh;
+        persist(account);
+        logEvent('info', 'admin_password_hash_upgraded', {});
+      }
+    }
+  } catch (err) {
+    logEvent('warn', 'admin_password_hash_upgrade_failed', { error: err instanceof Error ? err.message : String(err) });
+  }
   if (staff) {
     const { staffSessionToken } = await import('./staffAuth');
     return { token: staffSessionToken(staff, now), mustChangePassword: false, email: staff.email, role: 'accountant' as AdminRole };

@@ -17,6 +17,7 @@ import { auditStaffRestoreOnce } from './staffAuth';
 import { startFestivalRefresh } from './theme';
 import { startSeoWatch } from './seoWatch';
 import { startAutoAdd } from './autoAdd';
+import { startHousekeeping } from './housekeeping';
 import { logEvent } from './log';
 import { liveGateways } from '@/lib/otpService';
 
@@ -66,6 +67,8 @@ export async function onStartup() {
   // their state. Card refunds from before the refunds ledger are filled in. All retried every
   // minute until they work, and then kept up (all are cheap).
   startBankUpkeep();
+  // Once a day: old Stripe event ids, seen chat emails and hourly chat counters are removed.
+  step('housekeeping', startHousekeeping);
   try {
     // The Admin Hub's private link: made (and printed once) on the first start, or by the update that brought it.
     ensureAdminLink();
