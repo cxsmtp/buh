@@ -19,6 +19,8 @@ import { waMeLink } from '@/lib/whatsappConfirm';
 
 /** Shop-wide public settings for storefront components (from /api/settings/public). */
 export interface ShopInfo {
+  /** The shop's name (Settings → Brand), for messages a customer sends us; absent: a greeting without a name. */
+  shopName?: string;
   store: StoreSettings;
   lowStockThreshold: number;
   supportEmail: string;
@@ -57,6 +59,19 @@ export function piecesLeft(product: Product, sizeId: string): number {
 /** A wa.me link to the shop's WhatsApp with a message, or null when no number is set. */
 export function whatsappLink(store: StoreSettings, message: string): string | null {
   return waMeLink(store.whatsappNumber, message);
+}
+
+/** How a message from a customer to the shop starts: "Hello <the shop's name>", or plain "Hello" when it has none. */
+export const helloShop = (shopName: string | undefined) => (shopName?.trim() ? `Hello ${shopName.trim()}` : 'Hello');
+
+/**
+ * The first words of a WhatsApp chat from the Help button (Settings → Store & contact). The text
+ * the shop starts with names "Beautiful UAE Home": while the owner has not written their own, it
+ * names the shop as Settings → Brand calls it.
+ */
+export function whatsappGreeting(store: StoreSettings, shopName: string | undefined): string {
+  if (store.whatsappGreeting !== DEFAULT_STORE.whatsappGreeting) return store.whatsappGreeting;
+  return `${helloShop(shopName)}! I have a question about your bed linen.`;
 }
 
 /** "Ask on WhatsApp": only when switched on in Settings → Store & contact and a number is set. */

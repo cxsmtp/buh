@@ -1,10 +1,26 @@
 /**
- * Photo sizes for the shop. Photos hosted on Unsplash (the starter catalogue) can be asked for at
- * any width, so phones download a photo the size of the card instead of a 1200 px original.
- * Uploaded photos (/api/images/…) are already shrunk when the owner adds them and are used as is.
+ * Photo sizes for the shop, so a phone downloads a photo the size of the card instead of the
+ * original. Photos hosted on Unsplash can be asked for at any width. The shop's own uploaded photos
+ * (/api/images/…, up to 1600 px) come in three smaller widths as well, made by the server on the
+ * first request (src/lib/server/imageVariants.ts); the original is offered as the largest.
  */
 
 const RESIZABLE = /^https:\/\/images\.unsplash\.com\//;
+/** One of the shop's own stored photos (no query: a link that already asks for a width is left alone). */
+const OWN = /^\/api\/images\/[a-f0-9]{64}\.(png|jpg|webp)$/;
+/** The widths the server makes (the same list as IMAGE_WIDTHS there). */
+export const OWN_WIDTHS = [240, 540, 1080];
+/** What the original is offered as: uploads are shrunk to at most this wide when the owner adds them. */
+const OWN_FULL = 1600;
+
+function ownSources(url: string, widths: number[]): { src: string; srcSet?: string } {
+  const want = Math.max(...widths);
+  // Small pictures (a search row, a round chip): the smallest copy that covers them, nothing bigger.
+  const top = OWN_WIDTHS.find((w) => w >= want);
+  const made = top ? OWN_WIDTHS.filter((w) => w <= top) : OWN_WIDTHS;
+  const srcSet = [...made.map((w) => `${url}?w=${w} ${w}w`), ...(top ? [] : [`${url} ${OWN_FULL}w`])].join(', ');
+  return { src: top ? `${url}?w=${top}` : url, srcSet };
+}
 
 function withWidth(url: string, width: number): string {
   try {
@@ -20,6 +36,7 @@ function withWidth(url: string, width: number): string {
 
 /** src and srcSet for an <img>: srcSet only where the host can resize. */
 export function photoSources(url: string, widths: number[] = PHOTO_WIDTHS): { src: string; srcSet?: string } {
+  if (url && OWN.test(url)) return ownSources(url, widths);
   if (!url || !RESIZABLE.test(url)) return { src: url };
   return {
     src: withWidth(url, widths[Math.min(1, widths.length - 1)]),

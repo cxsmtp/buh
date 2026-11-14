@@ -8,6 +8,7 @@ import { WhatsAppConfirm } from './WhatsAppConfirm';
 import { cancelHoursOf } from '@/lib/whatsappConfirm';
 import { useLocale, useT, type Words } from '@/lib/i18n';
 import { useDialogFocus } from '@/components/common/Sheet';
+import { serverSaid } from './serverWords';
 
 interface OrderTrackerModalProps {
   isOpen: boolean;
@@ -134,11 +135,11 @@ export const OrderTrackerModal: React.FC<OrderTrackerModalProps> = ({
   useEffect(() => {
     if (!trackToken) return;
     let alive = true;
-    void postJson<{ found?: boolean; order?: TrackedOrder; message?: string }>('/api/orders/lookup', { token: trackToken }).then(({ data }) => {
+    void postJson<{ found?: boolean; order?: TrackedOrder; message?: string }>('/api/orders/lookup', { token: trackToken }).then(({ status, data }) => {
       if (!alive) return;
       setSearchResult(data.found && data.order ? data.order : null);
       if (data.order) setOrderId(data.order.id);
-      setMessage(data.found ? '' : data.message || t('badLink'));
+      setMessage(data.found ? '' : serverSaid({ status, data }, locale, t('badLink')));
       setHasSearched(true);
     });
     return () => {
@@ -154,14 +155,14 @@ export const OrderTrackerModal: React.FC<OrderTrackerModalProps> = ({
     e.preventDefault();
     if (!orderId.trim() || !phone.trim()) return;
     setSearching(true);
-    const { data } = await postJson<{ found?: boolean; order?: TrackedOrder; message?: string }>('/api/orders/lookup', {
+    const { status, data } = await postJson<{ found?: boolean; order?: TrackedOrder; message?: string }>('/api/orders/lookup', {
       orderId: orderId.trim(),
       phone: phone.trim(),
     });
     setSearching(false);
     setSearchResult(data.found && data.order ? data.order : null);
     setFoundPhone(phone.trim());
-    setMessage(data.found ? '' : data.message || t('noMatch'));
+    setMessage(data.found ? '' : serverSaid({ status, data }, locale, t('noMatch')));
     setHasSearched(true);
   };
 

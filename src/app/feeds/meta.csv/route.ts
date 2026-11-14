@@ -2,7 +2,7 @@ import { toCsv } from '@/lib/server/backup';
 import { handleRouteError } from '@/lib/server/http';
 import { listProducts } from '@/lib/server/products';
 import { getSettings } from '@/lib/server/settings';
-import { siteUrl } from '@/lib/server/siteUrl';
+import { publicSiteUrl } from '@/lib/server/siteUrl';
 
 /**
  * Product feed for Instagram / Facebook Shopping (Meta Commerce Manager →
@@ -12,7 +12,10 @@ import { siteUrl } from '@/lib/server/siteUrl';
  */
 export async function GET() {
   try {
-    const base = await siteUrl();
+    // Every row carries full links, and the answer may be kept by a cache: the shop's own address
+    // only, never an unknown Host header.
+    const base = await publicSiteUrl();
+    if (!base) return new Response('The shop’s address is not set (NEXT_PUBLIC_APP_URL), so the feed has no links to give.', { status: 503, headers: { 'Content-Type': 'text/plain; charset=utf-8', 'Cache-Control': 'no-store' } });
     const brand = getSettings('brand').storeName;
     const abs = (u: string) => (u.startsWith('http') ? u : `${base}${u}`);
     // Styled photos (made with AI) go to Meta and Google only while the shop labels them.

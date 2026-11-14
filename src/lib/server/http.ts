@@ -201,11 +201,11 @@ export function allowFields(body: Record<string, unknown>, allowed: readonly str
 
 export function str(value: unknown, field: string, max: number, { required = true, trim = true } = {}): string {
   if (value === undefined || value === null || value === '') {
-    if (required) throw new HttpError(400, `${field} is required.`);
+    if (required) throw new HttpError(400, `${field} is required.`, {}, { code: 'field_required', field });
     return '';
   }
-  if (typeof value !== 'string') throw new HttpError(400, `${field} must be text.`);
+  if (typeof value !== 'string') throw new HttpError(400, `${field} must be text.`, {}, { code: 'field_text', field });
   const trimmed = trim ? value.trim() : value;
-  if (trimmed.length > max) throw new HttpError(400, `${field} is too long.`);
+  if (trimmed.length > max) throw new HttpError(400, `${field} is too long.`, {}, { code: 'field_too_long', field });
   return trimmed;
 }

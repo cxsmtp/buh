@@ -6,7 +6,7 @@ import { CartItem, Emirate, Order, PaymentMethod, PhoneVerificationConfig } from
 import { UAE_EMIRATES } from '@/data/initialData';
 import { resolveArea, searchAreas, type UAEArea } from '@/data/uaeAreas';
 import { cardFeeFils, cartFils, formatAed, percentText, toFils, vatOnTopFils } from '@/lib/money';
-import { useShop } from '@/lib/client/shop';
+import { helloShop, useShop } from '@/lib/client/shop';
 import { postJson } from '@/lib/apiClient';
 import { formatAccuracy, suggestAreaFromGps, UAE_KEY_LOCATIONS } from '@/lib/uaeLocations';
 import { deliveryCheck } from '@/lib/delivery';
@@ -42,6 +42,7 @@ import type { PhotoOrderDraft } from './PhotoOrderSheet';
 import { useT, useLocale, type Words } from '@/lib/i18n';
 import { productTitle } from '@/lib/i18n/product';
 import { useDialogFocus } from '@/components/common/Sheet';
+import { serverSaid } from './serverWords';
 import { EMIRATE_AR, bagLimitMessage, bagOverLimit, deliveryMessage, deliveryName, payWays, refusalText, sameDayReason, servedPlaces } from './checkoutWords';
 
 // Stripe's fields: their own chunk, fetched only when checkout offers cards (never on the shop's first load).
@@ -425,7 +426,7 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
   const [isPhoneVerified, setIsPhoneVerified] = useState(false);
 
   // Delivery: decided by the address (the server checks again and charges any same-day fee).
-  const { delivery: deliverySettings, vatAddedPercent = 0, bagLimit } = useShop();
+  const { delivery: deliverySettings, vatAddedPercent = 0, bagLimit, shopName } = useShop();
   // Same day is chosen for one address: changing the emirate or area goes back to standard.
   const [deliveryChoice, setDeliveryChoice] = useState<{ option: 'standard' | 'same_day'; key: string }>({ option: 'standard', key: '' });
   const setDeliveryOption = (option: 'standard' | 'same_day') => setDeliveryChoice({ option, key: `${emirate}|${area}` });
@@ -708,7 +709,8 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
     if (status === 409 && data.code === 'checkout_changed') setIdempotencyKey(crypto.randomUUID());
     // In Arabic, the server's refusal is said from its code and values; in English, its own words.
     const said = locale === 'ar' ? refusalText(data, locale, (id) => { const p = items.find((i) => i.product.id === id)?.product; return p ? productTitle(p, locale) : undefined; }) : null;
-    return said || data.message || t('notPlaced');
+    // Anything else the server said (a box left empty, too many tries, a card that could not start): from its code.
+    return said || serverSaid({ status, data }, locale, t('notPlaced'));
   };
 
   /** Create the card order on the server (its prices, its total) and get Stripe's client secret for it. */
@@ -962,7 +964,7 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
       t('stepPayment', { how: t(confirmedOrder.paymentMethod === 'cod' ? 'howCod' : paidByCard ? (cardPaid ? 'howCardPaid' : 'howCard') : 'howBank') }),
     ];
     const whatsappMessage = encodeURIComponent(
-      `Hello Beautiful UAE Home! I have placed Order #${confirmedOrder.id} (${confirmedOrder.customer.fullName}) for AED ${confirmedOrder.total}. Payment method: ${confirmedOrder.paymentMethod === 'cod' ? 'Cash on Delivery' : paidByCard ? 'Card' : 'Bank Transfer'}. ${byTransfer ? 'Please send me the bank details.' : 'Please confirm dispatch.'}`
+      `${helloShop(shopName)}! I have placed Order #${confirmedOrder.id} (${confirmedOrder.customer.fullName}) for AED ${confirmedOrder.total}. Payment method: ${confirmedOrder.paymentMethod === 'cod' ? 'Cash on Delivery' : paidByCard ? 'Card' : 'Bank Transfer'}. ${byTransfer ? 'Please send me the bank details.' : 'Please confirm dispatch.'}`
     );
 
     return (

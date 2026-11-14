@@ -5,7 +5,7 @@ import { ShopApp } from '@/components/ShopApp';
 import { publicCollection } from '@/lib/server/collections';
 import { getProduct } from '@/lib/server/products';
 import { getSettings } from '@/lib/server/settings';
-import { siteUrl } from '@/lib/server/siteUrl';
+import { publicSiteUrl } from '@/lib/server/siteUrl';
 
 /**
  * A shared selection (/c/<slug>, made in Inventory → Share these): just those products, in the
@@ -26,7 +26,8 @@ export async function generateMetadata({ params }: Props): Promise<Metadata> {
   const brand = shopName();
   const robots = { index: false, follow: true };
   if (!c || c.ended) return { title: `This selection has ended | ${brand}`, robots };
-  const base = await siteUrl();
+  // The shop's own address (never an unknown Host header); without one, no canonical or link address.
+  const base = await publicSiteUrl();
   const first = c.productIds.map((id) => getProduct(id)).find(Boolean);
   const image = first ? first.aiTransformedImage || first.featuredImage : '';
   const description = `${c.productIds.length} ${c.productIds.length === 1 ? 'piece' : 'pieces'} chosen for you by ${brand}.`;
@@ -34,14 +35,14 @@ export async function generateMetadata({ params }: Props): Promise<Metadata> {
     title: `${c.title} | ${brand}`,
     description,
     robots,
-    alternates: { canonical: `${base}/c/${c.slug}` },
+    ...(base ? { alternates: { canonical: `${base}/c/${c.slug}` } } : {}),
     openGraph: {
       type: 'website',
       siteName: brand,
       title: c.title,
       description,
-      url: `${base}/c/${c.slug}`,
-      images: image ? [{ url: image.startsWith('http') ? image : `${base}${image}`, alt: first?.title ?? c.title }] : undefined,
+      ...(base ? { url: `${base}/c/${c.slug}` } : {}),
+      images: image && (base || image.startsWith('http')) ? [{ url: image.startsWith('http') ? image : `${base}${image}`, alt: first?.title ?? c.title }] : undefined,
     },
     twitter: { card: 'summary_large_image', title: c.title, description },
   };

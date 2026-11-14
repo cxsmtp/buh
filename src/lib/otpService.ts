@@ -94,18 +94,18 @@ function allowedPrefixes(): string[] {
 /** Normalise and validate a phone number, or throw a 400 the customer can act on. */
 export function validatePhone(raw: unknown): string {
   if (typeof raw !== 'string' || raw.length > 32) {
-    throw new HttpError(400, 'Please provide a valid phone number (e.g. +971 50 123 4567)');
+    throw new HttpError(400, 'Please provide a valid phone number (e.g. +971 50 123 4567)', {}, { code: 'phone_invalid' });
   }
   const phone = normalizePhoneNumber(raw);
   if (!/^\+[1-9]\d{7,14}$/.test(phone)) {
-    throw new HttpError(400, 'Please provide a valid phone number (e.g. +971 50 123 4567)');
+    throw new HttpError(400, 'Please provide a valid phone number (e.g. +971 50 123 4567)', {}, { code: 'phone_invalid' });
   }
   if (!allowedPrefixes().some((prefix) => phone.startsWith(prefix))) {
-    throw new HttpError(400, `Online checkout verifies UAE mobile numbers only. For international orders, please email ${supportEmail()}.`);
+    throw new HttpError(400, `Online checkout verifies UAE mobile numbers only. For international orders, please email ${supportEmail()}.`, {}, { code: 'phone_not_uae', email: supportEmail() });
   }
   // A UAE number must be a mobile: landlines and short codes cannot receive the SMS.
   if (phone.startsWith('+971') && !UAE_MOBILE.test(phone)) {
-    throw new HttpError(400, 'Please enter a UAE mobile number starting with 50, 52, 54, 55, 56 or 58.');
+    throw new HttpError(400, 'Please enter a UAE mobile number starting with 50, 52, 54, 55, 56 or 58.', {}, { code: 'phone_not_mobile' });
   }
   return phone;
 }
@@ -113,6 +113,9 @@ export function validatePhone(raw: unknown): string {
 export interface SendOtpResult {
   success: boolean;
   message: string;
+  /** Why it was not sent (and the shop's email for it), so checkout can say it in the customer's language. */
+  code?: string;
+  email?: string;
   provider: string;
   messageId?: string;
   isSimulated: boolean;
@@ -196,8 +199,8 @@ function alertGlobalLimit(ip: string | null) {
   }
 }
 
-function limited(message: string, retryAfterSec: number): never {
-  throw new HttpError(429, message, { 'Retry-After': String(retryAfterSec) });
+function limited(message: string, retryAfterSec: number, code: string): never {
+  throw new HttpError(429, message, { 'Retry-After': String(retryAfterSec) }, { code, retryAfterSec });
 }
 
 export async function sendRealSmsOtp(
@@ -211,17 +214,17 @@ export async function sendRealSmsOtp(
   // send, so a refused request never uses up the shop-wide cap or a number's
   // allowance. The shop-wide counter cannot be evicted (see rateLimit.ts).
   const HOUR = 60 * 60 * 1000;
-  const rules: Array<LimitRule & { message: string }> = [
-    ...(ip ? [{ key: `otp:ip:${ip}`, max: 10, windowMs: HOUR, message: 'Too many codes requested. Please try again later.' }] : []),
-    { key: `otp:phone:30s:${phone}`, max: 1, windowMs: 30 * 1000, message: 'Please wait {s} seconds before requesting another SMS.' },
-    { key: `otp:phone:1h:${phone}`, max: 5, windowMs: HOUR, message: 'Too many codes requested for this number. Please try again later.' },
-    { key: 'global:otp', max: Number(process.env.OTP_MAX_PER_HOUR) || 300, windowMs: HOUR, message: 'Phone verification is busy right now. Please try again shortly.' },
+  const rules: Array<LimitRule & { message: string; code: string }> = [
+    ...(ip ? [{ key: `otp:ip:${ip}`, max: 10, windowMs: HOUR, message: 'Too many codes requested. Please try again later.', code: 'otp_too_many' }] : []),
+    { key: `otp:phone:30s:${phone}`, max: 1, windowMs: 30 * 1000, message: 'Please wait {s} seconds before requesting another SMS.', code: 'otp_wait' },
+    { key: `otp:phone:1h:${phone}`, max: 5, windowMs: HOUR, message: 'Too many codes requested for this number. Please try again later.', code: 'otp_too_many_number' },
+    { key: 'global:otp', max: Number(process.env.OTP_MAX_PER_HOUR) || 300, windowMs: HOUR, message: 'Phone verification is busy right now. Please try again shortly.', code: 'otp_busy' },
   ];
   const refused = takeAll(rules);
   if (refused) {
     if (refused.rule.key === 'global:otp') alertGlobalLimit(ip);
-    const message = (refused.rule as (typeof rules)[number]).message.replace('{s}', String(refused.result.retryAfterSec));
-    limited(message, refused.result.retryAfterSec);
+    const rule = refused.rule as (typeof rules)[number];
+    limited(rule.message.replace('{s}', String(refused.result.retryAfterSec)), refused.result.retryAfterSec, rule.code);
   }
 
   const code = crypto.randomInt(0, 10 ** OTP_LENGTH).toString().padStart(OTP_LENGTH, '0');
@@ -244,6 +247,8 @@ export async function sendRealSmsOtp(
     return {
       success: false,
       message: `Phone verification is not available right now. Please try again shortly, or email ${supportEmail()} to order.`,
+      code: 'otp_unavailable',
+      email: supportEmail(),
       provider: 'none',
       isSimulated: false,
     };
@@ -265,6 +270,8 @@ export async function sendRealSmsOtp(
   return {
     success: false,
     message: `We could not send the SMS just now. Please try again in a minute, or email ${supportEmail()} to order.`,
+    code: 'otp_send_failed',
+    email: supportEmail(),
     provider: 'unavailable',
     isSimulated: false,
   };
@@ -347,22 +354,22 @@ async function deliver(
 /**
  * Verify customer input code against stored OTP
  */
-export function verifyRealSmsOtp(rawPhone: string, inputCode: string): { valid: boolean; message: string } {
+export function verifyRealSmsOtp(rawPhone: string, inputCode: string): { valid: boolean; message: string; code?: string; left?: number } {
   const phone = validatePhone(rawPhone);
   const record = otpStore.get(phone);
 
   if (!record) {
-    return { valid: false, message: 'No verification code is waiting for this number. Please request a new code.' };
+    return { valid: false, code: 'otp_none', message: 'No verification code is waiting for this number. Please request a new code.' };
   }
   if (Date.now() > record.expiresAt) {
     otpStore.delete(phone);
-    return { valid: false, message: 'The verification code has expired. Please request a new code.' };
+    return { valid: false, code: 'otp_expired', message: 'The verification code has expired. Please request a new code.' };
   }
 
   const attempts = otpStore.attempt(phone);
   if (attempts > MAX_ATTEMPTS) {
     otpStore.delete(phone);
-    return { valid: false, message: 'Too many incorrect attempts. Please request a new code.' };
+    return { valid: false, code: 'otp_attempts', message: 'Too many incorrect attempts. Please request a new code.' };
   }
   const given = Buffer.from(codeHash(phone, toAsciiDigits(String(inputCode)).replace(/\s+/g, '')));
   const expected = Buffer.from(record.hash);
@@ -373,10 +380,10 @@ export function verifyRealSmsOtp(rawPhone: string, inputCode: string): { valid: 
 
   if (attempts >= MAX_ATTEMPTS) {
     otpStore.delete(phone);
-    return { valid: false, message: 'Too many incorrect attempts. Please request a new code.' };
+    return { valid: false, code: 'otp_attempts', message: 'Too many incorrect attempts. Please request a new code.' };
   }
   const left = MAX_ATTEMPTS - attempts;
-  return { valid: false, message: `Incorrect verification code (${left} attempt${left === 1 ? '' : 's'} remaining).` };
+  return { valid: false, code: 'otp_wrong', left, message: `Incorrect verification code (${left} attempt${left === 1 ? '' : 's'} remaining).` };
 }
 
 /** Test hook. */

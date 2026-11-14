@@ -1,6 +1,6 @@
 import type { MetadataRoute } from 'next';
 import { sitemapEntries, sitemapXmlEntries } from '@/lib/server/seo';
-import { siteUrl } from '@/lib/server/siteUrl';
+import { publicSiteUrl } from '@/lib/server/siteUrl';
 
 /**
  * /sitemap.xml: the shop, its category pages, the festival gift pages (a high priority and a
@@ -11,6 +11,8 @@ import { siteUrl } from '@/lib/server/siteUrl';
 export const dynamic = 'force-dynamic';
 
 export default async function sitemap(): Promise<MetadataRoute.Sitemap> {
-  const base = await siteUrl();
-  return sitemapXmlEntries(sitemapEntries(base));
+  // A sitemap lists full addresses, so it needs the shop's own (NEXT_PUBLIC_APP_URL): never an
+  // unknown Host header. Without it the sitemap is valid and empty, rather than naming another site.
+  const base = await publicSiteUrl();
+  return base ? sitemapXmlEntries(sitemapEntries(base)) : [];
 }

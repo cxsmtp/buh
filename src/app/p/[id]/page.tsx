@@ -3,7 +3,7 @@ import { ShopApp } from '@/components/ShopApp';
 import { getProduct } from '@/lib/server/products';
 import { breadcrumbJsonLd, jsonLdString, productAlt, productDescription, productImages, productJsonLd, productTitle, shopName } from '@/lib/server/seo';
 import { getSettings } from '@/lib/server/settings';
-import { siteUrl } from '@/lib/server/siteUrl';
+import { publicSiteUrl } from '@/lib/server/siteUrl';
 
 /**
  * A product's own link (/p/<id>), for sharing on WhatsApp and Instagram and for search engines:
@@ -25,21 +25,22 @@ export async function generateMetadata({ params }: Props): Promise<Metadata> {
   const { id } = await params;
   const product = onSale(id);
   if (!product) return { title: shopName(), robots: { index: false, follow: true } };
-  const base = await siteUrl();
-  const image = productImages(product, base)[0];
+  // The shop's own address (never an unknown Host header); without one, no canonical, link or picture address.
+  const base = await publicSiteUrl();
+  const image = base ? productImages(product, base)[0] : undefined;
   const share = `${product.title} · AED ${product.price}`;
   const description = productDescription(product);
-  const url = `${base}/p/${encodeURIComponent(product.id)}`;
+  const url = base ? `${base}/p/${encodeURIComponent(product.id)}` : undefined;
   return {
     title: { absolute: productTitle(product) },
     description,
-    alternates: { canonical: url },
+    ...(url ? { alternates: { canonical: url } } : {}),
     openGraph: {
       type: 'website',
       siteName: shopName(),
       title: share,
       description,
-      url,
+      ...(url ? { url } : {}),
       images: image ? [{ url: image, alt: productAlt(product) }] : undefined,
     },
     twitter: { card: 'summary_large_image', title: share, description },
@@ -50,8 +51,8 @@ export default async function ProductPage({ params }: Props) {
   const { id } = await params;
   const product = onSale(id);
   let jsonLd: string[] = [];
-  if (product) {
-    const base = await siteUrl();
+  const base = product ? await publicSiteUrl() : null;
+  if (product && base) {
     const category = getSettings('catalog').categories.find((c) => c.id === product.category);
     jsonLd = [
       jsonLdString(productJsonLd(product, base)),

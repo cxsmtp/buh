@@ -4,9 +4,11 @@ import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { Bot, MessageCircle, MessagesSquare, RotateCcw, Send, UserRound, X } from 'lucide-react';
 import type { ChatMessage } from '@/types';
 import { getJson, postJson } from '@/lib/apiClient';
-import { OPEN_CHAT_EVENT, askWhatsAppLink, instagramLink, useShop } from '@/lib/client/shop';
+import { OPEN_CHAT_EVENT, askWhatsAppLink, instagramLink, useShop, whatsappGreeting } from '@/lib/client/shop';
 import { InstagramIcon } from '@/components/common/InstagramIcon';
-import { useT, type Words } from '@/lib/i18n';
+import { detectLocale, useLocale, useT, type Words } from '@/lib/i18n';
+import { serverSaid } from './serverWords';
+import { greetingFor } from '@/lib/assistant';
 
 /**
  * The floating help button. With the chat switched on it opens the shop
@@ -73,7 +75,8 @@ function loadSaved(): { id: string; token: string } | null {
 
 export function HelpLauncher() {
   const tr = useT(WORDS);
-  const { store, chat } = useShop();
+  const { locale } = useLocale();
+  const { store, chat, shopName } = useShop();
   const [open, setOpen] = useState(false);
   const [view, setView] = useState<View | null>(null);
   const [draft, setDraft] = useState('');
@@ -88,7 +91,7 @@ export function HelpLauncher() {
   const launcher = useRef<HTMLButtonElement>(null);
   const wasOpen = useRef(false);
 
-  const wa = askWhatsAppLink(store, store.whatsappGreeting);
+  const wa = askWhatsAppLink(store, whatsappGreeting(store, shopName));
   const ig = instagramLink(store);
   const floatingWa = store.showWhatsAppButton ? wa : null;
 
@@ -104,7 +107,8 @@ export function HelpLauncher() {
   const poll = useCallback(async () => {
     const s = saved.current;
     if (!s) return;
-    const res = await fetch(`/api/chat/${encodeURIComponent(s.id)}?after=${lastId.current}`, { headers: { 'x-chat-token': s.token }, credentials: 'same-origin' }).catch(() => null);
+    // The language is read afresh (not from the page's state, which is English for a moment while it loads).
+    const res = await fetch(`/api/chat/${encodeURIComponent(s.id)}?after=${lastId.current}&lang=${detectLocale()}`, { headers: { 'x-chat-token': s.token }, credentials: 'same-origin' }).catch(() => null);
     if (!res) return;
     if (res.status === 404) {
       saved.current = null;
@@ -185,8 +189,8 @@ export function HelpLauncher() {
     setError('');
     const s = saved.current;
     const res = s
-      ? await postJson<View>(`/api/chat/${encodeURIComponent(s.id)}`, { token: s.token, after: lastId.current, ...body })
-      : await postJson<View>('/api/chat', { message: body.message, page: window.location.pathname });
+      ? await postJson<View>(`/api/chat/${encodeURIComponent(s.id)}`, { token: s.token, after: lastId.current, locale, ...body })
+      : await postJson<View>('/api/chat', { message: body.message, page: window.location.pathname, locale });
     setBusy(false);
     if (!res.ok) {
       if (res.status === 404 && s) {
@@ -195,7 +199,7 @@ export function HelpLauncher() {
         setView(null);
         if (body.action === 'send') return call({ message: body.message });
       }
-      setError(res.data.message || tr('sendFailed'));
+      setError(serverSaid(res, locale, tr('sendFailed')));
       return false;
     }
     if (!s && res.data.token) {
@@ -228,7 +232,8 @@ export function HelpLauncher() {
   };
 
   const shown = view?.messages ?? [];
-  const greeting = chat.greeting;
+  // The greeting the shop starts with is shown in Arabic to an Arabic visitor; the owner's own, as written.
+  const greeting = greetingFor(chat.greeting, locale);
 
   return (
     <>
