@@ -12,9 +12,9 @@ First of three releases fixing what the production-readiness review found: money
 - **The camera works for scanning.** The live shop's security headers blocked the camera, so "Scan an item" and "Scan to check" only worked by typing. The hub's own pages may now use it.
 - **No sample products in a real shop.** A new shop from the published image starts empty; the four sample products are only for demos and tests. **Your shop still has them (prod-01 to prod-04) on sale: remove them in Inventory if they are not yours to sell.**
 - **Status.**
-  - **Benchmark:** BENCH_PLACEHOLDER
-  - **Tests:** TESTS_PLACEHOLDER
-  - **Dependency audit:** AUDIT_PLACEHOLDER
+  - **Benchmark:** no failed requests in any round (main first, alternating, 3 rounds; other work was running on the same machine, so the spread is wide and equal for both). p95, branch vs main: home page 87–108 ms vs 93–188, courier 84–115 ms vs 94–162, catalogue 102–134 ms vs 114–207, gift page 81–120 ms vs 74–90. Requests per second: home 796–976 vs 737–944, catalogue 985–1113 vs 647–1041. Nothing in this release touches those paths.
+  - **Tests:** 1,347 of 1,347 (151 files, run file by file; 4 files needed a second run: two tests expected the old behaviour (landmark before street, the credit route's old size cap) and were updated, one did not allow for Jeebly's real sandbox answering "the keys were refused", and the version page had been built before this entry existed). New: 16 tests in `test/production-review-a.test.mts`, each failing before its fix. Not covered by a new test: the refund after a partial move (the amount sent to Stripe), checked by reading only.
+  - **Dependency audit:** `npm audit --omit=dev`: 0 vulnerabilities; no dependency added or changed.
   - **Security scan:** Checkmarx One could not run (its connection needs signing in again; the owner will reconnect it after these fixes). By hand: no new route; the credit route's new `key` is allow-listed and checked (8–80 letters, digits, dashes); every new refusal goes through `HttpError`, and each money or courier change is audited before it is reported.
 
 ## BUH-02.43.00 — 2026-11-13 07:56 UTC · [#76](https://github.com/cxsmtp/buh/pull/76)
