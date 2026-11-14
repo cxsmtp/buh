@@ -1,5 +1,24 @@
 # Changelog
 
+## BUH-02.47.00 — 2026-11-14 12:30 UTC · [#82](https://github.com/cxsmtp/buh/pull/82)
+
+The gaps the three review releases had left open, closed.
+
+- **Your password for the settings that move money.** Saving bank details, payment (Stripe) keys, SMS or email settings, restoring an earlier version of them, and inviting an accountant now need your password again, unless you signed in within the last 10 minutes.
+- **No Save button overwrites another device.** Couriers, Branding, Bank, SMS, phone check, the announcement bar and the theme now also refuse to save over a change made elsewhere, reload, and tell you. A setting the shop refuses as you leave Settings is shown on the tab you moved to.
+- **Stock of a removed size.** When an order is cancelled for a size its product no longer has, the pieces are not put back on sale under a size nobody can see: the order's history and the audit log say how many to count by hand.
+- **Phone-size buttons everywhere on an order.** The WhatsApp, bank transfer, invoice, payment-moved, history and photo-deal boxes have full-size buttons on a phone and stay compact on a computer.
+- **Arabic all the way through.** Every refusal a customer can see (field checks, limits, card start, phone check, order lookup, screenshot upload, chat) is in Arabic in the Arabic shop; chat notices are in the customer's language and the chat helper answers Arabic questions about delivery, payment, returns, care, offers and sizes from your own answers.
+- **Lighter photos on phones.** The shop serves each of your photos in the size the screen needs (240, 540 or 1080 px) instead of one large file; the copies are made on demand, kept in a rebuildable cache outside backups, and the original is served if a copy can't be made.
+- **Back closes Track Order and the photo sheets** like the bag and checkout; texts sent on WhatsApp use your shop's name; search-engine links and the product feed are only built from the shop's own address.
+- **Stronger sign-in and pages.** Passwords are stored six times harder to guess and still work after a rollback (your other devices are signed out once at your next sign-in). Pages built per request (the hub, pay, deal, product, tracking, terms) no longer allow inline scripts; the prebuilt home, category, gift and offline pages still do, because building them per request made the home page five times slower.
+- **Housekeeping.** Old technical records (Stripe notices, seen chat mail) are pruned daily; the shop's container log is size-limited; a restricted Stripe key that can read but not cancel no longer leaves card orders waiting forever; the hub warns when the shop is behind a proxy without `TRUST_PROXY=1`; Settings → Versions shows how to make the shop come back after a server restart until it has been seen to.
+- **Status.**
+  - **Benchmark:** BENCH_PLACEHOLDER
+  - **Tests:** TESTS_PLACEHOLDER
+  - **Dependency audit:** AUDIT_PLACEHOLDER
+  - **Security scan:** SCAN_PLACEHOLDER
+
 ## BUH-02.46.00 — 2026-11-14 10:00 UTC · [#81](https://github.com/cxsmtp/buh/pull/81)
 
 Third of three releases fixing what the production-readiness review found: the Admin Hub and the shop your customers see.
