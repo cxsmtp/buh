@@ -1,5 +1,22 @@
 # Changelog
 
+## BUH-02.44.00 — 2026-11-14 08:05 UTC · [#79](https://github.com/cxsmtp/buh/pull/79)
+
+First of three releases fixing what the production-readiness review found: money, checkout and shipping.
+
+- **Money stays right when plans change.** Correcting the amount of an order from a photo keeps the extra to collect, and is refused once the courier has been told what to collect. A payment moved onto another order comes back to the paid order if that order is cancelled, so it can be refunded or used again. A refund can no longer send back money that was already moved to another order. Moving a payment twice by a double tap moves it once. An extra to collect can't be added to a card order that is not paid yet, and a bulk order already paid in cash is not collected again by the courier.
+- **Checkout never thanks a customer for the wrong order.** If a customer starts paying one way and then confirms another way (or with other items), the shop makes a new order instead of showing "Thank you" for the first, unpaid one. A photo-deal order sent twice gets its order back instead of "this link has expired".
+- **Handed over in person, safely.** A booking the courier never answered counts as booked: the hub asks you to check the courier's portal first. Nothing is cancelled with Jeebly for a handover that would be refused anyway, and a booking that comes back after a handover is flagged.
+- **Courier bookings.** Cancelling an order whose tracking number you typed in for another courier now flags it to cancel in their portal. A cancelled order no longer shows the customer a tracking number. Jeebly gets whole parcels, kilograms rounded up, and the street before the landmark. Same-day delivery is not offered on Sundays, when nothing is collected.
+- **Unpaid bank transfers.** Sending out a bank-transfer order that is not marked paid now asks "send it out anyway?" and records your answer, on the status buttons and when booking the courier.
+- **The camera works for scanning.** The live shop's security headers blocked the camera, so "Scan an item" and "Scan to check" only worked by typing. The hub's own pages may now use it.
+- **No sample products in a real shop.** A new shop from the published image starts empty; the four sample products are only for demos and tests. **Your shop still has them (prod-01 to prod-04) on sale: remove them in Inventory if they are not yours to sell.**
+- **Status.**
+  - **Benchmark:** no failed requests in any round (main first, alternating, 3 rounds; other work was running on the same machine, so the spread is wide and equal for both). p95, branch vs main: home page 87–108 ms vs 93–188, courier 84–115 ms vs 94–162, catalogue 102–134 ms vs 114–207, gift page 81–120 ms vs 74–90. Requests per second: home 796–976 vs 737–944, catalogue 985–1113 vs 647–1041. Nothing in this release touches those paths.
+  - **Tests:** 1,347 of 1,347 (151 files, run file by file; 4 files needed a second run: two tests expected the old behaviour (landmark before street, the credit route's old size cap) and were updated, one did not allow for Jeebly's real sandbox answering "the keys were refused", and the version page had been built before this entry existed). New: 16 tests in `test/production-review-a.test.mts`, each failing before its fix. Not covered by a new test: the refund after a partial move (the amount sent to Stripe), checked by reading only.
+  - **Dependency audit:** `npm audit --omit=dev`: 0 vulnerabilities; no dependency added or changed.
+  - **Security scan:** Checkmarx One could not run (its connection needs signing in again; the owner will reconnect it after these fixes). By hand: no new route; the credit route's new `key` is allow-listed and checked (8–80 letters, digits, dashes); every new refusal goes through `HttpError`, and each money or courier change is audited before it is reported.
+
 ## BUH-02.43.00 — 2026-11-13 07:56 UTC · [#76](https://github.com/cxsmtp/buh/pull/76)
 
 - **QR stickers for the inventory.** Inventory → **QR stickers** makes a PDF of stickers, 40 to an A4 sheet (4 across, 10 down, 52.5 × 29.7 mm: the common ready-made sticker sheet): one per piece in stock (or one per design and size), for the whole inventory or one category, starting at any sticker on a part-used sheet. Each has a QR code, the stock code in large letters, the name and the size.

@@ -106,14 +106,19 @@ export function buildJeeblyPayload(order: Order, settings: CourierSettings['jeeb
   // less payments moved in from cancelled orders (src/lib/orderMoney.ts). Nothing due: prepaid.
   const dueFils = dueOnDeliveryFils(order);
   const cod = dueFils > 0;
-  const pieces = order.courier?.pieces || order.items.reduce((sum, item) => sum + item.quantity, 0) || 1;
+  // Whole pieces only (a typed 1.5 is 2 parcels), at least one.
+  const asked = Number(order.courier?.pieces);
+  const pieces = Math.max(1, Math.ceil(Number.isFinite(asked) && asked > 0 ? asked : order.items.reduce((sum, item) => sum + item.quantity, 0) || 1));
+  // Whole kilograms, rounded up from the grams (2.0000001 from arithmetic stays 2; 2.01 is 3).
+  const kg = Number(order.courier?.weightKg);
+  const weight = Math.max(1, Math.ceil(Math.round((Number.isFinite(kg) && kg > 0 ? kg : 1) * 1000) / 1000));
   return {
     // A same-day order (the customer paid for it) is booked Same day.
     delivery_type: order.deliveryOption === 'same_day' ? 'Same day' : 'Next day',
     load_type: 'Non-document',
     consignment_type: 'Forward',
     description: cut(order.items.map((i) => `${i.quantity}x ${i.title} (${i.profileName})`).join(', '), 250),
-    weight: Math.max(1, Math.ceil(Number(order.courier?.weightKg) || 1)),
+    weight,
     payment_type: cod ? 'COD' : 'PREPAID',
     // Dirhams from fils, so 0.1 + 0.2 never becomes 0.30000000000000004.
     ...(cod ? { cod_amount: dueFils / 100 } : {}),
@@ -137,8 +142,9 @@ export function buildJeeblyPayload(order: Order, settings: CourierSettings['jeeb
     destination_address_type: 'Normal',
     destination_address_mob_no_country_code: '+971',
     destination_address_mobile_number: jeeblyMobile(c.phone),
-    // Jeebly has no street field: the landmark carries the street too.
-    destination_address_landmark: cut([c.landmark, c.streetAddress].filter(Boolean).join(', ') || c.area),
+    // Jeebly has no street field: the landmark carries the street too, the street first (the field
+    // is cut at 120 characters, and a driver needs the street more than the landmark).
+    destination_address_landmark: cut([c.streetAddress, c.landmark].filter(Boolean).join(', ') || c.area),
   };
 }
 

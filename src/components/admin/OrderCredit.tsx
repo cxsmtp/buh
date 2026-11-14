@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useId, useState } from 'react';
+import React, { useId, useRef, useState } from 'react';
 import { ArrowRightLeft, Loader2 } from 'lucide-react';
 import type { Order } from '@/types';
 import { postJson } from '@/lib/apiClient';
@@ -29,6 +29,9 @@ export function OrderCredit({ order, orders, onOrderChanged }: { order: Order; o
   const [amount, setAmount] = useState('');
   const [busy, setBusy] = useState(false);
   const [problem, setProblem] = useState('');
+  // One key per move asked for (this order, that order, this amount): a second tap or a retry after
+  // a lost answer is the same move on the server, never a second one.
+  const attempt = useRef<{ what: string; key: string }>({ what: '', key: '' });
   const history = [
     ...(order.creditsOut ?? []).map((c) => `AED ${c.amount.toFixed(2)} moved to ${c.toOrderId}`),
     ...(order.creditsIn ?? []).map((c) => `AED ${c.amount.toFixed(2)} paid on ${c.fromOrderId} (comes off what is collected)`),
@@ -50,9 +53,12 @@ export function OrderCredit({ order, orders, onOrderChanged }: { order: Order; o
     if (!window.confirm(`Move AED ${value.toFixed(2)} paid on ${order.id} to ${target.id} (${target.customer.fullName})?${cancelNote} The courier then collects AED ${aed(dueOnDeliveryFils(target) - Math.round(value * 100))} for ${target.id}. No refund is made for this amount.`)) return;
     setBusy(true);
     setProblem('');
-    const { ok, data } = await postJson<{ from?: Order; to?: Order; message?: string }>(`/api/admin/orders/${encodeURIComponent(order.id)}/credit`, { toOrderId: target.id, amount: Math.round(value * 100) / 100 });
+    const what = `${target.id}|${Math.round(value * 100)}`;
+    if (attempt.current.what !== what) attempt.current = { what, key: crypto.randomUUID() };
+    const { ok, data } = await postJson<{ from?: Order; to?: Order; message?: string }>(`/api/admin/orders/${encodeURIComponent(order.id)}/credit`, { toOrderId: target.id, amount: Math.round(value * 100) / 100, key: attempt.current.key });
     setBusy(false);
     if (!ok || !data.from || !data.to) return setProblem(data.message || 'Not moved. Please try again.');
+    attempt.current = { what: '', key: '' };
     onOrderChanged(data.from);
     onOrderChanged(data.to);
     setShow(false);

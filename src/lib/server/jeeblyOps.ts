@@ -4,7 +4,7 @@ import { auditOrThrow } from './audit';
 import { noteJeeblyReply } from './courierCharges';
 import { redact } from './log';
 import { HttpError } from './http';
-import { courierStillBooked, getOrder, handOverOrder, noteCarrierCancel } from './orders';
+import { assertHandoverReady, checkHandoverBody, courierStillBooked, getOrder, handOverOrder, noteCarrierCancel } from './orders';
 import { rateLimit } from './rateLimit';
 import { getSettings } from './settings';
 
@@ -103,6 +103,14 @@ export async function cancelJeeblyBooking(order: Order, actor: string): Promise<
     noteCarrierCancel(order.id, actor, false, message);
     return { attempted: false, cancelled: false, message };
   }
+  // A tracking number the owner typed in (their own booking, often another courier): the shop can't
+  // cancel that from here, so the order is flagged until the owner cancels it in the courier's portal.
+  if (!jeeblyBooking(order) && c.enteredByHand && c.awbNumber && !c.simulated && !/cancelled with the carrier/i.test(c.status || '')) {
+    const message = `This order is booked with ${c.carrierName || (c.provider === 'jeebly' ? 'Jeebly' : 'the courier')} (AWB ${c.awbNumber}), entered by hand: the shop can't cancel that for you. Cancel it in their portal so it is not collected.`;
+    auditOrThrow('courier.cancel', { by: actor, orderId: order.id, awb: c.awbNumber, cancelled: false, reason: 'entered_by_hand' });
+    noteCarrierCancel(order.id, actor, false, message);
+    return { attempted: false, cancelled: false, message };
+  }
   if (!jeeblyBooking(order) || c.status === 'Cancelled with the carrier' || cancelling.has(order.id)) return none;
   cancelling.add(order.id);
   try {
@@ -163,8 +171,14 @@ export async function cancelJeeblyAfterRefund(orderId: string): Promise<void> {
  * and says so ({ courierCancelled: true }).
  */
 export async function handOverInPerson(id: string, body: Record<string, unknown>, actor: string): Promise<{ order: Order; changed: boolean }> {
+  // Everything that could refuse the handover is checked before the courier is told to cancel.
+  checkHandoverBody(body);
   const order = getOrder(id);
   if (order && body.cancelCourier === true && body.courierCancelled !== true && courierStillBooked(order) && order.status !== 'delivered' && order.status !== 'cancelled') {
+    assertHandoverReady(order);
+    if (!order.courier.awbNumber) {
+      throw new HttpError(409, `${id} was sent to the courier and no answer came back, so it may be booked: check the courier's portal (reference ${id}), cancel it there if it is, then confirm.`, {}, { code: 'courier_not_cancelled' });
+    }
     if (!jeeblyBooking(order)) {
       throw new HttpError(409, `${id} is booked with ${order.courier.carrierName || 'the courier'} (AWB ${order.courier.awbNumber}), which the shop can't cancel for you: cancel it in their portal, then confirm.`, {}, { code: 'courier_not_cancelled' });
     }

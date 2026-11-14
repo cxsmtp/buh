@@ -13,8 +13,10 @@ export const creditInFils = (o: Pick<Order, 'creditsIn'>) => (o.creditsIn ?? [])
 export const creditOutFils = (o: Pick<Order, 'creditsOut'>) => (o.creditsOut ?? []).reduce((s, c) => s + fils(c.amount), 0);
 
 /** What the courier collects from the customer. */
-export function dueOnDeliveryFils(o: Pick<Order, 'paymentMethod' | 'total' | 'extraCharge' | 'creditsIn'>): number {
-  const base = o.paymentMethod === 'cod' ? fils(o.total) : fils(o.extraCharge?.amount);
+export function dueOnDeliveryFils(o: Pick<Order, 'paymentMethod' | 'total' | 'extraCharge' | 'creditsIn'> & Partial<Pick<Order, 'bulk' | 'paymentStatus'>>): number {
+  // A bulk order already paid in cash (typed in by the owner as paid): the courier collects only an extra, like a prepaid order.
+  const cashPaid = o.paymentMethod === 'cod' && Boolean(o.bulk) && o.paymentStatus === 'paid';
+  const base = o.paymentMethod === 'cod' && !cashPaid ? fils(o.total) : fils(o.extraCharge?.amount);
   return Math.max(0, base - creditInFils(o));
 }
 

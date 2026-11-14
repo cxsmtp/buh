@@ -11,10 +11,10 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
   try {
     const session = await requireAdmin(req);
     const { id } = await params;
-    const body = await readJsonBody(req, 256);
-    allowFields(body, ['toOrderId', 'amount']);
+    const body = await readJsonBody(req, 512);
+    allowFields(body, ['toOrderId', 'amount', 'key']);
     if (!/^BUH-[A-Z0-9-]{4,40}$/.test(id) || !getOrder(id)) throw new HttpError(404, 'Order not found.');
-    return json(moveCredit(id, body.toOrderId, body.amount, session.email));
+    return json(moveCredit(id, body.toOrderId, body.amount, session.email, body.key));
   } catch (err) {
     return handleRouteError(err, 'admin/orders/credit');
   }

@@ -48,13 +48,15 @@ export function deliveryCheck(input: { emirate: string; area: string }, s: Deliv
   const serviceable = Boolean(emirate) && s.emirates.includes(emirate!) && !blocked;
   const [h, m] = s.sameDayCutoff.split(':').map(Number);
   const beforeCutoff = uaeMinutes(now) < h * 60 + m;
+  // The courier collects nothing on Sundays (a Sunday pickup is moved to Monday), so no same-day then.
+  const sunday = new Date(now + 4 * 60 * 60 * 1000).getUTCDay() === 0;
   const sameDayHere = Boolean(emirate) && s.sameDayEmirates.includes(emirate!);
   const sameDay = {
-    available: serviceable && s.sameDayEnabled && sameDayHere && beforeCutoff,
+    available: serviceable && s.sameDayEnabled && sameDayHere && beforeCutoff && !sunday,
     fee: s.sameDayFee,
     name: s.sameDayName || 'Same day',
     cutoff: s.sameDayCutoff,
-    reason: !s.sameDayEnabled ? undefined : !sameDayHere ? `Same-day delivery is for ${s.sameDayEmirates.join(', ')}.` : !beforeCutoff ? `Same-day delivery is for orders before ${s.sameDayCutoff}; tomorrow is the earliest now.` : undefined,
+    reason: !s.sameDayEnabled ? undefined : !sameDayHere ? `Same-day delivery is for ${s.sameDayEmirates.join(', ')}.` : sunday ? 'Same-day delivery is not offered on Sundays; Monday is the earliest.' : !beforeCutoff ? `Same-day delivery is for orders before ${s.sameDayCutoff}; tomorrow is the earliest now.` : undefined,
   };
   return {
     serviceable,
