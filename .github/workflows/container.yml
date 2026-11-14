@@ -52,6 +52,12 @@ jobs:
         with:
           persist-credentials: false
 
+      # First, with the runner's own Node: the browser installer stalls after its download on
+      # Node 26 (it sat there until the job timed out). The same Playwright version as the lockfile.
+      - name: Browser for the end-to-end tests
+        timeout-minutes: 10
+        run: npx --yes "playwright@$(node -p "require('./package-lock.json').packages['node_modules/playwright'].version")" install --with-deps chromium
+
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
           node-version: 26
@@ -65,9 +71,6 @@ jobs:
 
       - name: Build
         run: npm run build
-
-      - name: Browser for the end-to-end tests
-        run: npx playwright install --with-deps chromium
 
       - name: All tests (a failed file is run once more; failing twice fails the job)
         run: node scripts/ci-test.mjs
