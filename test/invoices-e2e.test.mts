@@ -127,6 +127,13 @@ test('at 375 and 1280 px: the optional invoice fields; "Make invoice (PDF)", "Op
     if (process.env.SHOTS) await fields.screenshot({ path: `${process.env.SHOTS}/invoice-fields-${width}.png` });
     // Orders: the confirmed order's invoice.
     await openAdminSection(hp, /^Orders/);
+    // The fields save by themselves a moment after typing (and on leaving Settings): the invoice is
+    // made once they are saved, or "Regenerate" below would rightly find something changed.
+    await hp.waitForFunction(
+      async (licence) => JSON.stringify(await fetch('/api/admin/settings', { credentials: 'same-origin' }).then((r) => r.json())).includes(licence),
+      `TL-${width}`,
+      { polling: 300, timeout: 20_000 }
+    );
     const box = hp.locator('[data-testid="order-invoice"]').filter({ hasText: 'not made yet' }).first();
     await box.waitFor();
     const make = box.getByRole('button', { name: 'Make invoice (PDF)' });
