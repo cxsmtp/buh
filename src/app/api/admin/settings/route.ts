@@ -4,6 +4,9 @@ import { adminView, behindProxy, phoneCheckNoticeDue, settingsUpdatedAt, type Se
 
 const VERSIONED: SettingsKey[] = ['brand', 'bank', 'courier', 'sms', 'catalog', 'store', 'theme', 'email', 'assistant', 'delivery', 'payments', 'phoneCheck', 'ai', 'aiPrompt', 'aiPictures', 'backups'];
 
+/** A group as the hub edits it, with when it was last saved (a form sends that back with its save). */
+const view = <K extends SettingsKey>(key: K) => ({ ...adminView(key), updatedAt: settingsUpdatedAt(key) });
+
 /** All settings for the admin hub; secrets come back blank, with a "saved" flag. */
 export async function GET(req: Request) {
   try {
@@ -13,21 +16,21 @@ export async function GET(req: Request) {
       return json({ versions: Object.fromEntries(VERSIONED.map((k) => [k, settingsUpdatedAt(k)])) });
     }
     return json({
-      brand: adminView('brand'),
-      bank: adminView('bank'),
-      courier: adminView('courier'),
-      sms: adminView('sms'),
-      catalog: adminView('catalog'),
-      store: adminView('store'),
-      theme: adminView('theme'),
-      email: adminView('email'),
-      assistant: adminView('assistant'),
-      delivery: adminView('delivery'),
-      payments: adminView('payments'),
-      phoneCheck: adminView('phoneCheck'),
-      ai: adminView('ai'),
-      aiPrompt: adminView('aiPrompt'),
-      aiPictures: adminView('aiPictures'),
+      brand: view('brand'),
+      bank: view('bank'),
+      courier: view('courier'),
+      sms: view('sms'),
+      catalog: view('catalog'),
+      store: view('store'),
+      theme: view('theme'),
+      email: view('email'),
+      assistant: view('assistant'),
+      delivery: view('delivery'),
+      payments: view('payments'),
+      phoneCheck: view('phoneCheck'),
+      ai: view('ai'),
+      aiPrompt: view('aiPrompt'),
+      aiPictures: view('aiPictures'),
       // Settings → Phone check's warning (no TRUST_PROXY: stricter limits) and the hub's one-time notice.
       phoneCheckInfo: { behindProxy: behindProxy(), whatsappNotice: phoneCheckNoticeDue() },
     });

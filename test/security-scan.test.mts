@@ -52,12 +52,12 @@ test('containers: patched bases, pinned by digest; no end-of-life Node, old Cadd
     assert.match(l, /@sha256:[0-9a-f]{64}/, `${f}: ${l}`);
   }
   assert.deepEqual(fromLines('Dockerfile')[0].split(/\s+/)[1].split('@')[0], 'node:26.13.1-alpine3.24');
-  assert.match(read('deploy/proxy/Dockerfile'), /^FROM caddy:2\.11\.8-alpine@sha256:/m);
+  assert.match(read('deploy/proxy/Dockerfile'), /^FROM caddy:2\.11\.9-alpine@sha256:/m);
   const compose = read('docker-compose.yml');
-  assert.match(compose, /image: caddy:2\.11\.8-alpine@sha256:/);
+  assert.match(compose, /image: caddy:2\.11\.9-alpine@sha256:/);
   assert.match(compose, /image: docker:29\.9\.3-cli@sha256:/);
   for (const f of [...files, 'docker-compose.yml', 'deploy/ci/single-container-test.sh', '.github/workflows/zero-downtime.yml']) {
-    assert.doesNotMatch(read(f), /node:20|node:24\.|node:26\.13\.0|caddy:2\.8\.|caddy:2\.11\.7|docker:28\.|docker:29\.9\.1|docker:29\.9\.2|alpine:3\.24\.2|d8542f48d34a9cf4/, f);
+    assert.doesNotMatch(read(f), /node:20|node:24\.|node:26\.13\.0|caddy:2\.8\.|caddy:2\.11\.7|caddy:2\.11\.8|docker:28\.|docker:29\.9\.1|docker:29\.9\.2|alpine:3\.24\.2|d8542f48d34a9cf4/, f);
   }
 });
 
@@ -73,7 +73,7 @@ test('containers: what the images do not need is not in them', () => {
   assert.match(updater, /^COPY --from=cli \/usr\/local\/bin\/docker \/usr\/local\/bin\/docker$/m);
   assert.doesNotMatch(updater, /cli-plugins/);
   assert.match(read('deploy/proxy/Dockerfile'), /apk del --no-cache --no-network libcap-setcap curl/);
-  // Binding 80 and 443 as a non-root user: the one capability, on the binary (2.11.8's image no longer sets it).
+  // Binding 80 and 443 as a non-root user: the one capability, on the binary (the image no longer sets it since 2.11.8).
   assert.match(read('deploy/proxy/Dockerfile'), /setcap cap_net_bind_service=\+ep \/usr\/bin\/caddy/);
 });
 

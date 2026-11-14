@@ -47,7 +47,8 @@ export async function sendJson<T = Record<string, unknown>>(method: 'GET' | 'POS
     return {
       ok: false,
       status: 0,
-      data: { message: 'Could not reach the server. Check your connection and try again.' } as T,
+      // The code lets the shop say it in the customer's language.
+      data: { code: 'offline', message: 'Could not reach the server. Check your connection and try again.' } as T,
     };
   }
 }

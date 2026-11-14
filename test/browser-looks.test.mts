@@ -47,7 +47,7 @@ before(async () => {
   const first = (login.headers.get('set-cookie') || '').split(';')[0];
   const changed = await fetch(`${server.base}/api/admin/password`, { method: 'POST', headers: { ...j, cookie: first }, body: JSON.stringify({ currentPassword: once, newPassword: OWNER_PASSWORD }) });
   cookie = (changed.headers.get('set-cookie') || '').split(';')[0];
-  newer = await prepareNewerScreens(server, cookie);
+  newer = await prepareNewerScreens(server, cookie, OWNER_PASSWORD);
 });
 after(async () => {
   await browser?.close();

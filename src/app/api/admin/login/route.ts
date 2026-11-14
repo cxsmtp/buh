@@ -16,7 +16,7 @@ export async function POST(req: Request) {
     const password = str(body.password, 'Password', 256, { trim: false });
 
     try {
-      const result = await signIn(email, password, { ip });
+      const result = await signIn(email, password, { ip, upgradeHash: true });
       // An accountant's sign-in is in the audit log before it counts (no entry, no session).
       if (result.role === 'accountant') auditOrThrow('accountant.sign_in', { by: result.email, ip });
       else audit('admin.sign_in', { email: result.email, ip });

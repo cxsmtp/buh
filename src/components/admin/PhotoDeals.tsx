@@ -191,7 +191,7 @@ export function PhotoDeals({ limit, onShowAll }: { limit?: number; onShowAll?: (
 
   const field = 'w-full min-w-0 px-3 py-2 min-h-11 rounded-xl border border-line-strong bg-surface text-ink text-sm focus:outline-none focus:ring-2 focus:ring-gold';
   const pick = 'min-h-11 rounded-xl border border-ink bg-surface text-ink text-sm font-semibold flex items-center justify-center gap-2 cursor-pointer focus-within:ring-2 focus-within:ring-gold';
-  const small = 'min-h-9 px-2.5 rounded-lg border border-line-strong bg-surface text-ink text-xs font-semibold inline-flex items-center gap-1.5 focus:outline-none focus-visible:ring-2 focus-visible:ring-gold';
+  const small = 'min-h-11 md:min-h-9 px-2.5 rounded-lg border border-line-strong bg-surface text-ink text-xs font-semibold inline-flex items-center gap-1.5 focus:outline-none focus-visible:ring-2 focus-visible:ring-gold';
   const shareButtons = (d: Deal) =>
     d.url && (
       <>
@@ -218,13 +218,13 @@ export function PhotoDeals({ limit, onShowAll }: { limit?: number; onShowAll?: (
 
       {page && (
         <details className="rounded-xl border border-line bg-ivory p-3 text-xs" data-testid="photo-page-settings">
-          <summary className="min-h-9 flex items-center cursor-pointer font-semibold text-ink">
+          <summary className="min-h-11 md:min-h-9 flex items-center cursor-pointer font-semibold text-ink">
             Customer upload page: {page.photoOrders ? 'on' : 'off'}
           </summary>
           <div className="mt-2 space-y-2">
             <p className="text-ink-soft">The customer adds their own photos and the amount you agreed; you check it with &ldquo;Confirm amount&rdquo; on the order.</p>
-            <label className="flex items-start gap-2">
-              <input type="checkbox" className="mt-0.5" checked={page.photoOrders} onChange={(e) => void savePage({ photoOrders: e.target.checked })} />
+            <label className="flex items-center gap-2 min-h-11 md:min-h-0">
+              <input type="checkbox" className="shrink-0" checked={page.photoOrders} onChange={(e) => void savePage({ photoOrders: e.target.checked })} />
               <span>Take orders from the customer&rsquo;s own photos {!page.whatsappNumber && <span className="text-ink-muted">(set the shop&rsquo;s WhatsApp in Settings first)</span>}</span>
             </label>
             {page.photoOrders && (
@@ -235,12 +235,12 @@ export function PhotoDeals({ limit, onShowAll }: { limit?: number; onShowAll?: (
                     <Copy className="w-4 h-4" aria-hidden="true" /> Copy link
                   </button>
                 </div>
-                <label className="flex items-start gap-2">
-                  <input type="checkbox" className="mt-0.5" checked={page.photoOrdersOnHome} onChange={(e) => void savePage({ photoOrdersOnHome: e.target.checked })} />
+                <label className="flex items-center gap-2 min-h-11 md:min-h-0">
+                  <input type="checkbox" className="shrink-0" checked={page.photoOrdersOnHome} onChange={(e) => void savePage({ photoOrdersOnHome: e.target.checked })} />
                   <span>Show its banner on the home page</span>
                 </label>
-                <label className="flex items-start gap-2">
-                  <input type="checkbox" className="mt-0.5" checked={page.photoOrdersCard !== false} onChange={(e) => void savePage({ photoOrdersCard: e.target.checked })} />
+                <label className="flex items-center gap-2 min-h-11 md:min-h-0">
+                  <input type="checkbox" className="shrink-0" checked={page.photoOrdersCard !== false} onChange={(e) => void savePage({ photoOrdersCard: e.target.checked })} />
                   <span>Card payment on this page <span className="text-ink-muted">(off: cash on delivery or bank transfer, so you check the amount first)</span></span>
                 </label>
               </>
@@ -276,7 +276,7 @@ export function PhotoDeals({ limit, onShowAll }: { limit?: number; onShowAll?: (
                     <li key={`kept-${n}`} className="relative w-20">
                       {/* eslint-disable-next-line @next/next/no-img-element */}
                       <img src={`/api/admin/deals/${encodeURIComponent(editing.id)}/photos/${n}`} alt={`Picture ${n}`} className="w-20 h-20 object-cover rounded-xl border border-line" />
-                      <button type="button" onClick={() => setKeep((list) => list.filter((x) => x !== n))} className="absolute -top-2 -right-2 w-8 h-8 rounded-full bg-surface border border-line-strong flex items-center justify-center" aria-label={`Remove picture ${n}`}>
+                      <button type="button" onClick={() => setKeep((list) => list.filter((x) => x !== n))} className="absolute -top-2 -right-2 w-11 h-11 md:w-8 md:h-8 rounded-full bg-surface border border-line-strong flex items-center justify-center" aria-label={`Remove picture ${n}`}>
                         <X className="w-4 h-4" aria-hidden="true" />
                       </button>
                     </li>
@@ -285,7 +285,7 @@ export function PhotoDeals({ limit, onShowAll }: { limit?: number; onShowAll?: (
                   <li key={i} className="relative w-20">
                     {/* eslint-disable-next-line @next/next/no-img-element */}
                     <img src={src} alt={`New picture ${i + 1}`} className="w-20 h-20 object-cover rounded-xl border border-line" />
-                    <button type="button" onClick={() => setPhotos((list) => list.filter((_, j) => j !== i))} className="absolute -top-2 -right-2 w-8 h-8 rounded-full bg-surface border border-line-strong flex items-center justify-center" aria-label={`Remove new picture ${i + 1}`}>
+                    <button type="button" onClick={() => setPhotos((list) => list.filter((_, j) => j !== i))} className="absolute -top-2 -right-2 w-11 h-11 md:w-8 md:h-8 rounded-full bg-surface border border-line-strong flex items-center justify-center" aria-label={`Remove new picture ${i + 1}`}>
                       <X className="w-4 h-4" aria-hidden="true" />
                     </button>
                   </li>
@@ -393,7 +393,7 @@ export function PhotoDeals({ limit, onShowAll }: { limit?: number; onShowAll?: (
         </ul>
       )}
       {limit !== undefined && deals && deals.length > limit && onShowAll && (
-        <button type="button" onClick={onShowAll} data-testid="deal-see-all" className="min-h-10 text-xs font-semibold text-ink underline focus:outline-none focus-visible:ring-2 focus-visible:ring-gold rounded">
+        <button type="button" onClick={onShowAll} data-testid="deal-see-all" className="min-h-11 md:min-h-10 inline-flex items-center text-xs font-semibold text-ink underline focus:outline-none focus-visible:ring-2 focus-visible:ring-gold rounded">
           See all {deals.length} photo deal links in Photo orders
         </button>
       )}

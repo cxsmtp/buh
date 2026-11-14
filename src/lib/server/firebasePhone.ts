@@ -24,10 +24,10 @@ export async function confirmFirebasePhone(
   } catch (err) {
     if (err instanceof FirebaseTokenError) {
       logEvent('warn', 'otp_firebase_refused', { reason: err.reason });
-      throw new HttpError(401, 'We could not confirm your number. Please request a new code.');
+      throw new HttpError(401, 'We could not confirm your number. Please request a new code.', {}, { code: 'otp_unconfirmed' });
     }
     logEvent('error', 'otp_firebase_certs_unavailable', { error: (err as Error).message });
-    throw new HttpError(503, `Phone verification is not available right now. Please try again shortly, or email ${supportEmail()} to order.`);
+    throw new HttpError(503, `Phone verification is not available right now. Please try again shortly, or email ${supportEmail()} to order.`, {}, { code: 'otp_unavailable', email: supportEmail() });
   }
 
   // Firebase can verify any country; checkout only takes UAE mobiles (throws a 400 the customer can act on).

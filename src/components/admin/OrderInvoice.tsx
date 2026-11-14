@@ -46,7 +46,7 @@ export function OrderInvoice({ order, shopName }: { order: Order; shopName?: str
 
   const link = current ? current.pdfUrl ?? (typeof window === 'undefined' ? undefined : `${window.location.origin}${current.pdfPath}`) : undefined;
   const wa = current && link ? waMeLink(order.customer.phone, `Dear ${safeFirstName(order.customer.fullName) || 'customer'}, here is your invoice ${current.number} for order ${order.id}${shopName ? ` from ${shopName}` : ''}: ${link}`) : null;
-  const button = 'min-h-8 px-2 rounded-lg text-[11px] font-semibold inline-flex items-center justify-center gap-1.5 disabled:opacity-50 focus:outline-none focus-visible:ring-2 focus-visible:ring-gold';
+  const button = 'min-h-11 md:min-h-8 px-2 rounded-lg text-[11px] font-semibold inline-flex items-center justify-center gap-1.5 disabled:opacity-50 focus:outline-none focus-visible:ring-2 focus-visible:ring-gold';
 
   return (
     <div data-testid="order-invoice" className="rounded-xl border border-line bg-ivory px-2.5 py-1.5 text-[11px] min-w-0 flex flex-wrap items-center justify-between gap-x-2 gap-y-1">

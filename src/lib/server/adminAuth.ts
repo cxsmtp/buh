@@ -4,7 +4,7 @@ import { dataFile, writePrivateFile } from './dataDir';
 import { HttpError } from './http';
 import { logEvent } from './log';
 import { _resetServerSecret, serverSecret } from './secrets';
-import { dummyPasswordHash, generatePassword, hashPassword, verifyPassword } from './password';
+import { dummyPasswordHash, generatePassword, hashPassword, passwordNeedsRehash, verifyPassword } from './password';
 
 /**
  * Server-side admin authentication.
@@ -400,7 +400,7 @@ function clearAddressFailures(emailInput: string, ip: string | null | undefined)
  * sign-in is paused for this email (from this address, or everywhere) the
  * password is not checked: everyone gets the same 429.
  */
-export async function signIn(emailInput: string, password: string, options: { ip?: string | null; now?: number } = {}) {
+export async function signIn(emailInput: string, password: string, options: { ip?: string | null; now?: number; upgradeHash?: boolean } = {}) {
   const now = options.now ?? Date.now();
   const account = await loadAccount();
   const email = emailInput.trim().toLowerCase();
@@ -420,6 +420,31 @@ export async function signIn(emailInput: string, password: string, options: { ip
   }
 
   clearAddressFailures(email, options.ip);
+  // The password is right and in hand: a hash made at an older, cheaper cost is replaced by one
+  // at today's (src/lib/server/password.ts). Sessions are tied to the stored hash, so other
+  // devices signed in with the old one sign in again, once. Never a reason to refuse this sign-in.
+  // Only at a real sign-in (upgradeHash), which hands back a new session: a password re-typed to
+  // confirm an action (confirmOwner) keeps the session it was typed in.
+  try {
+    if (!options.upgradeHash) {
+      // nothing to do
+    } else if (staff && passwordNeedsRehash(staff.passwordHash)) {
+      const fresh = await hashPassword(password);
+      if ((await import('./staffAuth')).upgradeStaffPasswordHash(staff.id, staff.passwordHash, fresh)) staff.passwordHash = fresh;
+    } else if (!staff && !account.managedByEnv && passwordNeedsRehash(account.passwordHash)) {
+      const before = account.passwordHash;
+      const fresh = await hashPassword(password);
+      // Only if nothing else changed the password meanwhile (a reset, the other copy of the shop).
+      const current = await loadAccount();
+      if (current === account && account.passwordHash === before) {
+        account.passwordHash = fresh;
+        persist(account);
+        logEvent('info', 'admin_password_hash_upgraded', {});
+      }
+    }
+  } catch (err) {
+    logEvent('warn', 'admin_password_hash_upgrade_failed', { error: err instanceof Error ? err.message : String(err) });
+  }
   if (staff) {
     const { staffSessionToken } = await import('./staffAuth');
     return { token: staffSessionToken(staff, now), mustChangePassword: false, email: staff.email, role: 'accountant' as AdminRole };
@@ -487,6 +512,41 @@ export async function confirmOwner(session: AdminSession, currentPassword: strin
     await signIn(account.email, currentPassword, { ip: options.ip });
   } catch (err) {
     if (err instanceof HttpError && err.status === 401) throw new HttpError(400, 'That is not your current password.');
+    throw err;
+  }
+}
+
+/** A sign-in with the password or a passkey in the last 10 minutes: the owner has just proved it's them. */
+export function isFreshSignIn(session: AdminSession, now = Date.now()): boolean {
+  return (session.method === 'password' || session.method === 'passkey') && now >= session.issuedAt && now - session.issuedAt <= FRESH_PASSKEY_MS;
+}
+
+/** The settings groups that decide where money and messages go: saving one needs the owner again. */
+export const CONFIRMED_SETTINGS: readonly string[] = ['bank', 'payments', 'sms', 'email'];
+
+/**
+ * Before a high-impact change (the bank account, payment keys, the SMS gateway, the mail server,
+ * inviting an accountant): a live session is not enough. The owner signed in within the last 10
+ * minutes (password or passkey), or types the current password with the change. A typed password
+ * is a sign-in like any other (the same pauses after wrong ones): its new session comes back as
+ * `token` for the route to set, so the hub does not ask again for the next 10 minutes.
+ *
+ * Refusals are 400s (the owner is still signed in) with a code the hub reads: `owner_confirm`
+ * (ask for the password), `owner_confirm_wrong` (ask again).
+ */
+export async function confirmOwnerForChange(session: AdminSession, currentPassword: unknown, options: { ip?: string | null } = {}): Promise<{ token?: string }> {
+  if (currentPassword !== undefined && typeof currentPassword !== 'string') throw new HttpError(400, 'The password must be text.');
+  if (!currentPassword) {
+    if (isFreshSignIn(session)) return {};
+    throw new HttpError(400, 'Type your hub password to make this change.', {}, { code: 'owner_confirm' });
+  }
+  if (currentPassword.length > 256) throw new HttpError(400, 'That is not your current password.', {}, { code: 'owner_confirm_wrong' });
+  const account = await loadAccount();
+  try {
+    const signedIn = await signIn(account.email, currentPassword, { ip: options.ip });
+    return { token: signedIn.token };
+  } catch (err) {
+    if (err instanceof HttpError && err.status === 401) throw new HttpError(400, 'That is not your current password.', {}, { code: 'owner_confirm_wrong' });
     throw err;
   }
 }

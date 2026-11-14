@@ -1,9 +1,10 @@
 'use client';
 
-import React, { useState } from 'react';
+import React, { useRef, useState } from 'react';
 import { Loader2, Plus, Trash2 } from 'lucide-react';
 import type { BrandSettings } from '@/types';
 import { MarqueeStrip } from '@/components/common/MarqueeBar';
+import type { FormVersion } from './useAutoSave';
 import { DEFAULT_MARQUEE, MARQUEE_MAX_CHARS, MARQUEE_MAX_ITEMS, marqueeItems, marqueeProblem, stripEmoji } from '@/lib/marquee';
 
 const field = 'w-full min-w-0 px-3 py-2 rounded-xl border border-line-strong bg-surface text-ink text-sm focus:outline-none focus:ring-2 focus:ring-gold';
@@ -13,7 +14,9 @@ const field = 'w-full min-w-0 px-3 py-2 rounded-xl border border-line-strong bg-
  * three short lines (60 characters each), shown calmly: one line stays still in the middle, more
  * drift slowly. The preview below is the bar as customers see it.
  */
-export function MarqueeSettingsCard({ brand, onSave }: { brand: BrandSettings; onSave: (b: BrandSettings) => Promise<string | null> }) {
+export function MarqueeSettingsCard({ brand, updatedAt, onSave }: { brand: BrandSettings; /** When the branding was last saved, as loaded with these lines. */ updatedAt?: string | null; onSave: (b: BrandSettings, version?: FormVersion) => Promise<string | null> }) {
+  // The version of the branding this form was loaded from: sent with Save, so a change made on another device is not overwritten.
+  const version = useRef(updatedAt);
   const [enabled, setEnabled] = useState(brand.marquee?.enabled ?? true);
   const [lines, setLines] = useState<string[]>(() => {
     const now = marqueeItems(brand.marquee?.messages);
@@ -30,7 +33,7 @@ export function MarqueeSettingsCard({ brand, onSave }: { brand: BrandSettings; o
     if (problem) return;
     setSaving(true);
     setStatus(null);
-    const error = await onSave({ ...brand, marquee: { ...brand.marquee, enabled, messages: clean } });
+    const error = await onSave({ ...brand, marquee: { ...brand.marquee, enabled, messages: clean } }, version);
     setSaving(false);
     setStatus(error ? { ok: false, text: error } : { ok: true, text: 'Saved. The shop shows it now.' });
   };

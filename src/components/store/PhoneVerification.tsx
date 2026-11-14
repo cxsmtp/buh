@@ -1,12 +1,14 @@
 'use client';
 
+import { helloShop, useShop } from '@/lib/client/shop';
 import React, { useEffect, useRef, useState } from 'react';
 import { BadgeCheck, Globe2, Loader2, Mail, MessageSquareText, Pencil, RotateCcw, ShieldCheck, Smartphone } from 'lucide-react';
 import type { ConfirmationResult } from 'firebase/auth';
 import { postJson } from '@/lib/apiClient';
 import { confirmFirebaseCode, firebaseErrorMessage, preloadFirebasePhone, sendFirebaseCode } from '@/lib/firebasePhoneClient';
 import type { PhoneVerificationConfig } from '@/types';
-import { useT, type Words } from '@/lib/i18n';
+import { useLocale, useT, type Words } from '@/lib/i18n';
+import { serverSaid } from './serverWords';
 
 /** Shown until the shop's settings load (the real address comes from the server at runtime). */
 export const DEFAULT_SUPPORT_EMAIL = 'orders@beautifuluaehome.com';
@@ -109,7 +111,8 @@ interface PhoneVerificationProps {
   whatsapp?: boolean;
 }
 
-type VerifyResponse = { valid?: boolean; message?: string; verificationToken?: string };
+/** local: the message was made on this page (already in the customer's language), not by the server. */
+type VerifyResponse = { valid?: boolean; message?: string; verificationToken?: string; local?: boolean };
 
 export const PhoneVerification: React.FC<PhoneVerificationProps> = ({
   phone,
@@ -123,6 +126,8 @@ export const PhoneVerification: React.FC<PhoneVerificationProps> = ({
   whatsapp = false,
 }) => {
   const tr = useT(WORDS);
+  const { shopName } = useShop();
+  const { locale } = useLocale();
   const codeOptional = cardNoCode || whatsapp;
   const firebase = verification?.method === 'firebase' ? verification.firebase : undefined;
   // Firebase: the pending sign-in for the code that was sent, and where its invisible reCAPTCHA renders.
@@ -180,7 +185,7 @@ export const PhoneVerification: React.FC<PhoneVerificationProps> = ({
         confirmation.current = await sendFirebaseCode(firebase, info.e164, recaptchaHost.current);
       } catch (err) {
         setSending(false);
-        setError(firebaseErrorMessage(err, supportEmail));
+        setError(firebaseErrorMessage(err, supportEmail, locale));
         return;
       }
       setSending(false);
@@ -212,13 +217,13 @@ export const PhoneVerification: React.FC<PhoneVerificationProps> = ({
       setTimeout(() => boxes.current[0]?.focus(), 50);
     } else {
       if (status === 429) {
-        const seconds = Number(String(data.message).match(/(\d+) seconds/)?.[1]);
+        const seconds = Number((data as { retryAfterSec?: unknown }).retryAfterSec) || Number(String(data.message).match(/(\d+) seconds/)?.[1]);
         if (seconds) {
           setCooldown(seconds);
           setCooldownFor(info.e164);
         }
       }
-      setError(data.message || tr('sendFailed'));
+      setError(serverSaid({ status, data }, locale, tr('sendFailed')));
     }
   };
 
@@ -235,7 +240,8 @@ export const PhoneVerification: React.FC<PhoneVerificationProps> = ({
       setNotice('');
       setSandboxCode('');
     } else {
-      setError(data.message || tr('noMatch'));
+      // A message made here (Firebase's) is already in the customer's language; the server's is said from its code.
+      setError(data.local ? data.message || tr('noMatch') : serverSaid({ data }, locale, tr('noMatch')));
       resetCode();
       setTimeout(() => boxes.current[0]?.focus(), 50);
     }
@@ -243,12 +249,12 @@ export const PhoneVerification: React.FC<PhoneVerificationProps> = ({
 
   /** Firebase checks the code; our server then checks Firebase's signed answer and issues the phone token. */
   const verifyWithFirebase = async (code: string): Promise<VerifyResponse> => {
-    if (!firebase || !confirmation.current) return { valid: false, message: tr('tapResend') };
+    if (!firebase || !confirmation.current) return { valid: false, local: true, message: tr('tapResend') };
     let idToken: string;
     try {
       idToken = await confirmFirebaseCode(firebase, confirmation.current, code);
     } catch (err) {
-      return { valid: false, message: firebaseErrorMessage(err, supportEmail) };
+      return { valid: false, local: true, message: firebaseErrorMessage(err, supportEmail, locale) };
     }
     confirmation.current = null; // used: a new code is needed for another try
     return (await postJson<VerifyResponse>('/api/otp/firebase', { idToken })).data;
@@ -306,7 +312,7 @@ export const PhoneVerification: React.FC<PhoneVerificationProps> = ({
   }
 
   const mailto = `mailto:${supportEmail}?subject=${encodeURIComponent('International order request')}&body=${encodeURIComponent(
-    `Hello Beautiful UAE Home,\n\nI would like to order:\n${orderSummary}\n\nMy phone number: ${phone}\nDelivery country/city: \n\nThank you!`
+    `${helloShop(shopName)},\n\nI would like to order:\n${orderSummary}\n\nMy phone number: ${phone}\nDelivery country/city: \n\nThank you!`
   )}`;
 
   return (

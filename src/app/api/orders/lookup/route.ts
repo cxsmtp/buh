@@ -17,7 +17,7 @@ export async function POST(req: Request) {
     if (body.token !== undefined) {
       allowFields(body, ['token']);
       const tracked = lookupTracked(body.token);
-      if (!tracked) return json({ found: false, message: 'This tracking link is not valid. Please check it, or use your order number and phone number.' }, 404);
+      if (!tracked) return json({ found: false, code: 'track_link_invalid', message: 'This tracking link is not valid. Please check it, or use your order number and phone number.' }, 404);
       const full = getOrder(tracked.id);
       const live = full ? await customerTracking(full).catch(() => undefined) : undefined;
       return json({ found: true, order: live ? { ...tracked, courier: { ...tracked.courier, live } } : tracked });
@@ -26,10 +26,10 @@ export async function POST(req: Request) {
     const phone = normalizePhoneNumber(str(body.phone, 'Phone number', 32));
     // Per order number too, so spreading guesses over addresses does not help.
     if (!rateLimit(`lookup:order:${orderId.toUpperCase()}`, 10, 15 * 60 * 1000).ok) {
-      return json({ found: false, message: 'Too many lookups for this order. Please wait a few minutes.' }, 429);
+      return json({ found: false, code: 'rate_limited', message: 'Too many lookups for this order. Please wait a few minutes.' }, 429);
     }
     const order = lookupOrder(orderId, phone);
-    if (!order) return json({ found: false, message: 'No order matches that order number and phone number.' }, 404);
+    if (!order) return json({ found: false, code: 'order_no_match', message: 'No order matches that order number and phone number.' }, 404);
     // A real Jeebly booking: its live status and events (kept 5 minutes; never phones, rider, proof or signature).
     const full = getOrder(order.id);
     const live = full ? await customerTracking(full).catch(() => undefined) : undefined;

@@ -103,13 +103,13 @@ type Obj = Record<string, unknown>;
 
 function text(v: unknown, field: string, max: number, { required = false } = {}): string {
   if (v === undefined || v === null || v === '') {
-    if (required) throw new HttpError(400, `${field} is required.`);
+    if (required) throw new HttpError(400, `${field} is required.`, {}, { code: 'field_required', field });
     return '';
   }
-  if (typeof v !== 'string') throw new HttpError(400, `${field} must be text.`);
+  if (typeof v !== 'string') throw new HttpError(400, `${field} must be text.`, {}, { code: 'field_text', field });
   const s = v.replace(/[\u0000-\u001f\u007f]+/g, ' ').trim();
-  if (required && !s) throw new HttpError(400, `${field} is required.`);
-  if (s.length > max) throw new HttpError(400, `${field} is too long.`);
+  if (required && !s) throw new HttpError(400, `${field} is required.`, {}, { code: 'field_required', field });
+  if (s.length > max) throw new HttpError(400, `${field} is too long.`, {}, { code: 'field_too_long', field });
   return s;
 }
 
@@ -522,7 +522,7 @@ function sameCheckout(order: Order, body: Obj, paymentMethod: string): boolean {
 }
 
 export function placeOrder(input: unknown, context: PlaceOrderContext = {}): PlaceOrderResult {
-  if (!input || typeof input !== 'object' || Array.isArray(input)) throw new HttpError(400, 'Order must be an object.');
+  if (!input || typeof input !== 'object' || Array.isArray(input)) throw new HttpError(400, 'Order must be an object.', {}, { code: 'bad_request' });
   const body = input as Obj;
 
   const paymentMethod = text(body.paymentMethod, 'Payment method', 20, { required: true });
@@ -531,11 +531,11 @@ export function placeOrder(input: unknown, context: PlaceOrderContext = {}): Pla
   // Paid by card, the customer pays the amount they typed (with the card fee); the owner can't change it afterwards.
   // A photo deal (the owner's own link, photoDeals.ts): the owner's pictures and fixed price, the
   // payments the owner allowed; the customer adds the address. Never with the customer's own photos.
-  if (body.deal !== undefined && body.photo !== undefined) throw new HttpError(400, 'An order is from a deal link or from your photo, not both.');
+  if (body.deal !== undefined && body.photo !== undefined) throw new HttpError(400, 'An order is from a deal link or from your photo, not both.', {}, { code: 'bad_request' });
   // The same checkout sent again (double tap, network retry) is answered with its order further
   // down; looked up here first, because a deal link is closed by its own order and would refuse.
   const idempotencyKey = text(body.idempotencyKey, 'Checkout reference', 64, { required: true });
-  if (!/^[A-Za-z0-9-]{16,64}$/.test(idempotencyKey)) throw new HttpError(400, 'Checkout reference is invalid.');
+  if (!/^[A-Za-z0-9-]{16,64}$/.test(idempotencyKey)) throw new HttpError(400, 'Checkout reference is invalid.', {}, { code: 'bad_request' });
   const existing = parse(getDb().prepare(`SELECT ${COLUMNS} FROM orders WHERE idempotency_key = ?`).get(idempotencyKey) as Row | undefined);
   const deal = body.deal === undefined || existing ? null : dealForOrder(body.deal);
   const photo: PhotoInput | null = existing ? null : deal ? { files: deal.files, note: deal.note, pieces: deal.pieces, amountFils: deal.amountFils } : body.photo === undefined ? null : parsePhotoOrder(body.photo);
@@ -640,7 +640,7 @@ export function placeOrder(input: unknown, context: PlaceOrderContext = {}): Pla
   }
 
   if (photo) {
-    if (body.items !== undefined && !(Array.isArray(body.items) && body.items.length === 0)) throw new HttpError(400, 'An order from your photo has no bag items.');
+    if (body.items !== undefined && !(Array.isArray(body.items) && body.items.length === 0)) throw new HttpError(400, 'An order from your photo has no bag items.', {}, { code: 'bad_request' });
     body.items = [];
   } else if (!Array.isArray(body.items) || body.items.length === 0) throw new HttpError(400, 'Your bag is empty.', {}, { code: 'bag_empty' });
   if (!Array.isArray(body.items)) throw new HttpError(400, 'Your bag is empty.', {}, { code: 'bag_empty' });
@@ -1050,10 +1050,10 @@ const PHOTO_TYPES: Record<string, 'png' | 'jpg' | 'webp'> = { 'image/png': 'png'
 
 /** An amount in AED (a number, at most two decimals, within the limits), as fils. */
 function photoAmountFils(v: unknown, field = 'Amount'): number {
-  if (typeof v !== 'number' || !Number.isFinite(v)) throw new HttpError(400, `${field}: type the amount in AED, e.g. 350.`);
+  if (typeof v !== 'number' || !Number.isFinite(v)) throw new HttpError(400, `${field}: type the amount in AED, e.g. 350.`, {}, { code: 'amount_invalid' });
   const f = Math.round(v * 100);
-  if (Math.abs(v * 100 - f) > 1e-6) throw new HttpError(400, `${field}: at most two decimals (fils).`);
-  if (f < PHOTO_ORDER.minAmount * 100 || f > PHOTO_ORDER.maxAmount * 100) throw new HttpError(400, `${field}: from AED ${PHOTO_ORDER.minAmount} to AED ${PHOTO_ORDER.maxAmount.toLocaleString('en-US')}.`);
+  if (Math.abs(v * 100 - f) > 1e-6) throw new HttpError(400, `${field}: at most two decimals (fils).`, {}, { code: 'amount_invalid' });
+  if (f < PHOTO_ORDER.minAmount * 100 || f > PHOTO_ORDER.maxAmount * 100) throw new HttpError(400, `${field}: from AED ${PHOTO_ORDER.minAmount} to AED ${PHOTO_ORDER.maxAmount.toLocaleString('en-US')}.`, {}, { code: 'amount_range', min: PHOTO_ORDER.minAmount, max: PHOTO_ORDER.maxAmount.toLocaleString('en-US') });
   return f;
 }
 
@@ -1069,18 +1069,18 @@ function parsePhotoOrder(v: unknown): PhotoInput {
   if (!getSettings('store').photoOrders) {
     throw new HttpError(404, 'Orders from a photo are not taken right now. Please message us on WhatsApp.', {}, { code: 'photo_orders_off' });
   }
-  if (!v || typeof v !== 'object' || Array.isArray(v)) throw new HttpError(400, 'The photo order must be an object.');
+  if (!v || typeof v !== 'object' || Array.isArray(v)) throw new HttpError(400, 'The photo order must be an object.', {}, { code: 'bad_request' });
   const o = v as Obj;
   const unknown = Object.keys(o).filter((k) => !['photos', 'note', 'pieces', 'amount'].includes(k));
-  if (unknown.length) throw new HttpError(400, `Unknown field: ${unknown[0].slice(0, 40)}.`);
+  if (unknown.length) throw new HttpError(400, `Unknown field: ${unknown[0].slice(0, 40)}.`, {}, { code: 'bad_request' });
   if (!Array.isArray(o.photos) || o.photos.length < 1) throw new HttpError(400, 'Add at least one photo of the piece you want.', {}, { code: 'photo_missing' });
-  if (o.photos.length > PHOTO_ORDER.maxPhotos) throw new HttpError(400, `At most ${PHOTO_ORDER.maxPhotos} photos.`);
+  if (o.photos.length > PHOTO_ORDER.maxPhotos) throw new HttpError(400, `At most ${PHOTO_ORDER.maxPhotos} photos.`, {}, { code: 'photo_too_many', max: PHOTO_ORDER.maxPhotos });
   const files = o.photos.map((p) => {
     const { mime, bytes } = parseImageDataUrl(p, PHOTO_ORDER.maxPhotoBytes);
     return { ext: PHOTO_TYPES[mime], bytes };
   });
   const pieces = o.pieces === undefined ? 1 : o.pieces;
-  if (typeof pieces !== 'number' || !Number.isInteger(pieces) || pieces < 1 || pieces > PHOTO_ORDER.maxPieces) throw new HttpError(400, `Pieces: a whole number from 1 to ${PHOTO_ORDER.maxPieces}.`);
+  if (typeof pieces !== 'number' || !Number.isInteger(pieces) || pieces < 1 || pieces > PHOTO_ORDER.maxPieces) throw new HttpError(400, `Pieces: a whole number from 1 to ${PHOTO_ORDER.maxPieces}.`, {}, { code: 'photo_pieces', max: PHOTO_ORDER.maxPieces });
   return { files, note: text(o.note, 'What it is', PHOTO_ORDER.noteMax), pieces, amountFils: photoAmountFils(o.amount, 'Amount agreed') };
 }
 
@@ -1429,6 +1429,7 @@ export function editOrderDetails(id: string, input: unknown, actor: string): { o
       });
       if (!items.some((x) => x.quantity > 0)) throw new HttpError(400, 'An order keeps at least one line: cancel it instead.');
       // Stock follows the quantities of catalogue pieces (an order from a photo has none).
+      const notReturned: NotReturned[] = [];
       for (const x of items) {
         const it = x.before;
         if (it.productType === 'photo') {
@@ -1447,11 +1448,12 @@ export function editOrderDetails(id: string, input: unknown, actor: string): { o
             throw new HttpError(409, `${it.title} (${it.profileName}): only ${left} more in stock.`, {}, { code: 'stock' });
           }
         } else if (delta < 0) {
-          getDb()
-            .prepare('INSERT INTO product_stock (product_id, size_id, qty) SELECT ?, ?, ? WHERE EXISTS (SELECT 1 FROM products WHERE id = ?) ON CONFLICT(product_id, size_id) DO UPDATE SET qty = qty + excluded.qty')
-            .run(it.productId, it.profileId, -delta, it.productId);
+          // Back on sale, unless the product no longer has that size (then said in the history and the audit log).
+          const left = putBackOnSale(it, -delta);
+          if (left) notReturned.push(left);
         }
       }
+      recordNotReturned(order.id, actor, notReturned);
       const next: Order['items'] = [];
       items.forEach((x, i) => {
         if (x.quantity !== x.before.quantity || x.unit !== fils(x.before.unitPrice)) changes[`line${i + 1}`] = { item: x.before.title.slice(0, 80), from: `${x.before.quantity} × ${x.before.unitPrice}`, to: `${x.quantity} × ${aed(x.unit)}` };
@@ -1650,7 +1652,7 @@ export function uploadTransfer(orderId: string, file: unknown, context: { ip?: s
   const receipt = parseReceiptDataUrl(file);
   const before = getOrder(orderId);
   if (!before || before.paymentMethod !== 'bank_transfer' || !before.bankTransfer) throw new HttpError(404, 'Not found.');
-  if (before.status === 'cancelled' || before.bankTransfer.state === 'paid') throw new HttpError(409, 'This order is already paid or closed: nothing more to upload.');
+  if (before.status === 'cancelled' || before.bankTransfer.state === 'paid') throw new HttpError(409, 'This order is already paid or closed: nothing more to upload.', {}, { code: 'pay_closed' });
   const room = receiptRoomProblem(receipt.bytes.length);
   if (room) {
     noteNoRoom(orderId, room);
@@ -1664,7 +1666,7 @@ export function uploadTransfer(orderId: string, file: unknown, context: { ip?: s
     auditedTransaction((auditOrThrow) => {
       const order = getOrder(orderId);
       if (!order || order.paymentMethod !== 'bank_transfer' || !order.bankTransfer) throw new HttpError(404, 'Not found.');
-      if (order.status === 'cancelled' || order.bankTransfer.state === 'paid') throw new HttpError(409, 'This order is already paid or closed: nothing more to upload.');
+      if (order.status === 'cancelled' || order.bankTransfer.state === 'paid') throw new HttpError(409, 'This order is already paid or closed: nothing more to upload.', {}, { code: 'pay_closed' });
       n = order.bankTransfer.uploads + 1;
       const at = new Date().toISOString();
       getDb().prepare("UPDATE orders SET bank_state = 'uploaded', transfer_uploads = ?, transfer_uploaded_at = ? WHERE id = ?").run(n, at, orderId);
@@ -1915,20 +1917,64 @@ export function updateOrderByAdmin(id: string, patch: unknown, actor: string): O
   return updated;
 }
 
+/** Pieces that could not go back on sale: their size was removed from the product meanwhile. */
+interface NotReturned {
+  productId: string;
+  title: string;
+  sizeId: string;
+  size: string;
+  quantity: number;
+}
+
 /**
- * Put a cancelled order's reserved pieces back, size by size (the row is recreated if the size
- * was removed meanwhile). Only if they never left: once dispatched, the piece is with the courier
+ * Put pieces of one product and size back on sale. Only onto a size the product still offers: a
+ * size removed in the editor keeps no stock row (src/lib/server/products.ts), and making one again
+ * here would count pieces that no page, and no stock screen, shows. Those pieces are handed back
+ * to the caller to record instead. A product that no longer exists gets nothing, as before.
+ */
+function putBackOnSale(item: Order['items'][number], quantity: number): NotReturned | null {
+  const db = getDb();
+  const data = db.prepare('SELECT data FROM products WHERE id = ?').pluck().get(item.productId) as string | undefined;
+  if (data === undefined) return null;
+  let offered = false;
+  try {
+    offered = ((JSON.parse(data) as { profiles?: Array<{ id?: string }> }).profiles ?? []).some((p) => p.id === item.profileId);
+  } catch {
+    offered = false;
+  }
+  if (!offered) return { productId: item.productId, title: String(item.title ?? '').slice(0, 120), sizeId: item.profileId, size: String(item.profileName ?? item.profileId).slice(0, 60), quantity };
+  db.prepare('INSERT INTO product_stock (product_id, size_id, qty) VALUES (?, ?, ?) ON CONFLICT(product_id, size_id) DO UPDATE SET qty = qty + excluded.qty').run(item.productId, item.profileId, quantity);
+  return null;
+}
+
+/**
+ * Said in the order's history and the audit log (inside the caller's transaction: if the audit log
+ * can't be written, nothing else is either): N pieces of a removed size were not put back on sale,
+ * so the owner knows to count them and add them to a size the product has.
+ */
+function recordNotReturned(orderId: string, actor: string, lines: NotReturned[]): void {
+  if (!lines.length) return;
+  const pieces = lines.reduce((n, l) => n + l.quantity, 0);
+  logEvent(orderId, actor, 'stock_not_returned', { pieces, items: lines });
+  auditOrThrow('order.stock_not_returned', { orderId, by: actor, pieces, why: 'size_removed', items: lines });
+}
+
+/**
+ * Put a cancelled order's reserved pieces back, size by size. A size the product no longer has
+ * gets none (no hidden stock row is made or grown): that is written in the order's history and the
+ * audit log instead. Only if they never left: once dispatched, the piece is with the courier
  * (most designs are one of a kind), so the owner adds it back with + when it returns. Called inside
  * the transaction that moves the order to cancelled, once (a cancelled order can't be cancelled again).
  */
 function releaseStock(order: Order, to: OrderStatus, actor = 'shop'): void {
   if (to === 'cancelled') returnCreditsIn(order, actor);
   if (to !== 'cancelled' || !(order.status === 'pending_confirmation' || order.status === 'pending_payment' || order.status === 'confirmed')) return;
+  const notReturned: NotReturned[] = [];
   for (const item of order.items) {
-    getDb()
-      .prepare('INSERT INTO product_stock (product_id, size_id, qty) SELECT ?, ?, ? WHERE EXISTS (SELECT 1 FROM products WHERE id = ?) ON CONFLICT(product_id, size_id) DO UPDATE SET qty = qty + excluded.qty')
-      .run(item.productId, item.profileId, item.quantity, item.productId);
+    const left = putBackOnSale(item, item.quantity);
+    if (left) notReturned.push(left);
   }
+  recordNotReturned(order.id, actor, notReturned);
 }
 
 /**

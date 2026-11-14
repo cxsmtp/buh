@@ -2,7 +2,8 @@
 
 import React, { useCallback, useEffect, useRef, useState, useSyncExternalStore } from 'react';
 import { Check, Info, Loader2, RotateCcw, ShieldAlert, X } from 'lucide-react';
-import { getJson, postJson, sendJson } from '@/lib/apiClient';
+import { getJson, sendJson } from '@/lib/apiClient';
+import { ownerConfirmNeeded, sendConfirmed } from '../OwnerConfirm';
 
 /**
  * Settings save themselves: about 1.5 s after the owner stops typing, the
@@ -14,7 +15,12 @@ import { getJson, postJson, sendJson } from '@/lib/apiClient';
  *   address in a way that would drop a saved key: that needs Save, with the key.
  * - One request at a time per section; a newer change waits for the one in flight.
  * - Leaving the section sends what's still waiting; if the server refuses it, the reason is shown
- *   at the top of Settings (the section's own status line is gone by then).
+ *   at the top of Settings, or of the hub tab the owner moved to (the section's own status line is
+ *   gone by then).
+ * - The bank account, payments, SMS and email settings need the owner again (their password, unless
+ *   they signed in within the last 10 minutes). An autosave never opens the password dialog by
+ *   itself (it would pop up mid-typing): the status line says the change is waiting and has a
+ *   button that asks; Save asks straight away.
  * - Every save carries the version of the settings the form was loaded from. If they were changed
  *   somewhere else meanwhile (the phone, while the laptop had the section open), the server refuses
  *   the save, the form is re-created with the current settings and the owner is told: a form left
@@ -28,6 +34,17 @@ export interface AutoSaveHooks {
   onSaved: () => void | Promise<void>;
   /** The section's settings group was restored by Undo: re-create that form. */
   onUndone: (settingsKey: string) => void;
+  /** When this group was last saved, as the hub loaded it with the values the form shows (null: never). */
+  updatedAt?: string | null;
+}
+
+/**
+ * The version (updatedAt) of its settings group that a form's values come from. Every save of the
+ * form sends it and, when saved, moves it on; the server refuses a save whose version is not the
+ * current one (the group was changed somewhere else). undefined: not known (read before sending).
+ */
+export interface FormVersion {
+  current: string | null | undefined;
 }
 
 type Status =
@@ -35,6 +52,7 @@ type Status =
   | { kind: 'saving' }
   | { kind: 'saved'; note?: string }
   | { kind: 'needs-save'; text: string }
+  | { kind: 'confirm' }
   | { kind: 'error'; text: string };
 
 interface Options<T> {
@@ -46,6 +64,8 @@ interface Options<T> {
   onUndone?: (settingsKey: string) => void;
   /** After a successful send, with what was sent (e.g. to stop re-sending a logo). */
   onSent?: (sent: T) => void;
+  /** When this group was last saved, as loaded with the form's values (undefined: read from the server before the first save). */
+  updatedAt?: string | null;
   delayMs?: number;
   enabled?: boolean;
 }
@@ -68,6 +88,7 @@ const SECTION_NAMES: Record<string, string> = {
   bank: 'Bank details',
   courier: 'Couriers',
   sms: 'SMS',
+  theme: 'Festival themes',
   email: 'Email',
   assistant: 'Chat assistant',
   delivery: 'Delivery',
@@ -76,12 +97,23 @@ const SECTION_NAMES: Record<string, string> = {
   ai: 'AI writing',
 };
 
+/** What a section holds, for "Type your hub password to change …". */
+const SECTION_WHAT: Record<string, string> = {
+  bank: 'the bank details',
+  payments: 'the payment settings',
+  sms: 'the SMS gateway',
+  email: 'the email settings',
+};
+
+/** In place of the last value sent while a change waits for the owner's password (never equal to a form's value). */
+const NOT_SENT = '\u0000not-sent';
+
 let notices: SettingsNotice[] = [];
 let noticeSeq = 0;
 const noticeListeners = new Set<() => void>();
 const NO_NOTICES: SettingsNotice[] = [];
 
-function pushNotice(settingsKey: string, text: string) {
+export function pushSettingsNotice(settingsKey: string, text: string) {
   // One message per section: the newest replaces the one before.
   notices = [...notices.filter((n) => n.settingsKey !== settingsKey), { id: ++noticeSeq, settingsKey, text }];
   noticeListeners.forEach((fn) => fn());
@@ -104,17 +136,24 @@ export function useSettingsNotices(): SettingsNotice[] {
   );
 }
 
-/** Shown at the top of Settings, whichever section is open. */
-export function SettingsNotices() {
+/**
+ * Shown at the top of Settings, whichever section is open; and (`hub`) at the top of every other
+ * hub tab, so a change refused just as the owner left Settings is said where they are now.
+ */
+export function SettingsNotices({ hub = false }: { hub?: boolean }) {
   const list = useSettingsNotices();
   if (!list.length) return null;
   return (
-    <div className="space-y-2 mb-3" data-testid="settings-notices">
+    <div className={hub ? 'space-y-2' : 'space-y-2 mb-3'} data-testid={hub ? 'hub-settings-notices' : 'settings-notices'}>
       {list.map((n) => (
         <div key={n.id} role="alert" className="flex items-start gap-2 rounded-xl border border-warning-line bg-warning-soft px-3 py-2 text-xs text-ink">
           <ShieldAlert className="w-4 h-4 shrink-0 mt-0.5 text-warning" aria-hidden="true" />
           <span className="flex-1 min-w-0 break-words">
-            <strong>{SECTION_NAMES[n.settingsKey] ?? 'Settings'}:</strong> {n.text}
+            <strong>
+              {hub ? 'Settings → ' : ''}
+              {SECTION_NAMES[n.settingsKey] ?? 'Settings'}:
+            </strong>{' '}
+            {n.text}
           </span>
           <button type="button" onClick={() => dismissSettingsNotice(n.id)} className="min-h-11 min-w-11 -my-1.5 -mr-2 flex items-center justify-center rounded-xl text-ink-soft" aria-label="Dismiss this message">
             <X className="w-4 h-4" aria-hidden="true" />
@@ -132,7 +171,7 @@ export function SettingsNotices() {
  */
 const detachedSaves = new Map<string, number>();
 
-const CHANGED_ELSEWHERE = 'These settings were changed somewhere else (another phone or computer, or another part of the hub) while this page was open. The current settings are shown now. Your last change here was not saved: make it again if you still want it.';
+export const CHANGED_ELSEWHERE = 'These settings were changed somewhere else (another phone or computer, or another part of the hub) while this page was open. The current settings are shown now. Your last change here was not saved: make it again if you still want it.';
 
 interface SaveAnswer {
   message?: string;
@@ -148,7 +187,9 @@ async function loadVersion(settingsKey: string): Promise<string | null | undefin
   return ok && data.versions && settingsKey in data.versions ? data.versions[settingsKey] : undefined;
 }
 
-export function useAutoSave<T>({ settingsKey, value, onSaved, onUndone, onSent, delayMs = 1500, enabled = true }: Options<T>) {
+const NEEDS_OWNER = 'Your hub password is needed to change these settings. Nothing was changed: open the section and make the change again.';
+
+export function useAutoSave<T>({ settingsKey, value, onSaved, onUndone, onSent, updatedAt, delayMs = 1500, enabled = true }: Options<T>) {
   const [status, setStatus] = useState<Status>({ kind: 'idle' });
   const [undoId, setUndoId] = useState<number | null>(null);
   const json = JSON.stringify(value);
@@ -164,11 +205,14 @@ export function useAutoSave<T>({ settingsKey, value, onSaved, onUndone, onSent, 
   const superseded = useRef(false);
   const running = useRef<Promise<void> | null>(null);
   /**
-   * The version (updatedAt) of this group that the form's values come from: read when the form
-   * opens, then taken from each of its own saves. Sent with every save; the server refuses (409)
-   * when the group was saved since, so a form left open never puts back older settings.
+   * The version (updatedAt) of this group that the form's values come from: given by the hub with
+   * the values (else read right before the first save), then taken from each of the form's own
+   * saves. Sent with every save; the server refuses (409) when the group was saved since, so a form
+   * left open never puts back older settings.
    */
-  const version = useRef<Promise<string | null | undefined> | null>(null);
+  const version = useRef<string | null | undefined>(updatedAt);
+  /** The owner pressed "Type your password": the next autosave may open the password dialog. */
+  const askOwner = useRef(false);
   const callbacks = useRef({ onSaved, onUndone, onSent });
   useEffect(() => {
     callbacks.current = { onSaved, onUndone, onSent };
@@ -185,27 +229,29 @@ export function useAutoSave<T>({ settingsKey, value, onSaved, onUndone, onSent, 
   }, []);
   useEffect(() => {
     mounted.current = true;
-    if (enabled && !version.current) version.current = loadVersion(settingsKey);
     return () => {
       mounted.current = false;
     };
-  }, [enabled, settingsKey]);
+  }, []);
 
   /** Changed elsewhere: the owner is told, the hub reloads, and this form is re-created with the current values. */
   const reloadForm = useCallback(async () => {
-    pushNotice(settingsKey, CHANGED_ELSEWHERE);
+    pushSettingsNotice(settingsKey, CHANGED_ELSEWHERE);
     await callbacks.current.onSaved?.();
     callbacks.current.onUndone?.(settingsKey);
   }, [settingsKey]);
 
   /** One PUT of this group, with the version the form was loaded from. */
   const put = useCallback(
-    async (settings: unknown, auto: boolean) => {
-      // Not known (this form's group was just saved another way): read now, right before sending.
-      if (!version.current) version.current = loadVersion(settingsKey);
-      const loadedAt = await version.current;
-      const res = await sendJson<SaveAnswer>('PUT', `/api/admin/settings/${settingsKey}`, { settings, ...(auto ? { auto: true } : {}), ...(loadedAt === undefined ? {} : { updatedAt: loadedAt }) });
-      if (res.ok && res.data.updatedAt !== undefined) version.current = Promise.resolve(res.data.updatedAt);
+    async (settings: unknown, auto: boolean, ask: boolean) => {
+      // Not known (the hub gave none, or this form's group was just saved another way): read now, right before sending.
+      if (version.current === undefined) version.current = await loadVersion(settingsKey);
+      const loadedAt = version.current;
+      const body = { settings, ...(auto ? { auto: true } : {}), ...(loadedAt === undefined ? {} : { updatedAt: loadedAt }) };
+      const url = `/api/admin/settings/${settingsKey}`;
+      // The owner's password (bank, payments, SMS, email) is asked only when the owner pressed something.
+      const res = ask ? await sendConfirmed<SaveAnswer>('PUT', url, body, SECTION_WHAT[settingsKey]) : await sendJson<SaveAnswer>('PUT', url, body);
+      if (res.ok && res.data.updatedAt !== undefined) version.current = res.data.updatedAt;
       return res;
     },
     [settingsKey]
@@ -226,7 +272,10 @@ export function useAutoSave<T>({ settingsKey, value, onSaved, onUndone, onSent, 
         if (body === lastSent.current) break;
         lastSent.current = body;
         setStatus({ kind: 'saving' });
-        const { ok, status: http, data } = await put(JSON.parse(body), true);
+        const ask = askOwner.current;
+        askOwner.current = false;
+        const res = await put(JSON.parse(body), true, ask);
+        const { ok, status: http, data } = res;
         if (ok) {
           // The first version kept in this session is what Undo goes back to.
           setUndoId((id) => id ?? data.undoId ?? null);
@@ -236,11 +285,17 @@ export function useAutoSave<T>({ settingsKey, value, onSaved, onUndone, onSent, 
         } else if (http === 409 && data.code === 'changed_elsewhere') {
           await reloadForm();
           break;
+        } else if (ownerConfirmNeeded(res) || data.code === 'owner_confirm_cancelled') {
+          // Not sent again by itself; the next change, or the button on the status line, tries again.
+          lastSent.current = NOT_SENT;
+          setStatus({ kind: 'confirm' });
+          if (!mounted.current) pushSettingsNotice(settingsKey, NEEDS_OWNER);
+          break;
         } else {
           const text = data.message || 'Not saved. Your previous settings are still in use.';
           setStatus(data.code === 'needs_save' ? { kind: 'needs-save', text: data.message || 'Press Save.' } : { kind: 'error', text });
           // The section was left meanwhile: its own status line is gone, so say it at the top of Settings.
-          if (!mounted.current) pushNotice(settingsKey, `Your last change was not saved. ${text}`);
+          if (!mounted.current) pushSettingsNotice(settingsKey, `Your last change was not saved. ${text}`);
         }
       } while (queued.current);
     } finally {
@@ -264,6 +319,11 @@ export function useAutoSave<T>({ settingsKey, value, onSaved, onUndone, onSent, 
       clearTimeout(timer.current);
       if (!enabled || superseded.current) return;
       if (!inFlight.current && latest.current === lastSent.current) return;
+      // Waiting for the owner's password, which nobody is there to type now: said, not sent again.
+      if (!inFlight.current && lastSent.current === NOT_SENT) {
+        pushSettingsNotice(settingsKey, NEEDS_OWNER);
+        return;
+      }
       // Closed for good with a save waiting or on its way: if the same section is opened again
       // before it is through, that form (filled in from before the save) is re-created after it.
       const detached = gone.current;
@@ -282,17 +342,29 @@ export function useAutoSave<T>({ settingsKey, value, onSaved, onUndone, onSent, 
     clearTimeout(timer.current);
     lastSent.current = latest.current;
     setStatus({ kind: 'idle' });
-    // That save goes another way (the card's own Save, without this hook): the group's version
-    // is read again before the next autosave, so the card's own save is not taken for someone else's.
-    version.current = null;
   }, []);
+
+  /**
+   * Before a Save that goes through the hub (not this hook): the waiting autosave is dropped, one
+   * already on its way is let through, and the form's version comes back for the hub to send and
+   * move on, so the hub's save and the next autosave are not taken for someone else's change.
+   */
+  const hold = useCallback(async (): Promise<FormVersion> => {
+    clearTimeout(timer.current);
+    if (inFlight.current && running.current) await running.current.catch(() => undefined);
+    lastSent.current = latest.current;
+    setStatus({ kind: 'idle' });
+    // Not known (this form's group was just saved another way): read now, right before the hub sends.
+    if (version.current === undefined) version.current = await loadVersion(settingsKey);
+    return version;
+  }, [settingsKey]);
 
   /**
    * This group was just saved from this same form by another route (e.g. a weave renamed on the
    * server): read its version again before the next save.
    */
   const savedElsewhereHere = useCallback(() => {
-    version.current = null;
+    version.current = undefined;
   }, []);
   /**
    * The Save button's save, with the same version check as autosave: resolves to a problem to show,
@@ -301,9 +373,11 @@ export function useAutoSave<T>({ settingsKey, value, onSaved, onUndone, onSent, 
   const save = useCallback(
     async (settings: unknown, onWarning?: (warning: string) => void): Promise<string | null> => {
       clearTimeout(timer.current);
+      // An autosave already on its way goes first (its answer carries the version this save sends).
+      if (inFlight.current && running.current) await running.current.catch(() => undefined);
       lastSent.current = latest.current;
       setStatus({ kind: 'idle' });
-      const { ok, status: http, data } = await put(settings, false);
+      const { ok, status: http, data } = await put(settings, false, true);
       if (!ok) {
         if (http === 409 && data.code === 'changed_elsewhere') {
           await reloadForm();
@@ -321,22 +395,39 @@ export function useAutoSave<T>({ settingsKey, value, onSaved, onUndone, onSent, 
   const undo = useCallback(async () => {
     if (!undoId) return;
     setStatus({ kind: 'saving' });
-    const { ok, data } = await postJson<{ message?: string }>('/api/admin/settings/history', { id: undoId });
+    const { ok, data } = await sendConfirmed<{ message?: string }>('POST', '/api/admin/settings/history', { id: undoId }, SECTION_WHAT[settingsKey]);
     if (!ok) {
       setStatus({ kind: 'error', text: data.message || 'Could not undo.' });
       return;
     }
     setUndoId(null);
     setStatus({ kind: 'idle' });
+    // The form is re-created with the restored values (and their version).
+    version.current = undefined;
     await callbacks.current.onSaved?.();
     callbacks.current.onUndone?.(settingsKey);
   }, [undoId, settingsKey]);
 
-  const bar = <AutoSaveBar status={status} canUndo={Boolean(undoId)} onUndo={() => void undo()} />;
-  return { status, cancel, undo, bar, save, savedElsewhereHere };
+  /** "Type your password": the change that is waiting is sent again, and this time the hub may ask. */
+  const confirmNow = useCallback(() => {
+    askOwner.current = true;
+    void flush();
+  }, [flush]);
+
+  const bar = <AutoSaveBar status={status} canUndo={Boolean(undoId)} onUndo={() => void undo()} onConfirm={confirmNow} />;
+  return { status, cancel, hold, undo, bar, save, savedElsewhereHere };
 }
 
-function AutoSaveBar({ status, canUndo, onUndo }: { status: Status; canUndo: boolean; onUndo: () => void }) {
+function AutoSaveBar({ status, canUndo, onUndo, onConfirm }: { status: Status; canUndo: boolean; onUndo: () => void; onConfirm: () => void }) {
+  if (status.kind === 'confirm')
+    return (
+      <p className="text-xs text-warning font-semibold flex flex-wrap items-center gap-2" role="status" data-testid="autosave-confirm">
+        <ShieldAlert className="w-4 h-4 shrink-0" aria-hidden="true" /> Not saved yet: your hub password is needed to change these settings.
+        <button type="button" onClick={onConfirm} className="min-h-11 px-3 rounded-xl border border-line-strong bg-surface text-ink text-xs font-bold">
+          Type your password
+        </button>
+      </p>
+    );
   if (status.kind === 'idle') return <p className="text-[11px] text-ink-muted">Changes save automatically.</p>;
   if (status.kind === 'saving')
     return (

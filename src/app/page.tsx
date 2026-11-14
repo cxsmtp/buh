@@ -18,7 +18,9 @@ const building = () => process.env.NEXT_PHASE === 'phase-production-build';
 
 const FALLBACK: Metadata = {
   title: 'Beautiful UAE Home | Bedsheets & bed sets in the UAE',
-  description: 'Hand block and machine printed bedsheets, duvet covers and bed sets, fitted for deep UAE mattresses. Delivered to Dubai, Abu Dhabi, Sharjah and all the UAE.',
+  // Shown only until the shop's own words load (the build has no database): nothing here that the
+  // shop's settings could make untrue (no mattress fit, no list of emirates).
+  description: 'Hand block and machine printed bedsheets, duvet covers and bed sets for UAE homes, delivered to your door.',
 };
 
 export async function generateMetadata(): Promise<Metadata> {
@@ -58,7 +60,7 @@ async function SeoParts(): Promise<{ jsonLd: string[]; festival: React.ReactNode
       jsonLd: base ? siteJsonLd(base).map((x) => jsonLdString(x)) : [],
       festival: festival ? (
         <Link href={`/gifts/${festival.id}`} className="inline-flex items-center gap-1 min-h-11 px-4 rounded-full border border-line-strong bg-surface text-sm text-ink hover:border-ink-muted" data-testid="festival-gifts-link">
-          {festival.giftName} gifts: bedsheets &amp; bed sets <span aria-hidden="true">→</span>
+          {festival.giftName} gifts <span aria-hidden="true">→</span>
         </Link>
       ) : null,
       explore:

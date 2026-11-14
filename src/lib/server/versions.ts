@@ -46,6 +46,12 @@ export interface UpdaterStatus {
   digests: { version: string; digest: string; verified: boolean }[];
   /** A version refused because it came back under another digest (empty when none). */
   integrityProblem: string;
+  /**
+   * One line while the updater has not yet seen itself come back after a restart of the computer
+   * (Podman needs podman-restart.service for that, which cannot be checked from inside a
+   * container); empty once it has, and from updaters that do not say.
+   */
+  restartNote: string;
 }
 
 const DIGEST_RE = /^sha256:[0-9a-f]{64}$/;
@@ -134,6 +140,7 @@ export function updaterStatus(now = Date.now()): UpdaterStatus | null {
         .map((d: Partial<UpdaterStatus['digests'][number]>) => ({ version: v(d?.version), digest: typeof d?.digest === 'string' && DIGEST_RE.test(d.digest) ? d.digest : '', verified: d?.verified === true }))
         .filter((d) => d.version && d.digest),
       integrityProblem: s(raw.integrityProblem, 400),
+      restartNote: s(raw.restartNote, 500),
     };
   } catch {
     return null;

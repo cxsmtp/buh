@@ -19,7 +19,9 @@ import {
   verifyDoorToken,
 } from './adminLink';
 import { PAY_ROUTE, openPayOrderId } from './bankPay';
+import { newNonce, nonceContentSecurityPolicy, nonceKindFor, type NonceKind } from './cspNonce';
 import { DEAL_ROUTE, openDealId } from './photoDeals';
+import { noteArrival } from './http';
 import { logEvent } from './log';
 import { takeAll } from './rateLimit';
 import { SLOW_MS, addressOf, countsAsProbe, recordMiss, verdictFor } from './scannerGuard';
@@ -168,6 +170,21 @@ export function decide(rawUrl: string | undefined, cookieHeader: string | undefi
 
 type Emit = (event: string, ...args: unknown[]) => boolean;
 
+/** The request headers Next.js reads a page's script nonce from: only this gate sets them. */
+const CSP_REQUEST_HEADERS = ['content-security-policy', 'content-security-policy-report-only', 'x-nonce'];
+
+/**
+ * This request's page gets the nonce policy (src/lib/server/cspNonce.ts): on the request, where
+ * Next.js finds the nonce for its own scripts, and returned for the answer's header.
+ */
+function nonceHeaders(req: http.IncomingMessage, kind: NonceKind): Record<string, string> {
+  const nonce = newNonce();
+  const policy = nonceContentSecurityPolicy(nonce, kind);
+  req.headers['content-security-policy'] = policy;
+  req.headers['x-nonce'] = nonce;
+  return { 'content-security-policy': policy };
+}
+
 function asList(value: unknown): string[] {
   return Array.isArray(value) ? value.map(String) : value === undefined || value === null ? [] : [String(value)];
 }
@@ -241,6 +258,11 @@ export function installFrontGate(): void {
     const rawPath = req.url || '/';
     // Only this gate sets the hub's marker (checked first: a delete on every request would slow the headers object).
     if (req.headers[HUB_HEADER] !== undefined) delete req.headers[HUB_HEADER];
+    // The same for the policy a page's script nonce is read from: never a visitor's own.
+    for (const h of CSP_REQUEST_HEADERS) if (req.headers[h] !== undefined) delete req.headers[h];
+
+    // Without TRUST_PROXY: is a proxy in front all the same? (The monitor then tells the owner.)
+    if (process.env.TRUST_PROXY !== '1') noteArrival(req.headers, Date.now(), rawPath !== '/api/health');
 
     // The scanner slow-down (real addresses only).
     const ip = addressOf(req.headers);
@@ -276,7 +298,7 @@ export function installFrontGate(): void {
     } else if (decision.kind === 'hub') {
       req.url = decision.url;
       req.headers[HUB_HEADER] = decision.hubHeader;
-      finalHeaders(res, HUB_HEADERS, decision.cookie);
+      finalHeaders(res, { ...HUB_HEADERS, ...nonceHeaders(req, 'private') }, decision.cookie);
     } else if (decision.kind === 'renew') {
       finalHeaders(res, {}, decision.cookie);
     } else if (decision.kind === 'pay') {
@@ -289,7 +311,7 @@ export function installFrontGate(): void {
           return true;
         }
       }
-      finalHeaders(res, HUB_HEADERS);
+      finalHeaders(res, decision.api ? HUB_HEADERS : { ...HUB_HEADERS, ...nonceHeaders(req, 'private') });
     } else if (decision.kind === 'deal') {
       if (!decision.api) {
         const { perAddress, perOrder, windowMs } = PAY_VIEW_LIMITS;
@@ -300,7 +322,12 @@ export function installFrontGate(): void {
           return true;
         }
       }
-      finalHeaders(res, HUB_HEADERS);
+      // The deal's page holds the checkout (Stripe.js, the phone check): the storefront's nonce policy.
+      finalHeaders(res, decision.api ? HUB_HEADERS : { ...HUB_HEADERS, ...nonceHeaders(req, 'shop') });
+    } else if (decision.kind === 'pass' && rawPath.length > 2 && !rawPath.startsWith('/api/') && !rawPath.startsWith('/_next/')) {
+      // The storefront pages rendered for each request (a tracking link, a shared selection, the
+      // terms, order-by-photo): the nonce policy too. The kept pages cannot carry a nonce.
+      if (nonceKindFor(normalizePath(rawPath).path) === 'shop') finalHeaders(res, nonceHeaders(req, 'shop'));
     }
 
     // The shop's front page, for a browser signed in to the hub: maybe the new link, once.

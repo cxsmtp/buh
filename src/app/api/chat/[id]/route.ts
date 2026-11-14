@@ -10,14 +10,15 @@ export async function GET(req: Request, { params }: { params: Promise<{ id: stri
   try {
     const { id } = await params;
     enforceIpLimit(req, 'chat-poll', 600, 10 * 60 * 1000, 'Too many requests. Wait a moment.');
-    const after = new URL(req.url).searchParams.get('after');
-    return json(customerPoll(id, req.headers.get('x-chat-token'), after));
+    const query = new URL(req.url).searchParams;
+    // lang: the language the customer's page shows ("en" or "ar"; anything else is ignored).
+    return json(customerPoll(id, req.headers.get('x-chat-token'), query.get('after'), Date.now(), query.get('lang')));
   } catch (err) {
     return handleRouteError(err, 'chat/poll');
   }
 }
 
-/** { token, action: "send" | "person" | "contact", message?, name?, contact? } */
+/** { token, action: "send" | "person" | "contact", message?, name?, contact?, locale? ("en" or "ar") } */
 export async function POST(req: Request, { params }: { params: Promise<{ id: string }> }) {
   try {
     assertSameOrigin(req);
@@ -28,11 +29,11 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
     const body = await readJsonBody(req, 4 * 1024);
     switch (body.action) {
       case 'send':
-        return json(customerSend(id, body.token, body.message, body.after));
+        return json(customerSend(id, body.token, body.message, body.after, Date.now(), body.locale));
       case 'person':
-        return json(customerAskPerson(id, body.token, body.after));
+        return json(customerAskPerson(id, body.token, body.after, Date.now(), body.locale));
       case 'contact':
-        return json(customerContact(id, body.token, { name: body.name, contact: body.contact }, body.after));
+        return json(customerContact(id, body.token, { name: body.name, contact: body.contact }, body.after, Date.now(), body.locale));
       default:
         throw new HttpError(400, 'Unknown action.');
     }

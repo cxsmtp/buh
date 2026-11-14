@@ -34,6 +34,8 @@ interface Info {
     lastRequest: { request: string; result: string; message: string; at: string };
     /** Set while the registry refuses downloads (login missing or expired). */
     registryProblem?: string;
+    /** Until the updater has seen itself come back after a server restart: how to make sure it does. */
+    restartNote?: string;
     /** New versions are installed by themselves (off: only when asked here). */
     auto?: boolean;
     lastCheck?: { at: string; result: string };
@@ -195,6 +197,11 @@ export function VersionsCard() {
           <p role="alert" className="rounded-lg bg-danger-soft border border-danger-line text-danger p-2 break-words flex gap-1.5">
             <ShieldAlert className="w-4 h-4 shrink-0" aria-hidden="true" />
             <span>{info.updater!.integrityProblem}</span>
+          </p>
+        )}
+        {managed && info.updater!.restartNote && (
+          <p role="status" data-testid="restart-note" className="rounded-lg bg-warning-soft border border-warning-line text-ink p-2 break-words">
+            {info.updater!.restartNote}
           </p>
         )}
         {managed && info.updater!.registryProblem && (

@@ -20,7 +20,7 @@ export async function POST(req: Request) {
     const action = body.action === 'abandon' ? 'abandon' : body.action === undefined || body.action === 'check' ? 'check' : null;
     if (!action) throw new HttpError(400, 'Unknown action.');
     // Per order too: the confirmation screen asks every few seconds for a minute or so.
-    if (!rateLimit(`card-status:${orderId}`, 90, 15 * 60 * 1000).ok) throw new HttpError(429, 'Too many requests. Please wait a minute.');
+    if (!rateLimit(`card-status:${orderId}`, 90, 15 * 60 * 1000).ok) throw new HttpError(429, 'Too many requests. Please wait a minute.', {}, { code: 'rate_limited' });
     const view = action === 'abandon' ? await abandonCardPayment(orderId, body.clientSecret) : await checkCardPayment(orderId, body.clientSecret);
     return json({ success: true, ...view });
   } catch (err) {

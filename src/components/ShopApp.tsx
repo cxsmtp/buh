@@ -35,7 +35,7 @@ const WORDS = {
   clearAll: { en: 'Clear all', ar: 'مسح الكل' },
   collectionGone: { en: 'These pieces have all found homes. Have a look at the rest of the shop.', ar: 'وجدت كل هذه القطع بيوتها. ألقِ نظرة على بقية المتجر.' },
   noMatch: { en: 'Nothing matches these filters.', ar: 'لا توجد نتائج تطابق هذه الخيارات.' },
-  comingSoon: { en: 'New pieces are on their way. Please check back soon.', ar: 'قطع جديدة في الطريق. يرجى العودة قريباً.' },
+  comingSoon: { en: 'Nothing to show here right now. Please check back soon.', ar: 'لا توجد قطع معروضة حالياً. يرجى العودة قريباً.' },
   browse: { en: 'Browse the shop', ar: 'تصفّح المتجر' },
   showAll: { en: 'Show everything', ar: 'عرض الكل' },
   promise: { en: 'Our promise', ar: 'وعدنا' },
@@ -483,8 +483,8 @@ function ShopAppInner({
   };
 
   const shopInfo = useMemo<ShopInfo>(
-    () => ({ store: storeSettings, lowStockThreshold, supportEmail: supportEmail || 'orders@beautifuluaehome.com', festival, chat: chatInfo, delivery, ...(vatAddedPercent ? { vatAddedPercent } : {}), pay: { card: Boolean(cardPayments), bank: bankTransfer }, bagLimit }),
-    [storeSettings, lowStockThreshold, supportEmail, festival, chatInfo, delivery, vatAddedPercent, cardPayments, bankTransfer, bagLimit]
+    () => ({ shopName: brandSettings.storeName, store: storeSettings, lowStockThreshold, supportEmail: supportEmail || 'orders@beautifuluaehome.com', festival, chat: chatInfo, delivery, ...(vatAddedPercent ? { vatAddedPercent } : {}), pay: { card: Boolean(cardPayments), bank: bankTransfer }, bagLimit }),
+    [brandSettings.storeName, storeSettings, lowStockThreshold, supportEmail, festival, chatInfo, delivery, vatAddedPercent, cardPayments, bankTransfer, bagLimit]
   );
 
   // The storefront: what the search, filters and sort leave, and the round "story" chips.
@@ -536,9 +536,14 @@ function ShopAppInner({
     writeSearch(rest ? `?${rest}` : '', 'replace');
   }, [goBack]);
 
-  // The bag and checkout add one step to the browser's history while either is open, so the phone's
-  // Back button closes them (like the product sheet) instead of leaving the shop.
-  const overlayOpen = isCartOpen || isCheckoutOpen;
+  // The bag, checkout, Track Order and the photo sheets add one step to the browser's history while
+  // any of them is open, so the phone's Back button closes them (like the product sheet) instead of
+  // leaving the shop. Going from one to the next (photos → checkout → photos) keeps that one step.
+  const overlayOpen = isCartOpen || isCheckoutOpen || isTrackerOpen || photoSheetOpen || dealSheetOpen;
+  const checkoutOpenNow = useRef(false);
+  useEffect(() => {
+    checkoutOpenNow.current = isCheckoutOpen;
+  }, [isCheckoutOpen]);
   const overlayPushed = useRef(false);
   // The bag opened while one of our own steps back was still on its way (Add to Bag closes the
   // product sheet and opens the bag in one go): its step is added once that one has arrived.
@@ -556,6 +561,9 @@ function ShopAppInner({
     else setPhotoDraft(null);
     photoPlaced.current = false;
   }, []);
+  // Counts the customer's own Backs that closed something: one sheet may make way for another in
+  // the same moment (Back from checkout returns to the photos), and that one needs its own step.
+  const [backsTaken, setBacksTaken] = useState(0);
   const pushOverlay = useCallback(() => {
     overlayWaiting.current = false;
     overlayPushed.current = true;
@@ -580,7 +588,7 @@ function ShopAppInner({
         goBack();
       }
     }
-  }, [overlayOpen, goBack, pushOverlay]);
+  }, [overlayOpen, backsTaken, goBack, pushOverlay]);
 
   // Back and Forward: the view and the open product follow the address bar.
   useEffect(() => {
@@ -595,10 +603,18 @@ function ShopAppInner({
           window.history.pushState(null, '', window.location.href);
           return;
         }
-        // The phone's Back button: the bag or checkout closes, the shop stays.
+        // The phone's Back button: what is open closes, the shop stays. From checkout of an order
+        // by photo, Back returns to the photos (as its own close button does); Back again closes them.
         overlayPushed.current = false;
+        setBacksTaken((n) => n + 1);
         setIsCartOpen(false);
-        closeCheckout();
+        setIsTrackerOpen(false);
+        if (checkoutOpenNow.current) closeCheckout();
+        else {
+          setPhotoSheetOpen(false);
+          setDealSheetOpen(false);
+          setPhotoDraft(null);
+        }
       }
       const params = new URLSearchParams(window.location.search);
       setFilters(parseFilters(params));

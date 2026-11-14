@@ -464,7 +464,7 @@ test('single: a good new image is tried without a port first, then replaces the 
   // The fixed definition: hardening, the two updater volumes, TZ by default, the port only on the real one.
   assert.match(
     fileOf(e, SHOP, 'args'),
-    /--restart unless-stopped -p 443:3000 -v beautifuluaehome-data:\/data -v beautifuluaehome-updater-control:\/updater-control -v beautifuluaehome-updater-status:\/updater-status:ro -e TZ=Asia\/Dubai --read-only --tmpfs \/tmp --cap-drop ALL --security-opt no-new-privileges:true --pids-limit 512 \S+$/
+    /--restart unless-stopped -p 443:3000 -v beautifuluaehome-data:\/data -v beautifuluaehome-updater-control:\/updater-control -v beautifuluaehome-updater-status:\/updater-status:ro -e TZ=Asia\/Dubai --log-opt max-size=10m --log-opt max-file=5 --read-only --tmpfs \/tmp --cap-drop ALL --security-opt no-new-privileges:true --pids-limit 512 \S+$/
   );
   assert.doesNotMatch(fileOf(e, PREV, 'args') + read(path.join(e.state, 'updater.log')), /run -d --name beautifuluaehome-candidate .*-p /);
   assert.equal(read(path.join(e.state, 'last-good')).trim(), NEW);
@@ -634,7 +634,7 @@ test("single: adopt re-creates the owner's container with the full definition (s
     `rename ${SHOP} ${PREV}`,
     `run ${SHOP} ${OLD} port=443`,
   ]);
-  assert.match(fileOf(e, SHOP, 'args'), /-e TZ=Asia\/Dubai -e INSECURE_COOKIES=1 -e OTP_DEV_MODE=true --read-only/);
+  assert.match(fileOf(e, SHOP, 'args'), /-e TZ=Asia\/Dubai -e INSECURE_COOKIES=1 -e OTP_DEV_MODE=true --log-opt max-size=10m --log-opt max-file=5 --read-only/);
   assert.ok(fileOf(e, SHOP, 'spec'));
   assert.equal(read(path.join(e.state, 'bad-images')), '');
 
@@ -1654,4 +1654,96 @@ test("regression: Podman's full names for local images (docker.io/library/…, l
   const r = runSetup(e, [], { UPDATER_IMAGE: 'docker.io/library/buh-updater:vps-latest', IMAGE: 'localhost/buh:ci' });
   assert.equal(r.code, 0, r.out);
   assert.doesNotMatch(r.out, /refused to send/);
+});
+
+// ── Review gaps: the shop's log size, and coming back after a restart of the computer ──
+
+test('review: the shop container gets a log size limit like the compose file’s; an engine whose log driver refuses it still starts the shop, without one', () => {
+  const e = setup();
+  runningSingle(e);
+  publish(e, NEW);
+  assert.equal(runSingle(e, ['once']).code, 0);
+  assert.match(fileOf(e, SHOP, 'args'), /--log-opt max-size=10m --log-opt max-file=5 /);
+  assert.doesNotMatch(read(path.join(e.state, 'updater.log')), /log driver does not take a size limit/);
+
+  // Docker set to journald (or syslog) refuses the options before anything is created.
+  const f = setup();
+  runningSingle(f);
+  publish(f, NEW);
+  fs.writeFileSync(path.join(f.fake, 'log-opt-fails'), '');
+  const r = runSingle(f, ['once']);
+  assert.equal(r.code, 0, r.out);
+  assert.deepEqual(events(f), [`pull ${LATEST}`, `backup ${SHOP}`, `run ${CAND} ${NEW}`, `stop ${CAND}`, `rm ${CAND}`, `drain ${SHOP}`, `stop ${SHOP}`, `rename ${SHOP} ${PREV}`, `run ${SHOP} ${NEW} port=443`, `tag buh:last-good ${NEW}`, `tag buh:previous ${OLD}`, 'prune'], 'the same steps');
+  assert.equal(statusOf(f, SHOP), 'running');
+  assert.equal(fileOf(f, SHOP, 'image'), NEW);
+  assert.doesNotMatch(fileOf(f, SHOP, 'args'), /--log-opt/);
+  assert.match(fileOf(f, SHOP, 'args'), /--read-only --tmpfs \/tmp --cap-drop ALL --security-opt no-new-privileges:true --pids-limit 512 \S+$/, 'everything else as before');
+  assert.match(read(path.join(f.state, 'updater.log')), /log driver does not take a size limit; starting beautifuluaehome-candidate without one/);
+  assert.ok(!alerts(f).some((a) => a.level === 'critical' || a.level === 'error'));
+
+  // Any other failure is not retried (a port in use): one try, the usual handling.
+  const g = setup();
+  runningSingle(g);
+  publish(g, NEW);
+  fs.writeFileSync(path.join(g.fake, 'port-fails'), '');
+  runSingle(g, ['once']);
+  assert.doesNotMatch(read(path.join(g.state, 'updater.log')), /log driver does not take a size limit/);
+});
+
+test('review: until the updater has seen itself come back after a restart of the computer, its status carries a one-line reminder (podman-restart.service cannot be checked from inside a container)', async () => {
+  const e = setup();
+  runningSingle(e);
+  const dirOf = path.dirname(e.state);
+  const pub = path.join(dirOf, 'public');
+  fs.mkdirSync(pub);
+  const uptime = path.join(dirOf, 'uptime');
+  const status = () => {
+    try {
+      return JSON.parse(fs.readFileSync(path.join(pub, 'status.json'), 'utf8'));
+    } catch {
+      return null;
+    }
+  };
+  async function daemonUntil(fn: () => boolean) {
+    fs.rmSync(path.join(pub, 'status.json'), { force: true });
+    const child: ChildProcess = spawn('sh', [path.join(root, 'deploy/updater/updater.sh'), 'daemon'], {
+      env: { PATH: `${e.bin}:${process.env.PATH}`, NODE_ENV: 'test', FAKE_DOCKER_DIR: e.fake, UPDATER_MODE: 'single', PROJECT_DIR: e.project, STATE_DIR: e.state, ALERT_DIR: e.alerts, PUBLIC_DIR: pub, HEAL_CHECK_SECONDS: '1', UPDATE_CHECK_MINUTES: '0', PROC_UPTIME: uptime },
+    });
+    let out = '';
+    child.stdout?.on('data', (d: Buffer) => (out += d));
+    try {
+      for (let i = 0; i < 100 && !fn(); i++) await new Promise((r) => setTimeout(r, 100));
+      assert.ok(fn(), out);
+    } finally {
+      const exited = new Promise((r) => child.on('exit', r));
+      child.kill('SIGTERM');
+      await exited;
+    }
+    return out;
+  }
+
+  // Started by hand (the computer has been up for a day): not seen yet, so the reminder (rootless Podman's commands).
+  fs.writeFileSync(uptime, '86400.12 170000.00\n');
+  await daemonUntil(() => typeof status()?.restartNote === 'string');
+  assert.match(status().restartNote, /^Not yet seen coming back by itself after a restart of the computer\./);
+  assert.match(status().restartNote, /systemctl --user enable --now podman-restart\.service/);
+  assert.match(status().restartNote, /podman machine ssh "loginctl enable-linger && systemctl --user enable podman-restart\.service"/);
+  assert.ok(!status().restartNote.includes('\n'), 'one line');
+  assert.match(runSingle(e, ['status'], { PROC_UPTIME: uptime }).out, /after a restart: Not yet seen coming back by itself/);
+
+  // Rootful Podman: its own commands.
+  fs.writeFileSync(path.join(e.fake, 'rootful'), '');
+  await daemonUntil(() => typeof status()?.restartNote === 'string');
+  assert.match(status().restartNote, /sudo systemctl enable --now podman-restart\.service/);
+  assert.doesNotMatch(status().restartNote, /--user/);
+
+  // Started a minute after the computer did: it came back by itself. Remembered from then on.
+  fs.writeFileSync(uptime, '61.50 100.00\n');
+  const out = await daemonUntil(() => typeof status()?.restartNote === 'string');
+  assert.equal(status().restartNote, '');
+  assert.match(out + read(path.join(e.state, 'updater.log')), /came back by itself after a restart of the computer/);
+  fs.writeFileSync(uptime, '86400.12 170000.00\n');
+  await daemonUntil(() => typeof status()?.restartNote === 'string');
+  assert.equal(status().restartNote, '', 'still known after a later start by hand');
+  assert.doesNotMatch(runSingle(e, ['status'], { PROC_UPTIME: uptime }).out, /after a restart:/);
 });

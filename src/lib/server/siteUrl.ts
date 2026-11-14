@@ -24,3 +24,11 @@ export async function trustedSiteUrl(): Promise<string | null> {
   if (!/^(localhost|127\.0\.0\.1|\[::1\])(:\d{1,5})?$/.test(host)) return null;
   return `${h.get('x-forwarded-proto') === 'https' ? 'https' : 'http'}://${host}`;
 }
+
+/**
+ * The address for what search engines read (canonical links, the sitemap, robots.txt, structured
+ * data): the configured address, or this computer's own (localhost, 127.0.0.1) for a shop run on
+ * the owner's laptop. Never any other Host header (anyone can send any Host, and a kept page would
+ * then name someone else's site as the real one); null then, and the page leaves its address out.
+ */
+export const publicSiteUrl = trustedSiteUrl;

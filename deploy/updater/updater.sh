@@ -711,11 +711,29 @@ load_carried() {
 
 # run_shop CONTAINER IMAGE port|noport: start the shop from the one fixed definition.
 # "noport" is the trial copy: the same data and settings, no host port, no restart.
+# The shop's log is kept small, as in docker-compose.yml (10 MB a file, 5 files). Docker's
+# default driver (json-file) takes both options; Podman takes max-size for its k8s-file driver
+# and its journald driver leaves the size to the journal. An engine whose log driver refuses
+# the options (Docker set to journald or syslog) says so before anything is created: the shop is
+# then started without them, as before, and the log says so.
 run_shop() {
+  run_shop_once "$1" "$2" "$3" logs && return 0
+  case $RS_OUT in
+    *"log opt"* | *log-opt* | *"log driver"* | *max-size* | *max-file*)
+      log "  this engine's log driver does not take a size limit; starting $1 without one"
+      run_shop_once "$1" "$2" "$3" nologs && return 0
+      ;;
+  esac
+  log "  it did not start: $(printf '%s' "$RS_OUT" | tail -n 3 | tr '\n' ' ')"
+  return 1
+}
+
+run_shop_once() {
   rs_name=$1
   rs_ref=$2
   rs_image=${2#sha256:}
   rs_port=$3
+  rs_logs=$4
   set -f
   set -- run -d --name "$rs_name" --label "buh.updater.spec=$SHOP_SPEC"
   if [ "$rs_port" = port ]; then
@@ -733,17 +751,20 @@ run_shop() {
     set -- "$@" -e "$rs_pair"
   done
   set +f
+  if [ "$rs_logs" = logs ]; then
+    set -- "$@" --log-opt max-size=10m --log-opt max-file=5
+  fi
   # --pids-limit as in docker-compose.yml; also, Podman's Docker API reads "no limit" from the
   # docker CLI as a limit of 0 on some hosts, and the shop could not start a process.
   set -- "$@" --read-only --tmpfs /tmp --cap-drop ALL --security-opt no-new-privileges:true --pids-limit 512 "$rs_image"
-  if [ "$rs_port" = port ]; then
-    log "starting $rs_name from $rs_ref on port $SHOP_PORTS"
-  else
-    log "starting $rs_name from $rs_ref (no port)"
+  if [ "$rs_logs" = logs ]; then
+    if [ "$rs_port" = port ]; then
+      log "starting $rs_name from $rs_ref on port $SHOP_PORTS"
+    else
+      log "starting $rs_name from $rs_ref (no port)"
+    fi
   fi
-  rs_out=$(docker "$@" 2>&1) && return 0
-  log "  it did not start: $(printf '%s' "$rs_out" | tail -n 3 | tr '\n' ' ')"
-  return 1
+  RS_OUT=$(docker "$@" 2>&1)
 }
 
 # The last lines of a container's log, on one line.
@@ -1738,6 +1759,44 @@ take_request() {
 }
 
 # What runs, the versions on this server and the last request, for the Admin Hub.
+# ── Coming back after a restart of the computer ───────────────────────────────
+#
+# With Podman, containers with a restart policy come back after a reboot only through
+# podman-restart.service on the host. Whether that service is on cannot be asked from inside
+# a container (the engine's API does not say). What can be seen: this updater starting within
+# a few minutes of the computer's start means it was brought back by itself. Until that has
+# been seen once, the status carries a one-line reminder (restartNote).
+BOOT_SEEN_SECONDS=${BOOT_SEEN_SECONDS:-180}
+
+note_boot() {
+  is_single || return 0
+  nb_up=$(cut -d. -f1 "${PROC_UPTIME:-/proc/uptime}" 2> /dev/null) || return 0
+  is_number "$nb_up" || return 0
+  if [ "$nb_up" -lt "$BOOT_SEEN_SECONDS" ]; then
+    [ -f "$STATE_DIR/restart-seen" ] || log "the updater came back by itself after a restart of the computer (${nb_up}s after it started)"
+    stamp > "$STATE_DIR/restart-seen"
+  fi
+  # Asked once here (not in every status round): rootless or rootful decides the command shown.
+  rn_rootless=0
+  if [ ! -f "$STATE_DIR/restart-seen" ]; then
+    case $(docker info -f '{{json .SecurityOptions}}' 2> /dev/null) in *rootless*) rn_rootless=1 ;; esac
+  fi
+}
+
+restart_note() {
+  is_single || return 0
+  [ ! -f "$STATE_DIR/restart-seen" ] || return 0
+  if [ -z "${rn_rootless:-}" ]; then
+    rn_rootless=0
+    case $(docker info -f '{{json .SecurityOptions}}' 2> /dev/null) in *rootless*) rn_rootless=1 ;; esac
+  fi
+  if [ "$rn_rootless" = 1 ]; then
+    printf '%s' "Not yet seen coming back by itself after a restart of the computer. With Podman that needs its restart service, turned on once. Linux server: loginctl enable-linger && systemctl --user enable --now podman-restart.service   Windows: podman machine ssh \"loginctl enable-linger && systemctl --user enable podman-restart.service\""
+  else
+    printf '%s' "Not yet seen coming back by itself after a restart of the computer. With Podman that needs its restart service, turned on once. Linux server: sudo systemctl enable --now podman-restart.service   Windows: podman machine ssh \"sudo systemctl enable podman-restart.service\""
+  fi
+}
+
 publish_status() {
   [ -d "$PUBLIC_DIR" ] && [ ! -L "$PUBLIC_DIR" ] || return 0
   ps_cid=$(serving_cid)
@@ -1769,11 +1828,11 @@ publish_status() {
   ps_alert_at=$(sed -n 1p "$STATE_DIR/last-alert" 2> /dev/null || true)
   ps_alert_level=$(sed -n 2p "$STATE_DIR/last-alert" 2> /dev/null || true)
   ps_alert_msg=$(sed -n 3p "$STATE_DIR/last-alert" 2> /dev/null || true)
-  printf '{"updatedAt":"%s","mode":"%s","running":"%s","lastGood":"%s","previous":"%s","onServer":[%s],"autoUpdateMinutes":%s,"lastRequest":{"request":"%s","result":"%s","message":"%s","at":"%s"},"registryProblem":"%s","auto":%s,"lastCheck":{"at":"%s","result":"%s"},"history":[%s],"digests":[%s],"integrityProblem":"%s","lastAlert":{"at":"%s","level":"%s","message":"%s"}}\n' \
+  printf '{"updatedAt":"%s","mode":"%s","running":"%s","lastGood":"%s","previous":"%s","onServer":[%s],"autoUpdateMinutes":%s,"lastRequest":{"request":"%s","result":"%s","message":"%s","at":"%s"},"registryProblem":"%s","auto":%s,"lastCheck":{"at":"%s","result":"%s"},"history":[%s],"digests":[%s],"integrityProblem":"%s","lastAlert":{"at":"%s","level":"%s","message":"%s"},"restartNote":"%s"}\n' \
     "$(stamp)" "$ps_mode" "$(json_escape "$ps_running")" "$(json_escape "$ps_good")" "$(json_escape "$ps_prev")" "$ps_versions" "$ps_minutes" \
     "$(json_escape "$last_request")" "$last_result" "$(json_escape "$last_message")" "$last_at" "$(json_escape "$(registry_problem)")" \
     "$ps_auto" "$(json_escape "$ps_check_at")" "$(json_escape "$ps_check")" "$(history_json)" "$(digests_json)" "$(json_escape "$(integrity_problem)")" \
-    "$(json_escape "$ps_alert_at")" "$(json_escape "$ps_alert_level")" "$(json_escape "$ps_alert_msg")" > "$ps_tmp"
+    "$(json_escape "$ps_alert_at")" "$(json_escape "$ps_alert_level")" "$(json_escape "$ps_alert_msg")" "$(json_escape "$(restart_note)")" > "$ps_tmp"
   chmod 644 "$ps_tmp" 2>/dev/null || true
   mv -f "$ps_tmp" "$PUBLIC_DIR/status.json"
 }
@@ -2473,6 +2532,7 @@ daemon() {
   fi
   trap on_term TERM INT
   use_registry_login
+  note_boot
   next_update=$(now)
   while [ "$stop_requested" = 0 ]; do
     # A self-update starts the next updater as -new and renames it when it works; the one
@@ -2541,6 +2601,8 @@ status() {
     echo "rejected images:"
     while IFS= read -r st_bad; do echo "  $(short "$st_bad")"; done < "$STATE_DIR/bad-images"
   fi
+  st_note=$(restart_note)
+  [ -z "$st_note" ] || echo "after a restart: $st_note"
   echo "recent log:"
   tail -n 20 "$STATE_DIR/updater.log" 2> /dev/null || true
 }

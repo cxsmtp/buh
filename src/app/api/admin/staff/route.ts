@@ -1,5 +1,5 @@
-import { adminAccountInfo } from '@/lib/server/adminAuth';
-import { enforceLimit, requireAdmin } from '@/lib/server/guard';
+import { adminAccountInfo, confirmOwnerForChange, sessionCookie } from '@/lib/server/adminAuth';
+import { clientIp, enforceIpLimit, enforceLimit, requireAdmin } from '@/lib/server/guard';
 import { allowFields, handleRouteError, json, readJsonBody } from '@/lib/server/http';
 import { getSettings } from '@/lib/server/settings';
 import { siteUrl } from '@/lib/server/siteUrl';
@@ -29,16 +29,22 @@ export async function GET(req: Request) {
 export async function POST(req: Request) {
   try {
     const session = await requireAdmin(req);
-    enforceLimit(`staff-invite:${session.email}`, 10, 60 * 60_000, 'Too many invitations. Try again in an hour.');
     const body = await readJsonBody(req, 1024);
-    allowFields(body, ['email', 'name']);
+    allowFields(body, ['email', 'name', 'currentPassword']);
+    // Someone new gets to read the shop's money: the owner again (a sign-in in the last 10 minutes,
+    // or the password with the invitation), not only a live session.
+    if (body.currentPassword) enforceIpLimit(req, 'signin', 30, 10 * 60 * 1000, 'Too many attempts from this address. Wait a few minutes.');
+    const confirmed = await confirmOwnerForChange(session, body.currentPassword, { ip: clientIp(req) });
+    enforceLimit(`staff-invite:${session.email}`, 10, 60 * 60_000, 'Too many invitations. Try again in an hour.');
     const owner = await adminAccountInfo();
     const base = await siteUrl();
     const invite = inviteAccountant(body.email, body.name, owner.email, session.email);
     const link = `${base}/${invite.grant}#setup=${encodeURIComponent(invite.token)}`;
     const shop = getSettings('brand').storeName || 'Beautiful UAE Home';
     const emailed = await emailStaffInvite(invite.account.email, link, shop, owner.email);
-    return json({ success: true, account: invite.account, emailed, ...(emailed ? {} : { link }) });
+    const res = json({ success: true, account: invite.account, emailed, ...(emailed ? {} : { link }) });
+    if (confirmed.token) res.cookies.set(sessionCookie(confirmed.token));
+    return res;
   } catch (err) {
     return handleRouteError(err, 'admin/staff');
   }

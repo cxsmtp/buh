@@ -31,7 +31,7 @@ async function firstRunPassword(): Promise<string> {
 
 test('scrypt hashes verify and reject', async () => {
   const hash = await hashPassword('correct horse battery');
-  assert.match(hash, /^scrypt\$16384\$8\$1\$/);
+  assert.match(hash, /^scrypt\$32768\$8\$3\$/);
   assert.equal(await verifyPassword('correct horse battery', hash), true);
   assert.equal(await verifyPassword('wrong', hash), false);
   assert.ok(passwordProblem('short'));

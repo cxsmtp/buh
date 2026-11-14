@@ -87,7 +87,8 @@ export function PhotoOrderSheet({ onClose, onContinue, draft }: { onClose: () =>
         const url = await shrinkPhoto(file, 1400, PHOTO_URL_MAX);
         setPhotos((list) => (list.length < PHOTO_ORDER_LIMITS.maxPhotos ? [...list, url] : list));
       } catch (err) {
-        setError(err instanceof Error ? err.message : t('unreadable'));
+        // The reader's own words are English: in Arabic, the sheet's plain line.
+        setError(err instanceof Error && locale !== 'ar' ? err.message : t('unreadable'));
       } finally {
         setBusy((n) => n - 1);
       }

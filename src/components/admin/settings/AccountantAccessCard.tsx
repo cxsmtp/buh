@@ -2,7 +2,8 @@
 
 import React, { useCallback, useEffect, useState } from 'react';
 import { Copy, UserCheck } from 'lucide-react';
-import { getJson, postJson, sendJson } from '@/lib/apiClient';
+import { getJson, sendJson } from '@/lib/apiClient';
+import { sendConfirmed } from '../OwnerConfirm';
 
 /**
  * Settings → Security → Accountant access: invite your accountant (read-only: Money only), see who
@@ -60,7 +61,7 @@ export function AccountantAccessCard() {
     setLink(null);
     setCopied(false);
     setBusy(true);
-    const { ok, data } = await postJson<{ emailed?: boolean; link?: string; message?: string }>('/api/admin/staff', { email: to, ...(who ? { name: who } : {}) });
+    const { ok, data } = await sendConfirmed<{ emailed?: boolean; link?: string; message?: string }>('POST', '/api/admin/staff', { email: to, ...(who ? { name: who } : {}) }, 'who can see your accounts (inviting an accountant)');
     setBusy(false);
     if (!ok) return setError(data.message || 'Could not send the invitation. Please try again.');
     setEmail('');

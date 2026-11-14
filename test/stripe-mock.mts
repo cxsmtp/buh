@@ -43,6 +43,11 @@ export interface StripeMock {
   url: string;
   requests: MockRequest[];
   intents: Map<string, MockIntent>;
+  /**
+   * Stripe refuses the key (401: revoked or rolled; 403: a restricted key without the permission),
+   * for every request, or only those whose "METHOD path" matches `only`. null: the key is fine.
+   */
+  refuse: null | { status: 401 | 403; only?: RegExp };
   /** What the next refund answers with ('succeeded' by default; 'pending' to wait for the webhook). */
   refundStatus: string;
   /** Mark an intent paid, with how (e.g. Apple Pay, Visa 4242). */
@@ -74,6 +79,7 @@ export async function startStripeMock(): Promise<StripeMock> {
     intents,
     refundStatus: 'succeeded',
     refunds,
+    refuse: null,
   } as StripeMock;
 
   const err = (status: number, type: string, message: string, code?: string) => ({ status, body: { error: { type, message, ...(code ? { code } : {}) } } });
@@ -155,6 +161,8 @@ export async function startStripeMock(): Promise<StripeMock> {
       let answer: { status: number; body: unknown };
       if (auth !== `Bearer ${TEST_KEYS.secret}`) {
         answer = err(401, 'invalid_request_error', 'Invalid API Key provided.');
+      } else if (mock.refuse && (!mock.refuse.only || mock.refuse.only.test(`${req.method} ${url.pathname}`))) {
+        answer = mock.refuse.status === 401 ? err(401, 'invalid_request_error', 'Invalid API Key provided.') : err(403, 'invalid_request_error', 'The provided key does not have the required permissions for this endpoint.');
       } else if (idem && req.method === 'POST' && byKey.has(idem)) {
         answer = byKey.get(idem)!; // Stripe: the same key gives the first answer again
       } else {

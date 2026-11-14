@@ -1,6 +1,6 @@
 import crypto from 'node:crypto';
 import type { ChatMessage, ChatThread } from '@/types';
-import { reply as assistantReply } from '@/lib/assistant';
+import { greetingFor, isArabicText, reply as assistantReply } from '@/lib/assistant';
 import { audit } from './audit';
 import { getDb } from './db';
 import { HttpError } from './http';
@@ -49,21 +49,21 @@ const nowIso = (now = Date.now()) => new Date(now).toISOString();
 
 /** Plain text only, trimmed and capped. */
 export function cleanBody(v: unknown, max = MAX_BODY): string {
-  if (typeof v !== 'string') throw new HttpError(400, 'Type a message.');
+  if (typeof v !== 'string') throw new HttpError(400, 'Type a message.', {}, { code: 'chat_empty' });
   const body = v.replace(/\r\n?/g, '\n').replace(/[\u0000-\u0009\u000b-\u001f\u007f]+/g, ' ').replace(/\n{3,}/g, '\n\n').trim();
-  if (!body) throw new HttpError(400, 'Type a message.');
+  if (!body) throw new HttpError(400, 'Type a message.', {}, { code: 'chat_empty' });
   return body.slice(0, max);
 }
 
 /** A phone number (any country, 8–15 digits) or an email address. */
 export function cleanContact(v: unknown): string {
-  if (typeof v !== 'string') throw new HttpError(400, 'Leave a phone number or an email.');
+  if (typeof v !== 'string') throw new HttpError(400, 'Leave a phone number or an email.', {}, { code: 'chat_contact' });
   const c = v.trim().slice(0, 254);
   if (/^[^\s@<>",;]+@[^\s@<>",;]+\.[^\s@<>",;]+$/.test(c)) return c.toLowerCase();
   const digits = c.replace(/[\s()-]/g, '');
   const phone = digits.startsWith('00') ? `+${digits.slice(2)}` : /^05\d{8}$/.test(digits) ? `+971${digits.slice(1)}` : digits;
   if (/^\+?[1-9]\d{7,14}$/.test(phone)) return phone.startsWith('+') ? phone : `+${phone}`;
-  throw new HttpError(400, 'Please check the phone number or email.');
+  throw new HttpError(400, 'Please check the phone number or email.', {}, { code: 'chat_contact' });
 }
 
 function row(id: string): Row | undefined {
@@ -74,7 +74,7 @@ function row(id: string): Row | undefined {
 function own(id: unknown, token: unknown): Row {
   const r = typeof id === 'string' && /^[A-Za-z0-9_-]{10,40}$/.test(id) ? row(id) : undefined;
   const given = Buffer.from(sha(typeof token === 'string' ? token : ''));
-  if (!r || !crypto.timingSafeEqual(given, Buffer.from(r.token_hash))) throw new HttpError(404, 'This chat has ended. Start a new one.');
+  if (!r || !crypto.timingSafeEqual(given, Buffer.from(r.token_hash))) throw new HttpError(404, 'This chat has ended. Start a new one.', {}, { code: 'chat_ended' });
   return r;
 }
 
@@ -82,7 +82,7 @@ function addMessage(threadId: string, author: ChatMessage['author'], body: strin
   const db = getDb();
   const count = (db.prepare('SELECT COUNT(*) AS n FROM chat_messages WHERE thread_id = ?').get(threadId) as { n: number }).n;
   const cap = author === 'customer' || author === 'bot' ? MAX_MESSAGES_PER_THREAD : HARD_CAP;
-  if (count >= cap) throw new HttpError(429, 'This chat is full. Please start a new one, or message us on WhatsApp.');
+  if (count >= cap) throw new HttpError(429, 'This chat is full. Please start a new one, or message us on WhatsApp.', {}, { code: 'chat_full' });
   const at = nowIso(now);
   const info = db.prepare('INSERT INTO chat_messages (thread_id, at, author, body, via) VALUES (?, ?, ?, ?, ?)').run(threadId, at, author, body, via);
   db.prepare('UPDATE chat_threads SET updated_at = ? WHERE id = ?').run(at, threadId);
@@ -117,18 +117,62 @@ export function setChatNotifiers(owner: typeof notifyOwner, customer: typeof not
   notifyCustomer = customer;
 }
 
-function handOver(r: Row, reason: 'asked' | 'unsure', now = Date.now()) {
+/** The shop's two languages. The customer's page says which it shows (allow-listed here). */
+export type ChatLocale = 'en' | 'ar';
+export const chatLocale = (v: unknown): ChatLocale | undefined => (v === 'ar' || v === 'en' ? v : undefined);
+
+/**
+ * The chat's own notices, in English and UAE Arabic ({name}, {contact}: the customer's own). The
+ * English is word for word what the chat has always said.
+ */
+const SAY = {
+  asked: { en: 'Of course. I’ve asked the team to join this chat.', ar: 'بالتأكيد. طلبت من الفريق الانضمام إلى هذه الدردشة.' },
+  unsure: { en: 'I’m not sure about that one, so I’ve passed your question to the team.', ar: 'لست متأكداً من هذا السؤال، لذا حوّلته إلى الفريق.' },
+  willReply: { en: ' We will reply here as soon as we can.', ar: ' سنرد عليك هنا في أقرب وقت ممكن.' },
+  addContact: { en: ' So we can get back to you even if you leave, please add your phone number or email below.', ar: ' لنتمكن من الرد عليك حتى لو غادرت الصفحة، يرجى إضافة رقم هاتفك أو بريدك الإلكتروني أدناه.' },
+  thanks: { en: 'Thank you{name}. If you leave before we reply, we’ll get back to you at {contact}.', ar: 'شكراً لك{name}. إذا غادرت قبل أن نرد، سنتواصل معك على {contact}.' },
+  waitedContact: {
+    en: 'Thank you for waiting. Everyone is busy for a moment, but your message is with us and we’ll get back to you at {contact} as soon as we can. You can close this page.',
+    ar: 'شكراً لانتظارك. الجميع مشغول حالياً، لكن رسالتك وصلتنا وسنتواصل معك على {contact} في أقرب وقت ممكن. يمكنك إغلاق هذه الصفحة.',
+  },
+  waited: {
+    en: 'Thank you for waiting. Everyone is busy for a moment, but your message is with us. Please leave your phone number or email below, and we’ll get back to you as soon as we can.',
+    ar: 'شكراً لانتظارك. الجميع مشغول حالياً، لكن رسالتك وصلتنا. يرجى ترك رقم هاتفك أو بريدك الإلكتروني أدناه، وسنتواصل معك في أقرب وقت ممكن.',
+  },
+} as const;
+
+/** One of the chat's notices; in Arabic a phone number or email keeps its own left-to-right order. */
+function say(key: keyof typeof SAY, locale: ChatLocale, vars: { name?: string; contact?: string } = {}): string {
+  const ltr = (v: string) => (locale === 'ar' && v ? `\u2068${v}\u2069` : v);
+  return SAY[key][locale].replace('{name}', vars.name ?? '').replace('{contact}', ltr(vars.contact ?? ''));
+}
+
+/**
+ * The language of a chat's notices: what the customer's page says it shows; when the page did not
+ * say (an older page, or the server's own check every 30 seconds), the language the chat is
+ * already in: its last notice, else the customer's last message.
+ */
+function threadLocale(threadId: string, given?: ChatLocale): ChatLocale {
+  if (given) return given;
+  const db = getDb();
+  const last =
+    (db.prepare("SELECT body FROM chat_messages WHERE thread_id = ? AND author = 'system' ORDER BY id DESC LIMIT 1").get(threadId) as { body: string } | undefined) ??
+    (db.prepare("SELECT body FROM chat_messages WHERE thread_id = ? AND author = 'customer' ORDER BY id DESC LIMIT 1").get(threadId) as { body: string } | undefined);
+  return last && isArabicText(last.body) ? 'ar' : 'en';
+}
+
+function handOver(r: Row, reason: 'asked' | 'unsure', now = Date.now(), locale?: ChatLocale) {
   const db = getDb();
   if (r.status === 'bot' || r.status === 'closed') {
     db.prepare("UPDATE chat_threads SET status = 'waiting', handed_over_at = ?, reassured_at = NULL WHERE id = ?").run(nowIso(now), r.id);
-    const first = reason === 'asked' ? 'Of course. I’ve asked the team to join this chat.' : 'I’m not sure about that one, so I’ve passed your question to the team.';
-    addMessage(r.id, 'system', `${first} We will reply here as soon as we can.${r.contact ? '' : ' So we can get back to you even if you leave, please add your phone number or email below.'}`, 'web', now);
+    const l = threadLocale(r.id, locale);
+    addMessage(r.id, 'system', `${say(reason, l)}${say('willReply', l)}${r.contact ? '' : say('addContact', l)}`, 'web', now);
   }
   notifyOwner?.(r.id);
 }
 
 /** A customer's message: the assistant answers, or a person is asked to. */
-function onCustomerMessage(r: Row, body: string, now = Date.now()) {
+function onCustomerMessage(r: Row, body: string, now = Date.now(), locale?: ChatLocale) {
   addMessage(r.id, 'customer', body, 'web', now);
   if (r.status === 'waiting' || r.status === 'human') {
     notifyOwner?.(r.id);
@@ -136,13 +180,14 @@ function onCustomerMessage(r: Row, body: string, now = Date.now()) {
   }
   const settings = getSettings('assistant');
   const answer = assistantReply(body, settings, getSettings('catalog').sizes);
-  if (answer.kind === 'handover') handOver(r, answer.reason, now);
+  // A question in Arabic gets its notice in Arabic, whatever language the page is in.
+  if (answer.kind === 'handover') handOver(r, answer.reason, now, isArabicText(body) ? 'ar' : locale);
   else addMessage(r.id, 'bot', answer.text, 'web', now);
 }
 
-export function startChat(input: { message: unknown; name?: unknown; contact?: unknown; page?: unknown; ip?: string | null }, now = Date.now()): CustomerView & { token: string } {
+export function startChat(input: { message: unknown; name?: unknown; contact?: unknown; page?: unknown; ip?: string | null; locale?: unknown }, now = Date.now()): CustomerView & { token: string } {
   const settings = getSettings('assistant');
-  if (!settings.enabled) throw new HttpError(404, 'Chat is not available right now. Please message us on WhatsApp or by email.');
+  if (!settings.enabled) throw new HttpError(404, 'Chat is not available right now. Please message us on WhatsApp or by email.', {}, { code: 'chat_off' });
   const body = cleanBody(input.message);
   const name = typeof input.name === 'string' ? input.name.replace(/[\u0000-\u001f\u007f<>]+/g, ' ').trim().slice(0, 80) : '';
   const contact = input.contact ? cleanContact(input.contact) : '';
@@ -155,8 +200,9 @@ export function startChat(input: { message: unknown; name?: unknown; contact?: u
   getDb()
     .prepare('INSERT INTO chat_threads (id, token_hash, reply_key, customer_name, contact, page, ip, created_at, updated_at, customer_seen_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)')
     .run(id, sha(token), replyKey, name, contact, page, input.ip ?? '', at, at, at);
-  if (settings.greeting) addMessage(id, 'bot', settings.greeting, 'web', now - 1);
-  onCustomerMessage(row(id)!, body, now);
+  const locale = chatLocale(input.locale);
+  if (settings.greeting) addMessage(id, 'bot', greetingFor(settings.greeting, locale ?? 'en'), 'web', now - 1);
+  onCustomerMessage(row(id)!, body, now, locale);
   bump('chats');
   return { ...customerView(row(id)!), token };
 }
@@ -164,40 +210,41 @@ export function startChat(input: { message: unknown; name?: unknown; contact?: u
 /** `after`: the last message id the customer's page has, so nothing written meanwhile (an owner reply) is skipped. */
 const afterId = (v: unknown) => (Number.isInteger(Number(v)) && Number(v) > 0 ? Number(v) : 0);
 
-export function customerSend(id: unknown, token: unknown, message: unknown, after: unknown = 0, now = Date.now()): CustomerView {
+export function customerSend(id: unknown, token: unknown, message: unknown, after: unknown = 0, now = Date.now(), locale?: unknown): CustomerView {
   const r = own(id, token);
   const body = cleanBody(message);
   if (r.status === 'closed') getDb().prepare("UPDATE chat_threads SET status = 'bot' WHERE id = ?").run(r.id);
   getDb().prepare('UPDATE chat_threads SET customer_seen_at = ? WHERE id = ?').run(nowIso(now), r.id);
-  onCustomerMessage(row(r.id)!, body, now);
+  onCustomerMessage(row(r.id)!, body, now, chatLocale(locale));
   bump('chats');
   return customerView(r, afterId(after));
 }
 
 /** "Talk to a person" button. */
-export function customerAskPerson(id: unknown, token: unknown, after: unknown = 0, now = Date.now()): CustomerView {
+export function customerAskPerson(id: unknown, token: unknown, after: unknown = 0, now = Date.now(), locale?: unknown): CustomerView {
   const r = own(id, token);
-  handOver(r, 'asked', now);
+  handOver(r, 'asked', now, chatLocale(locale));
   bump('chats');
   return customerView(r, afterId(after));
 }
 
-export function customerContact(id: unknown, token: unknown, input: { name?: unknown; contact: unknown }, after: unknown = 0, now = Date.now()): CustomerView {
+export function customerContact(id: unknown, token: unknown, input: { name?: unknown; contact: unknown }, after: unknown = 0, now = Date.now(), locale?: unknown): CustomerView {
   const r = own(id, token);
   const contact = cleanContact(input.contact);
   const name = typeof input.name === 'string' && input.name.trim() ? input.name.replace(/[\u0000-\u001f\u007f<>]+/g, ' ').trim().slice(0, 80) : r.customer_name;
   getDb().prepare('UPDATE chat_threads SET contact = ?, customer_name = ? WHERE id = ?').run(contact, name, r.id);
-  addMessage(r.id, 'system', `Thank you${name ? `, ${name.split(' ')[0]}` : ''}. If you leave before we reply, we’ll get back to you at ${contact}.`, 'web', now);
+  const l = threadLocale(r.id, chatLocale(locale));
+  addMessage(r.id, 'system', say('thanks', l, { name: name ? `${l === 'ar' ? '، ' : ', '}${name.split(' ')[0]}` : '', contact }), 'web', now);
   notifyOwner?.(r.id);
   bump('chats');
   return customerView(r, afterId(after));
 }
 
 /** New messages since `after` (the customer's page asks every few seconds while the chat is open). */
-export function customerPoll(id: unknown, token: unknown, after: unknown, now = Date.now()): CustomerView {
+export function customerPoll(id: unknown, token: unknown, after: unknown, now = Date.now(), locale?: unknown): CustomerView {
   const r = own(id, token);
   getDb().prepare('UPDATE chat_threads SET customer_seen_at = ? WHERE id = ?').run(nowIso(now), r.id);
-  reassureIfWaiting(row(r.id)!, now);
+  reassureIfWaiting(row(r.id)!, now, chatLocale(locale));
   return customerView(r, afterId(after));
 }
 
@@ -206,21 +253,14 @@ export function customerPoll(id: unknown, token: unknown, after: unknown, now = 
  * get back to them (and ask how, if they haven't said). Run when the customer's page
  * asks for news, and every 30 seconds by the server.
  */
-function reassureIfWaiting(r: Row, now = Date.now()): boolean {
+function reassureIfWaiting(r: Row, now = Date.now(), locale?: ChatLocale): boolean {
   if (r.status !== 'waiting' || r.reassured_at || !r.handed_over_at) return false;
   const wait = getSettings('assistant').waitSeconds * 1000;
   if (now - Date.parse(r.handed_over_at) < wait) return false;
   const claimed = getDb().prepare("UPDATE chat_threads SET reassured_at = ? WHERE id = ? AND reassured_at IS NULL AND status = 'waiting'").run(nowIso(now), r.id);
   if (!claimed.changes) return false; // the other copy of the shop did it
-  addMessage(
-    r.id,
-    'system',
-    r.contact
-      ? `Thank you for waiting. Everyone is busy for a moment, but your message is with us and we’ll get back to you at ${r.contact} as soon as we can. You can close this page.`
-      : 'Thank you for waiting. Everyone is busy for a moment, but your message is with us. Please leave your phone number or email below, and we’ll get back to you as soon as we can.',
-    'web',
-    now
-  );
+  const l = threadLocale(r.id, locale);
+  addMessage(r.id, 'system', r.contact ? say('waitedContact', l, { contact: r.contact }) : say('waited', l), 'web', now);
   bump('chats');
   return true;
 }

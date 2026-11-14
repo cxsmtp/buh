@@ -59,11 +59,11 @@ export function imageDimensions(bytes: Buffer): { width: number; height: number 
 
 export function parseImageDataUrl(value: unknown, maxBytes = 6 * 1024 * 1024): { mime: string; bytes: Buffer } {
   const match = typeof value === 'string' ? DATA_URL.exec(value) : null;
-  if (!match) throw new HttpError(400, 'Upload a PNG, JPEG or WebP image.');
+  if (!match) throw new HttpError(400, 'Upload a PNG, JPEG or WebP image.', {}, { code: 'image_type' });
   const [, mime, b64] = match;
-  if (b64.length * 0.75 > maxBytes) throw new HttpError(413, 'The image is too large.');
+  if (b64.length * 0.75 > maxBytes) throw new HttpError(413, 'The image is too large.', {}, { code: 'image_too_large' });
   const bytes = Buffer.from(b64, 'base64');
-  if (bytes.length > maxBytes) throw new HttpError(413, 'The image is too large.');
+  if (bytes.length > maxBytes) throw new HttpError(413, 'The image is too large.', {}, { code: 'image_too_large' });
 
   const signatures: Record<string, number[]> = {
     'image/png': [0x89, 0x50, 0x4e, 0x47],
@@ -75,7 +75,7 @@ export function parseImageDataUrl(value: unknown, maxBytes = 6 * 1024 * 1024): {
     bytes.length >= 12 &&
     magic.every((b, i) => bytes[i] === b) &&
     (mime !== 'image/webp' || bytes.toString('latin1', 8, 12) === 'WEBP');
-  if (!ok) throw new HttpError(400, 'The file is not a valid PNG, JPEG or WebP image.');
+  if (!ok) throw new HttpError(400, 'The file is not a valid PNG, JPEG or WebP image.', {}, { code: 'image_invalid' });
   return { mime, bytes };
 }
 
@@ -86,10 +86,10 @@ export function parseImageDataUrl(value: unknown, maxBytes = 6 * 1024 * 1024): {
 export function parseReceiptDataUrl(value: unknown, maxBytes = 5 * 1024 * 1024): { ext: 'png' | 'jpg' | 'webp' | 'pdf'; bytes: Buffer } {
   const pdf = typeof value === 'string' ? /^data:application\/pdf;base64,([A-Za-z0-9+/]+={0,2})$/.exec(value) : null;
   if (pdf) {
-    if (pdf[1].length * 0.75 > maxBytes) throw new HttpError(413, 'The receipt is too large (max 5 MB).');
+    if (pdf[1].length * 0.75 > maxBytes) throw new HttpError(413, 'The receipt is too large (max 5 MB).', {}, { code: 'receipt_too_large' });
     const bytes = Buffer.from(pdf[1], 'base64');
-    if (bytes.length > maxBytes) throw new HttpError(413, 'The receipt is too large (max 5 MB).');
-    if (bytes.subarray(0, 5).toString('latin1') !== '%PDF-') throw new HttpError(400, 'The receipt is not a valid PDF.');
+    if (bytes.length > maxBytes) throw new HttpError(413, 'The receipt is too large (max 5 MB).', {}, { code: 'receipt_too_large' });
+    if (bytes.subarray(0, 5).toString('latin1') !== '%PDF-') throw new HttpError(400, 'The receipt is not a valid PDF.', {}, { code: 'receipt_invalid' });
     return { ext: 'pdf', bytes };
   }
   const { mime, bytes } = parseImageDataUrl(value, maxBytes);

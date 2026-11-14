@@ -5,11 +5,17 @@
  * Next.js bootstraps with them. Everything else is locked down: no plugins,
  * no <base> hijack, no framing, forms and fetches only to this site.
  *
- * A per-request nonce policy would also block injected inline scripts, but it
- * forces every page to render per request. Measured on this shop: the
- * storefront fell from ~790 to ~145 requests/s, and even an idle proxy cost
- * ~35%. React escapes all rendered text and the shop has no raw-HTML sinks,
- * so the static policy is the better trade (docs/security.md).
+ * A per-request nonce policy also blocks injected inline scripts, but a page
+ * can only carry a nonce when it is rendered for each request. Measured on this
+ * shop, rendering the storefront's kept pages per request took them from ~790
+ * to ~145 requests/s, and even an idle proxy cost ~35%. So: the pages that are
+ * rendered per request anyway (the Admin Hub, the private pay, deal and
+ * tracking pages, a shared selection, the terms, order-by-photo) get the nonce
+ * policy, set by the front gate with no proxy (src/lib/server/cspNonce.ts,
+ * frontGate.ts); the kept pages (home, category, festival, product) keep this
+ * static one. Their inline scripts are the framework's page data, different
+ * for every page and every rebuild, so a fixed list of hashes cannot cover
+ * them. React escapes all rendered text and the shop has no raw-HTML sinks.
  *
  * Firebase Phone Authentication (an optional SMS method) needs Google's
  * reCAPTCHA scripts and frames and Firebase's auth APIs. The policy is fixed
@@ -36,13 +42,14 @@ export const STRIPE_SOURCES = {
   connect: ['https://api.stripe.com'],
 };
 
-export function contentSecurityPolicy(): string {
+/** The whole policy around one script-src (the rest is the same for every page). */
+export function policyWithScripts(scriptSrc: string): string {
   const isDev = process.env.NODE_ENV === 'development';
   const fb = FIREBASE_PHONE_AUTH_SOURCES;
   const st = STRIPE_SOURCES;
   return [
     "default-src 'self'",
-    `script-src 'self' 'unsafe-inline'${isDev ? " 'unsafe-eval'" : ''} ${fb.script.join(' ')} ${st.script.join(' ')}`,
+    `script-src ${scriptSrc}${isDev ? " 'unsafe-eval'" : ''}`,
     // React style attributes need inline styles.
     "style-src 'self' 'unsafe-inline'",
     // Product photos come from https hosts; admin uploads are data:/blob: URLs.
@@ -61,6 +68,18 @@ export function contentSecurityPolicy(): string {
     "frame-ancestors 'none'",
     ...(isDev ? [] : ['upgrade-insecure-requests']),
   ].join('; ');
+}
+
+/** The other sites' scripts the shop's checkout may load (Firebase's reCAPTCHA, Stripe.js). */
+export const CHECKOUT_SCRIPT_HOSTS = [...FIREBASE_PHONE_AUTH_SOURCES.script, ...STRIPE_SOURCES.script].join(' ');
+
+/**
+ * The policy of the pages built ahead of time (the home, category, festival and product pages),
+ * fixed at build time (next.config.ts). Pages built for each request get a stricter one, with a
+ * per-request nonce and no 'unsafe-inline' for scripts: src/lib/server/cspNonce.ts.
+ */
+export function contentSecurityPolicy(): string {
+  return policyWithScripts(`'self' 'unsafe-inline' ${CHECKOUT_SCRIPT_HOSTS}`);
 }
 
 /**

@@ -229,6 +229,15 @@ export async function completeStaffSetup(token: unknown, password: string, now =
   });
 }
 
+/**
+ * Replace an accountant's stored password hash with one of the same password at today's cost
+ * (at sign-in, src/lib/server/adminAuth.ts). Only while the hash is still the one that was
+ * checked, so a setup, revoke or the other copy of the shop is never overwritten.
+ */
+export function upgradeStaffPasswordHash(id: string, fromHash: string, toHash: string): boolean {
+  return getDb().prepare("UPDATE staff_accounts SET password_hash = ? WHERE id = ? AND status = 'active' AND password_hash = ?").run(toHash, id, fromHash).changes === 1;
+}
+
 /** Revoke an accountant: their sessions and any setup link stop working now. Audited first. */
 export function revokeStaff(id: unknown, by: string, now = Date.now()): StaffAccount {
   if (typeof id !== 'string' || !/^acc_[A-Za-z0-9_-]{6,30}$/.test(id)) throw new HttpError(404, 'Account not found.');

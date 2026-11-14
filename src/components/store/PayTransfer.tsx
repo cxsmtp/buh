@@ -6,7 +6,8 @@ import { Building2, Check, CheckCircle2, Copy, Loader2, MessageCircle, Upload } 
 import type { BankState, BankTransferDetails } from '@/types';
 import { postJson } from '@/lib/apiClient';
 import { formatAed, toFils } from '@/lib/money';
-import { useT, type Words } from '@/lib/i18n';
+import { useLocale, useT, type Words } from '@/lib/i18n';
+import { serverSaid } from './serverWords';
 
 interface PayTransferProps {
   token: string;
@@ -107,6 +108,7 @@ function CopyLine({ label, value, mono, compact }: { label: string; value: strin
  */
 export function PayTransfer({ token, shopName, order, bank, onRequest = false, askLink, askConfirms = false, supportEmail = '' }: PayTransferProps) {
   const t = useT(WORDS);
+  const { locale } = useLocale();
   const [uploads, setUploads] = useState(order.uploads);
   const [state, setState] = useState<BankState>(order.state);
   const [busy, setBusy] = useState(false);
@@ -131,11 +133,11 @@ export function PayTransfer({ token, shopName, order, bank, onRequest = false, a
     reader.onerror = () => setProblem(t('unreadable'));
     reader.onload = async () => {
       setBusy(true);
-      const { ok, data } = await postJson<{ uploads?: number; message?: string }>(`/api/pay/${encodeURIComponent(token)}`, { file: reader.result });
+      const { ok, status, data } = await postJson<{ uploads?: number; message?: string }>(`/api/pay/${encodeURIComponent(token)}`, { file: reader.result });
       setBusy(false);
       if (input.current) input.current.value = '';
       if (!ok) {
-        setProblem(data.message || t('notSent'));
+        setProblem(serverSaid({ status, data }, locale, t('notSent')));
         return;
       }
       setUploads(data.uploads ?? uploads + 1);

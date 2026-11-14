@@ -118,6 +118,42 @@ export function clientIp(req: Request): string | null {
   return null;
 }
 
+// ── Is a proxy in front, though TRUST_PROXY is not set? ─────────────────────
+//
+// Counted at the front gate (frontGate.ts), on the request as it arrives: route handlers can't
+// tell, because Next.js adds its own X-Forwarded-For. Two numbers per hour, in memory.
+
+const PROXY_WINDOW_MS = 60 * 60 * 1000;
+/** Fewer requests than this in an hour say nothing either way. */
+const PROXY_MIN_REQUESTS = 10;
+let proxyWindow = { start: 0, total: 0, forwarded: 0 };
+let proxyLastSeen = 0;
+
+/**
+ * Note whether this request came with a proxy's headers (X-Forwarded-For or X-Real-IP), while
+ * TRUST_PROXY is not set. Pass `count: false` for requests that never come through the proxy (the
+ * updater's own health checks), so a quiet shop's numbers are its visitors'.
+ */
+export function noteArrival(headers: Record<string, unknown>, now = Date.now(), count = true): void {
+  if (process.env.TRUST_PROXY === '1' || !count) return;
+  if (now - proxyWindow.start >= PROXY_WINDOW_MS) proxyWindow = { start: now, total: 0, forwarded: 0 };
+  proxyWindow.total++;
+  if (headers['x-forwarded-for'] !== undefined || headers['x-real-ip'] !== undefined) proxyWindow.forwarded++;
+  // Most requests carry them: a proxy is in front. (A few do on any shop: anyone can send them.)
+  if (proxyWindow.total >= PROXY_MIN_REQUESTS && proxyWindow.forwarded * 2 >= proxyWindow.total) proxyLastSeen = now;
+}
+
+/** Requests arrived through a proxy in the last day, yet TRUST_PROXY is not set. */
+export function proxyWithoutTrust(now = Date.now()): boolean {
+  return process.env.TRUST_PROXY !== '1' && proxyLastSeen > 0 && now - proxyLastSeen < 24 * PROXY_WINDOW_MS;
+}
+
+/** Tests: forget what was counted. */
+export function _resetArrivals(): void {
+  proxyWindow = { start: 0, total: 0, forwarded: 0 };
+  proxyLastSeen = 0;
+}
+
 /**
  * CSRF guard for state-changing requests: the browser-supplied Origin (or,
  * failing that, Sec-Fetch-Site) must say the request came from this site.
@@ -165,11 +201,11 @@ export function allowFields(body: Record<string, unknown>, allowed: readonly str
 
 export function str(value: unknown, field: string, max: number, { required = true, trim = true } = {}): string {
   if (value === undefined || value === null || value === '') {
-    if (required) throw new HttpError(400, `${field} is required.`);
+    if (required) throw new HttpError(400, `${field} is required.`, {}, { code: 'field_required', field });
     return '';
   }
-  if (typeof value !== 'string') throw new HttpError(400, `${field} must be text.`);
+  if (typeof value !== 'string') throw new HttpError(400, `${field} must be text.`, {}, { code: 'field_text', field });
   const trimmed = trim ? value.trim() : value;
-  if (trimmed.length > max) throw new HttpError(400, `${field} is too long.`);
+  if (trimmed.length > max) throw new HttpError(400, `${field} is too long.`, {}, { code: 'field_too_long', field });
   return trimmed;
 }

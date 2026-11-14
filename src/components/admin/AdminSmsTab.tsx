@@ -18,7 +18,7 @@ import {
 } from 'lucide-react';
 import { INITIAL_SMS_SETTINGS } from '@/data/initialData';
 import { postJson } from '@/lib/apiClient';
-import { useAutoSave, type AutoSaveHooks } from './settings/useAutoSave';
+import { useAutoSave, type AutoSaveHooks, type FormVersion } from './settings/useAutoSave';
 import { secretPlaceholder } from './AdminCouriersTab';
 
 interface AdminSmsTabProps {
@@ -28,7 +28,7 @@ interface AdminSmsTabProps {
   /** The saved keys' last 4 characters (from the server), to tell which key is saved. */
   secretsHint?: Record<string, string>;
   /** Saves on the server; resolves to an error message, or null when saved. */
-  onUpdateSmsSettings: (updated: SmsGatewaySettings) => Promise<string | null>;
+  onUpdateSmsSettings: (updated: SmsGatewaySettings, version?: FormVersion) => Promise<string | null>;
   auto?: AutoSaveHooks;
 }
 
@@ -109,10 +109,10 @@ export const AdminSmsTab: React.FC<AdminSmsTabProps> = ({
 
   const handleSave = async (e?: React.FormEvent) => {
     if (e) e.preventDefault();
-    autosave.cancel();
     const updated = draft();
     setSaveError('');
-    const error = await onUpdateSmsSettings(updated);
+    // With the version this form was loaded from: a change made on another device is not overwritten.
+    const error = await onUpdateSmsSettings(updated, await autosave.hold());
     if (error) {
       setSaveError(error);
       return;

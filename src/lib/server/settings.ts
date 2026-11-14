@@ -278,6 +278,11 @@ export function settingsHistory(limit = 60): SettingsVersion[] {
   );
 }
 
+/** The settings group an earlier version belongs to (null: no longer kept). */
+export function settingsVersionKey(id: number): SettingsKey | null {
+  return (getDb().prepare('SELECT key FROM settings_history WHERE id = ?').pluck().get(id) as SettingsKey | undefined) ?? null;
+}
+
 /**
  * Put an earlier version back. Keys are not in history, so the keys saved now
  * stay. The version replaced by this restore is itself kept, so it can be undone.

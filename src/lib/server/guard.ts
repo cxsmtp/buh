@@ -50,7 +50,8 @@ export function requireReader(req: Request): Promise<AdminSession> {
 export function enforceLimit(key: string, max: number, windowMs: number, message: string) {
   const result = rateLimit(key, max, windowMs);
   if (!result.ok) {
-    throw new HttpError(429, message, { 'Retry-After': String(result.retryAfterSec) });
+    // The code and the wait let the shop say it in the customer's language (the English stays as written).
+    throw new HttpError(429, message, { 'Retry-After': String(result.retryAfterSec) }, { code: 'rate_limited', retryAfterSec: result.retryAfterSec });
   }
 }
 

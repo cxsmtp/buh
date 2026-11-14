@@ -32,6 +32,7 @@
 #                       DOCKER_CONFIG/config.json has a login for it (one without "expired")
 #   setup-auth-mount    the host folder the set-up container has at /run/buh/registry-auth
 #   port-fails          present: `docker run -p …` cannot start (the container stays "created")
+#   log-opt-fails       present: `docker run --log-opt …` is refused (a log driver without a size limit)
 #   events              one line per action, in order
 # Image ids containing "broken" never become healthy; "crash" exits at once.
 set -u
@@ -265,6 +266,11 @@ case $cmd in
         --env-file) envfile=$2 && shift ;;
         -e) pairs="$pairs$2$nl" && shift ;;
         --restart | --tmpfs | --cap-drop | --cap-add | --network | --security-opt | --pids-limit) shift ;;
+        --log-opt)
+          # log-opt-fails: an engine whose log driver takes no size limit refuses to create it.
+          [ ! -f "$D/log-opt-fails" ] || { echo "Error response from daemon: unknown log opt '${2%%=*}' for journald log driver" >&2 && exit 125; }
+          shift
+          ;;
         -*) echo "fake docker: unknown run flag $1" >&2 && exit 125 ;;
         *) image=$1 ;;
       esac

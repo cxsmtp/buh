@@ -10,6 +10,7 @@ import { s3Problem } from './s3Backup';
 import { updaterReport, updaterStatus } from './versions';
 import { getDb } from './db';
 import { kvGet, kvSet } from './kv';
+import { proxyWithoutTrust } from './http';
 import { logEvent } from './log';
 import { awaitingWhatsAppCount, cardTakings, ordersNeedingAttention, receiptsNoRoom, summaryOrderRows, transfersAwaitedCount, transfersToCheckCount, unconfirmedPressure } from './orders';
 import { getProduct, listProducts } from './products';
@@ -100,6 +101,15 @@ export function currentProblems(now = Date.now()): Problem[] {
   // Phone codes in test mode on a real shop: any code passes, so anyone can order as any number.
   if (process.env.NODE_ENV === 'production' && process.env.OTP_DEV_MODE === 'true' && !process.env.BUH_TEST_SERVER) {
     problems.push({ id: 'otp_test_mode', level: 'failing', text: 'Phone codes are in test mode (OTP_DEV_MODE=true): the phone check can be passed without a real code. Remove OTP_DEV_MODE from the shop’s settings on the server.' });
+  }
+  // Behind a proxy without TRUST_PROXY=1: the shop can't tell visitors apart. Only when requests
+  // do arrive through one (a shop opened directly on this machine is not warned).
+  if (process.env.NODE_ENV === 'production' && !process.env.BUH_TEST_SERVER && proxyWithoutTrust(now)) {
+    problems.push({
+      id: 'trust_proxy',
+      level: 'warning',
+      text: 'Visitors reach the shop through a proxy, but the shop is not told to trust it (TRUST_PROXY is not set). So it cannot tell visitors apart: the limits per visitor (orders, codes, chat) are skipped, and after several wrong passwords the Admin Hub’s sign-in pauses for everyone at once, you included. On the server, run the set-up again with  --env "TRUST_PROXY=1"  (or add TRUST_PROXY=1 to the shop’s settings there) and let the shop restart. Only with a proxy in front (Caddy, nginx, a tunnel): if the shop is open to the internet with none, put one in front first.',
+    });
   }
   // The data to back up nears (80%) or passes the most one backup holds: said before backups stop.
   try {

@@ -121,7 +121,7 @@ export function LandingPage(props: {
           </ul>
         ) : (
           <p className="rounded-2xl border border-dashed border-line-strong px-4 py-10 text-center text-sm text-ink">
-            New pieces are on their way. <Link href="/" className="underline underline-offset-4">See everything in the shop</Link>.
+            Nothing to show here right now. <Link href="/" className="underline underline-offset-4">See everything in the shop</Link>.
           </p>
         )}
 

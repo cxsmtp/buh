@@ -2,7 +2,8 @@
 
 import React, { useEffect, useState } from 'react';
 import { History, Loader2 } from 'lucide-react';
-import { getJson, postJson } from '@/lib/apiClient';
+import { getJson } from '@/lib/apiClient';
+import { sendConfirmed } from '../OwnerConfirm';
 
 /**
  * Settings → System → History: every save keeps the version it replaced (the
@@ -48,7 +49,7 @@ export function SettingsHistoryCard({ onRestored }: { onRestored: () => void }) 
   const restore = async (v: Version) => {
     if (!window.confirm(`Put ${NAMES[v.key] ?? v.key} back as it was on ${new Date(v.savedAt).toLocaleString()}? You can undo this the same way.`)) return;
     setBusy(v.id);
-    const { ok, data } = await postJson<{ message?: string }>('/api/admin/settings/history', { id: v.id });
+    const { ok, data } = await sendConfirmed<{ message?: string }>('POST', '/api/admin/settings/history', { id: v.id }, `the ${(NAMES[v.key] ?? v.key).toLowerCase()} settings`);
     setBusy(null);
     setStatus(ok ? { ok: true, text: `${NAMES[v.key] ?? v.key} restored.` } : { ok: false, text: data.message || 'Could not restore that version.' });
     setNonce((n) => n + 1);
