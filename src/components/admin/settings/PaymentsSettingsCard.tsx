@@ -111,7 +111,8 @@ export function PaymentsSettingsCard({
   }, [secretSaved]);
 
   const save = async () => {
-    autosave.cancel();
+    // With autosave on, the Save button goes through it too: the same check that the settings were not changed elsewhere.
+    if (!auto) autosave.cancel();
     setSaving(true);
     setStatus(null);
     setWarning('');
@@ -119,7 +120,7 @@ export function PaymentsSettingsCard({
       setSaving(false);
       return setStatus({ ok: false, text: `Card payment fee: a percent from 0 to ${MAX_CARD_FEE_PERCENT}, with up to 2 decimals.` });
     }
-    const problem = await onSave({ ...d, cardFeePercent: feeTyped }, setWarning);
+    const problem = auto ? await autosave.save({ ...d, cardFeePercent: feeTyped }, setWarning) : await onSave({ ...d, cardFeePercent: feeTyped }, setWarning);
     setSaving(false);
     if (!problem) setD((x) => ({ ...x, cardFeePercent: feeTyped, stripeSecretKey: '', stripeWebhookSecret: '' }));
     setStatus(problem ? { ok: false, text: problem } : { ok: true, text: d.cardEnabled ? 'Saved. Checkout now offers card, Apple Pay and Google Pay.' : 'Saved. Card payments are off.' });

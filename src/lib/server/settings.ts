@@ -241,6 +241,24 @@ function save<K extends SettingsKey>(key: K, value: SettingsMap[K], { keepHistor
   refreshShopPages();
 }
 
+/** When this group was last saved (null: never, the defaults are in use). The hub sends it back with a save. */
+export function settingsUpdatedAt(key: SettingsKey): string | null {
+  return (getDb().prepare('SELECT updated_at FROM settings WHERE key = ?').get(key) as { updated_at: string } | undefined)?.updated_at ?? null;
+}
+
+/**
+ * A save from the hub carries the version (updatedAt) its form was loaded from. If the group was
+ * saved since (the phone changed the WhatsApp number while the laptop had Settings open), the save
+ * is refused: sending the laptop's whole, older form would put the old number back.
+ */
+export function assertSettingsUnchanged(key: SettingsKey, loadedAt: unknown): void {
+  if (loadedAt === undefined) return; // callers that load and save in one step
+  if (loadedAt !== null && typeof loadedAt !== 'string') throw new HttpError(400, 'The settings version must be text.');
+  if (settingsUpdatedAt(key) !== loadedAt) {
+    throw new HttpError(409, 'These settings were changed somewhere else (another phone or computer, or another part of the hub) while this page was open. Nothing was overwritten.', {}, { code: 'changed_elsewhere' });
+  }
+}
+
 /** The version "Undo" goes back to: the newest one kept for this group (before the current editing session). */
 export function undoVersionId(key: SettingsKey): number | null {
   const row = getDb().prepare('SELECT id FROM settings_history WHERE key = ? ORDER BY id DESC LIMIT 1').get(key) as { id: number } | undefined;
@@ -768,6 +786,20 @@ const VALIDATORS: { [K in SettingsKey]: (input: Obj, current: SettingsMap[K]) =>
       return { id, label, icon: text(o.icon, `Category ${i + 1} icon`, 8), ...(o.defaultType === 'simple' ? { defaultType: 'simple' as const } : {}), ...(code ? { code } : {}) };
     });
     if (new Set(categories.map((c) => c.id)).size !== categories.length) throw new HttpError(400, 'Each category needs its own id.');
+    // A category products still use can't go (as with weaves): they would stay on sale under a
+    // category the shop no longer lists.
+    for (const gone of current.categories.filter((c) => !categories.some((x) => x.id === c.id))) {
+      const using = productsInCategory(gone.id);
+      if (using.length) {
+        const names = using.slice(0, 5).map((p) => p.title).join(', ');
+        throw new HttpError(
+          400,
+          `“${gone.label}” is still the category of ${using.length} ${using.length === 1 ? 'product' : 'products'} (${names}${using.length > 5 ? ', …' : ''}). Move ${using.length === 1 ? 'it' : 'them'} to another category first (Inventory → Edit).`,
+          {},
+          { code: 'category_in_use', category: gone.id, count: using.length }
+        );
+      }
+    }
     const threshold = input.lowStockThreshold === undefined ? current.lowStockThreshold : Number(input.lowStockThreshold);
     if (!Number.isInteger(threshold) || threshold < 0 || threshold > 50) throw new HttpError(400, 'Low-stock warning must be a whole number from 0 to 50.');
     const weaves = input.weaves === undefined ? current.weaves : cleanWeaves(input.weaves);
@@ -1109,6 +1141,12 @@ function cleanWeaves(v: unknown): string[] {
 /** Products in the shop (not archived) with this weave, by title. Read straight from the database (no import cycle). */
 export function productsWithWeave(weave: string): Array<{ id: string; title: string }> {
   const rows = getDb().prepare("SELECT id, json_extract(data, '$.title') AS title FROM products WHERE archived = 0 AND json_extract(data, '$.weave') = ? ORDER BY position, rowid").all(weave) as Array<{ id: string; title: string | null }>;
+  return rows.map((r) => ({ id: r.id, title: String(r.title ?? r.id) }));
+}
+
+/** Products in the shop (not archived) in this category, by title. */
+export function productsInCategory(category: string): Array<{ id: string; title: string }> {
+  const rows = getDb().prepare("SELECT id, json_extract(data, '$.title') AS title FROM products WHERE archived = 0 AND json_extract(data, '$.category') = ? ORDER BY position, rowid").all(category) as Array<{ id: string; title: string | null }>;
   return rows.map((r) => ({ id: r.id, title: String(r.title ?? r.id) }));
 }
 

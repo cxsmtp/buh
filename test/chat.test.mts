@@ -65,7 +65,7 @@ test('a customer starts a chat; only their own secret opens it', () => {
   assert.equal(c.status, 'bot');
   assert.ok(c.token.length >= 30);
   assert.deepEqual(c.messages.map((m) => m.author), ['bot', 'customer', 'bot'], 'greeting, question, answer');
-  assert.match(c.messages[2].body, /24 to 48 hours/);
+  assert.match(c.messages[2].body, /tracking number as soon as the courier collects it/);
   assert.equal(statusOf(() => chat.customerPoll(c.id, 'wrong-token', 0, T0)), 404);
   assert.equal(statusOf(() => chat.customerPoll('../../etc', c.token, 0, T0)), 404);
   const other = chat.startChat({ message: 'hi' }, T0);

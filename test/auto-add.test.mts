@@ -175,6 +175,7 @@ test('Quick add: saved at once (hidden), then written, pictured angle by angle, 
   assert.equal(r.product.title, auto.PLACEHOLDER_TITLE);
   assert.equal(r.product.stockBySize[king.id], 3);
   assert.equal(r.product.material, '', 'no fabric invented');
+  assert.equal(r.product.weave, '', 'no weave invented');
   // A double tap (or a retry) adds it once.
   assert.equal(auto.quickAdd({ key, photos: [url], price: 189, sizes: [{ id: king.id, stock: 3 }] }, OWNER).product.id, r.product.id);
 
@@ -182,6 +183,9 @@ test('Quick add: saved at once (hidden), then written, pictured angle by angle, 
   const p = products.getProduct(r.product.id)!;
   assert.equal(p.title, SUGGESTION.title);
   assert.equal(p.active, true, 'in the shop');
+  // The AI's guess at the weave is not put on a published product: it waits in the editor as a suggestion.
+  assert.equal(p.weave, '', 'no weave nobody chose');
+  assert.equal(p.weaveSuggestion, 'Percale');
   assert.ok(p.description.length > 0);
   assert.equal(p.colors[0].name, 'Indigo');
   assert.match(p.sku ?? '', /^[A-Z0-9-]+$/);

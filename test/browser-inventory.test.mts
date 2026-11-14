@@ -318,7 +318,8 @@ for (const width of [375, 1280]) {
     assert.equal(made.featuredImage, u2);
     assert.deepEqual(made.galleryImages, [u1]);
     assert.equal(made.sku, `WZ-${width}`);
-    assert.deepEqual(made.stockBySize, { king: 2, queen: 3 });
+    // A new product's first size starts with no pieces (it used to start with 1): one tap on + makes 1.
+    assert.deepEqual(made.stockBySize, { king: 1, queen: 3 });
     assert.equal(made.active, true);
     assert.equal((await (await api('GET', '/api/admin/products/drafts/new')).json()).draft, null, 'draft cleared after publishing');
     const shop = (await (await fetch(`${server.base}/api/products`)).json()).products;

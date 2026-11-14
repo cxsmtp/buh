@@ -88,20 +88,22 @@ export function fill(text: string, vars?: Record<string, string | number>): stri
   return text.replace(/\{(\w+)\}/g, (m, k: string) => (vars[k] === undefined ? m : String(vars[k])));
 }
 
+/**
+ * One of a screen's words in a language (for code outside a component, and for tests). In Arabic,
+ * each filled-in value (an English product or delivery name, "1–2 days", a number) is isolated, so
+ * it keeps its own order inside the right-to-left sentence.
+ */
+export function translate<W extends Words>(words: W, key: keyof W & string, locale: Locale, vars?: Record<string, string | number>): string {
+  const w = words[key];
+  if (!w) return key;
+  if (locale !== 'ar' || !w.ar) return fill(w.en, vars);
+  return fill(w.ar, vars && Object.fromEntries(Object.entries(vars).map(([k, v]) => [k, `\u2068${v}\u2069`])));
+}
+
 /** The words of one screen in the current language. */
 export function useT<W extends Words>(words: W): (key: keyof W & string, vars?: Record<string, string | number>) => string {
   const { locale } = useLocale();
-  return useCallback(
-    (key, vars) => {
-      const w = words[key];
-      if (!w) return key;
-      if (locale !== 'ar' || !w.ar) return fill(w.en, vars);
-      // In Arabic, each filled-in value (an English product or delivery name, "1–2 days", a number)
-      // is isolated, so it keeps its own order inside the right-to-left sentence.
-      return fill(w.ar, vars && Object.fromEntries(Object.entries(vars).map(([k, v]) => [k, `\u2068${v}\u2069`])));
-    },
-    [locale, words]
-  );
+  return useCallback((key, vars) => translate(words, key, locale, vars), [locale, words]);
 }
 
 /** Numbers stay in Western digits in both languages (prices, phone numbers, order numbers), as UAE shops do. */

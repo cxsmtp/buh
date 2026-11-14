@@ -106,7 +106,10 @@ test('the owner adds a one-of-a-kind product on a phone, sets pieces per size, a
   await editor.getByLabel('Price (AED)').fill('420');
   await editor.getByRole('button', { name: /^Next: Sizes/ }).click();
   await editor.getByRole('button', { name: /Add size Queen Size Bed/ }).click(); // add the Queen preset
-  await editor.getByRole('button', { name: 'One more King Size Bed (Most Popular)' }).click(); // King 1 → 2
+  // Sizes start with no pieces (they used to start with 1): the owner counts them in.
+  await editor.getByRole('button', { name: 'One more King Size Bed (Most Popular)' }).click();
+  await editor.getByRole('button', { name: 'One more King Size Bed (Most Popular)' }).click(); // King 0 → 2
+  await editor.getByRole('button', { name: /^One more Queen Size Bed/ }).click(); // Queen 0 → 1
   await editor.getByRole('button', { name: /^Next: Publish/ }).click();
   await editor.getByRole('button', { name: 'Publish', exact: true }).click();
   await editor.waitFor({ state: 'detached' });

@@ -1,5 +1,23 @@
 # Changelog
 
+## BUH-02.46.00 — 2026-11-14 10:00 UTC · [#81](https://github.com/cxsmtp/buh/pull/81)
+
+Third of three releases fixing what the production-readiness review found: the Admin Hub and the shop your customers see.
+
+- **Every order can be found.** The hub now always shows every open order however many there are (it used to stop at the newest 500), has a search box for any order by number, name or phone, Delivered and Cancelled filters, and "load more". The sales figure, badges and to-dos are counted on the server over all orders.
+- **Easier on a phone.** Order buttons, filter chips and chat buttons are full finger size on a phone and stay compact on a computer. Customers open in a proper sheet with their whole history, the right payment names, search and paging. The hub no longer re-downloads everything every minute while it is connected live.
+- **Two devices no longer overwrite each other.** Saving a product or a setting that was changed meanwhile (on your other device, by Picture studio) is refused with a clear message and your changes are kept on top of the current version; an old editor draft asks before it is applied instead of quietly bringing back old prices.
+- **Nothing invented on a product.** A product can have no weave, and a new one starts with no weave, fabric or thread count until you choose them; the AI's guess is offered as a suggestion, never published. New products carry no rating.
+- **Safer stock and catalogue changes.** A new size starts with 0 pieces, not 1; removing a size that has stock, "Sold out", and deleting a category ask first; a category still in use can't be deleted; Move up/down moves within the list you see; the marketplace export never leads with an AI picture when labelling is off.
+- **Checkout that doesn't leave customers stuck.** The close button is off while an order is being placed; bag limits show in the bag, not after the whole form is filled; the saved bag survives a failed first load; an update while the shop is open offers "Reload" instead of a blank error page; the Back button closes the bag or checkout instead of leaving the shop; the wallet button says when it includes the card fee.
+- **Arabic checkout and accessibility.** The delivery box and order refusals are shown in Arabic; dialogs keep keyboard focus inside them; the address fields are named for screen readers; messages appear beside the field instead of in pop-ups.
+- **Honest wording.** The shop's promise lines, the bag and checkout mention only the emirates and ways to pay you offer; claims like "handcraft" and "replies within minutes" are gone unless your own settings say so. Shared mobile connections are refused less easily (12 unconfirmed orders per connection, was 4).
+- **Status.**
+  - **Benchmark:** no failed requests in any round (main first, alternating, 3 rounds, nothing else running). p95, branch vs main: home page 68–81 ms vs 71–114, courier 54–68 ms vs 64–75, catalogue 114–118 ms vs 118–132, gift page 134–150 ms vs 127–153. Requests per second: home 1026–1147 vs 973–1084, catalogue 963–1031 vs 910–928.
+  - **Tests:** 1,426 of 1,426 (157 files, `scripts/ci-test.mjs`). One file (the app-install browser tests) hung on its first run while three other builds were loading the machine and passed on the runner's own second run. New: 6 test files (hub orders, inventory and settings, storefront; unit and browser at 375 and 1280 px, English and Arabic). Existing tests changed where they asserted the old behaviour (a guessed weave, sizes starting at 1 piece, an old chat answer). The Arabic wording was not checked by a native speaker.
+  - **Dependency audit:** `npm audit --omit=dev`: 0 vulnerabilities; no dependency added or changed.
+  - **Security scan:** Checkmarx One could not run (its connection needs signing in again; the owner will reconnect it now that the fixes are in). By hand: three new owner-only routes (order search, customers page, a customer's orders), each `requireAdmin`, query fields allow-listed and length-capped, errors through `handleRouteError`; values bound in SQL. Not done from the review: photo sizes per screen (srcset), Arabic for the chat assistant and the search-engine landing pages, small buttons inside the WhatsApp, bank and invoice boxes on an order, and the version check on the Couriers, Branding, Bank and SMS save buttons.
+
 ## BUH-02.45.00 — 2026-11-14 09:00 UTC · [#80](https://github.com/cxsmtp/buh/pull/80)
 
 Second of three releases fixing what the production-readiness review found: keeping the shop up, backed up and told when something is wrong.

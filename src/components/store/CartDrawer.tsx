@@ -10,14 +10,15 @@ import { sheetRow } from '@/lib/measurements';
 import { X, Trash2, ArrowRight, ShoppingBag, Truck, ShieldCheck } from 'lucide-react';
 import { useLocale, useT, type Words } from '@/lib/i18n';
 import { productTitle } from '@/lib/i18n/product';
+import { useDialogFocus } from '@/components/common/Sheet';
+import { BAG_LIMIT_WORDS, bagLimitMessage, bagOverLimit, deliveryName as deliveryNameIn, payWays, servedPlaces } from './checkoutWords';
 
 const WORDS = {
-  standard: { en: 'Standard delivery', ar: 'توصيل عادي' },
   title: { en: 'Your bag', ar: 'حقيبتك' },
   item: { en: 'item', ar: 'قطعة' },
   items: { en: 'items', ar: 'قطع' },
   close: { en: 'Close bag', ar: 'إغلاق الحقيبة' },
-  toAll: { en: '{name} to all seven emirates', ar: '{name} إلى الإمارات السبع' },
+  toAll: { en: '{name} to {places}', ar: '{name} إلى {places}' },
   empty: { en: 'Your bag is empty', ar: 'حقيبتك فارغة' },
   emptyText: { en: 'Browse our luxury bed sheet collections tailored for UAE homes and add to your bag.', ar: 'تصفّح مجموعات مفارش السرير الفاخرة المصمّمة لبيوت الإمارات وأضف ما يعجبك إلى حقيبتك.' },
   explore: { en: 'Explore the collection', ar: 'استكشف المجموعة' },
@@ -28,8 +29,7 @@ const WORDS = {
   removeItem: { en: 'Remove item', ar: 'إزالة القطعة' },
   remove: { en: 'Remove {title}', ar: 'إزالة {title}' },
   subtotal: { en: 'Subtotal', ar: 'المجموع الفرعي' },
-  delivery: { en: 'Delivery to all seven emirates', ar: 'التوصيل إلى الإمارات السبع' },
-  pay: { en: 'Cash on delivery or bank transfer', ar: 'الدفع عند الاستلام أو التحويل البنكي' },
+  delivery: { en: 'Delivery to {places}', ar: 'التوصيل إلى {places}' },
   door: { en: 'Delivered to your door', ar: 'التوصيل حتى باب منزلك' },
   total: { en: 'Total · {name}', ar: 'الإجمالي · {name}' },
   checkout: { en: 'Proceed to Checkout', ar: 'المتابعة لإتمام الطلب' },
@@ -57,13 +57,23 @@ export const CartDrawer: React.FC<CartDrawerProps> = ({
   onRemoveItem,
   onCheckout,
 }) => {
-  const { lowStockThreshold, delivery } = useShop();
+  const { lowStockThreshold, delivery, pay, bagLimit } = useShop();
   const t = useT(WORDS);
+  const tLimit = useT(BAG_LIMIT_WORDS);
   const { locale } = useLocale();
+  // Keyboard: focus moves into the bag, Tab stays inside it, Escape closes it.
+  const panel = useDialogFocus<HTMLDivElement>(isOpen, onClose);
   if (!isOpen) return null;
 
   // Standard delivery: what Settings → Delivery calls it and charges (the server charges the same).
-  const deliveryName = delivery.standardName || t('standard');
+  const deliveryName = deliveryNameIn('standard', delivery, locale);
+  // Where we deliver and the ways to pay: what the shop's settings say now (never a fixed promise).
+  const places = servedPlaces(delivery.emirates, locale);
+  // The small bag the server takes while a number is not yet confirmed: said here, before checkout.
+  // (Card orders only: checkout says it when Card is chosen.)
+  const limit = bagLimit?.applies === 'all' ? bagLimit : null;
+  const over = bagOverLimit(items, limit);
+  const perItem = (item: CartItem) => items.filter((i) => i.product.id === item.product.id && i.selectedProfile.id === item.selectedProfile.id).reduce((n, i) => n + i.quantity, 0);
   const deliveryFils = toFils(Number(delivery.standardFee) || 0);
   const subtotal = formatAed(cartFils(items));
   const grandTotal = formatAed(cartFils(items) + deliveryFils);
@@ -71,7 +81,7 @@ export const CartDrawer: React.FC<CartDrawerProps> = ({
   const unavailable = items.some((i) => piecesLeft(i.product, i.selectedProfile.id) < i.quantity);
 
   return (
-    <div className="fixed inset-0 z-50 overflow-hidden overscroll-contain" role="dialog" aria-modal="true" aria-labelledby="bag-title">
+    <div ref={panel} tabIndex={-1} className="fixed inset-0 z-50 overflow-hidden overscroll-contain outline-none" role="dialog" aria-modal="true" aria-labelledby="bag-title">
       {/* Backdrop */}
       <div
         className="absolute inset-0 bg-scrim/45 transition-opacity"
@@ -104,7 +114,7 @@ export const CartDrawer: React.FC<CartDrawerProps> = ({
           <div className="px-4 py-2.5 bg-ivory border-b border-line">
             <span className="flex items-center gap-2 text-xs text-ink-soft tracking-[0.02em]">
               <Truck className="w-4 h-4 text-gold-deep" strokeWidth={1.5} />
-              <span>{t('toAll', { name: deliveryName })}</span>
+              <span>{t('toAll', { name: deliveryName, places })}</span>
             </span>
           </div>
 
@@ -148,9 +158,12 @@ export const CartDrawer: React.FC<CartDrawerProps> = ({
                     {/* Item Details */}
                     <div className="flex-1 min-w-0 flex flex-col justify-between">
                       <div>
-                        <h4 className="font-serif text-base leading-snug text-ink line-clamp-2 pe-8" dir="auto">
-                          {productTitle(item.product, locale)}
-                        </h4>
+                        {/* Room for the remove button on the page's own side (an English name in the Arabic shop keeps clear of it). */}
+                        <div className="pe-8">
+                          <h4 className="font-serif text-base leading-snug text-ink line-clamp-2" dir="auto">
+                            {productTitle(item.product, locale)}
+                          </h4>
+                        </div>
                         <div className="flex flex-wrap items-center gap-x-1 text-[11px] text-ink-soft mt-1 min-w-0">
                           <span>{item.selectedProfile.name}</span>
                           {item.selectedColor && (
@@ -189,7 +202,7 @@ export const CartDrawer: React.FC<CartDrawerProps> = ({
                           <button
                             type="button"
                             onClick={() => onUpdateQuantity(idx, item.quantity + 1)}
-                            disabled={item.quantity >= left}
+                            disabled={item.quantity >= left || Boolean(limit && perItem(item) >= limit.perItem)}
                             aria-label={t('more', { title: productTitle(item.product, locale) })}
                             className="w-8 h-8 text-sm text-ink hover:bg-sand disabled:opacity-30"
                           >
@@ -226,15 +239,20 @@ export const CartDrawer: React.FC<CartDrawerProps> = ({
                     <span className="text-ink">AED {subtotal}</span>
                   </div>
                   <div className="flex flex-wrap justify-between gap-x-3">
-                    <span>{t('delivery')}</span>
+                    <span>{t('delivery', { places })}</span>
                     <span className={deliveryFils ? 'text-ink' : 'text-success'}>{deliveryFils ? `AED ${formatAed(deliveryFils)}` : deliveryName}</span>
                   </div>
                 </div>
+                {limit && !over && (
+                  <p data-testid="bag-limit" className="text-[11px] rounded-xl border px-2.5 py-2 leading-relaxed bg-ivory text-ink-soft border-line">
+                    {tLimit('note', { each: limit.perItem, lines: limit.lines })}
+                  </p>
+                )}
                 <BagLinkButton items={items} />
                 <p className="flex flex-wrap items-center justify-center gap-x-3 gap-y-1 text-[10px] text-ink-soft text-center">
                   <span className="flex items-center gap-1">
                     <ShieldCheck className="w-3.5 h-3.5 text-gold-deep" strokeWidth={1.5} />
-                    {t('pay')}
+                    <span data-testid="bag-pay-ways">{payWays(pay ?? { card: false, bank: false }, locale)}</span>
                   </span>
                   <span>{t('door')}</span>
                 </p>
@@ -245,6 +263,11 @@ export const CartDrawer: React.FC<CartDrawerProps> = ({
           {/* The bag's details scroll with it; the total and the checkout button stay on the screen. */}
           {items.length > 0 && (
             <div className="shrink-0 px-4 pt-3 pb-4 bg-ivory border-t border-line space-y-3">
+              {limit && over && (
+                <p data-testid="bag-limit" role="alert" className="text-[11px] rounded-xl border px-2.5 py-2 leading-relaxed bg-warning-soft text-warning border-warning-line font-semibold">
+                  {bagLimitMessage(over, limit, false, locale)}
+                </p>
+              )}
               <div className="flex flex-wrap items-baseline justify-between gap-x-3 text-sm text-ink">
                 <span className="label-caps text-ink-muted">{t('total', { name: deliveryName.toLowerCase() })}</span>
                 <span className="text-end tracking-[0.02em]">
@@ -254,7 +277,7 @@ export const CartDrawer: React.FC<CartDrawerProps> = ({
               </div>
               <button
                 type="button"
-                disabled={unavailable}
+                disabled={unavailable || Boolean(over)}
                 onClick={() => {
                   onClose();
                   onCheckout();

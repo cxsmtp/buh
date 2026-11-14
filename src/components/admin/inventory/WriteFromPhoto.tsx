@@ -74,7 +74,7 @@ type FieldKey = 'title' | 'shortDescription' | 'design' | 'comfort' | 'closing' 
 
 const EVERYDAY = 'everyday';
 /** A new product's starting values: not the owner's facts, so not sent as hints. */
-const NEW_DEFAULTS = { material: '100% Cotton', threadCount: '300', weave: 'Percale' };
+const NEW_DEFAULTS = { material: '', threadCount: '' };
 const box = 'w-full px-3 py-2 rounded-xl border border-line-strong bg-surface text-ink text-base sm:text-sm focus:outline-none focus:ring-2 focus:ring-gold';
 const small = 'min-h-11 px-3 rounded-xl border border-line-strong bg-surface text-ink text-sm font-semibold inline-flex items-center justify-center gap-1 disabled:opacity-50';
 
@@ -174,7 +174,8 @@ export function WriteFromPhoto({
     const h: Record<string, unknown> = { category: facts.category, colors: current.colors.map((c) => c.name).filter(Boolean) };
     if (!isNew || facts.material !== NEW_DEFAULTS.material) h.material = facts.material;
     if (!isNew || facts.threadCount !== NEW_DEFAULTS.threadCount) h.threadCount = Number(facts.threadCount) || undefined;
-    if (!isNew || current.weave !== NEW_DEFAULTS.weave) h.weave = current.weave;
+    // Only a weave the owner chose (a new product starts with none).
+    if (current.weave) h.weave = current.weave;
     const sizes = sizeFacts(facts.sizes, facts.stock, isNew, facts.productType === 'simple', facts.fitted === true);
     if (sizes.length) h.sizes = sizes;
     return h;

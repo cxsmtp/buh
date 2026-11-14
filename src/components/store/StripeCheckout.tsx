@@ -190,6 +190,7 @@ export function ExpressCheckout({
   servesEmirate,
   onWallet,
   onDone,
+  note,
 }: {
   publishableKey: string;
   amountFils: number;
@@ -202,17 +203,19 @@ export function ExpressCheckout({
   /** Turn the wallet's details into an order on the server, or say what to ask for. */
   onWallet: (p: WalletPayment) => Promise<StartedCardOrder & { reason?: 'invalid_shipping_address' | 'address_unserviceable' | 'fail' }>;
   onDone: (result: CardResult) => void;
+  /** What these buttons charge when it differs from the total shown beside them (the card fee). */
+  note?: string;
 }) {
   const { locale } = useLocale();
   if (useStripeFailed(publishableKey)) return null;
   return (
     <Elements stripe={stripeFor(publishableKey)} options={options(amountFils, locale)}>
-      <ExpressInner shippingRate={shippingRate} lineItems={lineItems} servesEmirate={servesEmirate} onWallet={onWallet} onDone={onDone} />
+      <ExpressInner shippingRate={shippingRate} lineItems={lineItems} servesEmirate={servesEmirate} onWallet={onWallet} onDone={onDone} note={note} />
     </Elements>
   );
 }
 
-function ExpressInner({ shippingRate, lineItems, servesEmirate, onWallet, onDone }: Omit<React.ComponentProps<typeof ExpressCheckout>, 'publishableKey' | 'amountFils'>) {
+function ExpressInner({ shippingRate, lineItems, servesEmirate, onWallet, onDone, note }: Omit<React.ComponentProps<typeof ExpressCheckout>, 'publishableKey' | 'amountFils'>) {
   const stripe = useStripe();
   const elements = useElements();
   const [available, setAvailable] = useState<boolean | null>(null);
@@ -249,6 +252,11 @@ function ExpressInner({ shippingRate, lineItems, servesEmirate, onWallet, onDone
   return (
     <div data-testid="express-checkout" className={available === false ? 'hidden' : 'space-y-1.5'}>
       {available && <p className="label-caps text-ink-muted text-center">{t('express')}</p>}
+      {available && note && (
+        <p data-testid="express-fee-note" className="text-[11px] text-ink-soft text-center">
+          {note}
+        </p>
+      )}
       <ExpressCheckoutElement
         options={{
           emailRequired: true,

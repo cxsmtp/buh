@@ -122,7 +122,7 @@ function handOver(r: Row, reason: 'asked' | 'unsure', now = Date.now()) {
   if (r.status === 'bot' || r.status === 'closed') {
     db.prepare("UPDATE chat_threads SET status = 'waiting', handed_over_at = ?, reassured_at = NULL WHERE id = ?").run(nowIso(now), r.id);
     const first = reason === 'asked' ? 'Of course. I’ve asked the team to join this chat.' : 'I’m not sure about that one, so I’ve passed your question to the team.';
-    addMessage(r.id, 'system', `${first} Someone usually replies within a few minutes.${r.contact ? '' : ' So we can get back to you even if you leave, please add your phone number or email below.'}`, 'web', now);
+    addMessage(r.id, 'system', `${first} We will reply here as soon as we can.${r.contact ? '' : ' So we can get back to you even if you leave, please add your phone number or email below.'}`, 'web', now);
   }
   notifyOwner?.(r.id);
 }

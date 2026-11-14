@@ -28,6 +28,13 @@ export interface ShopInfo {
   delivery: DeliverySettings;
   /** UAE VAT added on top at checkout (Settings → Payments → VAT, prices excluding VAT); absent otherwise. */
   vatAddedPercent?: number;
+  /** The ways to pay that are switched on besides cash on delivery (so no page promises one that is off). */
+  pay?: { card: boolean; bank: boolean };
+  /**
+   * The small bag the server takes from a phone no code proved (null or absent: no limit). all:
+   * every order (Phone check "WhatsApp"); card: card orders only.
+   */
+  bagLimit?: { applies: 'all' | 'card'; perItem: number; lines: number } | null;
 }
 
 const ShopContext = createContext<ShopInfo>({

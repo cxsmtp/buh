@@ -90,8 +90,8 @@ export const INITIAL_PRODUCTS: Product[] = [
     stockBySize: { queen: 1, king: 2, 'super-king': 1 },
     isFeatured: true,
     isNewArrival: true,
-    rating: 4.9,
-    reviewsCount: 32,
+    rating: 0,
+    reviewsCount: 0,
     profiles: [
       DEFAULT_BED_PROFILES.single,
       DEFAULT_BED_PROFILES.double,
@@ -132,8 +132,8 @@ export const INITIAL_PRODUCTS: Product[] = [
     stockBySize: { king: 2, 'super-king': 1 },
     isFeatured: true,
     isNewArrival: false,
-    rating: 5.0,
-    reviewsCount: 29,
+    rating: 0,
+    reviewsCount: 0,
     profiles: [
       DEFAULT_BED_PROFILES.queen,
       DEFAULT_BED_PROFILES.king,
@@ -171,8 +171,8 @@ export const INITIAL_PRODUCTS: Product[] = [
     stockBySize: { double: 1, queen: 1, king: 2 },
     isFeatured: true,
     isNewArrival: true,
-    rating: 4.8,
-    reviewsCount: 41,
+    rating: 0,
+    reviewsCount: 0,
     profiles: [
       DEFAULT_BED_PROFILES.double,
       DEFAULT_BED_PROFILES.queen,
@@ -210,8 +210,8 @@ export const INITIAL_PRODUCTS: Product[] = [
     stockBySize: { queen: 1, king: 1 },
     isFeatured: false,
     isNewArrival: true,
-    rating: 4.9,
-    reviewsCount: 19,
+    rating: 0,
+    reviewsCount: 0,
     profiles: [
       DEFAULT_BED_PROFILES.queen,
       DEFAULT_BED_PROFILES.king,

@@ -1,11 +1,17 @@
 import { requireAdmin } from '@/lib/server/guard';
 import { handleRouteError, json } from '@/lib/server/http';
-import { adminView, behindProxy, phoneCheckNoticeDue } from '@/lib/server/settings';
+import { adminView, behindProxy, phoneCheckNoticeDue, settingsUpdatedAt, type SettingsKey } from '@/lib/server/settings';
+
+const VERSIONED: SettingsKey[] = ['brand', 'bank', 'courier', 'sms', 'catalog', 'store', 'theme', 'email', 'assistant', 'delivery', 'payments', 'phoneCheck', 'ai', 'aiPrompt', 'aiPictures', 'backups'];
 
 /** All settings for the admin hub; secrets come back blank, with a "saved" flag. */
 export async function GET(req: Request) {
   try {
     await requireAdmin(req);
+    // ?versions=1: only when each group was last saved (a settings form sends its group's back with a save).
+    if (new URL(req.url).searchParams.get('versions') === '1') {
+      return json({ versions: Object.fromEntries(VERSIONED.map((k) => [k, settingsUpdatedAt(k)])) });
+    }
     return json({
       brand: adminView('brand'),
       bank: adminView('bank'),

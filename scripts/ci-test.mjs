@@ -59,6 +59,14 @@ console.log(`\n${files.length} files, ${passed} tests passed on the first run; $
 for (const r of failed.filter((f) => !still.some((s) => s.file === f.file))) console.log(`passed on the second run (look at it: a test that sometimes fails): ${r.file}`);
 for (const r of still) {
   console.log(`\n──── ${r.file} ────`);
-  console.log(r.out.split('\n').filter((l) => /^not ok|^\s+(error|expected|actual|code|stack):|^\s+at /.test(l)).slice(0, 60).join('\n'));
+  // Each failed test with its whole report (the message, what was expected, where), not only the headings.
+  const lines = r.out.split('\n');
+  const shown = [];
+  for (let i = 0; i < lines.length && shown.length < 200; i++) {
+    if (!/^\s*not ok/.test(lines[i])) continue;
+    shown.push(lines[i]);
+    for (let j = i + 1; j < lines.length && j < i + 45 && !/^\s*(not ok|ok) /.test(lines[j]); j++) shown.push(lines[j]);
+  }
+  console.log(shown.join('\n'));
 }
 process.exit(still.length ? 1 : 0);

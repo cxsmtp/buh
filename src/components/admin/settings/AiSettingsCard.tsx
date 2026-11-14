@@ -91,10 +91,11 @@ export function AiSettingsCard({
     d.provider === 'gemini' ? geminiSaved || Boolean(d.geminiApiKey) : d.provider === 'deepseek' ? deepseekSaved || Boolean(d.deepseekApiKey) : anthropicSaved || Boolean(d.anthropicApiKey);
 
   const save = async () => {
-    autosave.cancel();
+    // With autosave on, the Save button goes through it too: the same check that the settings were not changed elsewhere.
+    if (!auto) autosave.cancel();
     setSaving(true);
     setStatus(null);
-    const problem = await onSave(writingOnly(d));
+    const problem = auto ? await autosave.save(writingOnly(d)) : await onSave(writingOnly(d));
     setSaving(false);
     if (!problem) setD((x) => ({ ...x, anthropicApiKey: '', geminiApiKey: '', deepseekApiKey: '' }));
     setStatus(problem ? { ok: false, text: problem } : { ok: true, text: d.enabled ? 'Saved. “Write from photo” is on in the product editor.' : 'Saved. AI writing is off.' });

@@ -76,10 +76,13 @@ export function marketplaceRows(products: Product[], opts: { base: string; brand
   return products.flatMap((p) => {
     const simple = p.productType === 'simple';
     const category = opts.categories.find((c) => c.id === p.category)?.label ?? p.category;
-    const main = abs(p.aiTransformedImage || p.featuredImage);
-    // Styled (AI) photos go out only while the shop labels them, as in the Meta feed.
-    const shown = p.galleryImages.filter((u) => opts.labelStyledPhotos !== false || !p.stagedPhotos?.[u]);
-    const others = [p.featuredImage, ...shown].map(abs).filter((u) => u && u !== main).filter((u, i, all) => all.indexOf(u) === i).slice(0, 8).join('|');
+    // Styled (AI) photos go out only while the shop labels them, as in the Meta feed: the main image
+    // too. With labelling off, the main image is the first real photo (none: no image, never an AI one).
+    const labelled = opts.labelStyledPhotos !== false;
+    const real = (u: string | undefined): u is string => Boolean(u) && (labelled || !p.stagedPhotos?.[u as string]);
+    const photos = [labelled ? p.aiTransformedImage : undefined, p.featuredImage, ...p.galleryImages].filter(real);
+    const main = abs(photos[0] ?? '');
+    const others = photos.slice(1).map(abs).filter((u) => u && u !== main).filter((u, i, all) => all.indexOf(u) === i).slice(0, 8).join('|');
     return p.profiles.map((s) => [
       variantSku(p, s.id),
       parentSku(p),

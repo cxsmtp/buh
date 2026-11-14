@@ -41,6 +41,8 @@ import { classifyPhone, PhoneVerification } from './PhoneVerification';
 import type { PhotoOrderDraft } from './PhotoOrderSheet';
 import { useT, useLocale, type Words } from '@/lib/i18n';
 import { productTitle } from '@/lib/i18n/product';
+import { useDialogFocus } from '@/components/common/Sheet';
+import { EMIRATE_AR, bagLimitMessage, bagOverLimit, deliveryMessage, deliveryName, payWays, refusalText, sameDayReason, servedPlaces } from './checkoutWords';
 
 // Stripe's fields: their own chunk, fetched only when checkout offers cards (never on the shop's first load).
 const CardFields = dynamic(() => import('./StripeCheckout').then((m) => m.CardFields), {
@@ -116,7 +118,7 @@ const WORDS = {
   lblReceived: { en: 'Order received', ar: 'تم استلام الطلب' },
   lblConfirmed: { en: 'Order confirmed', ar: 'تم تأكيد الطلب' },
   thanks: { en: 'Thank you for your order', ar: 'شكراً لطلبك' },
-  prepared: { en: 'Your linens are being prepared with care in Dubai. We will send a tracking link as soon as they ship.', ar: 'نجهّز مفارشك بعناية في دبي، وسنرسل لك رابط التتبع فور شحنها.' },
+  prepared: { en: 'We are preparing your order with care. We will send a tracking link as soon as it ships.', ar: 'نجهّز طلبك بعناية، وسنرسل لك رابط التتبع فور شحنه.' },
   confirmBankWa: { en: 'Confirm & ask for bank details on WhatsApp', ar: 'التأكيد وطلب بيانات الحساب البنكي عبر واتساب' },
   photoAgreed: { en: 'We’ll prepare it as agreed.', ar: 'سنجهّزه كما اتفقنا.' },
   photoCheckCard: { en: 'We’ll check your photos and confirm on WhatsApp.', ar: 'سنراجع صورك ونؤكد عبر واتساب.' },
@@ -139,8 +141,6 @@ const WORDS = {
   destination: { en: 'Delivery Destination', ar: 'وجهة التوصيل' },
   gps: { en: 'GPS Coordinates', ar: 'إحداثيات GPS' },
   delivery: { en: 'Delivery', ar: 'التوصيل' },
-  sameDay: { en: 'Same day', ar: 'في نفس اليوم' },
-  standard: { en: 'Standard delivery', ar: 'التوصيل العادي' },
   paymentMode: { en: 'Payment Mode', ar: 'طريقة الدفع' },
   paidCard: { en: 'Paid by card{label}', ar: 'مدفوع بالبطاقة{label}' },
   cardOver: { en: 'The card payment did not go through: nothing was charged', ar: 'لم يتم الدفع بالبطاقة: لم يُخصم أي مبلغ' },
@@ -156,8 +156,9 @@ const WORDS = {
   sendWaUpdate: { en: 'Send WhatsApp Order Update', ar: 'إرسال تحديث الطلب عبر واتساب' },
   checkout: { en: 'Checkout', ar: 'إتمام الطلب' },
   headerSub: { en: '{standard} across the UAE · {pays}', ar: '{standard} في جميع أنحاء الإمارات · {pays}' },
-  paysCard: { en: 'Card, Apple Pay, Google Pay or cash on delivery', ar: 'البطاقة أو Apple Pay أو Google Pay أو الدفع عند الاستلام' },
-  paysCod: { en: 'Cash on delivery or bank transfer', ar: 'الدفع عند الاستلام أو التحويل البنكي' },
+  headerSubPlaces: { en: '{standard} to {places} · {pays}', ar: '{standard} إلى {places} · {pays}' },
+  expressTotal: { en: 'This button pays AED {total}, including the {p}% card fee.', ar: 'هذا الزر يدفع AED {total}، شاملاً رسوم البطاقة {p}%.' },
+  expressTotalVat: { en: 'This button pays AED {total}, including the {p}% card fee and VAT.', ar: 'هذا الزر يدفع AED {total}، شاملاً رسوم البطاقة {p}% وضريبة القيمة المضافة.' },
   closeCheckout: { en: 'Close checkout', ar: 'إغلاق صفحة الدفع' },
   yourOrder: { en: 'Your order', ar: 'طلبك' },
   yourPhotoOrder: { en: 'Your order from a photo', ar: 'طلبك من صورة' },
@@ -219,7 +220,7 @@ const WORDS = {
   s3: { en: '3. Payment', ar: '3. الدفع' },
   payment: { en: 'Payment', ar: 'الدفع' },
   cod: { en: 'Cash on delivery', ar: 'الدفع عند الاستلام' },
-  codText: { en: 'Pay the courier in cash at your door, in any of the seven emirates.', ar: 'ادفع نقداً للمندوب عند بابك، في أي من الإمارات السبع.' },
+  codText: { en: 'Pay the courier in cash at your door.', ar: 'ادفع نقداً للمندوب عند بابك.' },
   bank: { en: 'Bank transfer', ar: 'تحويل بنكي' },
   bankAskText: { en: 'Message us on WhatsApp for our bank details; we dispatch as soon as it arrives.', ar: 'راسلنا على واتساب لتصلك بياناتنا البنكية، ونشحن طلبك فور وصول التحويل.' },
   bankText: { en: 'Transfer to our UAE bank account; we dispatch as soon as it arrives.', ar: 'حوّل إلى حسابنا البنكي في الإمارات، ونشحن طلبك فور وصول التحويل.' },
@@ -244,17 +245,6 @@ const WORDS = {
   terms: { en: 'By placing your order you agree to our {link}.', ar: 'بإتمام طلبك فإنك توافق على {link}.' },
   termsLink: { en: 'Terms & Conditions', ar: 'الشروط والأحكام' },
 } as const satisfies Words;
-
-/** The emirates' names in Arabic (shown only; the value sent stays the English name). */
-const EMIRATE_AR: Record<Emirate, string> = {
-  Dubai: 'دبي',
-  'Abu Dhabi': 'أبوظبي',
-  Sharjah: 'الشارقة',
-  Ajman: 'عجمان',
-  'Umm Al Quwain': 'أم القيوين',
-  'Ras Al Khaimah': 'رأس الخيمة',
-  Fujairah: 'الفجيرة',
-};
 
 /** Text with {name} slots filled by React nodes (a bold word, an order number in mono). */
 function slots(text: string, nodes: Record<string, React.ReactNode>): React.ReactNode {
@@ -307,6 +297,8 @@ interface CheckoutModalProps {
    * the agreed amount). Paid on delivery or by transfer; the shop confirms the amount before it ships.
    */
   photoOrder?: PhotoOrderDraft | null;
+  /** An order is being placed or paid right now (the phone's Back button must not close checkout then). */
+  onBusy?: (busy: boolean) => void;
 }
 
 /** A card order (paying is its own proof of the number). */
@@ -378,6 +370,7 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
   phoneVerification,
   card,
   photoOrder = null,
+  onBusy,
 }) => {
   const t = useT(WORDS);
   const { locale } = useLocale();
@@ -432,7 +425,7 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
   const [isPhoneVerified, setIsPhoneVerified] = useState(false);
 
   // Delivery: decided by the address (the server checks again and charges any same-day fee).
-  const { delivery: deliverySettings, vatAddedPercent = 0 } = useShop();
+  const { delivery: deliverySettings, vatAddedPercent = 0, bagLimit } = useShop();
   // Same day is chosen for one address: changing the emirate or area goes back to standard.
   const [deliveryChoice, setDeliveryChoice] = useState<{ option: 'standard' | 'same_day'; key: string }>({ option: 'standard', key: '' });
   const setDeliveryOption = (option: 'standard' | 'same_day') => setDeliveryChoice({ option, key: `${emirate}|${area}` });
@@ -496,6 +489,9 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
   // In fils, like the server. Standard delivery and COD are free (same day adds Settings → Delivery's charge); the server is the source of truth and
   // refuses the order if its total differs from the one shown here (a price changed meanwhile).
   const delivery = deliveryCheck({ emirate, area }, deliverySettings);
+  // What the two speeds are called: the owner's names as typed, the starting ones in the customer's language.
+  const standardName = deliveryName('standard', deliverySettings, locale);
+  const sameDayName = deliveryName('sameDay', deliverySettings, locale);
   const sameDayChosen = deliveryChoice.option === 'same_day' && deliveryChoice.key === `${emirate}|${area}` && delivery.sameDay.available;
   // An order from a photo: the agreed total includes standard delivery (same day is extra), as on the server.
   const standardFils = photoOrder ? 0 : toFils(delivery.standard.fee);
@@ -527,6 +523,10 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
   // to order, and the customer confirms with one WhatsApp message afterwards.
   const whatsappCheck = phoneVerification?.check === 'whatsapp';
   const phoneReady = whatsappCheck ? phoneOk : isPhoneVerified;
+  // The server takes only a small bag from a phone no code proved (every order with the WhatsApp
+  // check; a card order without an SMS code): said at the top of checkout, not after the form.
+  const limitApplies = Boolean(bagLimit) && !photoOrder && (bagLimit?.applies === 'all' || (byCard && !(isPhoneVerified && phoneToken)));
+  const bagTooBig = limitApplies ? bagOverLimit(items, bagLimit) : null;
 
   // The confirmation screen of a card order: ask the server until Stripe has confirmed (or not).
   const confirmedId = confirmedOrder?.id;
@@ -551,15 +551,19 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
 
 
 
-  // Escape closes checkout (not while an order is being saved).
+  // Keyboard: focus moves into checkout, Tab stays inside it, and Escape closes it (not while an
+  // order is being saved: it would finish with no confirmation shown).
+  const panel = useDialogFocus<HTMLDivElement>(isOpen, () => {
+    if (!isSubmitting) onClose();
+  });
+  // The confirmation replaces the form: focus goes to it (the button that had it is gone).
   useEffect(() => {
-    if (!isOpen) return;
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === 'Escape' && !isSubmitting) onClose();
-    };
-    window.addEventListener('keydown', onKey);
-    return () => window.removeEventListener('keydown', onKey);
-  }, [isOpen, isSubmitting, onClose]);
+    if (confirmedId) panel.current?.focus({ preventScroll: true });
+  }, [confirmedId, panel]);
+  useEffect(() => {
+    onBusy?.(isSubmitting);
+    return () => onBusy?.(false);
+  }, [isSubmitting, onBusy]);
 
   // Every hook must run on every render, so the early return comes after them all.
   if (!isOpen) return null;
@@ -567,7 +571,8 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
   // Handler: GPS Current Location using Browser Geolocation
   const handleUseCurrentLocation = () => {
     if (!navigator.geolocation) {
-      alert(t('noGeo'));
+      setLocationProblem(true);
+      setLocationNotice(t('noGeo'));
       return;
     }
     setIsLocating(true);
@@ -685,7 +690,7 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
   });
 
   /** A refused order: reload prices or delivery if that was why, and say what happened. */
-  const orderRefused = async (status: number, data: { message?: string; code?: string; cardFeePercent?: number }) => {
+  const orderRefused = async (status: number, data: { message?: string; code?: string; cardFeePercent?: number } & Record<string, unknown>) => {
     if (status === 401) {
       // The phone check expired (30 minutes): verify again.
       setIsPhoneVerified(false);
@@ -701,7 +706,9 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
     if (status === 409 && data.code === 'same_day_unavailable') setDeliveryOption('standard');
     // The first try was for something else (another way of paying, other items): the next tap is a new order.
     if (status === 409 && data.code === 'checkout_changed') setIdempotencyKey(crypto.randomUUID());
-    return data.message || t('notPlaced');
+    // In Arabic, the server's refusal is said from its code and values; in English, its own words.
+    const said = locale === 'ar' ? refusalText(data, locale, (id) => { const p = items.find((i) => i.product.id === id)?.product; return p ? productTitle(p, locale) : undefined; }) : null;
+    return said || data.message || t('notPlaced');
   };
 
   /** Create the card order on the server (its prices, its total) and get Stripe's client secret for it. */
@@ -865,8 +872,11 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
   const handleSubmitOrder = async (e: React.FormEvent) => {
     e.preventDefault();
     if (isSubmitting) return;
-    if (!fullName || !phone || !area || !streetAddress || !buildingVilla || !flatVillaNo) {
-      alert(t('fillAll'));
+    // Said on the page (never a pop-up), with the first empty field focused.
+    const missing = ([['checkout-name', fullName], ['checkout-phone', phone], ['checkout-area', area], ['checkout-street', streetAddress], ['checkout-building', buildingVilla], ['checkout-flat', flatVillaNo]] as const).find(([, v]) => !v.trim());
+    if (missing) {
+      document.getElementById(missing[0])?.focus();
+      setSubmitError(t('fillAll'));
       return;
     }
 
@@ -879,12 +889,12 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
     if (byCard) {
       if (!phoneOk) {
         document.getElementById('checkout-phone')?.focus();
-        alert(t('needMobileCourier'));
+        setSubmitError(t('needMobileCourier'));
         return;
       }
       if (cardNeedsCode && !(isPhoneVerified && phoneToken)) {
         document.getElementById('checkout-phone')?.focus();
-        alert(t('verifyBeforePay'));
+        setSubmitError(t('verifyBeforePay'));
         return;
       }
       if (!cardPay.current) return;
@@ -899,7 +909,7 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
     // WhatsApp check: a UAE mobile is enough (no code). Otherwise only a verified UAE mobile number.
     if (whatsappCheck ? !phoneOk : !isPhoneVerified || !phoneToken) {
       document.getElementById('checkout-phone')?.focus();
-      alert(t(whatsappCheck ? 'enterMobile' : 'verifyBeforeOrder'));
+      setSubmitError(t(whatsappCheck ? 'enterMobile' : 'verifyBeforeOrder'));
       return;
     }
 
@@ -956,7 +966,7 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
     );
 
     return (
-      <div className="fixed inset-0 z-50 flex items-stretch sm:items-center justify-center bg-scrim/45 sm:p-4" role="dialog" aria-modal="true" aria-labelledby="order-confirmed-title">
+      <div ref={panel} tabIndex={-1} className="fixed inset-0 z-50 flex items-stretch sm:items-center justify-center bg-scrim/45 sm:p-4 outline-none" role="dialog" aria-modal="true" aria-labelledby="order-confirmed-title">
         <div className="bg-surface sm:rounded-3xl max-w-lg w-full h-[100dvh] sm:h-auto sm:max-h-[92dvh] flex flex-col border border-line pt-safe sm:pt-0 overflow-hidden">
           <div className="flex-1 min-h-0 overflow-y-auto overflow-x-hidden p-6 text-center space-y-5">
           {lastStep ? (
@@ -1139,7 +1149,7 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
             <div className="flex justify-between items-center">
               <span className="text-ink-muted font-medium">{t('delivery')}</span>
               <span className="text-gold-deep flex items-center gap-1">
-                <span>{confirmedOrder.deliveryOption === 'same_day' ? `${deliverySettings.sameDayName || t('sameDay')} (AED ${confirmedOrder.deliveryFee})` : `${deliverySettings.standardName || t('standard')}, ${confirmedOrder.courier.serviceability?.deliverySpeed || deliverySettings.standardDays}${confirmedOrder.deliveryFee ? ` (AED ${confirmedOrder.deliveryFee})` : ''}`}</span>
+                <span>{confirmedOrder.deliveryOption === 'same_day' ? `${sameDayName} (AED ${confirmedOrder.deliveryFee})` : `${standardName}, ${confirmedOrder.courier.serviceability?.deliverySpeed || deliverySettings.standardDays}${confirmedOrder.deliveryFee ? ` (AED ${confirmedOrder.deliveryFee})` : ''}`}</span>
               </span>
             </div>
 
@@ -1220,7 +1230,7 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
   }
 
   return (
-    <div className="fixed inset-0 z-50 flex items-stretch sm:items-center justify-center bg-scrim/45 p-0 sm:p-4 overscroll-contain" role="dialog" aria-modal="true" aria-labelledby="checkout-title">
+    <div ref={panel} tabIndex={-1} className="fixed inset-0 z-50 flex items-stretch sm:items-center justify-center bg-scrim/45 p-0 sm:p-4 overscroll-contain outline-none" role="dialog" aria-modal="true" aria-labelledby="checkout-title">
       <div className="bg-surface text-ink w-full max-w-xl sm:rounded-3xl h-[100dvh] sm:h-auto sm:max-h-[92dvh] flex flex-col overflow-hidden border border-line pt-safe sm:pt-0 sheet-up sm:[animation-name:sheet-fade]">
         
         {/* Header */}
@@ -1230,14 +1240,18 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
               {t('checkout')}
             </h2>
             <p className="text-[11px] text-ink-muted tracking-[0.02em]">
-              {t('headerSub', { standard: deliverySettings.standardName || t('standard'), pays: t(card ? 'paysCard' : 'paysCod') })}
+              {new Set(deliverySettings.emirates).size >= 7
+                ? t('headerSub', { standard: standardName, pays: payWays({ card: cardOffered, bank: bankReady, cod: codOffered }, locale) })
+                : t('headerSubPlaces', { standard: standardName, places: servedPlaces(deliverySettings.emirates, locale), pays: payWays({ card: cardOffered, bank: bankReady, cod: codOffered }, locale) })}
             </p>
           </div>
           <button
             type="button"
             onClick={onClose}
+            // Not while an order is being placed or paid: it would finish with no confirmation shown.
+            disabled={isSubmitting}
             aria-label={t('closeCheckout')}
-            className="shrink-0 w-10 h-10 -me-1.5 flex items-center justify-center text-ink rounded-full hover:bg-sand transition-colors"
+            className="shrink-0 w-10 h-10 -me-1.5 flex items-center justify-center text-ink rounded-full hover:bg-sand transition-colors disabled:opacity-40"
           >
             <X className="w-5 h-5" strokeWidth={1.5} />
           </button>
@@ -1281,12 +1295,20 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
             </div>
           </div>
 
+          {/* The small bag of an order whose number no code proved: said here, before the form is filled. */}
+          {bagTooBig && bagLimit && (
+            <p role="alert" data-testid="checkout-bag-limit" className="text-[11px] p-2.5 rounded-xl border bg-warning-soft text-warning border-warning-line font-semibold">
+              {bagLimitMessage(bagTooBig, bagLimit, byCard, locale)}
+            </p>
+          )}
+
           {/* Apple Pay / Google Pay / Link: the wallet fills in name, phone and address (only with card payments on) */}
           {card && (
             <ExpressCheckout
               publishableKey={card.publishableKey}
               amountFils={cardTotalFils}
-              shippingRate={sameDayChosen ? { id: 'same_day', displayName: delivery.sameDay.name, amount: deliveryFils } : { id: 'standard', displayName: t('nameIn', { name: delivery.standard.name, days: deliverySettings.standardDays }), amount: deliveryFils }}
+              shippingRate={sameDayChosen ? { id: 'same_day', displayName: sameDayName, amount: deliveryFils } : { id: 'standard', displayName: t('nameIn', { name: standardName, days: deliverySettings.standardDays }), amount: deliveryFils }}
+              note={cardTotalFils !== shownTotalFils && cardFee > 0 ? t(cardVatFils > 0 ? 'expressTotalVat' : 'expressTotal', { total: formatAed(cardTotalFils), p: percentText(feePercent) }) : undefined}
               lineItems={cardFee > 0 || cardVatFils > 0 ? [{ name: t('items'), amount: totalFils - deliveryFils }, ...(cardFee > 0 ? [{ name: t('cardFeeP', { p: percentText(feePercent) }), amount: cardFee }] : []), ...(cardVatFils > 0 ? [{ name: t('vatP', { p: percentText(vatAddedPercent) }), amount: cardVatFils }] : [])] : undefined}
               servesEmirate={(state, city) => {
                 const em = emirateFrom(state) ?? emirateFrom(city);
@@ -1332,10 +1354,11 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
             )}
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-xs">
               <div>
-                <label className="block text-ink font-semibold mb-1">
+                <label htmlFor="checkout-name" className="block text-ink font-semibold mb-1">
                   {t('fullName')} <span className="text-danger">*</span>
                 </label>
                 <input
+                  id="checkout-name"
                   type="text"
                   required
                   placeholder={t('namePh')}
@@ -1528,10 +1551,11 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
               </div>
 
               <div className="sm:col-span-2">
-                <label className="block text-ink font-semibold mb-1">
+                <label htmlFor="checkout-street" className="block text-ink font-semibold mb-1">
                   {t('street')} <span className="text-danger">*</span>
                 </label>
                 <input
+                  id="checkout-street"
                   type="text"
                   required
                   placeholder={t('streetPh')}
@@ -1542,10 +1566,11 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
               </div>
 
               <div>
-                <label className="block text-ink font-semibold mb-1">
+                <label htmlFor="checkout-building" className="block text-ink font-semibold mb-1">
                   {t('building')} <span className="text-danger">*</span>
                 </label>
                 <input
+                  id="checkout-building"
                   type="text"
                   required
                   placeholder={t('buildingPh')}
@@ -1556,10 +1581,11 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
               </div>
 
               <div>
-                <label className="block text-ink font-semibold mb-1">
+                <label htmlFor="checkout-flat" className="block text-ink font-semibold mb-1">
                   {t('flat')} <span className="text-danger">*</span>
                 </label>
                 <input
+                  id="checkout-flat"
                   type="text"
                   required
                   placeholder={t('flatPh')}
@@ -1570,10 +1596,11 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
               </div>
 
               <div className="sm:col-span-2">
-                <label className="block text-ink font-semibold mb-1">
+                <label htmlFor="checkout-landmark" className="block text-ink font-semibold mb-1">
                   {t('landmark')} <span className="text-ink-muted font-normal">{t('landmarkWhy')}</span>
                 </label>
                 <input
+                  id="checkout-landmark"
                   type="text"
                   placeholder={t('landmarkPh')}
                   value={landmark}
@@ -1592,8 +1619,8 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
                   <AlertCircle className="w-5 h-5 text-danger shrink-0" />
                 )}
                 <div>
-                  <div className={`font-semibold ${delivery.serviceable ? 'text-success' : 'text-danger'}`}>{delivery.message}</div>
-                  {delivery.serviceable && <div className="text-ink-soft">{t('nameIn', { name: delivery.standard.name, days: delivery.days })}{photoOrder?.deal ? t('inclPrice') : photoOrder ? t('inclAgreed') : standardFils > 0 ? ` · AED ${formatAed(standardFils)}` : ''}</div>}
+                  <div className={`font-semibold ${delivery.serviceable ? 'text-success' : 'text-danger'}`}>{deliveryMessage(delivery, locale)}</div>
+                  {delivery.serviceable && <div className="text-ink-soft">{t('nameIn', { name: standardName, days: delivery.days })}{photoOrder?.deal ? t('inclPrice') : photoOrder ? t('inclAgreed') : standardFils > 0 ? ` · AED ${formatAed(standardFils)}` : ''}</div>}
                 </div>
               </div>
               {delivery.serviceable && deliverySettings.sameDayEnabled && !photoOrder?.deal && (
@@ -1602,15 +1629,15 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
                   <label className={`flex items-start gap-2 p-2.5 rounded-xl border cursor-pointer ${!sameDayChosen ? 'border-ink bg-surface' : 'border-line bg-surface/60'}`}>
                     <input type="radio" name="delivery-option" className="mt-0.5" checked={!sameDayChosen} onChange={() => setDeliveryOption('standard')} />
                     <span>
-                      <strong className="block text-ink">{delivery.standard.name}{photoOrder ? t('included') : standardFils > 0 ? ` · AED ${formatAed(standardFils)}` : ''}</strong>
+                      <strong className="block text-ink">{standardName}{photoOrder ? t('included') : standardFils > 0 ? ` · AED ${formatAed(standardFils)}` : ''}</strong>
                       <span className="text-ink-muted">{delivery.days}</span>
                     </span>
                   </label>
                   <label className={`flex items-start gap-2 p-2.5 rounded-xl border ${delivery.sameDay.available ? 'cursor-pointer' : 'opacity-60'} ${sameDayChosen ? 'border-ink bg-surface' : 'border-line bg-surface/60'}`}>
                     <input type="radio" name="delivery-option" className="mt-0.5" checked={sameDayChosen} disabled={!delivery.sameDay.available} onChange={() => setDeliveryOption('same_day')} />
                     <span>
-                      <strong className="block text-ink">{delivery.sameDay.name} · {standardFils > 0 ? '' : '+'}AED {formatAed(toFils(delivery.sameDay.fee))}</strong>
-                      <span className="text-ink-muted">{delivery.sameDay.available ? t('orderBefore', { cutoff: delivery.sameDay.cutoff }) : delivery.sameDay.reason}</span>
+                      <strong className="block text-ink">{sameDayName} · {standardFils > 0 ? '' : '+'}AED {formatAed(toFils(delivery.sameDay.fee))}</strong>
+                      <span className="text-ink-muted">{delivery.sameDay.available ? t('orderBefore', { cutoff: delivery.sameDay.cutoff }) : sameDayReason(delivery.sameDay.reasonCode, { emirates: deliverySettings.sameDayEmirates, cutoff: delivery.sameDay.cutoff }, locale)}</span>
                     </span>
                   </label>
                 </fieldset>
@@ -1761,7 +1788,7 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
             </p>
             <button
               type="submit"
-              disabled={isSubmitting || !delivery.serviceable || (byCard ? !cardReady || (cardNeedsCode && !isPhoneVerified) : !phoneReady)}
+              disabled={isSubmitting || Boolean(bagTooBig) || !delivery.serviceable || (byCard ? !cardReady || (cardNeedsCode && !isPhoneVerified) : !phoneReady)}
               className="w-full bg-ink hover:bg-ink-2 text-ivory font-medium tracking-[0.03em] text-sm py-3.5 px-3 rounded-xl flex items-center justify-center gap-2 transition-colors disabled:opacity-50 text-center"
             >
               {isSubmitting ? (

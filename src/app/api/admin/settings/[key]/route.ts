@@ -2,7 +2,7 @@ import { audit } from '@/lib/server/audit';
 import { requireAdmin } from '@/lib/server/guard';
 import { handleRouteError, HttpError, json, readJsonBody } from '@/lib/server/http';
 import { auditPaymentOptions, paymentOptions, paymentsModeWarning } from '@/lib/server/payments';
-import { adminView, getSettings, undoVersionId, type SettingsKey } from '@/lib/server/settings';
+import { adminView, assertSettingsUnchanged, getSettings, settingsUpdatedAt, undoVersionId, type SettingsKey } from '@/lib/server/settings';
 import { saveGuarded } from '@/lib/server/settingsGuard';
 import { WRITING_FIELDS } from '@/lib/aiPrompt';
 import type { AiPromptSettings } from '@/lib/aiPrompt';
@@ -50,6 +50,8 @@ export async function PUT(req: Request, { params }: { params: Promise<{ key: str
     if (!KEYS.includes(key as SettingsKey)) throw new HttpError(404, 'Unknown settings.');
     // Branding may carry a logo image (stored as a file).
     const body = await readJsonBody(req, key === 'brand' ? 4 * 1024 * 1024 : 64 * 1024);
+    // The version the form was loaded from (when sent): a group saved since then is not overwritten (409).
+    assertSettingsUnchanged(key as SettingsKey, body.updatedAt);
     const keyBefore = key === 'payments' ? getSettings('payments').stripeSecretKey : '';
     const optionsBefore = key === 'payments' ? paymentOptions() : null;
     const promptBefore = key === 'aiPrompt' || key === 'aiPictures' ? structuredClone(getSettings(key)) : null;
@@ -62,7 +64,7 @@ export async function PUT(req: Request, { params }: { params: Promise<{ key: str
     // The card fee and the bank-transfer choice change what customers pay and see: from and to.
     if (optionsBefore) auditPaymentOptions(optionsBefore, session.email);
     if (promptBefore) auditPrompts(key as SettingsKey, promptBefore, session.email);
-    return json({ success: true, ...result, undoId: undoVersionId(key as SettingsKey), ...adminView(key as SettingsKey), ...(warning ? { warning } : {}) });
+    return json({ success: true, ...result, undoId: undoVersionId(key as SettingsKey), ...adminView(key as SettingsKey), updatedAt: settingsUpdatedAt(key as SettingsKey), ...(warning ? { warning } : {}) });
   } catch (err) {
     return handleRouteError(err, 'admin/settings/update');
   }

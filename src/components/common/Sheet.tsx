@@ -26,6 +26,67 @@ function unlockScroll() {
   }
 }
 
+/**
+ * The same keyboard manners for a dialog that draws itself (checkout, the bag, Track Order…):
+ * while `active`, focus moves into the panel (the panel itself, so a phone's keyboard does not pop
+ * up), Tab and Shift+Tab stay inside it, Escape calls onEscape, and on closing focus goes back to
+ * what opened it. Give the panel `ref={panel}` and `tabIndex={-1}`.
+ */
+export function useDialogFocus<T extends HTMLElement = HTMLDivElement>(active: boolean, onEscape?: () => void) {
+  const panel = useRef<T>(null);
+  const escape = useRef(onEscape);
+  useEffect(() => {
+    escape.current = onEscape;
+  }, [onEscape]);
+
+  useEffect(() => {
+    if (!active) return;
+    const opener = document.activeElement as HTMLElement | null;
+    if (panel.current && !panel.current.contains(document.activeElement)) panel.current.focus({ preventScroll: true });
+    const onKeyDown = (e: KeyboardEvent) => {
+      const el = panel.current;
+      if (!el) return;
+      const at = document.activeElement as HTMLElement | null;
+      // Another dialog on top (the photo zoom, the chat) keeps its own keys.
+      const other = at?.closest?.('[role="dialog"]');
+      if (other && !el.contains(other) && !other.contains(el)) return;
+      if (e.key === 'Escape') {
+        escape.current?.();
+        return;
+      }
+      if (e.key !== 'Tab') return;
+      const items = [...el.querySelectorAll<HTMLElement>(FOCUSABLE)].filter((x) => x.offsetParent !== null || x === at);
+      if (!items.length) {
+        e.preventDefault();
+        el.focus({ preventScroll: true });
+        return;
+      }
+      const first = items[0];
+      const last = items[items.length - 1];
+      const inside = Boolean(at && el.contains(at));
+      if (e.shiftKey && (!inside || at === first || at === el)) {
+        e.preventDefault();
+        last.focus();
+      } else if (!e.shiftKey && (!inside || at === last)) {
+        e.preventDefault();
+        first.focus();
+      }
+    };
+    // On the window, above the page's own handlers: a field that handles Escape or Tab itself (the
+    // area list, the pin search) stops the key there, and it never reaches this.
+    window.addEventListener('keydown', onKeyDown);
+    return () => {
+      window.removeEventListener('keydown', onKeyDown);
+      // Back to the button that opened it (if it is still on the page and nothing else took focus).
+      const now = document.activeElement;
+      const lost = !now || now === document.body || !document.contains(now) || Boolean(panel.current?.contains(now));
+      if (lost && opener && document.contains(opener) && typeof opener.focus === 'function') opener.focus({ preventScroll: true });
+    };
+  }, [active]);
+
+  return panel;
+}
+
 export interface SheetProps {
   /** The dialog's accessible name comes from this element's text. */
   labelledBy: string;

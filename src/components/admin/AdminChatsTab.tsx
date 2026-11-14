@@ -26,7 +26,10 @@ const STATUS: Record<ChatThread['status'], { label: string; cls: string }> = {
 
 const time = (iso: string) => new Date(iso).toLocaleString(undefined, { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' });
 
-export function AdminChatsTab({ refreshKey }: { refreshKey: number }) {
+/** Buttons 44 px tall on a phone (review finding 5), a little smaller from 768 px. */
+const TAP = 'min-h-11 md:min-h-9 inline-flex items-center';
+
+export function AdminChatsTab({ refreshKey, shopName }: { refreshKey: number; /** The shop's name (Settings → Branding), for the WhatsApp greeting. */ shopName?: string }) {
   const [chats, setChats] = useState<ChatThread[] | null>(null);
   const [mailbox, setMailbox] = useState<MailboxStatus | null>(null);
   const [filter, setFilter] = useState<'open' | 'all'>('open');
@@ -54,7 +57,7 @@ export function AdminChatsTab({ refreshKey }: { refreshKey: number }) {
         </h2>
         <div className="ml-auto flex gap-1.5 text-xs">
           {(['open', 'all'] as const).map((f) => (
-            <button key={f} type="button" onClick={() => setFilter(f)} aria-pressed={filter === f} className={`px-2.5 py-1 rounded-full border font-semibold ${filter === f ? 'bg-ink text-paper border-ink' : 'bg-surface border-line-strong text-ink-soft'}`}>
+            <button key={f} type="button" onClick={() => setFilter(f)} aria-pressed={filter === f} className={`${TAP} px-3.5 py-1 rounded-full border font-semibold ${filter === f ? 'bg-ink text-paper border-ink' : 'bg-surface border-line-strong text-ink-soft'}`}>
               {f === 'open' ? 'Open' : 'All'}
             </button>
           ))}
@@ -89,7 +92,7 @@ export function AdminChatsTab({ refreshKey }: { refreshKey: number }) {
 
         <div className={openId ? '' : 'hidden lg:block'}>
           {open ? (
-            <Conversation key={open.id} thread={open} refreshKey={refreshKey} onBack={() => setOpenId(null)} onChanged={(t) => setChats((list) => (list ?? []).map((x) => (x.id === t.id ? { ...x, ...t } : x)))} />
+            <Conversation key={open.id} thread={open} shopName={shopName} refreshKey={refreshKey} onBack={() => setOpenId(null)} onChanged={(t) => setChats((list) => (list ?? []).map((x) => (x.id === t.id ? { ...x, ...t } : x)))} />
           ) : (
             <div className="hidden lg:flex h-full min-h-60 items-center justify-center text-sm text-ink-muted bg-surface rounded-2xl border border-dashed border-line-strong">Choose a chat</div>
           )}
@@ -115,14 +118,14 @@ function MailboxNote({ mailbox, onChecked }: { mailbox: MailboxStatus | null; on
     <p className="text-[11px] text-ink-muted flex flex-wrap items-center gap-2">
       <Mail className="w-3.5 h-3.5" />
       {mailbox.last ? (mailbox.last.ok ? `Emailed replies checked ${time(mailbox.last.at)}.` : `The mailbox could not be read (${mailbox.last.error}).`) : 'Emailed replies are checked every minute.'}
-      <button type="button" onClick={() => void check()} disabled={busy} className="inline-flex items-center gap-1 underline disabled:opacity-50">
+      <button type="button" onClick={() => void check()} disabled={busy} className="min-h-11 md:min-h-9 inline-flex items-center gap-1 underline disabled:opacity-50">
         {busy ? <Loader2 className="w-3 h-3 animate-spin" /> : <RefreshCw className="w-3 h-3" />} Check now
       </button>
     </p>
   );
 }
 
-function Conversation({ thread, refreshKey, onBack, onChanged }: { thread: ChatThread; refreshKey: number; onBack: () => void; onChanged: (t: Partial<ChatThread> & { id: string }) => void }) {
+function Conversation({ thread, shopName, refreshKey, onBack, onChanged }: { thread: ChatThread; shopName?: string; refreshKey: number; onBack: () => void; onChanged: (t: Partial<ChatThread> & { id: string }) => void }) {
   const [messages, setMessages] = useState<ChatMessage[] | null>(null);
   const [draft, setDraft] = useState('');
   const [busy, setBusy] = useState(false);
@@ -161,17 +164,20 @@ function Conversation({ thread, refreshKey, onBack, onChanged }: { thread: ChatT
   };
 
   const setStatus = async (status: 'closed' | 'bot') => {
-    const { ok, data } = await sendJson<{ thread?: ChatThread }>('PATCH', `/api/admin/chats/${encodeURIComponent(thread.id)}`, { status });
-    if (ok && data.thread) onChanged(data.thread);
+    setError('');
+    const { ok, data } = await sendJson<{ thread?: ChatThread; message?: string }>('PATCH', `/api/admin/chats/${encodeURIComponent(thread.id)}`, { status });
+    if (ok && data.thread) return onChanged(data.thread);
+    // Never silent (review finding 5): the chat stays as it was, and the owner is told.
+    setError(data.message || (status === 'closed' ? 'The chat could not be closed. Check your connection and try again.' : 'The chat could not be changed. Check your connection and try again.'));
   };
 
   const phone = thread.contact.startsWith('+') ? thread.contact.replace(/\D/g, '') : '';
-  const wa = phone ? safeHref(`https://wa.me/${phone}?text=${encodeURIComponent(`Hello${thread.customerName ? ` ${thread.customerName.split(' ')[0]}` : ''}, this is Beautiful UAE Home replying to your chat on our website.`)}`) : undefined;
+  const wa = phone ? safeHref(`https://wa.me/${phone}?text=${encodeURIComponent(`Hello${thread.customerName ? ` ${thread.customerName.split(' ')[0]}` : ''}, this is ${shopName?.trim() || 'the shop'} replying to your chat on our website.`)}`) : undefined;
 
   return (
     <div className="bg-surface rounded-2xl border border-line flex flex-col max-h-[75vh] min-h-[50vh]">
       <div className="flex flex-wrap items-center gap-2 p-3 border-b border-line text-xs">
-        <button type="button" onClick={onBack} className="lg:hidden p-1.5 -ml-1 rounded-lg border border-line" aria-label="Back to the list">
+        <button type="button" onClick={onBack} className="lg:hidden w-11 h-11 -ml-1 flex items-center justify-center rounded-lg border border-line" aria-label="Back to the list">
           <ArrowLeft className="w-4 h-4" />
         </button>
         <div className="min-w-0">
@@ -180,24 +186,24 @@ function Conversation({ thread, refreshKey, onBack, onChanged }: { thread: ChatT
         </div>
         <div className="ml-auto flex flex-wrap gap-1.5">
           {wa && (
-            <a href={wa} target="_blank" rel="noopener noreferrer" className="px-2 py-1 rounded-lg border border-success-line text-success font-semibold inline-flex items-center gap-1">
+            <a href={wa} target="_blank" rel="noopener noreferrer" className={`${TAP} px-3 py-1 rounded-lg border border-success-line text-success font-semibold gap-1`}>
               <MessageCircle className="w-3.5 h-3.5" /> WhatsApp
             </a>
           )}
           {thread.contact.includes('@') && (
-            <a href={`mailto:${thread.contact}`} className="px-2 py-1 rounded-lg border border-line-strong font-semibold inline-flex items-center gap-1">
+            <a href={`mailto:${thread.contact}`} className={`${TAP} px-3 py-1 rounded-lg border border-line-strong font-semibold gap-1`}>
               <Mail className="w-3.5 h-3.5" /> Email
             </a>
           )}
           {thread.status !== 'closed' ? (
-            <button type="button" onClick={() => void setStatus('closed')} className="px-2 py-1 rounded-lg border border-line-strong font-semibold inline-flex items-center gap-1">
+            <button type="button" onClick={() => void setStatus('closed')} className={`${TAP} px-3 py-1 rounded-lg border border-line-strong font-semibold gap-1`}>
               <CheckCheck className="w-3.5 h-3.5" /> Close
             </button>
           ) : (
-            <button type="button" onClick={() => void setStatus('bot')} className="px-2 py-1 rounded-lg border border-line-strong font-semibold">Reopen</button>
+            <button type="button" onClick={() => void setStatus('bot')} className={`${TAP} px-3 py-1 rounded-lg border border-line-strong font-semibold`}>Reopen</button>
           )}
           {thread.status !== 'bot' && thread.status !== 'closed' && (
-            <button type="button" onClick={() => void setStatus('bot')} className="px-2 py-1 rounded-lg border border-line-strong font-semibold inline-flex items-center gap-1" title="The assistant answers new questions again">
+            <button type="button" onClick={() => void setStatus('bot')} className={`${TAP} px-3 py-1 rounded-lg border border-line-strong font-semibold gap-1`} title="The assistant answers new questions again">
               <Bot className="w-3.5 h-3.5" /> Back to assistant
             </button>
           )}
@@ -239,11 +245,11 @@ function Conversation({ thread, refreshKey, onBack, onChanged }: { thread: ChatT
           placeholder="Type your reply…"
           className="flex-1 min-w-0 px-3 py-2 rounded-xl border border-line-strong text-sm focus:outline-none focus:ring-2 focus:ring-gold resize-y"
         />
-        <button type="submit" disabled={busy || !draft.trim()} className="px-3.5 py-2.5 rounded-xl bg-ink text-paper text-xs font-bold inline-flex items-center gap-1.5 disabled:opacity-50">
+        <button type="submit" disabled={busy || !draft.trim()} className="min-h-11 px-3.5 py-2.5 rounded-xl bg-ink text-paper text-xs font-bold inline-flex items-center gap-1.5 disabled:opacity-50">
           {busy ? <Loader2 className="w-4 h-4 animate-spin" /> : <Send className="w-4 h-4" />} Send
         </button>
       </form>
-      {error && <p role="alert" className="px-3 pb-3 text-xs text-danger">{error}</p>}
+      {error && <p role="alert" data-testid="chat-error" className="px-3 pb-3 text-xs text-danger">{error}</p>}
     </div>
   );
 }

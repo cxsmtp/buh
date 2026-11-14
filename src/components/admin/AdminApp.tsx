@@ -2,12 +2,13 @@
 
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Archive, Box, Copy, CreditCard, Feather, ImagePlus, KeyRound, Laptop, LayoutGrid, Link2, Mail, MessageSquare, Palette, Search, ShieldCheck, Smartphone, Sparkles, Store, SwatchBook, Truck } from 'lucide-react';
-import type { AiSettings, AssistantSettings, BankTransferDetails, BrandSettings, CatalogSettings, CourierSettings, Customer, DeliverySettings, EmailSettings, Order, PaymentSettings, PhoneCheckSettings, Product, SmsGatewaySettings, StoreSettings, ThemeSettings } from '@/types';
+import type { AiSettings, AssistantSettings, BankTransferDetails, BrandSettings, CatalogSettings, CourierSettings, DeliverySettings, EmailSettings, Order, PaymentSettings, PhoneCheckSettings, Product, SmsGatewaySettings, StoreSettings, ThemeSettings } from '@/types';
 import { DEFAULT_AI, DEFAULT_ASSISTANT, DEFAULT_CATALOG, DEFAULT_DELIVERY, DEFAULT_EMAIL_SETTINGS, DEFAULT_STORE, DEFAULT_THEME_SETTINGS } from '@/data/catalogDefaults';
 import { INITIAL_BANK_DETAILS, INITIAL_BRAND_SETTINGS, INITIAL_COURIER_SETTINGS, INITIAL_SMS_SETTINGS } from '@/data/initialData';
 import { getJson, postJson, sendJson, UNAUTHORIZED_EVENT, UNKNOWN_ADDRESS_EVENT } from '@/lib/apiClient';
 import { useLiveUpdates } from '@/lib/client/live';
 import { stockAlerts } from '@/lib/client/stock';
+import type { HubTotals } from '@/lib/hubToday';
 import { VersionBadge } from '@/components/common/VersionBadge';
 import { AdminHeader } from './AdminHeader';
 import { AdminBar } from './AdminBar';
@@ -106,16 +107,21 @@ interface PhoneCheckInfo {
   whatsappNotice: boolean;
 }
 
-async function fetchAdminData() {
-  const [orders, customers, products, settings, chats] = await Promise.all([
-    getJson<{ orders: Order[] }>('/api/admin/orders'),
-    getJson<{ customers: Customer[] }>('/api/admin/customers'),
-    getJson<{ products: Product[] }>('/api/admin/products'),
-    getJson<AdminSettings & { phoneCheckInfo?: PhoneCheckInfo }>('/api/admin/settings'),
-    getJson<{ waiting: number }>('/api/admin/chats'),
-  ]);
-  return { orders, customers, products, settings, chats };
-}
+/**
+ * What the hub loads, each on its own, so a live event reloads only what changed:
+ *  - orders: every open order, the newest finished ones, where the older ones continue, and the
+ *    totals the server counted over every order (the header, badges, to-dos, money highlights);
+ *  - products, settings, chats (the number waiting).
+ * Customers are loaded by the Customers tab itself, a page at a time.
+ */
+const fetchOrders = () => getJson<{ orders: Order[]; older?: string | null; totals?: HubTotals }>('/api/admin/orders');
+const fetchProducts = () => getJson<{ products: Product[] }>('/api/admin/products');
+const fetchSettings = () => getJson<AdminSettings & { phoneCheckInfo?: PhoneCheckInfo }>('/api/admin/settings');
+const fetchChats = () => getJson<{ waiting: number }>('/api/admin/chats');
+type Loaded = 'orders' | 'products' | 'settings';
+
+/** While the live stream is down, the hub asks again this often (never while it is connected). */
+const FALLBACK_POLL_MS = 60_000;
 
 /** The shop's public settings the hub edits in place (the brand; the bank details are never public). */
 async function fetchPublic() {
@@ -157,7 +163,13 @@ export function AdminApp() {
   const [bankDetails, setBankDetails] = useState<BankTransferDetails>(INITIAL_BANK_DETAILS);
   const [publicSettingsLoaded, setPublicSettingsLoaded] = useState(false);
   const [orders, setOrders] = useState<Order[]>([]);
-  const [customers, setCustomers] = useState<Customer[]>([]);
+  // Where the finished orders continue on the server (null: the hub has them all), and the server's totals.
+  const [ordersOlder, setOrdersOlder] = useState<string | null>(null);
+  const [totals, setTotals] = useState<HubTotals | null>(null);
+  // Counts order changes, so the Customers tab (which loads its own pages) reloads the one in view.
+  const [ordersEpoch, setOrdersEpoch] = useState(0);
+  // Is the live stream open? Only while it is not does the hub poll.
+  const [liveConnected, setLiveConnected] = useState(false);
   const [adminProducts, setAdminProducts] = useState<Product[]>([]);
   const [adminSettings, setAdminSettings] = useState<AdminSettings>({
     courier: { value: INITIAL_COURIER_SETTINGS, secretsSet: {} },
@@ -174,7 +186,7 @@ export function AdminApp() {
     aiPrompt: { value: DEFAULT_AI_PROMPT, secretsSet: {} },
     aiPictures: { value: DEFAULT_AI_PICTURES, secretsSet: {} },
   });
-  const [adminLoadError, setAdminLoadError] = useState('');
+  const [loadFailed, setLoadFailed] = useState<Partial<Record<Loaded, boolean>>>({});
   const [adminSettingsLoaded, setAdminSettingsLoaded] = useState(false);
   const [settingsEpoch, setSettingsEpoch] = useState(0);
   const [undone, setUndone] = useState<Record<string, number>>({});
@@ -232,57 +244,94 @@ export function AdminApp() {
     setPublicSettingsLoaded(true);
   }, []);
 
-  const applyAdminData = useCallback(({ orders: o, customers: c, products: p, settings: st, chats: ch }: Awaited<ReturnType<typeof fetchAdminData>>) => {
-    if (ch.ok) setChatsWaiting(ch.data.waiting);
-    if (o.ok) setOrders(o.data.orders);
-    if (c.ok) setCustomers(c.data.customers);
-    if (p.ok) setAdminProducts(p.data.products);
-    if (st.ok) {
-      if (st.data.bank) setBankDetails(st.data.bank.value);
-      setAdminSettings({ courier: st.data.courier, sms: st.data.sms, catalog: st.data.catalog, store: st.data.store, theme: st.data.theme, email: st.data.email, assistant: st.data.assistant, delivery: st.data.delivery, payments: st.data.payments ?? { value: NO_PAYMENTS, secretsSet: {} }, phoneCheck: st.data.phoneCheck ?? { value: DEFAULT_PHONE_CHECK, secretsSet: {} }, ai: st.data.ai ?? { value: DEFAULT_AI, secretsSet: {} }, aiPrompt: st.data.aiPrompt ?? { value: DEFAULT_AI_PROMPT, secretsSet: {} }, aiPictures: st.data.aiPictures ?? { value: DEFAULT_AI_PICTURES, secretsSet: {} } });
-      setAdminSettingsLoaded(true);
-      if (st.data.phoneCheckInfo) setPhoneCheckInfo(st.data.phoneCheckInfo);
-    }
-    setAdminLoadError(o.ok && c.ok && p.ok && st.ok ? '' : 'Some admin data could not be loaded. Check your connection and refresh.');
+  const noteLoad = useCallback((what: Loaded, ok: boolean) => setLoadFailed((f) => (Boolean(f[what]) === !ok ? f : { ...f, [what]: !ok })), []);
+  const loadOrders = useCallback(async () => {
+    const { ok, data } = await fetchOrders();
+    noteLoad('orders', ok);
+    if (!ok) return;
+    setOrders(data.orders);
+    setOrdersOlder(data.older ?? null);
+    if (data.totals) setTotals(data.totals);
+  }, [noteLoad]);
+  const loadProducts = useCallback(async () => {
+    const { ok, data } = await fetchProducts();
+    noteLoad('products', ok);
+    if (ok) setAdminProducts(data.products);
+  }, [noteLoad]);
+  const loadSettings = useCallback(async () => {
+    const { ok, data } = await fetchSettings();
+    noteLoad('settings', ok);
+    if (!ok) return;
+    if (data.bank) setBankDetails(data.bank.value);
+    setAdminSettings({ courier: data.courier, sms: data.sms, catalog: data.catalog, store: data.store, theme: data.theme, email: data.email, assistant: data.assistant, delivery: data.delivery, payments: data.payments ?? { value: NO_PAYMENTS, secretsSet: {} }, phoneCheck: data.phoneCheck ?? { value: DEFAULT_PHONE_CHECK, secretsSet: {} }, ai: data.ai ?? { value: DEFAULT_AI, secretsSet: {} }, aiPrompt: data.aiPrompt ?? { value: DEFAULT_AI_PROMPT, secretsSet: {} }, aiPictures: data.aiPictures ?? { value: DEFAULT_AI_PICTURES, secretsSet: {} } });
+    setAdminSettingsLoaded(true);
+    if (data.phoneCheckInfo) setPhoneCheckInfo(data.phoneCheckInfo);
+  }, [noteLoad]);
+  const loadChats = useCallback(async () => {
+    const { ok, data } = await fetchChats();
+    if (ok) setChatsWaiting(data.waiting);
   }, []);
-  const loadAdminData = useCallback(async () => applyAdminData(await fetchAdminData()), [applyAdminData]);
+  const loadAdminData = useCallback(async () => {
+    await Promise.all([loadOrders(), loadProducts(), loadSettings(), loadChats()]);
+  }, [loadOrders, loadProducts, loadSettings, loadChats]);
   const reloadAll = useCallback(async () => {
     await Promise.all([loadAdminData(), loadPublic()]);
   }, [loadAdminData, loadPublic]);
+  const adminLoadError = Object.values(loadFailed).some(Boolean) ? 'Some admin data could not be loaded. Check your connection and refresh.' : '';
 
-  // Signed in: the data, refreshed every minute, and the link notice (the owner's hub only).
+  // Signed in: the data, and the link notice (the owner's hub only).
   useEffect(() => {
     if (auth !== 'in' || role !== 'owner') return;
     void Promise.resolve().then(reloadAll);
     void getJson<{ notice?: string | null }>('/api/admin/link').then(({ ok, data }) => {
       if (ok && data.notice && onAdminLink()) setLinkNotice(data.notice);
     });
-    const t = setInterval(() => void fetchAdminData().then(applyAdminData), 60_000);
-    return () => clearInterval(t);
-  }, [auth, role, reloadAll, applyAdminData]);
+  }, [auth, role, reloadAll]);
 
-  // Several changes in a row (e.g. tapping + on stock) give one reload.
+  // The live stream tells the hub what changed, so nothing is re-downloaded on a timer while it is
+  // open (review finding 6: everything every 60 s). Only while it is down does the hub ask again.
+  useEffect(() => {
+    if (auth !== 'in' || role !== 'owner' || liveConnected) return;
+    const t = setInterval(() => void loadAdminData(), FALLBACK_POLL_MS);
+    return () => clearInterval(t);
+  }, [auth, role, liveConnected, loadAdminData]);
+
+  // With no data asked on a timer, one small question a minute (while the hub is in view) still
+  // notices a sign-out elsewhere or a changed private link: the hub then stops and says so. A call
+  // that fails (no signal) changes nothing.
+  useEffect(() => {
+    if (auth !== 'in' || role !== 'owner' || !liveConnected) return;
+    const t = setInterval(() => {
+      if (document.visibilityState === 'hidden') return;
+      void getJson<{ authenticated?: boolean }>('/api/admin/session').then(({ ok, data }) => {
+        if (ok && data.authenticated === false) setAuth((x) => (x === 'closed' ? x : 'out'));
+      });
+    }, FALLBACK_POLL_MS);
+    return () => clearInterval(t);
+  }, [auth, role, liveConnected]);
+
+  // Several changes in a row (e.g. tapping + on stock) give one reload, of that channel only.
   const reloadTimers = useRef<Record<string, ReturnType<typeof setTimeout>>>({});
   const debounced = useCallback((key: string, fn: () => void) => {
     clearTimeout(reloadTimers.current[key]);
     reloadTimers.current[key] = setTimeout(fn, 400);
   }, []);
   useLiveUpdates(auth === 'in' && role === 'owner' ? '/api/admin/events' : null, {
-    onCatalog: () => debounced('admin', () => void reloadAll()),
-    onSettings: () => debounced('admin', () => void reloadAll()),
+    onCatalog: () => debounced('catalog', () => void loadProducts()),
+    onSettings: () => debounced('settings', () => void Promise.all([loadSettings(), loadPublic()])),
     onOrders: () => {
       setNewOrderNotice(true);
-      debounced('admin', () => void loadAdminData());
+      debounced('orders', () => {
+        setOrdersEpoch((n) => n + 1);
+        void loadOrders();
+      });
     },
     onChats: () => {
       setChatsKey((n) => n + 1);
-      debounced('chats', () =>
-        void getJson<{ waiting: number }>('/api/admin/chats').then(({ ok, data }) => {
-          if (ok) setChatsWaiting(data.waiting);
-        })
-      );
+      debounced('chats', () => void loadChats());
     },
     onNewVersion: () => setUpdateReady(true),
+    onStatus: setLiveConnected,
   });
 
   /** Save one settings group on the server; resolves to an error message or null. */
@@ -330,7 +379,8 @@ export function AdminApp() {
     }
   };
 
-  const pendingOrdersCount = orders.filter((o) => o.status === 'pending_confirmation').length;
+  // From the server's count of every order; the hub's own list only until that arrives.
+  const pendingOrdersCount = totals ? totals.toConfirm : orders.filter((o) => o.status === 'pending_confirmation').length;
   const stockAlertCount = useMemo(() => (auth === 'in' ? stockAlerts(adminProducts, adminSettings.catalog.value.lowStockThreshold).count : 0), [auth, adminProducts, adminSettings.catalog.value.lowStockThreshold]);
   const phone = view === 'phone';
 
@@ -409,7 +459,7 @@ export function AdminApp() {
           <button type="button" className="font-bold underline min-h-8" onClick={() => window.location.reload()}>Refresh</button>
         </div>
       )}
-      <AdminHeader orders={orders} products={adminProducts} customers={customers} onExitAdmin={toShop} onLogoutAdmin={handleLogout} brandSettings={brandSettings} />
+      <AdminHeader orders={orders} totals={totals} products={adminProducts} onExitAdmin={toShop} onLogoutAdmin={handleLogout} brandSettings={brandSettings} />
 
       <main className={`flex-1 mx-auto w-full px-3 sm:px-6 ${phone ? 'pb-[calc(5.5rem+env(safe-area-inset-bottom,0px))]' : 'max-w-7xl pb-16'}`}>
         <div className="py-4 space-y-4">
@@ -501,7 +551,7 @@ export function AdminApp() {
           />
           {adminLoadError && <p role="alert" className="text-xs text-danger bg-danger-soft border border-danger-line rounded-xl px-3 py-2">{adminLoadError}</p>}
 
-          {adminTab === 'overview' && <HubOverview orders={orders} products={adminProducts} lowStockThreshold={adminSettings.catalog.value.lowStockThreshold} onGo={setAdminTab} />}
+          {adminTab === 'overview' && <HubOverview orders={orders} totals={totals} products={adminProducts} lowStockThreshold={adminSettings.catalog.value.lowStockThreshold} onGo={setAdminTab} />}
           {adminTab === 'overview' && (
             <div className="max-w-4xl">
               <SeoOverviewCard
@@ -513,9 +563,9 @@ export function AdminApp() {
             </div>
           )}
 
-          {adminTab === 'orders' && phone && <TodayTodos orders={orders} products={adminProducts} lowStockThreshold={adminSettings.catalog.value.lowStockThreshold} onGo={setAdminTab} />}
+          {adminTab === 'orders' && phone && <TodayTodos orders={orders} totals={totals} products={adminProducts} lowStockThreshold={adminSettings.catalog.value.lowStockThreshold} onGo={setAdminTab} />}
 
-          {adminTab === 'orders' && <AdminOrdersTab orders={orders} onOrderChanged={(changed) => { setOrders((prev) => prev.map((o) => (o.id === changed.id ? changed : o))); void loadAdminData(); }} courierSettings={adminSettings.courier.value} courierSecretsSet={adminSettings.courier.secretsSet} bank={bankDetails} shopName={brandSettings.storeName} />}
+          {adminTab === 'orders' && <AdminOrdersTab orders={orders} older={ordersOlder} totals={totals} onOrderChanged={(changed) => { setOrders((prev) => (prev.some((o) => o.id === changed.id) ? prev.map((o) => (o.id === changed.id ? changed : o)) : [changed, ...prev])); void loadOrders(); void loadProducts(); }} courierSettings={adminSettings.courier.value} courierSecretsSet={adminSettings.courier.secretsSet} bank={bankDetails} shopName={brandSettings.storeName} />}
 
           {(adminTab === 'add-product' || adminTab === 'inventory') && (
             <AdminInventoryTab
@@ -529,9 +579,9 @@ export function AdminApp() {
             />
           )}
 
-          {adminTab === 'chats' && <AdminChatsTab refreshKey={chatsKey} />}
+          {adminTab === 'chats' && <AdminChatsTab refreshKey={chatsKey} shopName={brandSettings.storeName} />}
 
-          {adminTab === 'crm' && <AdminCrmTab customers={customers} orders={orders} />}
+          {adminTab === 'crm' && <AdminCrmTab refreshKey={ordersEpoch} shopName={brandSettings.storeName} />}
 
           {adminTab === 'money' && <AdminMoneyTab phone={phone} />}
 
