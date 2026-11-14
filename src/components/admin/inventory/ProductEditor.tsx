@@ -69,8 +69,9 @@ function draftFrom(product: Product | null, catalog: CatalogSettings): Draft {
       shortDescriptionAr: '',
       descriptionAr: '',
       category,
-      material: '100% Cotton',
-      threadCount: '300',
+      // Fabric and thread count are the owner's facts: empty until they (or their own words) fill them in.
+      material: '',
+      threadCount: '',
       // None until the owner chooses one: the shop shows no weave rather than a guessed one.
       weave: '',
       price: '',

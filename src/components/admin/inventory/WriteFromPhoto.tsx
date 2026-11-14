@@ -74,7 +74,7 @@ type FieldKey = 'title' | 'shortDescription' | 'design' | 'comfort' | 'closing' 
 
 const EVERYDAY = 'everyday';
 /** A new product's starting values: not the owner's facts, so not sent as hints. */
-const NEW_DEFAULTS = { material: '100% Cotton', threadCount: '300' };
+const NEW_DEFAULTS = { material: '', threadCount: '' };
 const box = 'w-full px-3 py-2 rounded-xl border border-line-strong bg-surface text-ink text-base sm:text-sm focus:outline-none focus:ring-2 focus:ring-gold';
 const small = 'min-h-11 px-3 rounded-xl border border-line-strong bg-surface text-ink text-sm font-semibold inline-flex items-center justify-center gap-1 disabled:opacity-50';
 
