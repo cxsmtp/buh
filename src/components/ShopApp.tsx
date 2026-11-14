@@ -12,6 +12,7 @@ import { getJson, postJson } from '@/lib/apiClient';
 import { applyUpdate, checkForUpdate, registerServiceWorker, useUpdateWaiting } from '@/lib/client/pwa';
 import { LocaleProvider, useLocale, useT, type Words } from '@/lib/i18n';
 import { LocaleBoot } from '@/components/common/LocaleBoot';
+import { payWays, servedPlaces } from '@/components/store/checkoutWords';
 
 const LOAD_FAILED = 'The shop could not be loaded. Please check your connection and refresh.';
 
@@ -38,10 +39,12 @@ const WORDS = {
   browse: { en: 'Browse the shop', ar: 'تصفّح المتجر' },
   showAll: { en: 'Show everything', ar: 'عرض الكل' },
   promise: { en: 'Our promise', ar: 'وعدنا' },
-  promiseTitle: { en: 'Made slowly, delivered with care', ar: 'صُنعت بتأنٍّ، وتصلك بعناية' },
+  // Only what the shop's settings say (where it delivers, the ways to pay that are on): no claim
+  // about how each piece is made, which differs from product to product.
+  promiseTitle: { en: 'Chosen with care, delivered with care', ar: 'نختارها بعناية، وتصلك بعناية' },
   promiseText: {
-    en: 'Every set is made with slow handcraft, fitted for deep Gulf mattresses, and delivered to your door in all seven emirates, with cash on delivery or bank transfer.',
-    ar: 'كل طقم مصنوع يدوياً بتأنٍّ، ومناسب للمراتب الخليجية العميقة، ويصلك إلى باب بيتك في الإمارات السبع، مع الدفع عند الاستلام أو التحويل البنكي.',
+    en: 'Bedding for UAE homes, delivered to your door in {places}. Pay by {pays}.',
+    ar: 'مفارش لبيوت الإمارات، تصلك إلى باب بيتك في {places}. الدفع: {pays}.',
   },
   terms: { en: 'Terms & Conditions', ar: 'الشروط والأحكام' },
 } as const satisfies Words;
@@ -50,7 +53,7 @@ const WORDS = {
 async function fetchCatalog() {
   const [products, settings] = await Promise.all([
     getJson<{ products: Product[] }>('/api/products'),
-    getJson<{ brand: BrandSettings; bankTransfer?: boolean; bankTransferMode?: 'send_details' | 'ask_whatsapp' | null; supportEmail?: string; store?: StoreSettings; catalog?: { categories: CatalogSettings['categories']; lowStockThreshold: number }; festival?: FestivalView | null; phoneVerification?: PhoneVerificationConfig; chat?: { name: string; greeting: string } | null; delivery?: DeliverySettings; vat?: { addedPercent?: number }; payments?: { card: boolean; publishableKey?: string; phoneCheck?: boolean; cardFeePercent?: number } }>('/api/settings/public'),
+    getJson<{ brand: BrandSettings; bankTransfer?: boolean; bankTransferMode?: 'send_details' | 'ask_whatsapp' | null; supportEmail?: string; store?: StoreSettings; catalog?: { categories: CatalogSettings['categories']; lowStockThreshold: number }; festival?: FestivalView | null; phoneVerification?: PhoneVerificationConfig; chat?: { name: string; greeting: string } | null; delivery?: DeliverySettings; vat?: { addedPercent?: number }; payments?: { card: boolean; publishableKey?: string; phoneCheck?: boolean; cardFeePercent?: number }; bagLimit?: { applies: 'all' | 'card'; perItem: number; lines: number } | null }>('/api/settings/public'),
   ]);
   return { products, settings };
 }
@@ -171,6 +174,13 @@ function ShopAppInner({
   const [filterOpen, setFilterOpen] = useState(false);
   // The product sheet added a history entry (?p=…): closing it goes back, so the phone's Back button closes it too.
   const sheetPushed = useRef(false);
+  // Steps back in the browser's history that the shop took itself and that have not arrived yet
+  // (history.back() only lands a moment later): told apart from the customer's own Back button.
+  const ownBacks = useRef(0);
+  const goBack = useCallback(() => {
+    ownBacks.current++;
+    window.history.back();
+  }, []);
   const resultsRef = useRef<HTMLDivElement>(null);
 
   // Core Data (all from the server)
@@ -195,6 +205,8 @@ function ShopAppInner({
   const [vatAddedPercent, setVatAddedPercent] = useState(0);
   // Card payments (Settings → Payments): Stripe's publishable key when switched on.
   const [cardPayments, setCardPayments] = useState<{ publishableKey: string; phoneCheck?: boolean; cardFeePercent?: number } | null>(null);
+  // The small bag the server takes from a phone no code proved (said in the bag, before checkout).
+  const [bagLimit, setBagLimit] = useState<{ applies: 'all' | 'card'; perItem: number; lines: number } | null>(null);
   // Where this visitor first came from (Instagram, WhatsApp…), sent with the order.
   const [landing] = useState<Landing | null>(() => (typeof window === 'undefined' ? null : captureLanding()));
   // Pre-fills Track Order (only rendered once opened, so no server/client mismatch).
@@ -215,17 +227,37 @@ function ShopAppInner({
   const [dealSheetOpen, setDealSheetOpen] = useState(Boolean(deal));
   const [photoDraft, setPhotoDraft] = useState<PhotoOrderDraft | null>(null);
   const photoPlaced = useRef(false);
+  const photoDraftNow = useRef<PhotoOrderDraft | null>(null);
+  useEffect(() => {
+    photoDraftNow.current = photoDraft;
+  }, [photoDraft]);
   const [selectedProduct, setSelectedProduct] = useState<Product | null>(null);
   const [searchOpen, setSearchOpen] = useState(false);
 
+  // The saved bag is read once, from the first catalogue that loads (the first try, a retry, or a
+  // live update); until then nothing is written over it.
+  const bagRestored = useRef(false);
+  const [bagReady, setBagReady] = useState(false);
+  // What the address asked for on arrival (?bag=…, ?open=…, /p/<id>): handled with that first catalogue.
+  const arrival = useRef<((list: Product[], result: Awaited<ReturnType<typeof fetchCatalog>>) => void) | null>(null);
+
   // Load the catalogue and branding on mount
-  const applyCatalog = useCallback(({ products: res, settings }: Awaited<ReturnType<typeof fetchCatalog>>) => {
+  const applyCatalog = useCallback((result: Awaited<ReturnType<typeof fetchCatalog>>) => {
+    const { products: res, settings } = result;
     if (res.ok) {
       productsRef.current = res.data.products;
       setProducts(res.data.products);
       setCatalogLoaded(true);
-      // Latest prices and stock in the bag too (quantities capped to what is left).
-      setCart((prev) => refreshCart(prev, res.data.products));
+      if (!bagRestored.current) {
+        bagRestored.current = true;
+        setCart(refreshCart(loadCart(res.data.products), res.data.products));
+        setBagReady(true);
+        arrival.current?.(res.data.products, result);
+        arrival.current = null;
+      } else {
+        // Latest prices and stock in the bag too (quantities capped to what is left).
+        setCart((prev) => refreshCart(prev, res.data.products));
+      }
       setCatalogError('');
     } else {
       setCatalogError(LOAD_FAILED);
@@ -243,6 +275,8 @@ function ShopAppInner({
       setVatAddedPercent(Number(settings.data.vat?.addedPercent) || 0);
       const pay = settings.data.payments;
       setCardPayments(pay?.card && pay.publishableKey ? { publishableKey: pay.publishableKey, cardFeePercent: Number(pay.cardFeePercent) || 0, ...(pay.phoneCheck ? { phoneCheck: true } : {}) } : null);
+      const limit = settings.data.bagLimit;
+      setBagLimit(limit && (limit.applies === 'all' || limit.applies === 'card') && limit.perItem > 0 && limit.lines > 0 ? limit : null);
       if (settings.data.catalog) {
         setLowStockThreshold(settings.data.catalog.lowStockThreshold);
         setCategories(settings.data.catalog.categories);
@@ -254,9 +288,7 @@ function ShopAppInner({
   const loadCatalog = useCallback(async () => applyCatalog(await fetchCatalog()), [applyCatalog]);
 
   useEffect(() => {
-    void fetchCatalog().then((result) => {
-      const list = applyCatalog(result);
-      if (!list) return;
+    arrival.current = (list, result) => {
       const params = new URLSearchParams(window.location.search);
       // A shared view (?cat=…&size=…) opens as it was shared.
       setFilters(parseFilters(params));
@@ -291,7 +323,24 @@ function ShopAppInner({
         const rest = params.toString();
         window.history.replaceState(null, '', `${window.location.pathname}${rest ? `?${rest}` : ''}`);
       }
-    });
+    };
+    // The first load can fail (the shop restarting for an update, a weak signal): tried again a few
+    // times by itself, a little later each time, and when the phone is back online.
+    let tries = 0;
+    let retry: ReturnType<typeof setTimeout> | undefined;
+    let stopped = false;
+    const load = () => {
+      clearTimeout(retry);
+      void fetchCatalog().then((result) => {
+        if (stopped || applyCatalog(result) || bagRestored.current || ++tries > 6) return;
+        retry = setTimeout(load, Math.min(1500 * tries, 8000));
+      });
+    };
+    load();
+    const onOnline = () => {
+      if (!bagRestored.current) load();
+    };
+    window.addEventListener('online', onOnline);
     try {
       // Old builds kept data in the browser: clear it.
       for (const key of ['buh_products_v1', 'buh_orders_v1', 'buh_customers_v1', 'buh_courier_settings_v1', 'buh_bank_details_v1', 'buh_brand_settings_v1', 'buh_sms_settings_v1']) {
@@ -303,12 +352,17 @@ function ShopAppInner({
 
     // The service worker: fast repeat opens, an offline page, installable as an app (src/lib/serviceWorker.ts).
     registerServiceWorker();
+    return () => {
+      stopped = true;
+      clearTimeout(retry);
+      window.removeEventListener('online', onOnline);
+    };
   }, [applyCatalog, initialProductId, openPhotoOrder]);
 
-  // The bag survives a reload.
+  // The bag survives a reload (saved only once the stored one has been read: never an empty bag over it).
   useEffect(() => {
-    if (products.length) saveCart(cart);
-  }, [cart, products.length]);
+    if (bagReady) saveCart(cart);
+  }, [cart, bagReady]);
 
   // Live updates: changes made anywhere (a sale, a price, a setting) show on open pages within seconds,
   // reloading only the data: the bag, an open product and half-filled forms stay as they are.
@@ -429,8 +483,8 @@ function ShopAppInner({
   };
 
   const shopInfo = useMemo<ShopInfo>(
-    () => ({ store: storeSettings, lowStockThreshold, supportEmail: supportEmail || 'orders@beautifuluaehome.com', festival, chat: chatInfo, delivery, ...(vatAddedPercent ? { vatAddedPercent } : {}) }),
-    [storeSettings, lowStockThreshold, supportEmail, festival, chatInfo, delivery, vatAddedPercent]
+    () => ({ store: storeSettings, lowStockThreshold, supportEmail: supportEmail || 'orders@beautifuluaehome.com', festival, chat: chatInfo, delivery, ...(vatAddedPercent ? { vatAddedPercent } : {}), pay: { card: Boolean(cardPayments), bank: bankTransfer }, bagLimit }),
+    [storeSettings, lowStockThreshold, supportEmail, festival, chatInfo, delivery, vatAddedPercent, cardPayments, bankTransfer, bagLimit]
   );
 
   // The storefront: what the search, filters and sort leave, and the round "story" chips.
@@ -472,7 +526,7 @@ function ShopAppInner({
     setSelectedProduct(null);
     if (sheetPushed.current) {
       sheetPushed.current = false;
-      window.history.back();
+      goBack();
       return;
     }
     const params = new URLSearchParams(window.location.search);
@@ -480,11 +534,72 @@ function ShopAppInner({
     params.delete('p');
     const rest = params.toString();
     writeSearch(rest ? `?${rest}` : '', 'replace');
+  }, [goBack]);
+
+  // The bag and checkout add one step to the browser's history while either is open, so the phone's
+  // Back button closes them (like the product sheet) instead of leaving the shop.
+  const overlayOpen = isCartOpen || isCheckoutOpen;
+  const overlayPushed = useRef(false);
+  // The bag opened while one of our own steps back was still on its way (Add to Bag closes the
+  // product sheet and opens the bag in one go): its step is added once that one has arrived.
+  const overlayWaiting = useRef(false);
+  const checkoutBusy = useRef(false);
+  const noteCheckoutBusy = useCallback((busy: boolean) => {
+    checkoutBusy.current = busy;
   }, []);
+  const closeCheckout = useCallback(() => {
+    setIsCheckoutOpen(false);
+    // Closed before ordering: back to the photos (nothing lost); after ordering: done.
+    const draft = photoDraftNow.current;
+    if (draft?.deal && !photoPlaced.current) setDealSheetOpen(true);
+    else if (draft && !photoPlaced.current) setPhotoSheetOpen(true);
+    else setPhotoDraft(null);
+    photoPlaced.current = false;
+  }, []);
+  const pushOverlay = useCallback(() => {
+    overlayWaiting.current = false;
+    overlayPushed.current = true;
+    window.history.pushState(null, '', window.location.href);
+  }, []);
+  useEffect(() => {
+    if (overlayOpen && !overlayPushed.current) {
+      if (!ownBacks.current) return pushOverlay();
+      overlayWaiting.current = true;
+      // If that step back never arrives (nothing to go back to), the bag still gets its step.
+      const timer = setTimeout(() => {
+        if (!overlayWaiting.current) return;
+        ownBacks.current = 0;
+        pushOverlay();
+      }, 500);
+      return () => clearTimeout(timer);
+    }
+    if (!overlayOpen) {
+      overlayWaiting.current = false;
+      if (overlayPushed.current) {
+        overlayPushed.current = false;
+        goBack();
+      }
+    }
+  }, [overlayOpen, goBack, pushOverlay]);
 
   // Back and Forward: the view and the open product follow the address bar.
   useEffect(() => {
     const onPop = () => {
+      if (ownBacks.current) {
+        // Our own step back (a sheet, the bag or checkout was closed with its own button).
+        ownBacks.current--;
+        if (!ownBacks.current && overlayWaiting.current) pushOverlay();
+      } else if (overlayPushed.current) {
+        if (checkoutBusy.current) {
+          // An order is being placed or paid: checkout stays (its confirmation must be seen).
+          window.history.pushState(null, '', window.location.href);
+          return;
+        }
+        // The phone's Back button: the bag or checkout closes, the shop stays.
+        overlayPushed.current = false;
+        setIsCartOpen(false);
+        closeCheckout();
+      }
       const params = new URLSearchParams(window.location.search);
       setFilters(parseFilters(params));
       const id = params.get('p');
@@ -496,7 +611,7 @@ function ShopAppInner({
     };
     window.addEventListener('popstate', onPop);
     return () => window.removeEventListener('popstate', onPop);
-  }, []);
+  }, [closeCheckout, pushOverlay]);
 
   const goHome = useCallback(() => {
     window.scrollTo({ top: 0, behavior: prefersReducedMotion() ? 'auto' : 'smooth' });
@@ -667,7 +782,9 @@ function ShopAppInner({
           <div className="border-y border-line px-5 py-10 sm:py-12 text-center my-8 space-y-3">
             <p className="label-caps text-gold-deep">{t('promise')}</p>
             <h2 className="font-serif text-2xl sm:text-3xl text-ink">{t('promiseTitle')}</h2>
-            <p className="text-ink-soft text-[13px] sm:text-sm max-w-xl mx-auto leading-relaxed">{t('promiseText')}</p>
+            <p data-testid="shop-promise" className="text-ink-soft text-[13px] sm:text-sm max-w-xl mx-auto leading-relaxed">
+              {t('promiseText', { places: servedPlaces(delivery.emirates, locale), pays: payWays({ card: Boolean(cardPayments), bank: bankTransfer }, locale, false) })}
+            </p>
           </div>
 
           {/* The version: in the footer on phones (never over the feed), bottom left on wider screens */}
@@ -726,14 +843,8 @@ function ShopAppInner({
       {/* Mounted only while open, so every checkout starts fresh (a second order is not stuck on the first's confirmation). */}
       {isCheckoutOpen && <CheckoutModal
         isOpen={isCheckoutOpen}
-        onClose={() => {
-          setIsCheckoutOpen(false);
-          // Closed before ordering: back to the photos (nothing lost); after ordering: done.
-          if (photoDraft?.deal && !photoPlaced.current) setDealSheetOpen(true);
-          else if (photoDraft && !photoPlaced.current) setPhotoSheetOpen(true);
-          else setPhotoDraft(null);
-          photoPlaced.current = false;
-        }}
+        onClose={closeCheckout}
+        onBusy={noteCheckoutBusy}
         items={photoDraft ? [] : cart}
         photoOrder={photoDraft}
         bankTransfer={bankTransfer}

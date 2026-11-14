@@ -22,8 +22,14 @@ export interface DeliveryCheck {
   days: string;
   /** Settings → Delivery: what standard delivery is called and costs (AED). */
   standard: { name: string; fee: number };
-  sameDay: { available: boolean; fee: number; name: string; cutoff: string; reason?: string };
+  sameDay: { available: boolean; fee: number; name: string; cutoff: string; reason?: string; reasonCode?: SameDayReason };
+  /** The same message as a code and its values, so checkout can say it in the customer's language. */
+  code: 'delivers' | 'choose_emirate' | 'not_served';
+  where: { area: string; emirate?: Emirate };
 }
+
+/** Why same day is not offered: only in some emirates, never on a Sunday, or past today's cut-off. */
+export type SameDayReason = 'emirates' | 'sunday' | 'cutoff';
 
 const norm = (s: string) => s.toLowerCase().replace(/[^\p{L}\p{N}]+/gu, ' ').trim();
 
@@ -51,12 +57,14 @@ export function deliveryCheck(input: { emirate: string; area: string }, s: Deliv
   // The courier collects nothing on Sundays (a Sunday pickup is moved to Monday), so no same-day then.
   const sunday = new Date(now + 4 * 60 * 60 * 1000).getUTCDay() === 0;
   const sameDayHere = Boolean(emirate) && s.sameDayEmirates.includes(emirate!);
+  const reasonCode: SameDayReason | undefined = !s.sameDayEnabled ? undefined : !sameDayHere ? 'emirates' : sunday ? 'sunday' : !beforeCutoff ? 'cutoff' : undefined;
   const sameDay = {
     available: serviceable && s.sameDayEnabled && sameDayHere && beforeCutoff && !sunday,
     fee: s.sameDayFee,
     name: s.sameDayName || 'Same day',
     cutoff: s.sameDayCutoff,
-    reason: !s.sameDayEnabled ? undefined : !sameDayHere ? `Same-day delivery is for ${s.sameDayEmirates.join(', ')}.` : sunday ? 'Same-day delivery is not offered on Sundays; Monday is the earliest.' : !beforeCutoff ? `Same-day delivery is for orders before ${s.sameDayCutoff}; tomorrow is the earliest now.` : undefined,
+    reason: reasonCode === 'emirates' ? `Same-day delivery is for ${s.sameDayEmirates.join(', ')}.` : reasonCode === 'sunday' ? 'Same-day delivery is not offered on Sundays; Monday is the earliest.' : reasonCode === 'cutoff' ? `Same-day delivery is for orders before ${s.sameDayCutoff}; tomorrow is the earliest now.` : undefined,
+    ...(reasonCode ? { reasonCode } : {}),
   };
   return {
     serviceable,
@@ -65,6 +73,8 @@ export function deliveryCheck(input: { emirate: string; area: string }, s: Deliv
       : !emirate
         ? 'Choose your emirate.'
         : `Sorry, we don’t deliver to ${where} yet. Message us and we’ll see what we can do.`,
+    code: serviceable ? 'delivers' : !emirate ? 'choose_emirate' : 'not_served',
+    where: { area, ...(emirate ? { emirate } : {}) },
     days: s.standardDays,
     standard: { name: s.standardName || 'Standard delivery', fee: Number(s.standardFee) || 0 },
     sameDay,

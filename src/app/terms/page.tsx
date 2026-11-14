@@ -10,10 +10,15 @@ export const dynamic = 'force-dynamic';
 
 export async function generateMetadata(): Promise<Metadata> {
   const { shopName } = await import('@/lib/server/seo');
+  const { shopUrl } = await import('@/lib/server/runtimeConfig');
+  // The page's full address, from the shop's own address (NEXT_PUBLIC_APP_URL). A relative one would be
+  // completed by the framework with the address the server listens on, so without it the
+  // tag is left out (as on the home and product pages).
+  const base = shopUrl();
   return {
     title: { absolute: `Terms & Conditions | ${shopName()}` },
     description: 'How ordering, payment, delivery, our no-returns policy for personal and made-to-order bedding, and faulty items work.',
-    alternates: { canonical: '/terms' },
+    ...(base ? { alternates: { canonical: `${base}/terms` } } : {}),
   };
 }
 

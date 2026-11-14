@@ -194,7 +194,12 @@ async function overflow(page: Page) {
 async function tabTo(page: Page, name: RegExp): Promise<boolean> {
   for (let i = 0; i < 40; i++) {
     await page.keyboard.press('Tab');
-    const label = await page.evaluate(() => (document.activeElement as HTMLElement | null)?.innerText || '');
+    // The focused control's name: its aria-label, or its text. (Never the page's whole text: focus
+    // stays inside the dialog now, so it must really land on the control.)
+    const label = await page.evaluate(() => {
+      const el = document.activeElement as HTMLElement | null;
+      return !el || el === document.body ? '' : `${el.getAttribute('aria-label') ?? ''} ${el.innerText || ''}`;
+    });
     if (name.test(label)) return true;
   }
   return false;

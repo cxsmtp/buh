@@ -73,7 +73,10 @@ export const CARD_PAYMENT_TTL_MINUTES = CARD_PAYMENT_TTL_MS / 60_000;
  */
 export const UNCONFIRMED_LIMITS = {
   perPhone: 2,
-  perIp: 4,
+  // Many strangers on mobile data share one address (du and Etisalat put customers behind shared
+  // addresses), so this is roomy: a fifth of the shop cap. Each phone still has its own cap of 2,
+  // each order a small bag, and each size at most half its pieces held.
+  perIp: 12,
   shop: 60,
   /** No TRUST_PROXY (the shop can't tell customers apart, so no per-connection cap): stricter. */
   shopNoProxy: 15,
@@ -541,7 +544,7 @@ export function placeOrder(input: unknown, context: PlaceOrderContext = {}): Pla
   }
   // Settings → Store & contact: card payment on the /order-by-photo page can be switched off (the customer typed the amount there).
   if (card && photo && !deal && getSettings('store').photoOrdersCard === false) {
-    throw new HttpError(400, 'Card payment is not available for orders from a photo. Please choose Cash on Delivery or Bank Transfer.', {}, { code: 'card_unavailable' });
+    throw new HttpError(400, 'Card payment is not available for orders from a photo. Please choose Cash on Delivery or Bank Transfer.', {}, { code: 'card_unavailable', photo: true });
   }
   if (card && !cardPaymentsReady()) throw new HttpError(400, 'Card payment is not available right now. Please choose Cash on Delivery.', {}, { code: 'card_unavailable' });
   // Settings → Phone check "WhatsApp (free)": no code; the number typed (UAE mobile rules) is
@@ -558,7 +561,7 @@ export function placeOrder(input: unknown, context: PlaceOrderContext = {}): Pla
       : card && !phoneCodesOn() && body.verificationToken === undefined
         ? validatePhone(typedPhone)
         : null);
-  if (!phone) throw new HttpError(401, 'Please verify your UAE mobile number again (the code check has expired).');
+  if (!phone) throw new HttpError(401, 'Please verify your UAE mobile number again (the code check has expired).', {}, { code: 'phone_check_expired' });
   // No code proved it: the WhatsApp message (or the owner's call) will.
   const unproven = !provenPhone;
 
@@ -566,7 +569,7 @@ export function placeOrder(input: unknown, context: PlaceOrderContext = {}): Pla
     // The same checkout sent twice (double tap, network retry): same order back. Never for a
     // different request (another way of paying, other items): that would show "Thank you" for an
     // order the customer did not ask for; checkout sends it again as a new one.
-    if (existing.customer.phone !== phone) throw new HttpError(409, 'This checkout reference was already used.');
+    if (existing.customer.phone !== phone) throw new HttpError(409, 'This checkout reference was already used.', {}, { code: 'checkout_reference_used' });
     if (!sameCheckout(existing, body, paymentMethod)) {
       throw new HttpError(409, 'Your order changed since the first try. Please confirm again.', {}, { code: 'checkout_changed' });
     }
@@ -575,9 +578,9 @@ export function placeOrder(input: unknown, context: PlaceOrderContext = {}): Pla
 
   const c = (body.customer && typeof body.customer === 'object' ? body.customer : {}) as Obj;
   const emirate = text(c.emirate, 'Emirate', 40, { required: true });
-  if (!EMIRATES.includes(emirate as Emirate)) throw new HttpError(400, 'Please choose one of the seven Emirates.');
+  if (!EMIRATES.includes(emirate as Emirate)) throw new HttpError(400, 'Please choose one of the seven Emirates.', {}, { code: 'bad_emirate' });
   const email = text(c.email, 'Email', 254);
-  if (email && !isCustomerEmail(email)) throw new HttpError(400, 'Please check the email address.');
+  if (email && !isCustomerEmail(email)) throw new HttpError(400, 'Please check the email address.', {}, { code: 'bad_email' });
   const gps = c.gpsCoordinates && typeof c.gpsCoordinates === 'object' ? (c.gpsCoordinates as Obj) : null;
   const lat = gps && typeof gps.lat === 'number' && Number.isFinite(gps.lat) && Math.abs(gps.lat) <= 90 ? gps.lat : undefined;
   const lng = gps && typeof gps.lng === 'number' && Number.isFinite(gps.lng) && Math.abs(gps.lng) <= 180 ? gps.lng : undefined;
@@ -598,22 +601,22 @@ export function placeOrder(input: unknown, context: PlaceOrderContext = {}): Pla
 
   // Where we deliver comes from the address, never the GPS reading (often a network location far away).
   const delivery = deliveryCheck({ emirate, area: customer.area }, getSettings('delivery'));
-  if (!delivery.serviceable) throw new HttpError(400, delivery.message);
+  if (!delivery.serviceable) throw new HttpError(400, delivery.message, {}, { code: 'not_delivered', area: delivery.where.area, emirate: delivery.where.emirate });
   const deliveryOption = body.deliveryOption === 'same_day' ? 'same_day' : 'standard';
   // A deal's price is fixed, delivery included: same day is not offered on it.
-  if (deal && deliveryOption === 'same_day') throw new HttpError(400, 'This order’s price includes standard delivery; same-day delivery is not offered for it.', {}, { code: 'same_day_unavailable' });
+  if (deal && deliveryOption === 'same_day') throw new HttpError(400, 'This order’s price includes standard delivery; same-day delivery is not offered for it.', {}, { code: 'same_day_unavailable', reason: 'deal' });
   if (deliveryOption === 'same_day' && !delivery.sameDay.available) {
-    throw new HttpError(409, delivery.sameDay.reason || 'Same-day delivery is not available for this order. Choose standard delivery.', {}, { code: 'same_day_unavailable' });
+    throw new HttpError(409, delivery.sameDay.reason || 'Same-day delivery is not available for this order. Choose standard delivery.', {}, { code: 'same_day_unavailable', reason: delivery.sameDay.reasonCode ?? 'off', emirates: getSettings('delivery').sameDayEmirates, cutoff: delivery.sameDay.cutoff });
   }
   // Settings → Delivery's charges, worked out here (never the browser's).
   // An order from a photo: the amount agreed includes standard delivery (same day, chosen at checkout, is extra).
   const deliveryFils = deliveryOption === 'same_day' ? fils(delivery.sameDay.fee) : photo ? 0 : fils(delivery.standard.fee);
 
-  if (paymentMethod !== 'cod' && paymentMethod !== 'bank_transfer' && !card) throw new HttpError(400, 'Choose Cash on Delivery, Bank Transfer or Card.');
+  if (paymentMethod !== 'cod' && paymentMethod !== 'bank_transfer' && !card) throw new HttpError(400, 'Choose Cash on Delivery, Bank Transfer or Card.', {}, { code: 'bad_payment' });
   // Settings → Payments → Bank transfer: our details sent automatically, or asked for on WhatsApp.
   const bankMode = paymentMethod === 'bank_transfer' ? bankTransferMode() : null;
   if (paymentMethod === 'bank_transfer' && !bankMode) {
-    throw new HttpError(400, 'Bank transfer is not available right now. Please choose Cash on Delivery.');
+    throw new HttpError(400, 'Bank transfer is not available right now. Please choose Cash on Delivery.', {}, { code: 'bank_unavailable' });
   }
   // Settings → Payments "Card payment fee (%)": card orders only, worked out here (never the browser's).
   const feePercent = card ? cardFeePercent() : 0;
@@ -639,23 +642,23 @@ export function placeOrder(input: unknown, context: PlaceOrderContext = {}): Pla
   if (photo) {
     if (body.items !== undefined && !(Array.isArray(body.items) && body.items.length === 0)) throw new HttpError(400, 'An order from your photo has no bag items.');
     body.items = [];
-  } else if (!Array.isArray(body.items) || body.items.length === 0) throw new HttpError(400, 'Your bag is empty.');
-  if (!Array.isArray(body.items)) throw new HttpError(400, 'Your bag is empty.');
-  if (body.items.length > MAX_LINES) throw new HttpError(400, `At most ${MAX_LINES} lines per order.`);
+  } else if (!Array.isArray(body.items) || body.items.length === 0) throw new HttpError(400, 'Your bag is empty.', {}, { code: 'bag_empty' });
+  if (!Array.isArray(body.items)) throw new HttpError(400, 'Your bag is empty.', {}, { code: 'bag_empty' });
+  if (body.items.length > MAX_LINES) throw new HttpError(400, `At most ${MAX_LINES} lines per order.`, {}, { code: 'bag_lines_limit', max: MAX_LINES });
   // No code proved this phone: the order holds pieces before anyone has paid or confirmed (a card
   // order until it is paid, any other until the WhatsApp message or the owner's call), so a small
   // bag only.
   const smallBag = !provenPhone;
-  const bagLimit = (what: string) =>
+  const bagLimit = (what: string, limit: 'lines' | 'each', max: number) =>
     card
-      ? new HttpError(400, `Paying by card, at most ${what} per order. For more, place a second order, or choose Cash on Delivery.`, {}, { code: 'card_bag_limit' })
-      : new HttpError(400, `At most ${what} per order until we have confirmed your number. For more, please message us on WhatsApp.`, {}, { code: 'unconfirmed_bag_limit' });
-  if (smallBag && body.items.length > MAX_UNVERIFIED_CARD_LINES) throw bagLimit(`${MAX_UNVERIFIED_CARD_LINES} different items`);
+      ? new HttpError(400, `Paying by card, at most ${what} per order. For more, place a second order, or choose Cash on Delivery.`, {}, { code: 'card_bag_limit', limit, max })
+      : new HttpError(400, `At most ${what} per order until we have confirmed your number. For more, please message us on WhatsApp.`, {}, { code: 'unconfirmed_bag_limit', limit, max });
+  if (smallBag && body.items.length > MAX_UNVERIFIED_CARD_LINES) throw bagLimit(`${MAX_UNVERIFIED_CARD_LINES} different items`, 'lines', MAX_UNVERIFIED_CARD_LINES);
   const lines = body.items.map((raw, i) => {
     const it = (raw && typeof raw === 'object' ? raw : {}) as Obj;
     const quantity = it.quantity;
     if (typeof quantity !== 'number' || !Number.isInteger(quantity) || quantity < 1 || quantity > MAX_QTY) {
-      throw new HttpError(400, `Line ${i + 1}: quantity must be 1 to ${MAX_QTY}.`);
+      throw new HttpError(400, `Line ${i + 1}: quantity must be 1 to ${MAX_QTY}.`, {}, { code: 'bad_quantity', line: i + 1, max: MAX_QTY });
     }
     return {
       productId: text(it.productId, `Line ${i + 1} product`, 80, { required: true }),
@@ -668,14 +671,14 @@ export function placeOrder(input: unknown, context: PlaceOrderContext = {}): Pla
   // The per-line cap also holds per product, so a bag can't split 100 units over five lines.
   const perProduct = new Map<string, number>();
   for (const l of lines) perProduct.set(l.productId, (perProduct.get(l.productId) ?? 0) + l.quantity);
-  if ([...perProduct.values()].some((q) => q > MAX_QTY)) throw new HttpError(400, `At most ${MAX_QTY} of one product per order.`);
+  if ([...perProduct.values()].some((q) => q > MAX_QTY)) throw new HttpError(400, `At most ${MAX_QTY} of one product per order.`, {}, { code: 'product_qty_limit', max: MAX_QTY });
   // Pieces per product and size (the same size may come on two lines).
   const perItem = new Map<string, { productId: string; profileId: string; quantity: number }>();
   for (const l of lines) {
     const k = `${l.productId}|${l.profileId}`;
     perItem.set(k, { productId: l.productId, profileId: l.profileId, quantity: (perItem.get(k)?.quantity ?? 0) + l.quantity });
   }
-  if (smallBag && [...perItem.values()].some((q) => q.quantity > MAX_UNVERIFIED_CARD_QTY)) throw bagLimit(`${MAX_UNVERIFIED_CARD_QTY} of each item`);
+  if (smallBag && [...perItem.values()].some((q) => q.quantity > MAX_UNVERIFIED_CARD_QTY)) throw bagLimit(`${MAX_UNVERIFIED_CARD_QTY} of each item`, 'each', MAX_UNVERIFIED_CARD_QTY);
   // The connection's address is kept only as a hash (enough to count, not to know it); in card_ip
   // (migration 9) for every order, for the caps on card orders and on orders not yet confirmed.
   // IPv6: by its /64 (one home or phone gets a whole /64, so a single address is no limit).
@@ -731,7 +734,7 @@ export function placeOrder(input: unknown, context: PlaceOrderContext = {}): Pla
       // One verified phone can't tie up the stock with a pile of unconfirmed orders.
       const open = (getDb().prepare("SELECT COUNT(*) AS n FROM orders WHERE phone = ? AND status = 'pending_confirmation'").get(phone) as { n: number }).n;
       if (open >= MAX_OPEN_PER_PHONE) {
-        throw new HttpError(429, `You already have ${open} orders waiting for confirmation. We'll call you shortly, or contact us to add to them.`);
+        throw new HttpError(429, `You already have ${open} orders waiting for confirmation. We'll call you shortly, or contact us to add to them.`, {}, { code: 'open_orders_limit', count: open });
       }
       if (whatsappUnconfirmed) {
         // No code cost anything: orders not yet confirmed are capped per phone, per connection and
@@ -739,10 +742,10 @@ export function placeOrder(input: unknown, context: PlaceOrderContext = {}): Pla
         // any one size's pieces.
         const count = (where: string, ...args: unknown[]) => getDb().prepare(`SELECT COUNT(*) FROM orders WHERE ${UNCONFIRMED_OPEN}${where}`).pluck().get(...args) as number;
         if (count(' AND phone = ?', phone) >= UNCONFIRMED_LIMITS.perPhone) {
-          throw new HttpError(429, `You already have ${UNCONFIRMED_LIMITS.perPhone} orders waiting for your WhatsApp confirmation. Please confirm them first (tap “Confirm on WhatsApp”), or contact us.`, {}, { code: 'unconfirmed_limit' });
+          throw new HttpError(429, `You already have ${UNCONFIRMED_LIMITS.perPhone} orders waiting for your WhatsApp confirmation. Please confirm them first (tap “Confirm on WhatsApp”), or contact us.`, {}, { code: 'unconfirmed_limit', scope: 'phone', max: UNCONFIRMED_LIMITS.perPhone });
         }
         if (ipHash && count(' AND card_ip = ?', ipHash) >= UNCONFIRMED_LIMITS.perIp) {
-          throw new HttpError(429, 'Several orders from this connection are waiting for their WhatsApp confirmation. Please confirm them first, or contact us.', {}, { code: 'unconfirmed_limit' });
+          throw new HttpError(429, 'Several orders from this connection are waiting for their WhatsApp confirmation. Please confirm them first, or contact us.', {}, { code: 'unconfirmed_limit', scope: 'connection' });
         }
         if (count('') >= shopCap) {
           throw new HttpError(429, 'We’re receiving a lot of orders right now, sorry. Please try again in a little while, or message us on WhatsApp.', {}, { code: 'shop_busy' });
@@ -770,19 +773,19 @@ export function placeOrder(input: unknown, context: PlaceOrderContext = {}): Pla
       const items: Order['items'] = photo ? [photoLine(photo, Math.max(1, Math.round(Number(courierSettings.photoPieceGrams) || 1000)))] : [];
       for (const line of lines) {
         const product = getProduct(line.productId);
-        if (!product || !product.active) throw new HttpError(409, 'An item in your bag is no longer available. Please remove it and try again.');
+        if (!product || !product.active) throw new HttpError(409, 'An item in your bag is no longer available. Please remove it and try again.', {}, { code: 'item_unavailable' });
         const profile = product.profiles.find((p) => p.id === line.profileId);
-        if (!profile) throw new HttpError(409, `${product.title}: that ${product.productType === 'simple' ? 'option' : 'bed size'} is no longer offered.`);
+        if (!profile) throw new HttpError(409, `${product.title}: that ${product.productType === 'simple' ? 'option' : 'bed size'} is no longer offered.`, {}, { code: 'size_unavailable', productId: product.id, title: product.title, kind: product.productType === 'simple' ? 'option' : 'bed_size' });
         // No colours on the product: none is chosen (a colour sent from an older bag is ignored).
         const color = !product.colors.length ? undefined : line.color && product.colors.some((c2) => c2.name === line.color) ? line.color : product.colors[0]?.name;
-        if (product.colors.length && line.color && color !== line.color) throw new HttpError(409, `${product.title}: that colour is no longer offered.`);
+        if (product.colors.length && line.color && color !== line.color) throw new HttpError(409, `${product.title}: that colour is no longer offered.`, {}, { code: 'colour_unavailable', productId: product.id, title: product.title });
         // Reserve this size's pieces atomically: fails if another order took the last one.
         const reserved = getDb()
           .prepare('UPDATE product_stock SET qty = qty - ? WHERE product_id = ? AND size_id = ? AND qty >= ? AND EXISTS (SELECT 1 FROM products WHERE id = ? AND active = 1 AND archived = 0)')
           .run(line.quantity, product.id, profile.id, line.quantity, product.id);
         if (reserved.changes !== 1) {
           const left = (getDb().prepare('SELECT qty FROM product_stock WHERE product_id = ? AND size_id = ?').get(product.id, profile.id) as { qty: number } | undefined)?.qty ?? 0;
-          throw new HttpError(409, left > 0 ? `${product.title} (${profile.name}): only ${left} left.` : `${product.title} (${profile.name}) has just sold out.`);
+          throw new HttpError(409, left > 0 ? `${product.title} (${profile.name}): only ${left} left.` : `${product.title} (${profile.name}) has just sold out.`, {}, { code: left > 0 ? 'only_left' : 'sold_out', productId: product.id, title: product.title, size: profile.name, left });
         }
         const unitFils = fils(product.price) + fils(profile.priceDelta || 0);
         items.push({

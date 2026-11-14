@@ -4,7 +4,9 @@ import React, { useId, useState } from 'react';
 import { Camera, ImagePlus, Loader2, MessageCircle, X } from 'lucide-react';
 import { shrinkPhoto } from '@/lib/shrinkPhoto';
 import { useShop } from '@/lib/client/shop';
-import { useT, type Words } from '@/lib/i18n';
+import { useLocale, useT, type Words } from '@/lib/i18n';
+import { useDialogFocus } from '@/components/common/Sheet';
+import { deliveryName as deliveryNameIn } from './checkoutWords';
 import type { PaymentMethod } from '@/types';
 
 /** What the customer fills in before the address and payment (the server checks it all again). */
@@ -62,7 +64,10 @@ export function PhotoOrderSheet({ onClose, onContinue, draft }: { onClose: () =>
   const id = useId();
   const t = useT(WORDS);
   const { delivery } = useShop();
-  const deliveryName = (delivery.standardName || 'Standard delivery').toLowerCase();
+  const { locale } = useLocale();
+  const deliveryName = deliveryNameIn('standard', delivery, locale).toLowerCase();
+  // Keyboard: focus moves into the sheet, Tab stays inside it, Escape closes it.
+  const panel = useDialogFocus<HTMLDivElement>(true, onClose);
   const [photos, setPhotos] = useState<string[]>(draft?.photos ?? []);
   const [busy, setBusy] = useState(0);
   const [note, setNote] = useState(draft?.note ?? '');
@@ -107,7 +112,7 @@ export function PhotoOrderSheet({ onClose, onContinue, draft }: { onClose: () =>
   const pick = 'min-h-11 rounded-xl border border-ink bg-surface text-ink text-sm font-semibold flex items-center justify-center gap-2 cursor-pointer focus-within:ring-2 focus-within:ring-gold';
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-scrim/45 p-3 sm:p-4 overscroll-contain sheet-fade" role="dialog" aria-modal="true" aria-labelledby={`${id}-title`} data-testid="photo-order">
+    <div ref={panel} tabIndex={-1} className="fixed inset-0 z-50 flex items-center justify-center bg-scrim/45 p-3 sm:p-4 overscroll-contain sheet-fade outline-none" role="dialog" aria-modal="true" aria-labelledby={`${id}-title`} data-testid="photo-order">
       <form onSubmit={next} className="bg-surface rounded-3xl max-w-lg w-full min-w-0 max-h-[calc(100dvh-1.5rem)] overflow-y-auto overflow-x-hidden overscroll-contain px-5 pb-5 border border-line space-y-4">
         <div className="sticky top-0 z-10 -mx-5 px-5 pt-4 pb-3 !mb-4 bg-surface flex items-center justify-between gap-3 border-b border-line">
           <div className="flex items-center gap-2 min-w-0">

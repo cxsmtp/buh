@@ -1,5 +1,6 @@
 import { handleRouteError, json } from '@/lib/server/http';
-import { bankTransferMode, cardFeePercent, cardPaymentsReady, contactEmail, getSettings, phoneCodesOn, phoneVerificationConfig } from '@/lib/server/settings';
+import { bankTransferMode, cardFeePercent, cardPaymentsReady, contactEmail, getSettings, phoneCheckMode, phoneCodesOn, phoneVerificationConfig } from '@/lib/server/settings';
+import { MAX_UNVERIFIED_CARD_LINES, MAX_UNVERIFIED_CARD_QTY } from '@/lib/server/orders';
 import { storefrontTheme } from '@/lib/server/theme';
 import { vatAddedPercent } from '@/lib/server/vat';
 
@@ -10,7 +11,9 @@ import { vatAddedPercent } from '@/lib/server/vat';
  * low-stock threshold, the support email, today's festival look, and how
  * checkout verifies phones (the Firebase web config only when Firebase is the
  * switched-on SMS option), and whether checkout takes cards (with the Stripe
- * publishable key, which is public by design, and the card fee's percent). Nothing here is secret.
+ * publishable key, which is public by design, and the card fee's percent), and the small-bag limit
+ * of an order whose phone no code proved (so the bag can say it before the form is filled).
+ * Nothing here is secret.
  */
 export function GET() {
   try {
@@ -32,6 +35,7 @@ export function GET() {
       chat: chatView(),
       delivery: getSettings('delivery'),
       payments: paymentsView(),
+      bagLimit: bagLimitView(),
       // UAE VAT added on top at checkout: only when it is on with prices excluding VAT (nothing otherwise).
       ...(vatAddedPercent() ? { vat: { addedPercent: vatAddedPercent() } } : {}),
     });
@@ -47,6 +51,16 @@ export function GET() {
 function paymentsView() {
   const p = getSettings('payments');
   return cardPaymentsReady(p) ? { card: true, publishableKey: p.stripePublishableKey, cardFeePercent: cardFeePercent(p), ...(phoneCodesOn() ? { phoneCheck: true } : {}) } : { card: false };
+}
+
+/**
+ * The small bag of an order whose phone no code proved (src/lib/server/orders.ts refuses a bigger
+ * one): every order with Phone check "WhatsApp (free)", card orders only when no SMS code is sent
+ * for them, else none. The numbers are the server's own, so the bag and the refusal always agree.
+ */
+function bagLimitView() {
+  const applies = phoneCheckMode() === 'whatsapp' ? 'all' : cardPaymentsReady(getSettings('payments')) && !phoneCodesOn() ? 'card' : null;
+  return applies ? { applies, perItem: MAX_UNVERIFIED_CARD_QTY, lines: MAX_UNVERIFIED_CARD_LINES } : null;
 }
 
 function chatView() {

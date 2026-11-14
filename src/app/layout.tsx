@@ -47,19 +47,19 @@ export const viewport: Viewport = {
 };
 
 export const metadata: Metadata = {
-  title: "Beautiful UAE Home • Handprinted & Machine Printed Block Bed Linens",
+  // The words every page starts with (pages give their own: the home page's come from Settings →
+  // Search). Nothing here the shop's settings could make untrue: no fabric, no delivery speed, no
+  // way of paying that may be switched off, no company name.
+  title: "Beautiful UAE Home | Bedsheets & bed sets in the UAE",
   description:
-    "Artisanal hand-block and machine-printed luxury bed sheet collections tailored for UAE deep mattresses. Fast delivery across Dubai, Abu Dhabi, Sharjah & all Emirates with Cash on Delivery & Direct Bank Transfer.",
+    "Hand block and machine printed bedsheets, duvet covers and bed sets for UAE homes, delivered to your door.",
   keywords: [
     "UAE bed sheets",
     "block printed linens",
-    "handprinted bedding Dubai",
-    "Egyptian cotton bed sheets UAE",
-    "Abu Dhabi luxury bedding",
-    "cash on delivery bedding UAE",
-    "express delivery UAE",
+    "printed bedding Dubai",
+    "bed sets UAE",
+    "Abu Dhabi bedding",
   ],
-  authors: [{ name: "Beautiful UAE Home Trading LLC" }],
   icons: {
     icon: "/favicon.ico",
     apple: "/icons/apple-touch-icon.png",

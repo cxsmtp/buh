@@ -6,6 +6,8 @@ import { formatAed } from '@/lib/money';
 import { useShop } from '@/lib/client/shop';
 import type { DealView, PaymentMethod } from '@/types';
 import { useLocale, useT, type Locale, type Words } from '@/lib/i18n';
+import { useDialogFocus } from '@/components/common/Sheet';
+import { deliveryName as deliveryNameIn } from './checkoutWords';
 
 const PAY_NAMES: Record<Locale, Record<PaymentMethod, string>> = {
   en: { online_card: 'card', cod: 'cash on delivery', bank_transfer: 'bank transfer' },
@@ -45,13 +47,15 @@ export function DealSheet({ deal, onClose, onContinue }: { deal: DealView; onClo
   const { locale } = useLocale();
   const t = useT(WORDS);
   const { delivery } = useShop();
-  const deliveryName = (delivery.standardName || 'Standard delivery').toLowerCase();
+  const deliveryName = deliveryNameIn('standard', delivery, locale).toLowerCase();
+  // Keyboard: focus moves into the sheet, Tab stays inside it, Escape closes it.
+  const panel = useDialogFocus<HTMLDivElement>(true, onClose);
   const [shown, setShown] = useState(0);
   const count = deal.photos.length;
   const until = new Date(deal.expiresAt).toLocaleDateString(locale === 'ar' ? 'ar-AE-u-nu-latn' : 'en-GB', { day: 'numeric', month: 'long', timeZone: 'Asia/Dubai' });
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-scrim/45 p-3 sm:p-4 overscroll-contain sheet-fade" role="dialog" aria-modal="true" aria-labelledby={`${id}-title`} data-testid="deal-sheet">
+    <div ref={panel} tabIndex={-1} className="fixed inset-0 z-50 flex items-center justify-center bg-scrim/45 p-3 sm:p-4 overscroll-contain sheet-fade outline-none" role="dialog" aria-modal="true" aria-labelledby={`${id}-title`} data-testid="deal-sheet">
       <div className="bg-surface rounded-3xl max-w-lg w-full min-w-0 max-h-[calc(100dvh-1.5rem)] overflow-y-auto overflow-x-hidden overscroll-contain px-5 pb-5 border border-line space-y-4">
         <div className="sticky top-0 z-10 -mx-5 px-5 pt-4 pb-3 !mb-4 bg-surface flex items-center justify-between gap-3 border-b border-line">
           <div className="flex items-center gap-2 min-w-0">
