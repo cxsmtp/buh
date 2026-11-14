@@ -1,6 +1,6 @@
 # Changelog
 
-## BUH-02.44.00 — 2026-11-14 08:05 UTC · [#77](https://github.com/cxsmtp/buh/pull/77)
+## BUH-02.44.00 — 2026-11-14 08:05 UTC · [#79](https://github.com/cxsmtp/buh/pull/79)
 
 First of three releases fixing what the production-readiness review found: money, checkout and shipping.
 
