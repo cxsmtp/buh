@@ -32,7 +32,7 @@ const nextConfig: NextConfig = {
           { key: "Cross-Origin-Opener-Policy", value: "same-origin" },
           // Checkout uses the browser's location to fill the address, and Stripe's frame (only) may
           // use the Payment Request API for Apple Pay and Google Pay; nothing else is needed.
-          { key: "Permissions-Policy", value: 'camera=(), microphone=(), geolocation=(self), payment=(self "https://js.stripe.com" "https://pay.google.com"), usb=()' },
+          { key: "Permissions-Policy", value: 'camera=(self), microphone=(), geolocation=(self), payment=(self "https://js.stripe.com" "https://pay.google.com"), usb=()' },
           // Only meaningful over HTTPS; browsers ignore it on plain http. No `preload`:
           // that is a one-way commitment the site owner should opt into deliberately.
           { key: "Strict-Transport-Security", value: "max-age=31536000; includeSubDomains" },

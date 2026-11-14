@@ -25,7 +25,7 @@ import { kvGet, kvSet } from './kv';
 import { logEvent as logEvent_ } from './log';
 import { issuePayLink, payPathOf } from './bankPay';
 import { claimDeal, dealForOrder } from './photoDeals';
-import { creditOutFils, dueOnDeliveryFils, heldFils } from '@/lib/orderMoney';
+import { creditInFils, creditOutFils, dueOnDeliveryFils, heldFils } from '@/lib/orderMoney';
 import { waMeLink } from '@/lib/whatsappConfirm';
 import { validatePhone } from '@/lib/otpService';
 import { DEFAULT_PACKAGING_GRAMS, shipmentWeight } from '@/lib/shipmentWeight';
@@ -385,6 +385,25 @@ export interface PlaceOrderContext {
   ip?: string | null;
 }
 
+/** Is this request the one that made the order (same way of paying, same kind, same lines)? */
+function sameCheckout(order: Order, body: Obj, paymentMethod: string): boolean {
+  if (order.paymentMethod !== paymentMethod) return false;
+  if (Boolean(order.photoOrder?.dealId) !== (body.deal !== undefined)) return false;
+  if (Boolean(order.photoOrder && !order.photoOrder.dealId) !== (body.photo !== undefined)) return false;
+  if (order.photoOrder) return true;
+  // Pieces per product and size on both sides (the same size may come on two lines).
+  const sum = (rows: Array<{ productId?: unknown; profileId?: unknown; quantity?: unknown }>) => {
+    const m = new Map<string, number>();
+    for (const r of rows) {
+      const k = `${String(r.productId)}|${String(r.profileId)}`;
+      m.set(k, (m.get(k) ?? 0) + (typeof r.quantity === 'number' ? r.quantity : NaN));
+    }
+    return [...m].map(([k, q]) => `${k}|${q}`).sort().join(',');
+  };
+  const asked = (Array.isArray(body.items) ? (body.items as unknown[]) : []).map((raw) => (raw && typeof raw === 'object' ? raw : {}) as Obj);
+  return sum(asked) === sum(order.items.filter((i) => i.productId));
+}
+
 export function placeOrder(input: unknown, context: PlaceOrderContext = {}): PlaceOrderResult {
   if (!input || typeof input !== 'object' || Array.isArray(input)) throw new HttpError(400, 'Order must be an object.');
   const body = input as Obj;
@@ -396,8 +415,13 @@ export function placeOrder(input: unknown, context: PlaceOrderContext = {}): Pla
   // A photo deal (the owner's own link, photoDeals.ts): the owner's pictures and fixed price, the
   // payments the owner allowed; the customer adds the address. Never with the customer's own photos.
   if (body.deal !== undefined && body.photo !== undefined) throw new HttpError(400, 'An order is from a deal link or from your photo, not both.');
-  const deal = body.deal === undefined ? null : dealForOrder(body.deal);
-  const photo: PhotoInput | null = deal ? { files: deal.files, note: deal.note, pieces: deal.pieces, amountFils: deal.amountFils } : body.photo === undefined ? null : parsePhotoOrder(body.photo);
+  // The same checkout sent again (double tap, network retry) is answered with its order further
+  // down; looked up here first, because a deal link is closed by its own order and would refuse.
+  const idempotencyKey = text(body.idempotencyKey, 'Checkout reference', 64, { required: true });
+  if (!/^[A-Za-z0-9-]{16,64}$/.test(idempotencyKey)) throw new HttpError(400, 'Checkout reference is invalid.');
+  const existing = parse(getDb().prepare(`SELECT ${COLUMNS} FROM orders WHERE idempotency_key = ?`).get(idempotencyKey) as Row | undefined);
+  const deal = body.deal === undefined || existing ? null : dealForOrder(body.deal);
+  const photo: PhotoInput | null = existing ? null : deal ? { files: deal.files, note: deal.note, pieces: deal.pieces, amountFils: deal.amountFils } : body.photo === undefined ? null : parsePhotoOrder(body.photo);
   if (deal && !deal.payments.includes(paymentMethod as Order['paymentMethod'])) {
     throw new HttpError(400, 'This way of paying is not offered for this order. Please choose another.', {}, { code: 'deal_payment' });
   }
@@ -424,12 +448,14 @@ export function placeOrder(input: unknown, context: PlaceOrderContext = {}): Pla
   // No code proved it: the WhatsApp message (or the owner's call) will.
   const unproven = !provenPhone;
 
-  const idempotencyKey = text(body.idempotencyKey, 'Checkout reference', 64, { required: true });
-  if (!/^[A-Za-z0-9-]{16,64}$/.test(idempotencyKey)) throw new HttpError(400, 'Checkout reference is invalid.');
-  const existing = parse(getDb().prepare(`SELECT ${COLUMNS} FROM orders WHERE idempotency_key = ?`).get(idempotencyKey) as Row | undefined);
   if (existing) {
-    // The same checkout sent twice (double tap, network retry): same order back.
+    // The same checkout sent twice (double tap, network retry): same order back. Never for a
+    // different request (another way of paying, other items): that would show "Thank you" for an
+    // order the customer did not ask for; checkout sends it again as a new one.
     if (existing.customer.phone !== phone) throw new HttpError(409, 'This checkout reference was already used.');
+    if (!sameCheckout(existing, body, paymentMethod)) {
+      throw new HttpError(409, 'Your order changed since the first try. Please confirm again.', {}, { code: 'checkout_changed' });
+    }
     return { order: existing, created: false };
   }
 
@@ -999,15 +1025,21 @@ export function confirmPhotoAmount(id: string, amount: unknown, actor: string): 
     const fromFils = fils(order.items[0].totalPrice);
     if (order.photoOrder.confirmedAt && fromFils === itemFils) return { order, changed: false };
     if (fromFils !== itemFils) {
+      // Booked (or a booking unanswered): the courier was told what to collect, so the amount stays.
+      const locked = collectLocked(order);
+      if (locked) throw new HttpError(409, locked, {}, { code: 'collect_locked' });
+      if (getDb().prepare('SELECT 1 FROM invoices WHERE order_id = ?').get(id)) throw new HttpError(409, `${id} has its invoice already, so its amount can't change.`, {}, { code: 'photo_invoiced' });
       // Paid (or being paid) by card: Stripe takes the amount the customer typed, so it stays; a wrong one is cancelled and refunded.
       if (order.paymentMethod === 'online_card') throw new HttpError(409, `${id} is paid by card, so its amount can’t change. If it is wrong, use “Cancel & refund”, and ask the customer to order again with the right amount.`, {}, { code: 'photo_card' });
       if (order.bankTransfer?.state === 'paid') throw new HttpError(409, `${id} is already paid: its amount can’t change.`);
       if (orderVat(id)) throw new HttpError(409, `${id} has a VAT breakdown, so its amount can’t change. Cancel it, and ask the customer to send it again with the right amount.`, {}, { code: 'photo_vat' });
-      const totalFils = itemFils + fils(order.deliveryFee) + fils(order.codFee) + fils(order.cardFee ?? 0) + fils(order.vatAdded ?? 0);
+      // The whole total, as an edit makes it (editOrderDetails): the extra to collect stays in it.
+      const totalFils = itemFils + fils(order.deliveryFee) + fils(order.codFee) + fils(order.cardFee ?? 0) + fils(order.vatAdded ?? 0) + fils(order.extraCharge?.amount ?? 0) - fils(order.discount ?? 0);
+      assertCoversCredits(order, totalFils);
       order.items[0] = { ...order.items[0], unitPrice: aed(itemFils), totalPrice: aed(itemFils) };
       order.subtotal = aed(itemFils);
       order.total = aed(totalFils);
-      if (order.paymentMethod === 'cod') order.courier.codAmountCollected = aed(totalFils);
+      if (order.paymentMethod === 'cod') order.courier.codAmountCollected = aed(dueOnDeliveryFils(order));
       getDb().prepare('UPDATE orders SET total_fils = ? WHERE id = ?').run(totalFils, id);
     }
     const at = new Date().toISOString();
@@ -1030,7 +1062,47 @@ export const EXTRA_CHARGE_MAX = 10_000;
 function collectLocked(order: Order): string | null {
   if (order.status === 'cancelled' || order.status === 'delivered') return `${order.id} is ${order.status}.`;
   if (order.status === 'dispatched' || order.status === 'out_for_delivery' || order.courier.bookingState === 'booked') return `${order.id} is already booked with the courier, so what it collects can't change (change it in the courier's portal).`;
+  // A booking the courier never answered may exist, with the amount as it was sent.
+  if (order.courier.bookingState === 'uncertain') return `${order.id} has a courier booking that was never answered: check the courier's portal first (cancel it there, or enter its tracking number), then change what it collects.`;
   return null;
+}
+
+/**
+ * A payment moved onto this order must still fit in what it collects: a new total (or extra) below
+ * it would hide the difference (it could not be refunded or moved again). Move it back first.
+ */
+function assertCoversCredits(order: Order, newTotalFils: number, newExtraFils = fils(order.extraCharge?.amount ?? 0)): void {
+  const moved = creditInFils(order);
+  if (!moved) return;
+  const base = order.paymentMethod === 'cod' ? newTotalFils : newExtraFils;
+  if (base < moved) throw new HttpError(409, `AED ${aed(moved)} paid on another order was moved onto ${order.id}: what it collects can't go below that. Cancel ${order.id} to give that payment back to its order, or keep at least AED ${aed(moved)} to collect.`, {}, { code: 'credit_exceeds' });
+}
+
+/**
+ * This order is being cancelled: every payment moved onto it goes back to the order it came from
+ * (which holds it again: refundable, or movable to another order). Inside the caller's transaction;
+ * audited. Without this the money belonged to no live order (found by the review, BUH-02.44.00).
+ */
+function returnCreditsIn(order: Order, actor: string): void {
+  const moved = order.creditsIn ?? [];
+  if (!moved.length) return;
+  for (const c of moved) {
+    const source = getOrder(c.fromOrderId);
+    if (!source) continue;
+    const out = source.creditsOut ?? [];
+    const i = out.findIndex((x) => x.toOrderId === order.id && fils(x.amount) === fils(c.amount));
+    if (i < 0) continue;
+    source.creditsOut = [...out.slice(0, i), ...out.slice(i + 1)];
+    if (!source.creditsOut.length) delete source.creditsOut;
+    writeOrder(source);
+    // Its rest was refunded meanwhile: it holds money again, so it is "paid" again and the hub can refund what came back.
+    if (source.card?.state === 'refunded') getDb().prepare("UPDATE orders SET card_state = 'paid', refunded_at = NULL WHERE id = ? AND card_state = 'refunded'").run(source.id);
+    logEvent(source.id, actor, 'credit_returned', { from: order.id, amount: c.amount });
+    logEvent(order.id, actor, 'credit_given_back', { to: source.id, amount: c.amount });
+    auditOrThrow('order.credit_returned', { by: actor, fromOrderId: order.id, toOrderId: source.id, amountFils: fils(c.amount), reason: 'order cancelled' });
+  }
+  delete order.creditsIn;
+  order.courier.codAmountCollected = aed(dueOnDeliveryFils(order));
 }
 
 /** An amount in AED (at most two decimals), as fils, within 0..max. */
@@ -1058,9 +1130,14 @@ export function setExtraCharge(id: string, amount: unknown, note: unknown, actor
     if (fromFils === toFils && (order.extraCharge?.note ?? '') === why) return { order, changed: false };
     const locked = collectLocked(order);
     if (locked) throw new HttpError(409, locked, {}, { code: 'collect_locked' });
+    // An unpaid card order: Stripe is about to take its total as it is; a different total would never match.
+    if (order.paymentMethod === 'online_card' && (order.card?.state === 'pending' || order.card?.state === 'failed')) {
+      throw new HttpError(409, `${id} is waiting for the customer's card payment: add the extra once it is paid.`, {}, { code: 'card_unpaid' });
+    }
     if (orderVat(id)) throw new HttpError(409, `${id} has a VAT breakdown, so its total can't change. Make a new order for the extra.`, {}, { code: 'extra_vat' });
     if (getDb().prepare('SELECT 1 FROM invoices WHERE order_id = ?').get(id)) throw new HttpError(409, `${id} has its invoice already, so its total can't change.`, {}, { code: 'extra_invoiced' });
     const totalFils = fils(order.total) - fromFils + toFils;
+    assertCoversCredits(order, totalFils, toFils);
     if (toFils) order.extraCharge = { amount: aed(toFils), ...(why ? { note: why } : {}), at: new Date().toISOString(), by: actor };
     else delete order.extraCharge;
     order.total = aed(totalFils);
@@ -1083,7 +1160,9 @@ export function setExtraCharge(id: string, amount: unknown, note: unknown, actor
  * comes off what the courier collects for the other order. Neither may be with the courier yet.
  * Both orders and the audit log are written in one transaction.
  */
-export function moveCredit(fromId: string, toId: unknown, amount: unknown, actor: string): { from: Order; to: Order } {
+export function moveCredit(fromId: string, toId: unknown, amount: unknown, actor: string, key?: unknown): { from: Order; to: Order } {
+  // The hub's key for this tap: the same key again (a double tap, a retry) moves nothing more.
+  if (key !== undefined && (typeof key !== 'string' || !/^[A-Za-z0-9_-]{8,80}$/.test(key))) throw new HttpError(400, 'key: 8 to 80 letters, digits, - or _.');
   const target = typeof toId === 'string' ? toId.trim().toUpperCase() : '';
   if (!/^BUH-[A-Z0-9-]{4,40}$/.test(target)) throw new HttpError(400, 'Type the other order’s number (BUH-…).');
   if (target === fromId) throw new HttpError(400, 'Choose another order.');
@@ -1093,6 +1172,7 @@ export function moveCredit(fromId: string, toId: unknown, amount: unknown, actor
     const to = getOrder(target);
     if (!from) throw new HttpError(404, 'Order not found.');
     if (!to) throw new HttpError(404, `No order ${target}.`);
+    if (key && (from.creditsOut ?? []).some((c) => c.key === key)) return { from, to, again: true };
     if (from.status === 'delivered') throw new HttpError(409, `${from.id} was delivered: its payment belongs to it.`);
     if (from.status === 'dispatched' || from.status === 'out_for_delivery' || from.courier.bookingState === 'booked') throw new HttpError(409, `${from.id} is with the courier: cancel that booking first.`, {}, { code: 'collect_locked' });
     const held = heldFils(from);
@@ -1106,11 +1186,13 @@ export function moveCredit(fromId: string, toId: unknown, amount: unknown, actor
     if (moveFils > due) throw new HttpError(409, `${to.id} has AED ${aed(due)} to collect: at most that can move.`, {}, { code: 'too_much' });
     const at = new Date().toISOString();
     if (from.status !== 'cancelled') {
-      releaseStock(from, 'cancelled');
+      // Payments moved onto it go back to their own orders first (written there, not on these two).
+      if ((from.creditsIn ?? []).some((c) => c.fromOrderId === to.id)) throw new HttpError(409, `${to.id} already moved a payment onto ${from.id}: cancel ${from.id} first.`);
+      releaseStock(from, 'cancelled', actor);
       from.status = 'cancelled';
       logEvent(from.id, actor, 'cancelled', { reason: `payment moved to ${to.id}` });
     }
-    from.creditsOut = [...(from.creditsOut ?? []), { toOrderId: to.id, amount: aed(moveFils), at, by: actor }];
+    from.creditsOut = [...(from.creditsOut ?? []), { toOrderId: to.id, amount: aed(moveFils), at, by: actor, ...(key ? { key } : {}) }];
     to.creditsIn = [...(to.creditsIn ?? []), { fromOrderId: from.id, amount: aed(moveFils), at, by: actor }];
     to.courier.codAmountCollected = aed(dueOnDeliveryFils(to));
     writeOrder(from);
@@ -1118,13 +1200,14 @@ export function moveCredit(fromId: string, toId: unknown, amount: unknown, actor
     logEvent(from.id, actor, 'credit_moved_out', { to: to.id, amount: aed(moveFils) });
     logEvent(to.id, actor, 'credit_moved_in', { from: from.id, amount: aed(moveFils) });
     auditOrThrow('order.credit_moved', { by: actor, fromOrderId: from.id, toOrderId: to.id, amountFils: moveFils, heldBeforeFils: held, dueBeforeFils: due, collectFils: dueOnDeliveryFils(to) });
-    return { from: getOrder(from.id)!, to: getOrder(to.id)! };
+    return { from: getOrder(from.id)!, to: getOrder(to.id)!, again: false };
   });
+  if (result.again) return { from: result.from, to: result.to };
   // Its pieces went back on sale: the catalogue shows them again.
   invalidateProducts();
   bump('orders');
   bump('catalog');
-  return result;
+  return { from: result.from, to: result.to };
 }
 
 // ── Edit an order before its label; recreate a cancelled cash order ─────────
@@ -1270,6 +1353,7 @@ export function editOrderDetails(id: string, input: unknown, actor: string): { o
     // Worked out again here: the total, what the courier collects, the parcel.
     const subtotalFils = order.items.reduce((s, i) => s + fils(i.totalPrice), 0);
     const totalFils = subtotalFils + fils(order.deliveryFee) + fils(order.codFee) + fils(order.cardFee ?? 0) + fils(order.vatAdded ?? 0) + fils(order.extraCharge?.amount ?? 0) - fils(order.discount);
+    assertCoversCredits(order, totalFils);
     order.subtotal = aed(subtotalFils);
     order.total = aed(totalFils);
     order.courier.codAmountCollected = aed(dueOnDeliveryFils(order));
@@ -1658,8 +1742,14 @@ export function updateOrderByAdmin(id: string, patch: unknown, actor: string): O
         if (p.shipUnconfirmed !== true) throw shipAnywayQuestion(order);
         noteShipAnyway(order, actor, `status:${status}`, auditFn);
       }
+      if (['dispatched', 'out_for_delivery', 'delivered'].includes(status) && unpaidBank(order) && p.paymentStatus !== 'paid') {
+        // The money has not arrived as far as the shop knows: only on the owner's word (recorded).
+        if (p.shipUnconfirmed !== true) throw bankUnpaidQuestion(order);
+        logEvent(order.id, actor, 'ship_unpaid_bank', { via: `status:${status}` });
+        auditFn('order.ship_unpaid_bank', { by: actor, orderId: order.id, via: `status:${status}`, total: order.total });
+      }
       assertCardAllows(order, status);
-      releaseStock(order, status);
+      releaseStock(order, status, actor);
       if (status === 'delivered') order.courier.deliveredAt = new Date().toISOString();
       changes.status = { from: order.status, to: status };
       order.status = status;
@@ -1714,7 +1804,8 @@ export function updateOrderByAdmin(id: string, patch: unknown, actor: string): O
  * (most designs are one of a kind), so the owner adds it back with + when it returns. Called inside
  * the transaction that moves the order to cancelled, once (a cancelled order can't be cancelled again).
  */
-function releaseStock(order: Order, to: OrderStatus): void {
+function releaseStock(order: Order, to: OrderStatus, actor = 'shop'): void {
+  if (to === 'cancelled') returnCreditsIn(order, actor);
   if (to !== 'cancelled' || !(order.status === 'pending_confirmation' || order.status === 'pending_payment' || order.status === 'confirmed')) return;
   for (const item of order.items) {
     getDb()
@@ -1857,6 +1948,18 @@ export function unconfirmedCod(order: Order): boolean {
   return order.paymentMethod === 'cod' && order.status === 'pending_confirmation' && !order.customer.phoneVerified && order.whatsappCheck?.status !== 'confirmed';
 }
 
+/**
+ * A bank transfer the shop has not marked paid (an order entered by the owner as a bulk sale keeps
+ * its own payment record). Sending it out takes the owner's explicit "ship anyway", recorded.
+ */
+export function unpaidBank(order: Order): boolean {
+  return order.paymentMethod === 'bank_transfer' && order.bankTransfer?.state !== 'paid' && order.paymentStatus !== 'paid' && order.paymentStatus !== 'verified' && !order.bulk && order.status !== 'cancelled' && order.status !== 'delivered';
+}
+
+function bankUnpaidQuestion(order: Order): HttpError {
+  return new HttpError(409, `${order.id} is paid by bank transfer and is not marked paid yet — send it out anyway?`, {}, { code: 'bank_unpaid' });
+}
+
 function shipAnywayQuestion(order: Order): HttpError {
   return new HttpError(409, `This customer hasn't confirmed ${order.id} on WhatsApp yet — ship anyway?`, {}, { code: 'whatsapp_unconfirmed' });
 }
@@ -1877,6 +1980,16 @@ function noteShipAnyway(order: Order, actor: string, via: string, auditFn: (acti
  */
 export function assertShipAllowed(orderId: string, actor: string, shipUnconfirmed: boolean): void {
   const order = getOrder(orderId);
+  if (order && unpaidBank(order)) {
+    if (!shipUnconfirmed) throw bankUnpaidQuestion(order);
+    auditedTransaction((auditFn) => {
+      const now = getOrder(orderId);
+      if (!now || !unpaidBank(now)) return;
+      logEvent(orderId, actor, 'ship_unpaid_bank', { via: 'courier' });
+      auditFn('order.ship_unpaid_bank', { by: actor, orderId, via: 'courier', total: now.total });
+    });
+    return;
+  }
   if (!order || !unconfirmedCod(order)) return;
   if (!shipUnconfirmed) throw shipAnywayQuestion(order);
   auditedTransaction((auditFn) => {
@@ -2023,7 +2136,7 @@ export function recordBooking(id: string, actor: string, booking: Partial<Order[
     // A test or practice result never clears what a live attempt left (an unanswered one may exist).
     if (courier.bookingState === undefined) delete courier.bookingState;
     const cardState = order.paymentMethod === 'online_card' ? order.card?.state : undefined;
-    const why = order.status === 'cancelled' ? 'the order was cancelled' : cardState !== undefined && cardState !== 'paid' ? `its card payment is ${cardState === 'refund_pending' || cardState === 'refunded' ? 'refunded' : 'not paid'}` : '';
+    const why = order.status === 'cancelled' ? 'the order was cancelled' : order.handedOver ? 'the order was handed over in person' : order.status === 'delivered' ? 'the order was delivered' : cardState !== undefined && cardState !== 'paid' ? `its card payment is ${cardState === 'refund_pending' || cardState === 'refunded' ? 'refunded' : 'not paid'}` : '';
     order.courier = { ...order.courier, ...courier };
     if (notes !== undefined) order.adminNotes = notes || undefined;
     if (!why && (courier.bookingState === 'booked' || courier.simulated)) {
@@ -2245,7 +2358,8 @@ export function unpaidCardOrders(before: string): Array<{ id: string; ref: strin
 
 /** Did Stripe take exactly this order's total, in AED, on the intent this server made for it? */
 export function intentMatches(order: Order, pi: IntentFacts): boolean {
-  return order.paymentMethod === 'online_card' && order.card?.ref === pi.id && pi.orderId === order.id && pi.currency === 'aed' && pi.amount === fils(order.total);
+  // An extra to collect is added only after the card payment (setExtraCharge): the card took the total without it.
+  return order.paymentMethod === 'online_card' && order.card?.ref === pi.id && pi.orderId === order.id && pi.currency === 'aed' && pi.amount === fils(order.total) - fils(order.extraCharge?.amount ?? 0);
 }
 
 /**
@@ -2258,6 +2372,9 @@ export function markCardPaid(orderId: string, pi: IntentFacts, actor: string, ev
   const outcome = applyOnce(event, orderId, () => {
     const order = getOrder(orderId);
     if (!order || !order.card) return 'unknown';
+    // Paid already on this very payment (Stripe sends an event again): nothing to check or change.
+    const settled = order.card.state === 'paid' || order.card.state === 'refund_pending' || order.card.state === 'refunded';
+    if (settled && order.card.ref === pi.id && pi.orderId === order.id && pi.amount === fils(order.card.paidAmount ?? 0)) return 'already';
     if (!intentMatches(order, pi)) {
       logEvent(orderId, actor, 'card_mismatch', { ref: pi.id, amount: aed(pi.amount), currency: pi.currency });
       auditOrThrow('payment.mismatch', { orderId, ref: pi.id, amountFils: pi.amount, currency: pi.currency, expectedFils: fils(order.total), via: actor });
@@ -2430,7 +2547,8 @@ export function recordCardRefund(orderId: string, refund: { id: string; status: 
       throw new HttpError(502, 'Stripe answered with a different refund amount. Check the payment in your Stripe dashboard.');
     }
     const done = refund.status === 'succeeded';
-    const paidFils = fils(order.card.paidAmount ?? 0);
+    // What has gone back to the card once this refund is through: everything paid, less what was moved onto another order.
+    const paidFils = fils(order.card.paidAmount ?? 0) - creditOutFils(order);
     getDb()
       .prepare("UPDATE orders SET card_state = ?, refund_ref = ?, refunded_at = ?, refunded_fils = ? WHERE id = ? AND card_state IN ('paid', 'refund_pending')")
       .run(done ? 'refunded' : 'refund_pending', refund.id, done ? new Date().toISOString() : null, done ? paidFils : paidFils - left || null, orderId);
@@ -2645,7 +2763,9 @@ function whatsAppView(check: NonNullable<Order['whatsappCheck']>) {
 function trackingView(order: Order) {
   const c = order.courier;
   // Only a real booking reaches the customer: a test (sandbox or practice) AWB is not a shipment.
-  const real = !c.simulated && c.bookingState !== 'uncertain' && Boolean(c.awbNumber);
+  // Nor a booking that was cancelled (the order cancelled, or handed over in person instead).
+  const gone = order.status === 'cancelled' || Boolean(order.handedOver) || c.status === 'Cancelled with the carrier';
+  const real = !c.simulated && c.bookingState !== 'uncertain' && Boolean(c.awbNumber) && !gone;
   return {
     awbNumber: real ? c.awbNumber : '',
     trackingUrl: real ? c.trackingUrl : '',
@@ -2939,16 +3059,33 @@ const HANDOVER_FIELDS = ['cashReceived', 'note', 'cancelCourier', 'courierCancel
 /** A real courier booking still stands (not a test, not cancelled with the carrier). */
 export function courierStillBooked(order: Order): boolean {
   const c = order.courier;
-  if (!c.awbNumber || c.simulated || c.status === 'Cancelled with the carrier') return false;
-  return c.bookingState === 'booked' || c.bookingState === 'uncertain' || Boolean(c.enteredByHand);
+  if (c.simulated || c.status === 'Cancelled with the carrier') return false;
+  // A booking request the carrier never answered may have gone through, even with no AWB yet.
+  if (c.bookingState === 'uncertain') return true;
+  if (!c.awbNumber) return false;
+  return c.bookingState === 'booked' || Boolean(c.enteredByHand);
 }
 
-export function handOverOrder(id: string, body: Obj, actor: string): { order: Order; changed: boolean } {
+/** The handover request's fields, checked (before anything is cancelled with a courier for it). */
+export function checkHandoverBody(body: Obj): void {
   const unknown = Object.keys(body).filter((k) => !HANDOVER_FIELDS.includes(k));
   if (unknown.length) throw new HttpError(400, `Unknown field: ${unknown[0].slice(0, 40)}.`);
   for (const k of ['cashReceived', 'cancelCourier', 'courierCancelled']) {
     if (body[k] !== undefined && typeof body[k] !== 'boolean') throw new HttpError(400, `${k} must be true or false.`);
   }
+  text(body.note, 'Note', 300);
+}
+
+/** What stops a handover whatever the courier says: an unconfirmed photo amount, an unpaid card. */
+export function assertHandoverReady(order: Order): void {
+  if (order.photoOrder && !order.photoOrder.confirmedAt) {
+    throw new HttpError(409, `${order.id} is an order from a photo: confirm the amount first (“Confirm amount”).`, {}, { code: 'photo_amount' });
+  }
+  assertCardAllows(order, 'delivered');
+}
+
+export function handOverOrder(id: string, body: Obj, actor: string): { order: Order; changed: boolean } {
+  checkHandoverBody(body);
   const ownerCancelled = body.courierCancelled === true;
   const note = text(body.note, 'Note', 300);
   const result = auditedTransaction((auditOrThrow) => {
@@ -2959,12 +3096,16 @@ export function handOverOrder(id: string, body: Obj, actor: string): { order: Or
     const c = order.courier;
     const booked = courierStillBooked(order);
     if (booked && !ownerCancelled) {
-      throw new HttpError(409, `${id} is booked with the courier (AWB ${c.awbNumber}): cancel that booking first, so the courier does not come for it.`, {}, { code: 'courier_booked' });
+      throw new HttpError(
+        409,
+        c.awbNumber
+          ? `${id} is booked with the courier (AWB ${c.awbNumber}): cancel that booking first, so the courier does not come for it.`
+          : `${id} was sent to the courier and no answer came back, so it may be booked: check the courier's portal (reference ${id}), cancel it there if it is, then confirm.`,
+        {},
+        { code: 'courier_booked' }
+      );
     }
-    if (order.photoOrder && !order.photoOrder.confirmedAt) {
-      throw new HttpError(409, `${id} is an order from a photo: confirm the amount first (“Confirm amount”).`, {}, { code: 'photo_amount' });
-    }
-    assertCardAllows(order, 'delivered');
+    assertHandoverReady(order);
     const now = new Date().toISOString();
     const isCod = order.paymentMethod === 'cod';
     const cashReceived = isCod && body.cashReceived !== false;
@@ -2980,7 +3121,7 @@ export function handOverOrder(id: string, body: Obj, actor: string): { order: Or
     writeOrder(order);
     // The owner cancelled the booking in the portal: the "cancel it in the portal" flag is done.
     if (booked && order.attention?.kind === 'booked_after_cancel') getDb().prepare('UPDATE orders SET needs_attention = NULL WHERE id = ?').run(id);
-    logEvent(id, actor, 'handed_over', { from, cashFils, note: note || undefined, ...(booked ? { courierCancelledBy: 'owner', awb: c.awbNumber } : {}) });
+    logEvent(id, actor, 'handed_over', { from, cashFils, note: note || undefined, ...(booked ? { courierCancelledBy: 'owner', awb: c.awbNumber || undefined } : {}) });
     auditOrThrow('order.handed_over', { by: actor, orderId: id, from, cashFils, paymentMethod: order.paymentMethod, paymentStatus: order.paymentStatus, ...(booked ? { courierCancelled: 'owner_confirmed', awb: c.awbNumber } : c.status === 'Cancelled with the carrier' ? { courierCancelled: 'carrier_confirmed', awb: c.awbNumber } : {}) });
     return { order: getOrder(id)!, changed: true };
   });

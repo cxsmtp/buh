@@ -239,7 +239,7 @@ export interface Order {
   /** Handed over in person by the owner (no courier): when, by whom, and the cash taken then (AED). */
   handedOver?: { at: string; by: string; cash?: number; note?: string };
   /** This (cancelled) order's payment moved onto other orders instead of a refund. In AED. */
-  creditsOut?: Array<{ toOrderId: string; amount: number; at: string; by: string }>;
+  creditsOut?: Array<{ toOrderId: string; amount: number; at: string; by: string; key?: string }>;
   /** UAE VAT added on top (Settings → Payments → VAT with prices excluding VAT), in AED. Part of total. */
   vatAdded?: number;
   /**

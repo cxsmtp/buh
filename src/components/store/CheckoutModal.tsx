@@ -699,6 +699,8 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
     }
     // Same-day closed while they were at checkout (past the cut-off): back to standard, total shown again.
     if (status === 409 && data.code === 'same_day_unavailable') setDeliveryOption('standard');
+    // The first try was for something else (another way of paying, other items): the next tap is a new order.
+    if (status === 409 && data.code === 'checkout_changed') setIdempotencyKey(crypto.randomUUID());
     return data.message || t('notPlaced');
   };
 

@@ -63,8 +63,10 @@ export function bookingModeOf(provider: CourierProvider, settings: CourierSettin
 /** A real courier booking still stands (kept in step with courierStillBooked in src/lib/server/orders.ts). */
 export function courierBooked(order: Order): boolean {
   const c = order.courier;
-  if (!c.awbNumber || c.simulated || c.status === 'Cancelled with the carrier') return false;
-  return c.bookingState === 'booked' || c.bookingState === 'uncertain' || Boolean(c.enteredByHand);
+  if (c.simulated || c.status === 'Cancelled with the carrier') return false;
+  if (c.bookingState === 'uncertain') return true;
+  if (!c.awbNumber) return false;
+  return c.bookingState === 'booked' || Boolean(c.enteredByHand);
 }
 
 export function realBooking(order: Order): boolean {
@@ -155,7 +157,9 @@ export const AdminOrdersTab: React.FC<AdminOrdersTabProps> = ({
     const money = due ? ` and AED ${(due / 100).toFixed(2)} cash received` : '';
     const booked = courierBooked(order);
     const courier = booked
-      ? order.courier.provider === 'jeebly'
+      ? !order.courier.awbNumber
+        ? ' It was sent to the courier and no answer came back, so it may be booked: you will be asked to check the courier’s portal.'
+        : order.courier.provider === 'jeebly'
         ? ` Its Jeebly booking (AWB ${order.courier.awbNumber}) is cancelled with Jeebly first, so nobody comes to collect it.`
         : ` It is booked with ${carrierLabel(order.courier.provider, order.courier.carrierName)} (AWB ${order.courier.awbNumber}): cancel that in their portal too.`
       : ' No courier is booked.';
@@ -187,9 +191,10 @@ export const AdminOrdersTab: React.FC<AdminOrdersTabProps> = ({
     setBusyOrderId(order.id);
     let { ok, data } = await sendJson<{ order?: Order; message?: string; code?: string }>('PATCH', `/api/admin/orders/${encodeURIComponent(order.id)}`, changes);
     // Not confirmed on WhatsApp yet: only on the owner's explicit "ship anyway" (the server records it).
-    if (!ok && data.code === 'whatsapp_unconfirmed' && window.confirm(data.message || "This customer hasn't confirmed on WhatsApp yet — ship anyway?")) {
+    const ask = data.code === 'whatsapp_unconfirmed' || data.code === 'bank_unpaid';
+    if (!ok && ask && window.confirm(data.message || "This customer hasn't confirmed on WhatsApp yet — ship anyway?")) {
       ({ ok, data } = await sendJson<{ order?: Order; message?: string; code?: string }>('PATCH', `/api/admin/orders/${encodeURIComponent(order.id)}`, { ...changes, shipUnconfirmed: true }));
-    } else if (!ok && data.code === 'whatsapp_unconfirmed') {
+    } else if (!ok && ask) {
       setBusyOrderId('');
       return;
     }
@@ -393,8 +398,8 @@ export const AdminOrdersTab: React.FC<AdminOrdersTabProps> = ({
     }
     // The customer hasn't confirmed on WhatsApp (cash on delivery, no code): the owner may have
     // confirmed by phone, so ask; "ship anyway" is recorded in the order's history and the audit log.
-    if (status === 409 && data.code === 'whatsapp_unconfirmed') {
-      if (!window.confirm(`${data.message || "This customer hasn't confirmed on WhatsApp yet — ship anyway?"}\n\nTip: if you confirmed by phone, tap “Confirmed by phone call” on the order instead.`)) {
+    if (status === 409 && (data.code === 'whatsapp_unconfirmed' || data.code === 'bank_unpaid')) {
+      if (!window.confirm(`${data.message || "This customer hasn't confirmed on WhatsApp yet — ship anyway?"}${data.code === 'bank_unpaid' ? '\n\nTip: if the money has arrived, tap “Payment received” on the order first.' : '\n\nTip: if you confirmed by phone, tap “Confirmed by phone call” on the order instead.'}`)) {
         setIsDispatching(false);
         return;
       }

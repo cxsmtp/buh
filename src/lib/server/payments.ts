@@ -1,3 +1,4 @@
+import { creditOutFils } from '@/lib/orderMoney';
 import Stripe from 'stripe';
 import { HttpError } from './http';
 import { logEvent } from './log';
@@ -364,7 +365,12 @@ export async function refundCardOrder(orderId: string, actor: string, shownFils?
   const paidFils = fils(order.card.paidAmount ?? order.total);
   const charge = pi.latest_charge && typeof pi.latest_charge === 'object' ? pi.latest_charge : null;
   const refundedSoFar = charge?.amount_refunded ?? 0;
-  const left = paidFils - refundedSoFar;
+  // Part of it may have been moved onto another order ("Use it on another order"): that part is not refunded here.
+  const movedFils = creditOutFils(order);
+  const left = paidFils - refundedSoFar - movedFils;
+  if (left <= 0 && movedFils > 0 && refundedSoFar < paidFils) {
+    throw new HttpError(409, `Nothing is left to refund on ${orderId}: AED ${movedFils / 100} of it was moved onto another order. Cancel that order to bring the payment back here, then refund.`, {}, { code: 'refund_moved' });
+  }
   if (left <= 0) {
     // Already refunded in full (in the dashboard, its webhook not here yet): recorded from Stripe's word.
     const outcome = markCardRefunded(order.card.ref, { amount: charge?.amount ?? paidFils, amountRefunded: refundedSoFar }, actor);
@@ -372,7 +378,7 @@ export async function refundCardOrder(orderId: string, actor: string, shownFils?
   }
   noteRefundedSoFar(orderId, refundedSoFar);
   if (shownFils !== undefined && shownFils !== left) {
-    throw new HttpError(409, `AED ${left / 100} is left to refund (part of it was refunded in your Stripe dashboard): refresh and try again.`, {}, { code: 'refund_amount_changed', amount: left / 100 });
+    throw new HttpError(409, `AED ${left / 100} is left to refund (${movedFils && !refundedSoFar ? 'the rest was moved onto another order' : 'part of it was refunded in your Stripe dashboard'}): refresh and try again.`, {}, { code: 'refund_amount_changed', amount: left / 100 });
   }
   if (!audit('payment.refund_requested', { orderId, ref: order.card.ref, amountFils: left, by: actor })) {
     throw new HttpError(503, 'The audit log could not be written, so nothing was refunded. Please try again.');
@@ -475,7 +481,7 @@ export function handleStripeWebhook(raw: Buffer, signature: string | null): { ty
       // Refunded in full in Stripe's dashboard, so the order was cancelled: its Jeebly booking is
       // cancelled too, once Stripe is answered (the webhook route).
       const now = outcome === 'refunded' && before ? getOrder(before.id) : undefined;
-      const carrierCancel = now && before!.status !== 'cancelled' && now.status === 'cancelled' && now.courier.provider === 'jeebly' ? now.id : undefined;
+      const carrierCancel = now && before!.status !== 'cancelled' && now.status === 'cancelled' && (now.courier.provider === 'jeebly' || now.courier.enteredByHand) ? now.id : undefined;
       return { type: event.type, outcome, ...(carrierCancel ? { carrierCancel } : {}) };
     }
     // A refund that failed after Stripe took it (the card was closed, the bank sent it back).

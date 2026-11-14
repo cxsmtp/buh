@@ -64,7 +64,13 @@ function seedStock(p: Product): Record<string, number> {
   return Number.isInteger(n) && n > 0 && n <= 1000 ? Object.fromEntries(p.profiles.map((s) => [s.id, n])) : p.stockBySize;
 }
 
+/**
+ * The starter catalogue (sample products) is for demos, tests and development only. A real shop
+ * (the published image, no SEED_STOCK) starts empty: the samples are not the owner's stock, and
+ * customers could order them.
+ */
 function seedIfEmpty() {
+  if (process.env.NODE_ENV === 'production' && !process.env.SEED_STOCK) return;
   const db = getDb();
   const { n } = db.prepare('SELECT COUNT(*) AS n FROM products').get() as { n: number };
   if (n > 0) return;
