@@ -62,6 +62,8 @@ const STRIPE_JS_STUB = `
 export interface NewerScreens {
   /** The private page of a bank-transfer order with a screenshot uploaded. */
   payPath: string;
+  /** The owner's password: payment keys ask for it again once the sign-in is more than 10 minutes old (these walks run long). */
+  password: string;
 }
 
 function api(server: RunningServer, cookie: string, method: string, p: string, body?: unknown) {
@@ -95,9 +97,9 @@ async function placeOrder(server: RunningServer, paymentMethod: 'cod' | 'bank_tr
  * What the newer screens show: the shop's WhatsApp number and bank details, an order waiting for
  * WhatsApp, a bank transfer with its screenshot, an order confirmed by phone call, and an expense.
  */
-export async function prepareNewerScreens(server: RunningServer, cookie: string): Promise<NewerScreens> {
+export async function prepareNewerScreens(server: RunningServer, cookie: string, password: string): Promise<NewerScreens> {
   for (const [key, settings] of [['bank', BANK], ['store', { whatsappNumber: '+971 50 999 7744' }]] as const) {
-    const res = await api(server, cookie, 'PUT', `/api/admin/settings/${key}`, { settings });
+    const res = await api(server, cookie, 'PUT', `/api/admin/settings/${key}`, { settings, currentPassword: password });
     assert.equal(res.status, 200, await res.text());
   }
   await placeOrder(server, 'cod');
@@ -110,12 +112,12 @@ export async function prepareNewerScreens(server: RunningServer, cookie: string)
   const today = new Date(Date.now() + 4 * 3600_000).toISOString().slice(0, 10);
   const ex = await api(server, cookie, 'POST', '/api/admin/expenses', { key: crypto.randomUUID(), date: today, amount: '45.75', categoryId: 'courier', method: 'card', payee: 'Jeebly' });
   assert.equal(ex.status, 201, await ex.text());
-  return { payPath };
+  return { payPath, password };
 }
 
-async function cardPayments(server: RunningServer, cookie: string, on: boolean) {
+async function cardPayments(server: RunningServer, cookie: string, on: boolean, password: string) {
   const settings = on ? { cardEnabled: true, stripePublishableKey: TEST_KEYS.publishable, stripeSecretKey: TEST_KEYS.secret, stripeWebhookSecret: TEST_KEYS.webhook } : { cardEnabled: false };
-  const res = await api(server, cookie, 'PUT', '/api/admin/settings/payments', { settings });
+  const res = await api(server, cookie, 'PUT', '/api/admin/settings/payments', { settings, currentPassword: password });
   assert.equal(res.status, 200, await res.text());
 }
 
@@ -133,7 +135,7 @@ export async function walkNewerScreens(browser: Browser, server: RunningServer, 
   await ctx.route('https://js.stripe.com/**', (r) => r.fulfill({ status: 200, contentType: 'application/javascript', body: STRIPE_JS_STUB }));
   await ctx.route('https://wa.me/**', (r) => r.fulfill({ status: 200, contentType: 'text/html', body: '<title>wa</title>' }));
   const page = await ctx.newPage();
-  await cardPayments(server, cookie, true);
+  await cardPayments(server, cookie, true, setup.password);
   try {
     await page.goto(server.base, { waitUntil: 'domcontentloaded' });
     await page.locator('main h3').first().waitFor();
@@ -173,7 +175,7 @@ export async function walkNewerScreens(browser: Browser, server: RunningServer, 
     const id = href.match(/BUH-\d{6}-[A-Z2-9]{6}/)![0];
     assert.equal((await api(server, cookie, 'POST', `/api/admin/orders/${id}/whatsapp`, { result: 'call' })).status, 200);
   } finally {
-    await cardPayments(server, cookie, false);
+    await cardPayments(server, cookie, false, setup.password);
   }
   await page.goto(`${server.base}${setup.payPath}`, { waitUntil: 'domcontentloaded' });
   await page.getByRole('heading', { name: 'Pay by bank transfer' }).waitFor();
