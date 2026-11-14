@@ -2,10 +2,12 @@ import fs from 'node:fs';
 import type { Order } from '@/types';
 import { PALETTE } from '@/lib/design/tokens';
 import { audit } from './audit';
-import { BACKUP_LIMITS, backupDataSize, backupHealth } from './backup';
+import { BACKUP_LIMITS, RESTORE_COMMAND, backupDataSize, backupHealth } from './backup';
 import { emailConfigured, ownerEmail, sender, transport } from './mail';
 import { dataDir } from './dataDir';
 import { driveProblem } from './driveBackup';
+import { s3Problem } from './s3Backup';
+import { updaterReport, updaterStatus } from './versions';
 import { getDb } from './db';
 import { kvGet, kvSet } from './kv';
 import { logEvent } from './log';
@@ -33,6 +35,10 @@ export interface Problem {
 }
 
 const MIN_FREE_BYTES = 1024 ** 3; // 1 GB
+/** The updater writes its status every round (15 minutes at most): three missed is silence. */
+const UPDATER_SILENT_MS = 45 * 60_000;
+/** A problem whose email could not be sent is tried again after this, not after a day. */
+const RESEND_MS = 60 * 60_000;
 const MIN_FREE_RATIO = 0.1;
 
 export function diskSpace(): { free: number; total: number } | null {
@@ -65,7 +71,7 @@ export function currentProblems(now = Date.now()): Problem[] {
   if (disk && (disk.free < MIN_FREE_BYTES || disk.free / disk.total < MIN_FREE_RATIO)) {
     problems.push({ id: 'disk', level: disk.free < MIN_FREE_BYTES / 4 ? 'failing' : 'warning', text: `Disk space is low: ${(disk.free / 1024 ** 3).toFixed(1)} GB free of ${(disk.total / 1024 ** 3).toFixed(0)} GB.` });
   }
-  if (!databaseOk(now)) problems.push({ id: 'database', level: 'failing', text: 'The database check failed. Restore the latest backup (see the deployment guide).' });
+  if (!databaseOk(now)) problems.push({ id: 'database', level: 'failing', text: `The database check failed. Restore the latest backup: on the server, run  ${RESTORE_COMMAND}  with the newest file name from Settings → System & backups (the shop is stopped, restored and started again; the data as it is now is kept aside).` });
   const backup = backupHealth(now);
   if (backup.level === 'failing') problems.push({ id: 'backup', level: 'failing', text: backup.lastError ? `Backups are failing: ${backup.lastError}` : backup.overdueText || backup.notice || 'Backups need attention.' });
   else if (backup.level === 'warning') problems.push({ id: 'backup', level: 'warning', text: backup.lastEmailError || backup.notice || backup.offServerWarning || 'Backups need attention.' });
@@ -75,6 +81,26 @@ export function currentProblems(now = Date.now()): Problem[] {
   // Compared with the last backup handed to Drive (a "Back up now" with nothing new is not copied again).
   const drive = driveProblem(backup.lastDriveHandoffAt ?? backup.lastSuccessAt, backup.intervalHours, now);
   if (drive) problems.push(drive);
+  // The copy to S3 storage (when switched on): a failed copy is said, like Drive's.
+  try {
+    const s3 = s3Problem();
+    if (s3) problems.push(s3);
+  } catch (err) {
+    logEvent('warn', 's3_check_failed', { error: err instanceof Error ? err.message : String(err) });
+  }
+  // The updater (automatic updates and self-healing): silent for 45 minutes, or what it reports.
+  const report = updaterReport();
+  if (report && now - report.at > UPDATER_SILENT_MS) {
+    problems.push({ id: 'updater', level: 'failing', text: `The updater has not reported since ${new Date(report.at).toUTCString()}: new versions are not installed and a stopped shop is not restarted. On the server: podman start beautifuluaehome-updater` });
+  } else if (report) {
+    const st = updaterStatus(now);
+    if (st?.integrityProblem) problems.push({ id: 'updater_integrity', level: 'failing', text: st.integrityProblem });
+    if (st?.registryProblem) problems.push({ id: 'updater_registry', level: 'warning', text: st.registryProblem });
+  }
+  // Phone codes in test mode on a real shop: any code passes, so anyone can order as any number.
+  if (process.env.NODE_ENV === 'production' && process.env.OTP_DEV_MODE === 'true' && !process.env.BUH_TEST_SERVER) {
+    problems.push({ id: 'otp_test_mode', level: 'failing', text: 'Phone codes are in test mode (OTP_DEV_MODE=true): the phone check can be passed without a real code. Remove OTP_DEV_MODE from the shop’s settings on the server.' });
+  }
   // The data to back up nears (80%) or passes the most one backup holds: said before backups stop.
   try {
     const size = backupDataSize();
@@ -143,8 +169,9 @@ export async function checkAndAlert(now = Date.now()): Promise<Problem[]> {
     const last = state[p.id];
     if (!last || now - last > 24 * 3600_000) {
       audit('monitor.problem', { id: p.id, level: p.level, text: p.text });
-      await sendOwner(p.level === 'failing' ? `Needs attention: ${p.id}` : `Warning: ${p.id}`, `${p.text}\n\nOpen the Admin Hub → Settings → System & backups for details.`);
-      next[p.id] = now;
+      const sent = await sendOwner(p.level === 'failing' ? `Needs attention: ${p.id}` : `Warning: ${p.id}`, `${p.text}\n\nOpen the Admin Hub → Settings → System & backups for details.`);
+      // Told (or no email is set up at all): again in a day. The email failed: again in an hour.
+      next[p.id] = sent || !emailConfigured() ? now : now - 24 * 3600_000 + RESEND_MS;
     } else {
       next[p.id] = last;
     }
@@ -156,6 +183,18 @@ export async function checkAndAlert(now = Date.now()): Promise<Problem[]> {
     }
   }
   kvSet('monitor:alerted', next);
+  // What the updater last raised (rolled back, the shop did not start, the registry login expired): emailed once each.
+  try {
+    const alert = updaterReport()?.alert;
+    const told = kvGet<number>('monitor:updater-alert')?.data ?? 0;
+    if (alert && alert.at > told && now - alert.at < 7 * 24 * 3600_000) {
+      audit('monitor.updater_alert', { level: alert.level, at: new Date(alert.at).toISOString(), message: alert.message });
+      const sent = await sendOwner(`Updater ${alert.level === 'critical' ? 'CRITICAL' : 'error'}`, `${alert.message}\n\nRaised by the updater at ${new Date(alert.at).toUTCString()}. Open the Admin Hub → Settings → Versions for what runs now.`);
+      if (sent || !emailConfigured()) kvSet('monitor:updater-alert', alert.at);
+    }
+  } catch (err) {
+    logEvent('warn', 'updater_alert_check_failed', { error: err instanceof Error ? err.message : String(err) });
+  }
   return problems;
 }
 
@@ -372,7 +411,7 @@ function summaryHtml(day: string, sections: SummarySection[]): string {
       (sec) => `<h2 style="font:600 15px/1.3 Arial,sans-serif;color:${P.ink};margin:22px 0 8px;border-bottom:1px solid ${P["gold-light"]};padding-bottom:4px">${esc(sec.title)}</h2>
 <table role="presentation" cellpadding="0" cellspacing="0" style="width:100%;border-collapse:collapse">${sec.items
         .map(
-          (i) => `<tr><td style="width:18px;vertical-align:top;padding:3px 0;font:13px/1.5 Arial,sans-serif;color:${i.tone ? colour[i.tone] : '${P["gold-deep"]}'}">${i.tone ? mark[i.tone] : '•'}</td><td style="padding:3px 0;font:14px/1.5 Arial,sans-serif;color:${P.ink}">${esc(i.text)}</td></tr>`
+          (i) => `<tr><td style="width:18px;vertical-align:top;padding:3px 0;font:13px/1.5 Arial,sans-serif;color:${i.tone ? colour[i.tone] : P['gold-deep']}">${i.tone ? mark[i.tone] : '•'}</td><td style="padding:3px 0;font:14px/1.5 Arial,sans-serif;color:${P.ink}">${esc(i.text)}</td></tr>`
         )
         .join('')}</table>`
     )
@@ -402,7 +441,8 @@ export function startMonitor() {
       if (dubaiHour >= 8 && lastSent !== today && process.env.DAILY_SUMMARY !== 'false') {
         kvSet('monitor:summary', today); // one copy only, even with two copies of the shop running
         const { subject, text, html } = dailySummary(now);
-        await sendOwner(subject, text, html);
+        // Not sent (the mail server refused): the mark is taken back, so the next check tries again.
+        if (!(await sendOwner(subject, text, html)) && emailConfigured()) kvSet('monitor:summary', lastSent ?? '');
       }
     } catch (err) {
       logEvent('warn', 'monitor_failed', { error: err instanceof Error ? err.message : String(err) });

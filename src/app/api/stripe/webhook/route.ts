@@ -18,9 +18,9 @@ const refused = () => json({ received: false, message: WEBHOOK_REFUSED }, 400);
 export async function POST(req: Request) {
   try {
     const ip = clientIp(req);
-    if ((ip && !rateLimit(`stripe-webhook:${ip}`, 300, 60_000).ok) || !rateLimit('global:stripe-webhook', 1200, 60_000).ok) {
-      return json({ received: false, message: 'Too many requests.' }, 429, { 'Retry-After': '60' });
-    }
+    if (ip && !rateLimit(`stripe-webhook:${ip}`, 300, 60_000).ok) return json({ received: false, message: 'Too many requests.' }, 429, { 'Retry-After': '60' });
+    // No shop-wide limit here: it was spent by anyone's unsigned posts, and Stripe's own events were
+    // then turned away. Checking a signature costs one HMAC over a small, size-capped body.
     const raw = await readRawBody(req, WEBHOOK_MAX_BYTES, new HttpError(400, WEBHOOK_REFUSED));
     const { type, outcome, carrierCancel } = handleStripeWebhook(raw, req.headers.get('stripe-signature'));
     if (outcome === 'mismatch') logEvent('error', 'stripe_webhook_mismatch', { type });

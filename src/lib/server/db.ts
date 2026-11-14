@@ -777,23 +777,47 @@ let openedFile = '';
 export function getDb(): DB {
   const file = dataFile('shop.db');
   if (db && openedFile === file) return db;
-  if (db) db.close();
-
-  db = new Database(file);
-  openedFile = file;
-  db.pragma('journal_mode = WAL');
-  db.pragma('synchronous = FULL');
-  db.pragma('foreign_keys = ON');
-  db.pragma('busy_timeout = 5000');
-
-  const current = db.pragma('user_version', { simple: true }) as number;
-  for (let v = current; v < MIGRATIONS.length; v++) {
-    db.transaction(() => {
-      MIGRATIONS[v](db!);
-      db!.pragma(`user_version = ${v + 1}`);
-    })();
+  if (db) {
+    db.close();
+    db = null;
   }
+
+  // Kept only once it is open, set up and migrated: a failure (disk full, a migration that
+  // throws) must not leave a half-ready handle that every later request then uses.
+  const opened = new Database(file);
+  try {
+    opened.pragma('journal_mode = WAL');
+    opened.pragma('synchronous = FULL');
+    opened.pragma('foreign_keys = ON');
+    opened.pragma('busy_timeout = 5000');
+
+    const current = opened.pragma('user_version', { simple: true }) as number;
+    for (let v = current; v < MIGRATIONS.length; v++) {
+      opened.transaction(() => {
+        MIGRATIONS[v](opened);
+        opened.pragma(`user_version = ${v + 1}`);
+      })();
+    }
+  } catch (e) {
+    try {
+      opened.close();
+    } catch {
+      // already unusable
+    }
+    throw e;
+  }
+  db = opened;
+  openedFile = file;
   return db;
+}
+
+/** Can the shop read its database right now? (The readiness part of /api/health.) Never throws. */
+export function dbReady(): boolean {
+  try {
+    return getDb().prepare('SELECT 1').pluck().get() === 1;
+  } catch {
+    return false;
+  }
 }
 
 /** Things to do once the outermost transaction has committed (dropped if it, or the part that queued them, rolls back). */

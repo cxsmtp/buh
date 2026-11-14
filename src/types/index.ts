@@ -365,7 +365,7 @@ export interface CardPayment {
 
 /** Something on an order the owner must look at (a refund that failed, a booking after a cancel…). Admin only. */
 export interface OrderAttention {
-  kind: 'refund_failed' | 'booked_after_cancel' | 'refund_outside_stripe' | 'card_unreachable' | 'call_customer' | 'bank_unconfirmed';
+  kind: 'refund_failed' | 'booked_after_cancel' | 'refund_outside_stripe' | 'card_unreachable' | 'call_customer' | 'bank_unconfirmed' | 'card_dispute' | 'paid_after_cancel';
   text: string;
   at: string;
 }

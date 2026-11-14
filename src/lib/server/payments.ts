@@ -15,6 +15,7 @@ import {
   markCardFailed,
   markCardPaid,
   markCardRefunded,
+  markCardDisputed,
   markRefundFailed,
   noteRefundedSoFar,
   openCardOrders,
@@ -108,6 +109,13 @@ function reachFor(order: Order): { client: Stripe; why?: undefined } | { client?
   if (order.card?.mode && mode && order.card.mode !== mode) return { why: `it was made in Stripe ${order.card.mode} mode, and the keys now saved are ${mode} mode` };
   return { client: stripeClient(key) };
 }
+
+/** Stripe refused the saved key itself (revoked, rolled, or without the permission): no retry will help. */
+function isKeyRefused(err: unknown): boolean {
+  const e = err as { type?: string; statusCode?: number };
+  return e?.statusCode === 401 || e?.statusCode === 403 || e?.type === 'StripeAuthenticationError' || e?.type === 'StripePermissionError';
+}
+const KEY_REFUSED_WHY = 'Stripe refused the secret key now saved (revoked or without permission), so the shop can no longer see or stop this payment';
 
 const MISSING_WHY = 'Stripe has no such payment in the account of the keys now saved';
 
@@ -258,6 +266,9 @@ async function stopCardPayment(orderId: string, actor: string, reason: string): 
       return applyIntent(orderId, pi, actor);
     } catch (err2) {
       if (isMissing(err2)) return cancelUnreachable(order, actor, reason, MISSING_WHY);
+      // The key itself is refused: these orders would otherwise stay "waiting for payment" for good,
+      // holding their pieces. Closed like a payment the keys can't reach (flagged when it was live).
+      if (isKeyRefused(err2)) return cancelUnreachable(order, actor, reason, KEY_REFUSED_WHY);
       logEvent('warn', 'stripe_cancel_failed', { orderId, ...stripeError(err) });
       throw new HttpError(502, 'Stripe could not be reached to stop the payment. Please try again in a minute.');
     }
@@ -493,6 +504,15 @@ export function handleStripeWebhook(raw: Buffer, signature: string | null): { ty
       const pi = typeof refund.payment_intent === 'string' ? refund.payment_intent : refund.payment_intent?.id;
       if (!pi) return { type: event.type, outcome: 'unknown' };
       return { type: event.type, outcome: markRefundFailed(pi, { id: refund.id, amount: refund.amount, reason: refund.failure_reason?.slice(0, 60) }, 'stripe', ref) };
+    }
+    // A dispute (chargeback): the bank may take the money back. The owner must answer it in Stripe,
+    // and should not send the parcel meanwhile: flagged on the order and emailed.
+    case 'charge.dispute.created':
+    case 'charge.dispute.funds_withdrawn': {
+      const dispute = event.data.object;
+      const pi = typeof dispute.payment_intent === 'string' ? dispute.payment_intent : dispute.payment_intent?.id;
+      if (!pi) return { type: event.type, outcome: 'unknown' };
+      return { type: event.type, outcome: markCardDisputed(pi, { id: dispute.id, amount: dispute.amount, reason: dispute.reason?.slice(0, 60), withdrawn: event.type === 'charge.dispute.funds_withdrawn' }, 'stripe', ref) };
     }
     default:
       return { type: event.type, outcome: 'ignored' };

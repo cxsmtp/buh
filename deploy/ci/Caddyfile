@@ -8,8 +8,10 @@
 		format filter {
 			wrap json
 			fields {
-				request>uri regexp "^(/(?:api/)?pay)?/([A-Za-z0-9_-]{4})[A-Za-z0-9_-]{28,}" "${1}/${2}..."
+				request>uri regexp "^(?:((?:/(?:api/)?(?:pay|deal))?/[A-Za-z0-9_-]{4})[A-Za-z0-9_-]{28,}|(/(?:track|invoice)/BUH-[A-Z0-9-]{4,40}[.][A-Za-z0-9_-]{4})[A-Za-z0-9_-]{39})" "${1}${2}..."
 				request>headers>Referer delete
+				# A customer's chat is opened with this header: never in the log.
+				request>headers>X-Chat-Token delete
 				# The one-time move to a new admin link is a redirect: its Location is the link.
 				resp_headers>Location delete
 			}

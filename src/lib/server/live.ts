@@ -1,3 +1,4 @@
+import fs from 'node:fs';
 import { getDb } from './db';
 import { kvBump } from './kv';
 
@@ -40,6 +41,7 @@ interface Subscriber {
   channels: Channel[];
   ip: string;
   send: (text: string) => void;
+  close: () => void;
   last: string;
 }
 const subscribers = new Set<Subscriber>();
@@ -49,7 +51,26 @@ function payloadFor(sub: Subscriber, all: Record<Channel, number>): string {
   return JSON.stringify({ ...Object.fromEntries(sub.channels.map((c) => [c, all[c]])), app: process.env.NEXT_PUBLIC_APP_VERSION ?? '' });
 }
 
+/**
+ * This copy is being replaced (the updater's mark, seen by the poller within 2 s): every open
+ * stream is ended now (the browsers reconnect by themselves, to the new copy). Not on SIGTERM: a
+ * handler for it here would take over Node's own stop, and the shop would no longer exit. Found by the review: every open page holds a stream for up to
+ * 10 minutes, so a stop waited its full 25 s for them and the shop was closed for longer than the
+ * proxy holds a request.
+ */
+export function closeAllStreams(): number {
+  const open = [...subscribers];
+  for (const sub of open) sub.close();
+  return open.length;
+}
+const drainMark = () => process.env.BUH_DRAIN_MARK || '/tmp/buh-draining';
+
 function poll() {
+  // The updater's mark that this copy is being replaced (see /api/health): streams move over now.
+  if (fs.existsSync(drainMark())) {
+    closeAllStreams();
+    return;
+  }
   let all: Record<Channel, number>;
   try {
     all = versions();
@@ -116,6 +137,7 @@ export function eventStream(req: Request, channels: Channel[], ip = 'unknown'): 
         channels,
         ip,
         last: '',
+        close,
         send: (text: string) => {
           try {
             controller.enqueue(encoder.encode(text));

@@ -299,6 +299,22 @@ let queued: { file: string; reason: string } | null = null;
 
 export const s3Enabled = () => config().enabled;
 
+/** Is a recent copy really in the S3 bucket? (Switched on, and the last copy worked within two days.) */
+export function s3Protects(now = Date.now()): boolean {
+  if (!config().enabled) return false;
+  const st = state();
+  const last = st.lastSuccessAt ? Date.parse(st.lastSuccessAt) : 0;
+  return !st.lastError && Number.isFinite(last) && now - last < 2 * 24 * 3600_000;
+}
+
+/** For the monitor: copies to S3 are switched on and the last one failed. */
+export function s3Problem(): { id: string; level: 'failing'; text: string } | null {
+  if (!config().enabled) return null;
+  const st = state();
+  if (!st.lastError) return null;
+  return { id: 's3_backup', level: 'failing', text: `The copy of the backups to S3 storage failed: ${String(st.lastError).slice(0, 300)} (Settings → System & backups).` };
+}
+
 /** Copy a backup just taken to the bucket (when switched on), keep the newest `keep`. Never throws. */
 export function copyBackupToS3(file: string, reason = 'backup'): Promise<S3State | null> {
   if (!config().enabled) return Promise.resolve(null);

@@ -296,6 +296,15 @@ EOF
         fi
         ;;
     esac
+    # A one-off container of the shop image running its restore tool on the data volume.
+    case "$remove $*" in
+      "1 node scripts/restore-backup.mjs "*)
+        ev "restore $id data=$data $3 $5"
+        [ -f "$D/restore-fails" ] && { echo "The backup is damaged: nothing was changed."; exit 1; }
+        echo "Restored into /data."
+        exit 0
+        ;;
+    esac
     [ -e "$D/c/$name" ] && { echo "the container name \"$name\" is already in use"; exit 125; }
     mkdir -p "$D/c/$name"
     printf '%s\n' "$id" > "$D/c/$name/image"

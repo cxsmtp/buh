@@ -330,9 +330,10 @@ function failState(key: string): FailState {
     state = { fails: [], pausedUntil: 0 };
     failStates.set(key, state);
     if (failStates.size > MAX_FAIL_KEYS) {
-      // Drop the oldest entry that is not currently paused.
+      // Drop the oldest entry that is not currently paused; never an account's own counter (acct|…:
+      // the limit on guesses spread over many addresses), which a flood of other keys must not flush.
       for (const [k, s] of failStates) {
-        if (s.pausedUntil < Date.now()) {
+        if (s.pausedUntil < Date.now() && !k.startsWith('acct|')) {
           failStates.delete(k);
           break;
         }

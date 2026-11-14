@@ -71,6 +71,7 @@ function run(e: Env, args: string[], extra: Record<string, string> = {}) {
       ALERT_DIR: e.alerts,
       HEALTH_TIMEOUT: '4',
       SETTLE_SECONDS: '0',
+      DRAIN_SECONDS: '0',
       ...extra,
     },
     encoding: 'utf8',
@@ -287,6 +288,7 @@ test('the loop: UPDATE_CHECK_MINUTES=0 updates only when asked (trigger file), a
       STATE_DIR: e.state,
       ALERT_DIR: e.alerts,
       SETTLE_SECONDS: '0',
+      DRAIN_SECONDS: '0',
       HEAL_CHECK_SECONDS: '1',
       UPDATE_CHECK_MINUTES: '0',
     },
@@ -341,6 +343,7 @@ test('Settings → Versions: the daemon takes a "rollback X.Y.Z" request, switch
       CONTROL_DIR: control,
       PUBLIC_DIR: pub,
       SETTLE_SECONDS: '0',
+      DRAIN_SECONDS: '0',
       HEAL_CHECK_SECONDS: '1',
       UPDATE_CHECK_MINUTES: '0',
     },
@@ -444,6 +447,7 @@ test('single: a good new image is tried without a port first, then replaces the 
     `run ${CAND} ${NEW}`,
     `stop ${CAND}`,
     `rm ${CAND}`,
+    `drain ${SHOP}`,
     `stop ${SHOP}`,
     `rename ${SHOP} ${PREV}`,
     `run ${SHOP} ${NEW} port=443`,
@@ -557,6 +561,32 @@ test('single: self-healing starts a stopped shop, re-creates a missing one from 
   assert.ok(alerts(f).some((a) => /data volume beautifuluaehome-data does not exist/.test(a.message)), JSON.stringify(alerts(f)));
 });
 
+test('single: restore stops the shop, restores the backup in a one-off container on the data volume, and starts the shop again; a refused backup changes nothing', () => {
+  const e = setup();
+  runningSingle(e);
+  const ok = runSingle(e, ['restore', 'buh-backup-20261114-0900.tar.gz.enc']);
+  assert.equal(ok.code, 0, ok.out);
+  assert.deepEqual(events(e), [`stop ${SHOP}`, `restore ${OLD} data=${SHOP}-data /data/backups/buh-backup-20261114-0900.tar.gz.enc --replace`, `start ${SHOP}`]);
+  assert.equal(statusOf(e, SHOP), 'running');
+  assert.match(alerts(e).at(-1).message, /restored from the backup buh-backup-20261114-0900\.tar\.gz\.enc/);
+
+  // The tool refuses the backup (damaged, wrong password): said, the shop is started again, exit 1.
+  fs.rmSync(path.join(e.fake, 'events'));
+  fs.writeFileSync(path.join(e.fake, 'restore-fails'), '');
+  const bad = runSingle(e, ['restore', 'buh-backup-20261113-0900.tar.gz']);
+  assert.equal(bad.code, 1, bad.out);
+  assert.match(bad.out, /NOT restored/);
+  assert.deepEqual(events(e).map((l) => l.split(' ')[0]), ['stop', 'restore', 'start']);
+  assert.equal(statusOf(e, SHOP), 'running');
+
+  // Only a plain file name from backups/: no path, nothing else; the shop is not touched.
+  fs.rmSync(path.join(e.fake, 'events'));
+  for (const name of ['', '../shop.db', '/etc/passwd', 'a b', '.hidden', 'x;rm -rf']) assert.equal(runSingle(e, ['restore', name]).code, 2, name);
+  assert.deepEqual(events(e), []);
+  // Blue/green (compose) shops restore by hand (deployment guide).
+  assert.equal(run(e, ['restore', 'x.tar.gz']).code, 2);
+});
+
 test('single: a shop that stops answering is restarted; still not answering, it is re-created from last good', () => {
   const e = setup();
   runningSingle(e);
@@ -599,6 +629,7 @@ test("single: adopt re-creates the owner's container with the full definition (s
     `run ${CAND} ${OLD}`,
     `stop ${CAND}`,
     `rm ${CAND}`,
+    `drain ${SHOP}`,
     `stop ${SHOP}`,
     `rename ${SHOP} ${PREV}`,
     `run ${SHOP} ${OLD} port=443`,

@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { execFileSync } from 'node:child_process';
+import { execFileSync, spawnSync } from 'node:child_process';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -181,6 +181,30 @@ test('restore --replace swaps the data in place, keeps the old data aside and th
   assert.ok(fs.existsSync(path.join(live, 'backups', 'keep.tar.gz')));
 });
 
+
+test('found by the review: restore --replace refuses while the shop runs on that data (orders placed afterwards would be lost); the updater, which stops it first, may', async () => {
+  const live = fs.mkdtempSync(path.join(os.tmpdir(), 'buh-live-'));
+  fs.writeFileSync(path.join(live, 'shop.db'), 'old database');
+  // What a running shop writes every 10 s (src/lib/server/startup.ts RUNNING_MARK).
+  fs.writeFileSync(path.join(live, '.shop-running'), `${Date.now()}\n`);
+  const result = await backup.createBackup();
+  const run = (extra: string[] = []) => spawnSync(process.execPath, ['scripts/restore-backup.mjs', result.file, live, '--replace', ...extra], { encoding: 'utf8' });
+  const refused = run();
+  assert.equal(refused.status, 2, refused.stderr);
+  assert.match(refused.stderr, /the shop is running on this data/);
+  assert.match(refused.stderr, /updater\.sh restore/);
+  assert.equal(fs.readFileSync(path.join(live, 'shop.db'), 'utf8'), 'old database', 'nothing touched');
+  assert.deepEqual(fs.readdirSync(live).filter((f) => f.startsWith('replaced-') || f.startsWith('.restore-')), []);
+  // Stopped a minute ago: the mark is stale, the restore goes ahead.
+  fs.writeFileSync(path.join(live, '.shop-running'), `${Date.now() - 60_000}\n`);
+  assert.equal(run().status, 0);
+  // The updater stopped the shop itself a second ago.
+  const again = fs.mkdtempSync(path.join(os.tmpdir(), 'buh-live-'));
+  fs.writeFileSync(path.join(again, '.shop-running'), `${Date.now()}\n`);
+  const viaUpdater = spawnSync(process.execPath, ['scripts/restore-backup.mjs', result.file, again, '--replace', '--shop-stopped'], { encoding: 'utf8' });
+  assert.equal(viaUpdater.status, 0, viaUpdater.stderr);
+});
+
 test('passkeys and recovery codes are in the backup and restored, but switched off until reviewed (the backup may predate a revocation)', async () => {
   const { SoftAuthenticator } = await import('./fixtures/soft-authenticator.mjs');
   const passkeys = await import('@/lib/server/passkeys');
@@ -241,4 +265,33 @@ test('passkeys and recovery codes are in the backup and restored, but switched o
     _closeDb();
     process.env.DATA_DIR = dir;
   }
+});
+
+test('found by the review: one record the spreadsheets cannot read does not stop the backup; the database is in it, whole', async () => {
+  const { getDb } = await import('@/lib/server/db');
+  const good = order('Readable Order', '+971501234590');
+  const bad = order('Broken Order', '+971501234591');
+  getDb().prepare("UPDATE orders SET data = json_remove(data, '$.customer') WHERE id = ?").run(bad.id);
+  const result = await backup.createBackup(new Date(Date.now() + 5 * 60_000));
+  const entries = backup.openBackup(fs.readFileSync(result.file));
+  assert.ok(entries.some((e) => e.name === 'shop.db'), 'the database is always there');
+  const csv = entries.filter((e) => e.name.endsWith('.csv')).map((e) => e.data.toString()).join('\n');
+  assert.ok(csv.includes(good.id) || csv.includes('could not be made'), 'the readable order, or a note that the spreadsheets were left out');
+  assert.match(csv, /COULD NOT BE READ|could not be made/);
+  getDb().prepare('DELETE FROM order_events WHERE order_id = ?').run(bad.id);
+  getDb().prepare('DELETE FROM orders WHERE id = ?').run(bad.id);
+});
+
+test('found by the review: local backups are kept by size too: together within the budget, the newest three always', async () => {
+  const policy = await import('@/lib/server/backupPolicy');
+  const GB = 1024 ** 3;
+  const files = Array.from({ length: 20 }, (_, i) => ({ name: `buh-backup-202611${String(i + 1).padStart(2, '0')}-0900.tar.gz`, bytes: 2 * GB }));
+  // 40 GB of backups, a budget of 25 GB: the oldest 8 go (12 × 2 GB = 24 GB stay).
+  const remove = policy.localBackupsOverBudget(files, 25 * GB);
+  assert.deepEqual(remove, files.slice(0, 8).map((f) => f.name));
+  // A tiny budget never takes the newest three.
+  assert.deepEqual(policy.localBackupsOverBudget(files, 0), files.slice(0, 17).map((f) => f.name));
+  // Within the budget, or a file that is not a backup: nothing.
+  assert.deepEqual(policy.localBackupsOverBudget(files, 40 * GB), []);
+  assert.deepEqual(policy.localBackupsOverBudget([{ name: 'pre-update-1.db', bytes: 99 * GB }, ...files.slice(-3)], 0), []);
 });

@@ -20,9 +20,9 @@ import { kvGet, kvSet } from './kv';
 import { expenseCsvFiles } from './expenses';
 import { toCsv } from './csv';
 import { blankDriveKeyIn, CLOCK_WRONG, copyBackupToDrive, driveStatus, serverClockSuspect } from './driveBackup';
-import { copyBackupToS3, s3Enabled } from './s3Backup';
+import { copyBackupToS3, s3Enabled, s3Protects } from './s3Backup';
 import { changeMark, describeAreas, markBackedUp, pendingChanges } from './dataChanges';
-import { catchUpEmailDue, decideBackup, localBackupsToRemove, RETRY_MS, shouldEmail, WEEKLY_OVERDUE_DAYS, type BackupReason, type BackupSettings } from './backupPolicy';
+import { catchUpEmailDue, decideBackup, LOCAL_KEEP_ALWAYS, localBackupsOverBudget, localBackupsToRemove, RETRY_MS, shouldEmail, WEEKLY_OVERDUE_DAYS, type BackupReason, type BackupSettings } from './backupPolicy';
 import { backupPassphrase, currentBackupKey, describeFingerprint, MIN_PASSPHRASE_LENGTH, passphraseFingerprintSync, passphraseSource, UNREADABLE_MESSAGE } from './backupSecret';
 
 /**
@@ -90,17 +90,66 @@ export const BACKUP_LIMITS = { totalBytes: 6 * 1024 ** 3, warnRatio: 0.8, minFre
  * Local backups kept (backupPolicy.ts localBackupsToRemove): the newest 14 always; with room on
  * the disk every backup of the 14 days before the 14th newest; with the disk tight (no room for
  * three more of the newest's size), all from the 24 hours before it and then the newest of each UAE
- * day; at most 5 removed a run. None at all while Google says the server's clock is wrong
- * (driveBackup.ts serverClockSuspect).
+ * day; at most 5 removed a run. None of that while Google says the server's clock is wrong
+ * (driveBackup.ts serverClockSuspect). And by size (backupPolicy.ts localBackupsOverBudget): together
+ * at most a quarter of the disk, the newest three always kept; with no room for the next backup,
+ * the oldest go until there is.
  */
-function pruneLocalBackups(dir: string, newestSize: number, now = Date.now()): number {
-  if (serverClockSuspect()) return 0;
+function pruneLocalBackups(dir: string, newestSize: number, now = Date.now(), needRoom = false): number {
   const names = fs.readdirSync(dir).filter((f) => f.startsWith('buh-backup-'));
-  const tight = Boolean(diskRoomProblem(dir, 3 * newestSize, BACKUP_LIMITS.minFreeBytes));
-  const remove = localBackupsToRemove(names, now, tight);
-  for (const old of remove) fs.rmSync(path.join(dir, old), { force: true });
-  return remove.length;
+  let removed = 0;
+  if (!serverClockSuspect()) {
+    const tight = Boolean(diskRoomProblem(dir, 3 * newestSize, BACKUP_LIMITS.minFreeBytes));
+    const remove = localBackupsToRemove(names, now, tight);
+    for (const old of remove) fs.rmSync(path.join(dir, old), { force: true });
+    removed = remove.length;
+  }
+  // By size too: all local backups together take at most a quarter of the disk (and always room
+  // for the newest three). With no room for the next backup, as many of the oldest go as it
+  // needs, down to the newest three: a full disk must never stop backups for good.
+  const sizes = () =>
+    fs.readdirSync(dir).filter((f) => f.startsWith('buh-backup-')).map((name) => {
+      try {
+        return { name, bytes: fs.statSync(path.join(dir, name)).size };
+      } catch {
+        return { name, bytes: 0 };
+      }
+    });
+  let budget = Infinity;
+  try {
+    const st = fs.statfsSync(dir);
+    budget = Math.max(LOCAL_KEEP_ALWAYS * newestSize, (Number(st.blocks) * Number(st.bsize)) / 4);
+  } catch {
+    // statfs unavailable: no budget to go by
+  }
+  if (serverClockSuspect() && !needRoom) return removed;
+  for (const old of localBackupsOverBudget(sizes(), budget)) {
+    fs.rmSync(path.join(dir, old), { force: true });
+    removed++;
+  }
+  if (needRoom) {
+    const files = sizes();
+    const total = files.reduce((n, f) => n + f.bytes, 0);
+    let free = 0;
+    try {
+      const st = fs.statfsSync(dir);
+      free = Number(st.bavail) * Number(st.bsize);
+    } catch {
+      return removed;
+    }
+    const short = newestSize + BACKUP_LIMITS.minFreeBytes - free;
+    if (short > 0) {
+      for (const old of localBackupsOverBudget(files, Math.max(0, total - short))) {
+        fs.rmSync(path.join(dir, old), { force: true });
+        removed++;
+      }
+    }
+  }
+  return removed;
 }
+/** The one command that restores a backup on a Podman shop (deploy/updater/updater.sh restore). */
+export const RESTORE_COMMAND = 'podman exec beautifuluaehome-updater sh /updater/updater.sh restore <backup file name>';
+
 // Gmail and most mail servers accept 25 MB per message; base64 adds a third.
 const EMAIL_LIMIT_BYTES = 17 * 1024 * 1024;
 
@@ -172,9 +221,26 @@ function writeBackupState(patch: BackupState) {
 // toCsv lives in ./csv (shared with the accountant's export); kept importable from here.
 export { toCsv } from './csv';
 
+function stockChangesText(changes: unknown): string {
+  try {
+    return (JSON.parse(String(changes)) as Array<{ sizeId: string; from: number; to: number }>).map((c) => `${c.sizeId} ${c.from}→${c.to}`).join('; ');
+  } catch {
+    return String(changes ?? '');
+  }
+}
+
+/** One spreadsheet row; a record that can't be read is one row saying so, not the end of the backup. */
+function guardRow<T>(id: string, row: () => T[]): Array<T | string> {
+  try {
+    return row();
+  } catch {
+    return [id, 'THIS RECORD COULD NOT BE READ FOR THE SPREADSHEET (it is in shop.db)'];
+  }
+}
+
 function csvFiles(): TarEntry[] {
   const orders = allOrders();
-  const o = (x: Order) => [
+  const o = (x: Order) => guardRow(String((x as { id?: unknown })?.id ?? ''), () => [
     x.id, x.createdAt, x.status, x.paymentMethod, x.paymentStatus, x.subtotal, x.deliveryFee, x.codFee, x.discount, x.total,
     x.customer.fullName, x.customer.phone, x.customer.email ?? '', x.customer.emirate, x.customer.area, x.customer.streetAddress,
     x.customer.buildingVilla, x.customer.flatVillaNo, x.customer.landmark ?? '', x.bankTransferRef ?? '',
@@ -187,7 +253,7 @@ function csvFiles(): TarEntry[] {
     x.bankTransfer?.state ?? '', x.bankTransfer?.uploads ?? '', x.bankTransfer?.uploadedAt ?? '', x.bankTransfer?.emailedAt ?? '', x.bankTransfer?.checkedAt ?? '', x.bankTransfer?.checkedBy ?? '',
     // The card payment fee (part of total_aed), and a bank transfer whose details the customer asks for on WhatsApp.
     x.cardFee ?? '', x.cardFeePercent ?? '', x.bankDetailsBy ?? '',
-  ];
+  ]);
   return [
     {
       name: 'orders.csv',
@@ -232,7 +298,7 @@ function csvFiles(): TarEntry[] {
         ['move_id', 'at', 'product_id', 'by', 'reason', 'changes', 'note', 'undo_of'],
         (getDb().prepare('SELECT id, at, product_id, actor, reason, changes, note, undo_of FROM stock_moves ORDER BY id').all() as Array<Record<string, string | number | null>>).map((r) => [
           r.id, r.at, r.product_id, r.actor, r.reason,
-          (JSON.parse(String(r.changes)) as Array<{ sizeId: string; from: number; to: number }>).map((c) => `${c.sizeId} ${c.from}→${c.to}`).join('; '),
+          stockChangesText(r.changes),
           r.note, r.undo_of ?? '',
         ])
       )),
@@ -419,7 +485,7 @@ export async function createBackup(now = new Date()): Promise<BackupResult> {
   }
   // No room: older backups thinned first (never the newest 14), then checked again.
   let room = diskRoomProblem(dir, size.bytes, BACKUP_LIMITS.minFreeBytes);
-  if (room && pruneLocalBackups(dir, size.bytes)) room = diskRoomProblem(dir, size.bytes, BACKUP_LIMITS.minFreeBytes);
+  if (room && pruneLocalBackups(dir, size.bytes, Date.now(), true)) room = diskRoomProblem(dir, size.bytes, BACKUP_LIMITS.minFreeBytes);
   if (room) throw new Error(`There is no room for the backup: ${room}. Free some space on the server.`);
   const tmpDb = path.join(dir, `.snapshot-${process.pid}-${Date.now()}.db`);
   const partial = path.join(dir, `.partial-${process.pid}-${Date.now()}`);
@@ -451,7 +517,15 @@ export async function createBackup(now = new Date()): Promise<BackupResult> {
     check.close();
     if (ok !== 'ok') throw new Error(`Snapshot failed its integrity check: ${ok}`);
 
-    const csv = csvFiles();
+    // The spreadsheets are a convenience; the database is the backup. A row they can't read (found
+    // by the review: an order whose JSON lacked a field stopped every backup) must not stop it.
+    let csv: TarEntry[] = [];
+    try {
+      csv = csvFiles();
+    } catch (err) {
+      logEvent('warn', 'backup_csv_failed', { error: err instanceof Error ? err.message : String(err) });
+      csv = [{ name: 'csv_not_made.csv', data: Buffer.from(toCsv(['note'], [['The spreadsheets could not be made for this backup (a record could not be read). The database (shop.db) in this backup is complete.']])) }];
+    }
     const items: PackItem[] = [
       { name: 'shop.db', size: fs.statSync(tmpDb).size, file: tmpDb },
       ...csv.map((c) => ({ name: c.name, size: c.data.length, data: c.data })),
@@ -562,7 +636,8 @@ async function emailBackup(result: BackupResult) {
       : `The full backup (${(result.size / 1024 / 1024).toFixed(1)} MB) is too large to email; it is on the server in the backups folder. ${result.encrypted ? '' : 'The CSV files are attached.'}`,
     result.encrypted ? '' : 'Note: these files contain customer names, phone numbers and addresses. Protect them with a password in the Admin Hub (Settings → System & backups) to receive them encrypted instead.',
     '',
-    'To restore: node scripts/restore-backup.mjs <backup file> <empty folder> (see HOSTINGER_DEPLOYMENT_GUIDE.md).',
+    `To restore it over the shop's data, on the server: ${RESTORE_COMMAND} (the file must be in the shop's backups folder; the shop is stopped, restored and started again, and the data as it was is kept aside).`,
+    'To only look inside it: node scripts/restore-backup.mjs <backup file> <empty folder>.',
   ].filter((l) => l !== undefined);
 
   await (await transport()).sendMail({
@@ -801,7 +876,8 @@ export function backupHealth(now = Date.now()) {
   // Nothing has left the server for 2 days: no Drive, and the newer backups were not emailed.
   let driveOn = false;
   try {
-    driveOn = driveStatus().enabled || s3Enabled();
+    // S3 counts only while its copies really arrive (a bucket that refuses every copy protects nothing).
+    driveOn = driveStatus().enabled || s3Protects(now);
   } catch {
     driveOn = false;
   }

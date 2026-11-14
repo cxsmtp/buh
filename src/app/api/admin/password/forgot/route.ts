@@ -5,7 +5,7 @@ import { assertSameOrigin, handleRouteError, json, readJsonBody, str } from '@/l
 import { logEvent } from '@/lib/server/log';
 import { emailConfigured, sender, transport } from '@/lib/server/mail';
 import { getSettings } from '@/lib/server/settings';
-import { siteUrl } from '@/lib/server/siteUrl';
+import { trustedSiteUrl } from '@/lib/server/siteUrl';
 
 /**
  * "Forgot password?": emails a one-time reset link (30 minutes) to the admin
@@ -24,13 +24,14 @@ export async function POST(req: Request) {
     const body = await readJsonBody(req, 1024);
     const email = str(body.email, 'Email', 254);
     // Worked out for every request (and inside it: it reads this request's Host), so both answers cost the same.
-    const base = await siteUrl();
+    const base = await trustedSiteUrl();
     const reset = await startPasswordReset(email);
     if (reset) {
-      audit('admin.password_reset_requested', { ip: clientIp(req), emailed: emailConfigured() });
+      // No address the shop can vouch for (NEXT_PUBLIC_APP_URL unset, asked through another host name): no link is sent.
+      audit('admin.password_reset_requested', { ip: clientIp(req), emailed: emailConfigured() && Boolean(base), ...(base ? {} : { withheld: 'the shop’s address (NEXT_PUBLIC_APP_URL) is not set' }) });
       // Not awaited: waiting for the mail server would make the admin email's answer slower than any other.
       // The path is the link's single-reset door grant (it opens the Admin Hub); the token stays in the fragment.
-      if (emailConfigured()) void sendLink(email.trim().toLowerCase(), `${base}/${reset.grant}#reset=${encodeURIComponent(reset.token)}`);
+      if (emailConfigured() && base) void sendLink(email.trim().toLowerCase(), `${base}/${reset.grant}#reset=${encodeURIComponent(reset.token)}`);
     }
     return json({ success: true, message: ANSWER });
   } catch (err) {

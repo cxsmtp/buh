@@ -903,3 +903,36 @@ test('review M3: a full refund in Stripe’s dashboard cancels the order and its
     await settings.updateSettings('courier', { jeebly: { isLive: false } });
   }
 });
+
+test('found by the review: a dispute (chargeback) is flagged on the order, audited, once; nothing else changes', async () => {
+  const { id, pi } = await paidCard();
+  const ev = mock.event('charge.dispute.created', { id: 'dp_1', object: 'dispute', amount: pi.amount, reason: 'fraudulent', payment_intent: pi.id });
+  assert.equal(payments.handleStripeWebhook(Buffer.from(ev.body), ev.signature).outcome, 'disputed');
+  assert.equal(payments.handleStripeWebhook(Buffer.from(ev.body), ev.signature).outcome, 'duplicate');
+  const o = orders.getOrder(id)!;
+  assert.equal(o.attention?.kind, 'card_dispute');
+  assert.match(o.attention!.text, /disputed this card payment.*fraudulent.*do not send the parcel/);
+  assert.equal(o.card!.state, 'paid');
+  assert.equal(auditLinesWith('payment.disputed').length, 1);
+  const unknown = mock.event('charge.dispute.created', { id: 'dp_2', object: 'dispute', amount: 100, payment_intent: 'pi_nobody' });
+  assert.equal(payments.handleStripeWebhook(Buffer.from(unknown.body), unknown.signature).outcome, 'unknown');
+});
+
+test('found by the review: a refund event that arrives before the payment event is not used up: Stripe sends it again, and the order ends refunded', async () => {
+  const { data } = await placeCard();
+  const id = data.order!.id;
+  const pi = mock.succeed(intentOf(id).id);
+  const charge = { id: 'ch_early', object: 'charge', amount: pi.amount, amount_refunded: pi.amount, payment_intent: pi.id, refunds: { data: [{ id: 're_early' }] } };
+  const refunded = mock.event('charge.refunded', charge);
+  // First, out of order: refused (not 2xx), so Stripe keeps it for later.
+  const early = await webhook(refunded.body, refunded.signature);
+  assert.ok(early.status >= 500, String(early.status));
+  assert.equal(orders.getOrder(id)!.card!.state, 'pending');
+  const paid = mock.event('payment_intent.succeeded', pi);
+  assert.equal((await webhook(paid.body, paid.signature)).status, 200);
+  // Sent again: applied now.
+  assert.equal((await webhook(refunded.body, refunded.signature)).status, 200);
+  const o = orders.getOrder(id)!;
+  assert.equal(o.card!.state, 'refunded');
+  assert.equal(o.status, 'cancelled', 'not left as a paid order to ship');
+});

@@ -173,7 +173,7 @@ const COLUMNS =
   'data, wa_code, phone_check, wa_hold, wa_opened_at, phone_checked_at, phone_checked_by, card_state, payment_ref, paid_fils, paid_at, card_label, refund_ref, refunded_at, card_livemode, refunded_fils, refund_outside_at, needs_attention, ' +
   'id, status, payment_status, pay_nonce, pay_expires_at, bank_state, transfer_uploads, transfer_uploaded_at, bank_emailed_at, bank_checked_at, bank_checked_by, ' +
   'phone_check_method, wa_cancel_at, wa_unopened_cancel_at';
-const ATTENTION_KINDS: OrderAttention['kind'][] = ['refund_failed', 'booked_after_cancel', 'refund_outside_stripe', 'card_unreachable', 'call_customer', 'bank_unconfirmed'];
+const ATTENTION_KINDS: OrderAttention['kind'][] = ['refund_failed', 'booked_after_cancel', 'refund_outside_stripe', 'card_unreachable', 'call_customer', 'bank_unconfirmed', 'card_dispute', 'paid_after_cancel'];
 const CARD_STATES: CardState[] = ['pending', 'failed', 'paid', 'refund_pending', 'refunded', 'canceled'];
 const BANK_STATES: BankState[] = ['awaiting', 'uploaded', 'not_received', 'paid'];
 
@@ -2081,6 +2081,24 @@ export function sweepUnconfirmedOrders(now = Date.now()): number {
   return cancelled;
 }
 
+/**
+ * The shop was down (found by the review: orders whose time to confirm ran out during an outage
+ * were cancelled 45 s after the start, though nobody could confirm them meanwhile). Deadlines that
+ * passed, or pass within the grace, are moved to `graceMs` from now. Audited; returns how many.
+ */
+export function graceUnconfirmedOrders(graceMs = 60 * 60_000, now = Date.now()): number {
+  const until = new Date(now + graceMs).toISOString();
+  const moved = inTransaction(() => {
+    const db = getDb();
+    const a = db.prepare("UPDATE orders SET wa_cancel_at = ? WHERE wa_cancel_at IS NOT NULL AND wa_cancel_at < ? AND phone_check IN ('awaiting', 'mismatch')").run(until, until).changes;
+    const b = db.prepare("UPDATE orders SET wa_unopened_cancel_at = ? WHERE wa_unopened_cancel_at IS NOT NULL AND wa_unopened_cancel_at < ? AND phone_check IN ('awaiting', 'mismatch') AND wa_opened_at IS NULL").run(until, until).changes;
+    if (a + b) auditOrThrow('orders.unconfirmed_grace', { by: 'shop', deadlinesMoved: a + b, until, reason: 'the shop was not running' });
+    return a + b;
+  });
+  if (moved) bump('orders');
+  return moved;
+}
+
 let unconfirmedTimer: NodeJS.Timeout | null = null;
 
 /** Start the sweep of unconfirmed orders (every 5 minutes, and once soon after start). Off with UNCONFIRMED_SWEEP_DISABLED=1. */
@@ -2311,7 +2329,7 @@ export interface StripeEventRef {
   type: string;
 }
 
-export type CardOutcome = 'paid' | 'paid_after_cancel' | 'already' | 'mismatch' | 'unknown' | 'failed' | 'cancelled' | 'refunded' | 'refund_pending' | 'refund_failed' | 'partial' | 'ignored' | 'duplicate';
+export type CardOutcome = 'paid' | 'paid_after_cancel' | 'already' | 'mismatch' | 'unknown' | 'failed' | 'cancelled' | 'refunded' | 'refund_pending' | 'refund_failed' | 'partial' | 'ignored' | 'duplicate' | 'disputed';
 
 function applyOnce(event: StripeEventRef | undefined, orderId: string | null, fn: () => CardOutcome): CardOutcome {
   return inTransaction(() => {
@@ -2392,9 +2410,12 @@ export function markCardPaid(orderId: string, pi: IntentFacts, actor: string, ev
     writeOrder(order);
     logEvent(orderId, actor, late ? 'card_paid_after_cancel' : 'card_paid', { ref: pi.id, amount: aed(pi.amount), label: pi.label });
     auditOrThrow(late ? 'payment.paid_after_cancel' : 'payment.paid', { orderId, ref: pi.id, amountFils: pi.amount, via: actor, ...(event ? { event: event.id } : {}) });
+    // Paid though the order was cancelled: the money is the customer's to get back. Said to the owner.
+    if (late) setAttention(orderId, 'paid_after_cancel', `AED ${aed(pi.amount)} was paid by card after this order was cancelled. Refund it (“Cancel & refund”), or check with the customer.`);
     return late ? 'paid_after_cancel' : 'paid';
   });
   if (outcome === 'paid' || outcome === 'paid_after_cancel') bump('orders');
+  if (outcome === 'paid_after_cancel') notifyAttention(getOrder(orderId));
   return outcome;
 }
 
@@ -2584,6 +2605,10 @@ export function markCardRefunded(ref: string, charge: { amount: number; amountRe
     const order = found && getOrder(found.id);
     if (!order?.card) return 'unknown';
     if (order.card.state === 'refunded') return 'already';
+    // The refund's event came before the payment's (Stripe does not promise the order): not used
+    // up as "ignored", or the order would later count as paid though the money went back. Refused,
+    // so Stripe sends it again, after the payment is recorded.
+    if (order.card.state === 'pending' || order.card.state === 'failed') throw new HttpError(503, 'The payment is not recorded yet.');
     if (order.card.state !== 'paid' && order.card.state !== 'refund_pending') return 'ignored';
     if (charge.amountRefunded < (order.card.paidAmount !== undefined ? fils(order.card.paidAmount) : charge.amount)) {
       // A partial refund (Stripe's dashboard): noted, so "Cancel & refund" offers only what is left.
@@ -2650,6 +2675,26 @@ export function markRefundFailed(ref: string, refund: { id: string; amount: numb
     return 'refund_failed';
   });
   if (outcome === 'refund_failed') notifyAttention(found && getOrder(found.id));
+  return outcome;
+}
+
+/**
+ * Stripe says the customer's bank disputed the payment (a chargeback): flagged on the order and
+ * emailed to the owner, once per event, audited. Nothing else changes: the dispute is answered in
+ * Stripe's dashboard, and if it is lost Stripe's refund event follows.
+ */
+export function markCardDisputed(ref: string, dispute: { id: string; amount: number; reason?: string; withdrawn?: boolean }, actor: string, event?: StripeEventRef): CardOutcome {
+  const found = orderByPaymentRef(ref);
+  const outcome = applyOnce(event, found?.id ?? null, () => {
+    const order = found && getOrder(found.id);
+    if (!order?.card) return 'unknown';
+    const text = `The customer's bank disputed this card payment (AED ${aed(dispute.amount)}${dispute.reason ? `, ${dispute.reason.replace(/_/g, ' ')}` : ''})${dispute.withdrawn ? ' and Stripe has taken the money back for now' : ''}. Answer it in your Stripe dashboard (Disputes) before the deadline shown there, and do not send the parcel until it is settled.`;
+    setAttention(order.id, 'card_dispute', text);
+    logEvent(order.id, actor, 'card_disputed', { dispute: dispute.id, amount: aed(dispute.amount), reason: dispute.reason, withdrawn: Boolean(dispute.withdrawn) });
+    auditOrThrow('payment.disputed', { orderId: order.id, ref, dispute: dispute.id, amountFils: dispute.amount, reason: dispute.reason, withdrawn: Boolean(dispute.withdrawn), via: actor, ...(event ? { event: event.id } : {}) });
+    return 'disputed';
+  });
+  if (outcome === 'disputed') notifyAttention(found && getOrder(found.id));
   return outcome;
 }
 

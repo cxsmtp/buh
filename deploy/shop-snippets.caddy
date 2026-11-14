@@ -20,17 +20,20 @@
 		-X-Powered-By
 	}
 
-	# Access log. The Admin Hub's private link (one 32-character path) and a password-reset
-	# email's one-time path (43 characters), and a bank-transfer order's private page (/pay/<43>),
-	# are masked to their first 4 characters, so the
+	# Access log. The Admin Hub's private link (one 32-character path), a password-reset email's
+	# one-time path (43 characters), a bank-transfer order's private page (/pay/<43>), a photo
+	# deal's link (/deal/<43>, /api/deal/<43>/…) and a customer's tracking and receipt links
+	# (/track/<order>.<43>, /invoice/<order>.<43>) are masked to their first 4 characters, so the
 	# log never holds a working link.
 	log {
 		output stdout
 		format filter {
 			wrap console
 			fields {
-				request>uri regexp "^(/(?:api/)?pay)?/([A-Za-z0-9_-]{4})[A-Za-z0-9_-]{28,}" "${1}/${2}..."
+				request>uri regexp "^(?:((?:/(?:api/)?(?:pay|deal))?/[A-Za-z0-9_-]{4})[A-Za-z0-9_-]{28,}|(/(?:track|invoice)/BUH-[A-Z0-9-]{4,40}[.][A-Za-z0-9_-]{4})[A-Za-z0-9_-]{39})" "${1}${2}..."
 				request>headers>Referer delete
+				# A customer's chat is opened with this header: never in the log.
+				request>headers>X-Chat-Token delete
 				# The one-time move to a new admin link is a redirect: its Location is the link.
 				resp_headers>Location delete
 			}
@@ -40,9 +43,10 @@
 
 # Inside reverse_proxy: wait for a healthy shop instead of failing while it switches.
 (shop_upstream) {
-	# Keep trying for up to 30 s (covers a restart or a version switch), every 250 ms. A
-	# request that never reached the shop is always retried; one that did, only if a GET.
-	lb_try_duration 30s
+	# Keep trying for up to 60 s (covers a restart or a one-container version switch: up to 25 s
+	# to stop the old copy, then the new one's start), every 250 ms. A request that never reached
+	# the shop is always retried; one that did, only if a GET.
+	lb_try_duration 60s
 	lb_try_interval 250ms
 
 	# Active health checks: traffic goes only to a copy whose /api/health answers 200 (?lb=1: a copy
