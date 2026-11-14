@@ -296,6 +296,20 @@ export function AdminApp() {
     return () => clearInterval(t);
   }, [auth, role, liveConnected, loadAdminData]);
 
+  // With no data asked on a timer, one small question a minute (while the hub is in view) still
+  // notices a sign-out elsewhere or a changed private link: the hub then stops and says so. A call
+  // that fails (no signal) changes nothing.
+  useEffect(() => {
+    if (auth !== 'in' || role !== 'owner' || !liveConnected) return;
+    const t = setInterval(() => {
+      if (document.visibilityState === 'hidden') return;
+      void getJson<{ authenticated?: boolean }>('/api/admin/session').then(({ ok, data }) => {
+        if (ok && data.authenticated === false) setAuth((x) => (x === 'closed' ? x : 'out'));
+      });
+    }, FALLBACK_POLL_MS);
+    return () => clearInterval(t);
+  }, [auth, role, liveConnected]);
+
   // Several changes in a row (e.g. tapping + on stock) give one reload, of that channel only.
   const reloadTimers = useRef<Record<string, ReturnType<typeof setTimeout>>>({});
   const debounced = useCallback((key: string, fn: () => void) => {

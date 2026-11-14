@@ -279,6 +279,11 @@ test('at 375 and 1280 px: totals from every order, search and paging in Orders, 
     assert.ok((await cards.evaluateAll((els) => els.map((e) => e.textContent ?? ''))).every((t) => /delivered/i.test(t)));
     assert.equal(await overflow(page), false, `orders at ${width}: no sideways scroll`);
 
+    // Card payments: the only card order is an old finished one (not in the hub's own list): it is fetched.
+    await page.getByTestId('order-filter-card').click();
+    await page.waitForFunction((id) => Boolean(document.querySelector(`[data-testid="order-card"][data-order-id="${id}"]`)), idOf(3));
+    assert.equal(await cards.count(), 1);
+
     // The Photo orders tab and the latest deal links still work (none here: the form is there).
     await page.getByTestId('order-filter-photo').click();
     assert.equal(await page.getByTestId('order-filter-photo').getAttribute('aria-pressed'), 'true');

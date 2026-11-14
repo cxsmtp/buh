@@ -329,8 +329,10 @@ export const AdminOrdersTab: React.FC<AdminOrdersTabProps> = ({
     clearTimeout(view.current.timer);
     view.current.key = key;
     setVisible(ORDERS_PAGE);
-    setFound({ orders: [], loading: Boolean(searchText && OLDER_OF[f] && older), error: '' });
-    if (searchText) view.current.timer = setTimeout(() => void fetchOlder(f, searchText, older), 300);
+    // A search asks the server too (after a pause in typing); so does a filter the hub's own list has nothing for.
+    const ask = Boolean(OLDER_OF[f] && older) && (Boolean(searchText) || !orders.some((o) => inFilter(o, f)));
+    setFound({ orders: [], loading: ask, error: '' });
+    if (ask) view.current.timer = setTimeout(() => void fetchOlder(f, searchText, older), searchText ? 300 : 0);
   };
   const setFilter = (f: OrderFilter) => show(f, query);
   /** An order changed: also in the older ones fetched here, then the hub's list. */
@@ -638,7 +640,7 @@ export const AdminOrdersTab: React.FC<AdminOrdersTabProps> = ({
       <div className="space-y-3">
         {filteredOrders.length === 0 ? (
           <div className="bg-surface rounded-2xl p-8 text-center border border-line text-ink-muted text-xs" data-testid="orders-empty" role="status">
-            {found.loading ? 'Searching…' : terms ? `No order matches “${query.trim()}”${filter === 'all' ? '' : ' under this filter'}.` : 'No orders found under this filter.'}
+            {found.loading ? (terms ? 'Searching…' : 'Loading…') : olderFrom ? 'None among the newest orders. Older ones may match: load them below.' : terms ? `No order matches “${query.trim()}”${filter === 'all' ? '' : ' under this filter'}.` : 'No orders found under this filter.'}
           </div>
         ) : (
           shownOrders.map((order) => {
@@ -1066,12 +1068,14 @@ export const AdminOrdersTab: React.FC<AdminOrdersTabProps> = ({
         )}
         {/* A page at a time: never hundreds of cards at once; older finished orders come from the server */}
         {found.error && <p role="alert" className="text-xs text-danger">{found.error}</p>}
-        {filteredOrders.length > 0 && (
+        {(filteredOrders.length > 0 || olderFrom) && (
           <div className="flex flex-wrap items-center gap-3 text-xs text-ink-soft" data-testid="orders-paging">
-            <span role="status" data-testid="orders-shown">
-              Showing {shownOrders.length}
-              {knownTotal !== null ? ` of ${knownTotal}` : ''}
-            </span>
+            {filteredOrders.length > 0 && (
+              <span role="status" data-testid="orders-shown">
+                Showing {shownOrders.length}
+                {knownTotal !== null ? ` of ${knownTotal}` : ''}
+              </span>
+            )}
             {(visible < filteredOrders.length || olderFrom) && (
               <button type="button" onClick={showMore} disabled={found.loading} data-testid="orders-more" className="min-h-11 px-4 rounded-xl border border-line-strong bg-surface text-ink font-semibold hover:bg-sand disabled:opacity-50 focus:outline-none focus-visible:ring-2 focus-visible:ring-gold">
                 {found.loading ? 'Loading…' : visible < filteredOrders.length ? 'Show more orders' : 'Load older orders'}
