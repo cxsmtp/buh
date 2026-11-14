@@ -44,7 +44,8 @@ jobs:
   tests:
     # Every test (unit and end-to-end, against the real build) on the Node version the image runs.
     # Nothing is published unless this passes: a release that fails its tests never reaches a shop.
-    runs-on: ubuntu-latest
+    # Ubuntu 24.04, not "latest": the browser the end-to-end tests install supports it.
+    runs-on: ubuntu-24.04
     timeout-minutes: 60
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
