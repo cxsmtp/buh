@@ -200,7 +200,7 @@ test("courier connection test reports Jeebly's own reply (or that it could not b
   assert.ok(!text.includes('SUPERSECRETKEY') && !text.includes('CLIENTKEY98'), 'keys are not echoed');
   const body = JSON.parse(text);
   assert.equal(body.target, 'sandbox', 'Live mode off: the sandbox keys, on the sandbox');
-  assert.match(body.summary, body.reached ? /^Reached Jeebly's sandbox \(HTTP \d+\); Jeebly said: / : /^Could not reach Jeebly's sandbox/);
+  assert.match(body.summary, body.reached ? /^Reached Jeebly's sandbox \(HTTP \d+\)(; |: the keys were refused\. )Jeebly said: / : /^Could not reach Jeebly's sandbox/);
   assert.doesNotMatch(text, /LIVE_ENDPOINT_ACTIVE/);
   const eco = await (await post('/api/courier/test', { provider: 'echo', settings: {} }, { cookie })).json();
   assert.equal(eco.reached, false);

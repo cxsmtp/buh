@@ -87,7 +87,7 @@ test('the routes: the extra goes with the booking (checked); moving money is the
   assert.equal((await fetch(`${server.base}${route}`, { method: 'POST', headers: { 'content-type': 'application/json', origin: server.base }, body: '{}' })).status, 401);
   assert.equal((await api('POST', route, { toOrderId: o.id, amount: 1 }, { origin: 'https://evil.test' })).status, 403);
   assert.equal((await api('POST', route, { toOrderId: o.id, amount: 1, extra: 1 })).status, 400);
-  assert.equal((await api('POST', route, JSON.stringify({ toOrderId: o.id, amount: 1, pad: 'x'.repeat(400) }))).status, 413);
+  assert.equal((await api('POST', route, JSON.stringify({ toOrderId: o.id, amount: 1, pad: 'x'.repeat(700) }))).status, 413);
   const unpaid = await api('POST', route, { toOrderId: o.id, amount: 1 });
   assert.equal(unpaid.status, 409, 'not paid yet: nothing to move');
 });

@@ -69,7 +69,7 @@ test('the request is Jeebly\'s flat snake_case body: the order and the owner\'s 
     destination_address_type: 'Normal',
     destination_address_mob_no_country_code: '+971',
     destination_address_mobile_number: '501234567',
-    destination_address_landmark: 'Near the mosque, Street 7',
+    destination_address_landmark: 'Street 7, Near the mosque',
   });
   // Prepaid: no cod_amount; same day: "Same day"; weight at least 1 kg.
   const prepaid = buildJeeblyPayload({ ...order, paymentMethod: 'online_card', deliveryOption: 'same_day', courier: { ...order.courier, weightKg: 0.3 } } as Order, jeebly(true), sender);
