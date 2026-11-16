@@ -2102,7 +2102,11 @@ proxy_switch() {
   log "$2: starting $px_name from $(describe "$px_new") for https://$PROXY_DOMAIN"
   px_ok=0
   if px_out=$(create_proxy "$px_name" "$px_new" 2>&1); then
-    if [ "$px_had" = 1 ]; then docker stop -t 10 "$px_name-previous" > /dev/null 2>&1 || true; fi
+    if [ "$px_had" = 1 ]; then
+      docker stop -t 10 "$px_name-previous" > /dev/null 2>&1 || true
+      # Kept as a fallback only: it must not start by itself with the computer (where the engine can change that).
+      docker update --restart=no "$px_name-previous" > /dev/null 2>&1 || true
+    fi
     if px_out=$(docker start "$px_name" 2>&1) && proxy_ready "$px_name"; then px_ok=1; fi
   fi
   if [ "$px_ok" = 1 ]; then
@@ -2151,6 +2155,13 @@ proxy_heal() {
   [ -n "$PROXY_IMAGE" ] || return 0
   ph_state=$(state_of "$SHOP_NAME-proxy") || ph_state=''
   if [ "$ph_state" = running ]; then
+    # The proxy before is kept stopped, as a fallback. It was created to restart always, so a
+    # restart of the computer starts it again beside the current one (reported by the owner: two
+    # proxies on ports 80 and 443 after a reboot). Stopped here, every round.
+    if [ "$(state_of "$SHOP_NAME-proxy-previous")" = running ]; then
+      log "stopping $SHOP_NAME-proxy-previous: it is the fallback and was started by a restart of the computer"
+      docker stop -t 10 "$SHOP_NAME-proxy-previous" > /dev/null 2>&1 || true
+    fi
     note_proxy_good
     return 0
   fi
