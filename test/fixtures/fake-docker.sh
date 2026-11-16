@@ -387,6 +387,12 @@ EOF
     rm -rf "${D:?}/c/$c"
     ev "rm $(label_of "$1")"
     ;;
+  update)
+    # docker update --restart=no NAME
+    c=$(colour_of "$2")
+    [ -d "$D/c/$c" ] || exit 1
+    ev "norestart $(label_of "$2")"
+    ;;
   logs) echo "fake log line" ;;
   *) echo "fake docker: unsupported $cmd" >&2; exit 1 ;;
 esac

@@ -1415,9 +1415,23 @@ test('the proxy: the same image is left running; a new one is created before the
     `rename ${SHOP}-proxy ${SHOP}-proxy-previous`,
     `create ${SHOP}-proxy ${PROXY2}`,
     `stop ${SHOP}-proxy-previous`,
+    `norestart ${SHOP}-proxy-previous`,
     `start ${SHOP}-proxy`,
   ]);
   assert.equal(fileOf(e, `${SHOP}-proxy`, 'image'), PROXY2);
+
+  // Reported by the owner: after a restart of the server the fallback proxy was running too (it was
+  // created to restart always), beside the current one on ports 80 and 443. The updater stops it.
+  fs.writeFileSync(path.join(e.fake, 'c', `${SHOP}-proxy-previous`, 'status'), 'running\n');
+  fs.rmSync(path.join(e.fake, 'events'), { force: true });
+  asUpdater(e, UPDATER, ['self-update'], env);
+  assert.ok(events(e).includes(`stop ${SHOP}-proxy-previous`), events(e).join('\n'));
+  assert.equal(statusOf(e, `${SHOP}-proxy-previous`), 'exited');
+  assert.equal(statusOf(e, `${SHOP}-proxy`), 'running', 'the current proxy is not touched');
+  // Stopped already: left alone.
+  fs.rmSync(path.join(e.fake, 'events'), { force: true });
+  asUpdater(e, UPDATER, ['self-update'], env);
+  assert.ok(!events(e).includes(`stop ${SHOP}-proxy-previous`), events(e).join('\n'));
 });
 
 test('regression: the folder marker is never written through a link the shop planted', { skip: process.getuid?.() !== 0 && 'needs root to chown' }, () => {

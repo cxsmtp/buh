@@ -1,5 +1,14 @@
 # Changelog
 
+## BUH-02.48.00 — 2026-11-16 06:00 UTC · [#83](https://github.com/cxsmtp/buh/pull/83)
+
+- **Only one proxy after a server restart.** After restarting the server, the HTTPS proxy kept as a fallback from the last update started again beside the current one, so two proxies answered on ports 80 and 443 (reported by the owner after a reboot; the shop itself kept working). The updater now stops a fallback proxy it finds running, at every check, and where the engine allows it the fallback is set not to start with the computer.
+- **Status.**
+  - **Benchmark:** not run: only the updater's script and its test changed; the shop's own code is the same as BUH-02.47.00.
+  - **Tests:** the updater's 53 tests pass, with a new one that failed before the fix (a running fallback proxy is stopped, the current one untouched, and nothing is done when it is already stopped). The full suite runs in CI before anything is published.
+  - **Dependency audit:** no dependency changed.
+  - **Security scan:** not run for this release (the Checkmarx connection needs signing in again); the change is two `docker` commands on a container the updater itself created.
+
 ## BUH-02.47.00 — 2026-11-14 12:30 UTC · [#82](https://github.com/cxsmtp/buh/pull/82)
 
 The gaps the three review releases had left open, closed.
