@@ -671,7 +671,7 @@ function ShopAppInner({
             <CollectionHeader collection={collection} pieces={catalogLoaded ? filteredProducts.length : null} />
           ) : (
           <>
-          <HeroBanner brand={brandSettings} pieces={catalogLoaded ? products.length : null} />
+          <HeroBanner brand={brandSettings} pieces={catalogLoaded ? products.length : null} gifts={festive ? festivalLink : undefined} />
           {storeSettings.photoOrders && storeSettings.photoOrdersOnHome && (
             <button
               type="button"
@@ -687,7 +687,8 @@ function ShopAppInner({
               <ChevronRight className="w-5 h-5 shrink-0 text-ink-soft rtl:-scale-x-100" aria-hidden="true" />
             </button>
           )}
-          {festivalLink}
+          {/* In the fuller festive look the gift link sits inside the greeting (HeroBanner). */}
+          {!festive && festivalLink}
 
           <StoryChips
             stories={stories}
@@ -701,9 +702,11 @@ function ShopAppInner({
 
           <div ref={resultsRef} className="scroll-mt-28 space-y-3">
             {/* Count, and Filter (a bottom sheet) only when wanted */}
-            {!collection && festive && <FestiveDivider motif={festive.theme.motif} />}
             {!collection && (
-            <div className={`flex flex-wrap items-center justify-between gap-3 ${festive ? '' : 'border-t border-line pt-4'}`}>
+            <div className={festive ? '' : 'border-t border-line pt-4'}>
+            {/* The fuller festive look: the line above the pieces carries the festival's motif (the same height as the plain line). */}
+            {festive && <FestiveDivider motif={festive.theme.motif} />}
+            <div className="flex flex-wrap items-center justify-between gap-3">
               <p className="label-caps text-ink-muted" aria-live="polite">
                 {catalogLoaded ? t(filteredProducts.length === 1 ? 'piece' : 'pieces', { n: filteredProducts.length }) : ''}
               </p>
@@ -724,6 +727,7 @@ function ShopAppInner({
                 )}
               </button>
               </div>
+            </div>
             </div>
             )}
 

@@ -94,12 +94,15 @@ for (const width of [375, 1280]) {
     assert.equal(await garland.getAttribute('aria-hidden'), 'true');
     const shown = await garland.locator('[data-garland-swag]').evaluateAll((els) => els.filter((e) => (e as HTMLElement).getBoundingClientRect().width > 0).length);
     assert.equal(shown, width < 640 ? 4 : 9, 'four swags on a phone, more on a wide screen');
-    assert.ok(g!.height >= 50, 'a garland, not a hairline');
+    assert.ok(g!.height >= 28, 'a garland, not a hairline');
     await page.getByTestId('festive-divider').waitFor();
     // The whole greeting, not the slim line: its motif in a ring, the greeting in the serif.
     const note = page.getByRole('note').first();
     assert.match((await note.textContent()) ?? '', /Happy Diwali/);
-    assert.ok((await note.boundingBox())!.height >= 90, 'the larger band');
+    assert.ok((await note.boundingBox())!.height >= 58, 'the larger band');
+    // The top stays short (asked by the owner earlier): the first piece still starts on the first screen's upper part.
+    const firstPiece = (await page.locator('main article').first().boundingBox())!;
+    assert.ok(firstPiece.y < 800 * 0.62, `the first piece starts at ${Math.round(firstPiece.y)} px`);
     if (process.env.SHOTS) await page.screenshot({ path: `${process.env.SHOTS}/festive-${width}.png` });
     // The wash of the festival's tint, and the greeting again at the foot of the shop.
     const root = page.locator('[data-festive-look="full"]');

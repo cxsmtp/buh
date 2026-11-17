@@ -27,6 +27,8 @@ interface HeroBannerProps {
   brand: BrandSettings;
   /** Pieces in the shop now (shown like a profile's post count). */
   pieces: number | null;
+  /** The link to the live festival's gift page: inside the greeting in the fuller festive look. */
+  gifts?: React.ReactNode;
 }
 
 /**
@@ -35,7 +37,7 @@ interface HeroBannerProps {
  * delivers. The logo, name and tagline are already in the header just above, so they are not
  * repeated here (the name stays the page's heading for search engines and screen readers).
  */
-export const HeroBanner: React.FC<HeroBannerProps> = ({ brand, pieces }) => {
+export const HeroBanner: React.FC<HeroBannerProps> = ({ brand, pieces, gifts }) => {
   const { festival, store, delivery, chat } = useShop();
   // A festival's look (3 weeks before to 1 week after it, or as the admin chose).
   const f = festival?.festivalId && festival.showBanner ? festival : null;
@@ -51,7 +53,7 @@ export const HeroBanner: React.FC<HeroBannerProps> = ({ brand, pieces }) => {
       {f &&
         (full ? (
           // The fuller festive look (Settings → Festival themes): the whole greeting, with the days to go.
-          <FestiveGreeting theme={f.theme} grand note={f.phase === 'during' ? t('now') : f.phase === 'upcoming' && f.daysToStart ? (f.daysToStart === 1 ? t('tomorrow') : t('inDaysToGo', { n: f.daysToStart })) : undefined} />
+          <FestiveGreeting theme={f.theme} grand gifts={gifts} note={f.phase === 'during' ? t('now') : f.phase === 'upcoming' && f.daysToStart ? (f.daysToStart === 1 ? t('tomorrow') : t('inDaysToGo', { n: f.daysToStart })) : undefined} />
         ) : (
           <FestiveGreeting theme={f.theme} compact />
         ))}
