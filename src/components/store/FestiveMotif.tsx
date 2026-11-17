@@ -133,3 +133,47 @@ export function FestivePattern({ motif, className = '' }: { motif: MotifId; clas
     </svg>
   );
 }
+
+/**
+ * A garland for the fuller festive look (Settings → Festival themes): a thread draped in swags
+ * across the top of the shop, a small light on each side of every swag and the festival's motif
+ * hanging at its lowest point, each twinkling softly on its own beat (still when the device asks
+ * for less motion). Decorative only. Four swags on a phone, more as the screen widens; it never
+ * adds width to the page.
+ */
+export function FestiveGarland({ motif, className = '' }: { motif: MotifId; className?: string }) {
+  return (
+    <div aria-hidden="true" data-testid="festive-garland" className={`pointer-events-none select-none overflow-hidden ${className}`}>
+      <div className="mx-auto flex max-w-7xl">
+        {Array.from({ length: 9 }, (_, i) => (
+          <span key={i} data-garland-swag="" className={`relative h-[30px] min-w-0 flex-1 sm:h-9 ${i >= 4 ? (i >= 6 ? 'hidden lg:block' : 'hidden sm:block') : ''}`}>
+            {/* The thread: one swag, stretched to the width it is given. */}
+            <svg className="absolute inset-x-0 top-0 h-4 w-full text-festive-glow" viewBox="0 0 100 16" preserveAspectRatio="none" fill="none" focusable="false">
+              <path d="M0 1 Q50 22 100 1" stroke="currentColor" strokeWidth="1.2" vectorEffect="non-scaling-stroke" />
+            </svg>
+            {/* Two lights on the thread, the motif hanging where it dips lowest. */}
+            <span className="festive-twinkle absolute left-1/4 top-[6px] h-1.5 w-1.5 -translate-x-1/2 rounded-full bg-festive-glow" />
+            <span className="festive-twinkle absolute left-3/4 top-[6px] h-1.5 w-1.5 -translate-x-1/2 rounded-full bg-festive-glow" />
+            <span className="absolute left-1/2 top-[11px] flex -translate-x-1/2 flex-col items-center">
+              <span className="h-[3px] w-px bg-festive-glow" />
+              <FestiveMotif motif={motif} className="festive-twinkle h-4 w-4 text-festive sm:h-5 sm:w-5" strokeWidth={1.2} />
+            </span>
+          </span>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+/** A fine line with the festival's motif in the middle: between the top of the shop and its pieces, in the fuller festive look. */
+export function FestiveDivider({ motif, className = '' }: { motif: MotifId; className?: string }) {
+  return (
+    <div aria-hidden="true" data-testid="festive-divider" className={`flex h-[17px] items-center gap-3 text-festive ${className}`}>
+      <span className="h-px flex-1 bg-gradient-to-r from-transparent to-festive-glow/70 rtl:bg-gradient-to-l" />
+      <span className="h-1 w-1 rounded-full bg-festive-glow" />
+      <FestiveMotif motif={motif} className="h-4 w-4 shrink-0" />
+      <span className="h-1 w-1 rounded-full bg-festive-glow" />
+      <span className="h-px flex-1 bg-gradient-to-l from-transparent to-festive-glow/70 rtl:bg-gradient-to-r" />
+    </div>
+  );
+}

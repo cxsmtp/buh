@@ -736,6 +736,12 @@ export interface ThemeSettings {
   showBanner: boolean;
   /** Festival lines added to the scrolling bar. */
   showMarquee: boolean;
+  /**
+   * How much of the shop dresses up for a festival. full: a garland under the header, a larger
+   * greeting with the days to go, a soft wash of the festival's colour and a greeting in the
+   * footer. subtle: one slim greeting line. Days of remembrance are always calm.
+   */
+  festiveLook: 'full' | 'subtle';
 }
 
 /**

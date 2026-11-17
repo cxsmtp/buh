@@ -13,6 +13,15 @@ export interface FestivalView {
   theme: FestivalTheme;
   showBanner: boolean;
   showMarquee: boolean;
+  /** How much the shop dresses up (Settings → Festival themes); absent from an older server: subtle. */
+  look?: 'full' | 'subtle';
+  /** A day of remembrance: always calm, whatever the look. */
+  solemn?: boolean;
+}
+
+/** The fuller festive look is on: a festival (not a day of remembrance), its greeting shown, the look set to full. */
+export function festiveFull(f: FestivalView | null | undefined): boolean {
+  return Boolean(f?.festivalId && f.showBanner && f.look === 'full' && !f.solemn);
 }
 import { DEFAULT_CATALOG, DEFAULT_DELIVERY, DEFAULT_STORE } from '@/data/catalogDefaults';
 import { waMeLink } from '@/lib/whatsappConfirm';

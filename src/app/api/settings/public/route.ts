@@ -1,6 +1,7 @@
 import { handleRouteError, json } from '@/lib/server/http';
 import { bankTransferMode, cardFeePercent, cardPaymentsReady, contactEmail, getSettings, phoneCheckMode, phoneCodesOn, phoneVerificationConfig } from '@/lib/server/settings';
 import { MAX_UNVERIFIED_CARD_LINES, MAX_UNVERIFIED_CARD_QTY } from '@/lib/server/orders';
+import { getFestival } from '@/lib/festivals/catalog';
 import { storefrontTheme } from '@/lib/server/theme';
 import { vatAddedPercent } from '@/lib/server/vat';
 
@@ -73,7 +74,7 @@ function festivalView() {
   const t = getSettings('theme');
   try {
     const { pick, theme } = storefrontTheme();
-    return { themeId: pick.themeId, festivalId: pick.festivalId ?? null, phase: pick.phase, daysToStart: pick.daysToStart ?? null, theme, showBanner: t.showBanner, showMarquee: t.showMarquee };
+    return { themeId: pick.themeId, festivalId: pick.festivalId ?? null, phase: pick.phase, daysToStart: pick.daysToStart ?? null, theme, showBanner: t.showBanner, showMarquee: t.showMarquee, look: t.festiveLook === 'subtle' ? ('subtle' as const) : ('full' as const), solemn: Boolean(pick.festivalId && getFestival(pick.festivalId)?.solemn) };
   } catch {
     return null; // never let a calendar problem break the shop
   }
