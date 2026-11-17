@@ -6,9 +6,9 @@
 - **You choose how festive.** Settings → Festival themes → **How festive the shop looks**: **Festive** (the new look, on by default) or **Subtle** (the one slim line as before).
 - **Respectful and gentle.** Days of remembrance stay calm whatever you choose. Nothing moves on a phone set to reduce motion, the decorations are skipped by screen readers, and they never make the page wider than the screen.
 - **Status.**
-  - **Benchmark:** BENCH_PLACEHOLDER
-  - **Tests:** TESTS_PLACEHOLDER
-  - **Dependency audit:** AUDIT_PLACEHOLDER
+  - **Benchmark:** no failed requests in any round (main first, alternating, 3 rounds, nothing else running). p95, branch vs main: home page 90–128 ms vs 90–126, courier 92–106 ms vs 86–100, catalogue 128–182 ms vs 139–175, gift page 77–96 ms vs 144–195. Within the runs' own spread; the decorations are drawn in the browser, so the server does no more work.
+  - **Tests:** 1,502 of 1,502 (164 files). The first version of this look failed the two "top of the shop is short" tests (the first piece started at 633 px of 800 on a laptop and 665 of 812 on a phone, a complaint the owner made before about the old banner); it was redesigned to take no more room than the slim line did, and those tests pass unchanged. New: `test/festive-look-e2e.test.mts` (6, at 375 and 1280 px). Looked at in screenshots: light, dark and Arabic on a phone, and a laptop. Not checked: every one of the festivals' greetings on a narrow phone (a long greeting may wrap onto two lines).
+  - **Dependency audit:** `npm audit --omit=dev`: 0 vulnerabilities; no dependency added or changed.
   - **Security scan:** not run for this release (the Checkmarx connection needs signing in again). By hand: no new route; the one new setting (`festiveLook`) is checked on the server against its two values; the decorations are drawn in the page (no image, script or address from outside).
 
 ## BUH-02.48.00 — 2026-11-16 06:00 UTC · [#83](https://github.com/cxsmtp/buh/pull/83)
