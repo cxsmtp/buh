@@ -1098,11 +1098,19 @@ const VALIDATORS: { [K in SettingsKey]: (input: Obj, current: SettingsMap[K]) =>
       disabledFestivals,
       showBanner: bool(input.showBanner, current.showBanner),
       showMarquee: bool(input.showMarquee, current.showMarquee),
+      festiveLook: festiveLookOf(input.festiveLook, current.festiveLook),
     };
   },
 };
 
 const FESTIVAL_ID_SET = new Set(FESTIVALS.map((f) => f.id));
+
+/** 'full' or 'subtle'; a setting saved before this choice existed counts as full. */
+function festiveLookOf(input: unknown, current: unknown): 'full' | 'subtle' {
+  if (input === undefined) return current === 'subtle' ? 'subtle' : 'full';
+  if (input !== 'full' && input !== 'subtle') throw new HttpError(400, 'Festive look must be full or subtle.');
+  return input;
+}
 
 const ANTHROPIC_KEY = /^sk-ant-[A-Za-z0-9_-]{20,300}$/;
 /**

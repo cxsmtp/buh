@@ -69,6 +69,8 @@ export const DEFAULT_THEME_SETTINGS: ThemeSettings = {
   disabledFestivals: [],
   showBanner: true,
   showMarquee: true,
+  // Asked by the owner: the shop should feel festive, not just carry a small banner.
+  festiveLook: 'full',
 };
 
 /** Settings → Email before the owner fills it in (then .env.production applies). */

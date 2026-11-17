@@ -1,5 +1,16 @@
 # Changelog
 
+## BUH-02.49.00 — 2026-11-17 06:00 UTC · [#84](https://github.com/cxsmtp/buh/pull/84)
+
+- **The shop dresses up for festivals.** Asked by the owner: "I don't see any festival theme except a small banner". During a festival the shop now hangs a garland of the festival's own motif under the header (diyas for Diwali, crescents for Eid, the flag for National Day, snowflakes for Christmas…), with small lights that twinkle softly; shows the whole greeting large, with how near the festival is ("In 15 days", "Tomorrow", "Celebrating now"); gives the top of the page a warm glow in the festival's colour; marks the start of the pieces with a small ornament; and repeats the greeting at the foot of the shop. It follows the same festival calendar as before, in light and dark, English and Arabic.
+- **You choose how festive.** Settings → Festival themes → **How festive the shop looks**: **Festive** (the new look, on by default) or **Subtle** (the one slim line as before).
+- **Respectful and gentle.** Days of remembrance stay calm whatever you choose. Nothing moves on a phone set to reduce motion, the decorations are skipped by screen readers, and they never make the page wider than the screen.
+- **Status.**
+  - **Benchmark:** BENCH_PLACEHOLDER
+  - **Tests:** TESTS_PLACEHOLDER
+  - **Dependency audit:** AUDIT_PLACEHOLDER
+  - **Security scan:** not run for this release (the Checkmarx connection needs signing in again). By hand: no new route; the one new setting (`festiveLook`) is checked on the server against its two values; the decorations are drawn in the page (no image, script or address from outside).
+
 ## BUH-02.48.00 — 2026-11-16 06:00 UTC · [#83](https://github.com/cxsmtp/buh/pull/83)
 
 - **Only one proxy after a server restart.** After restarting the server, the HTTPS proxy kept as a fallback from the last update started again beside the current one, so two proxies answered on ports 80 and 443 (reported by the owner after a reboot; the shop itself kept working). The updater now stops a fallback proxy it finds running, at every check, and where the engine allows it the fallback is set not to start with the computer.

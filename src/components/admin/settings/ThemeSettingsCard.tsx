@@ -151,6 +151,24 @@ export function ThemeSettingsCard({ value, updatedAt, onSave }: { value: ThemeSe
         <label className="flex items-center gap-2"><input type="checkbox" checked={d.showMarquee} onChange={(e) => void save({ ...d, showMarquee: e.target.checked })} /> Festival lines in the scrolling bar</label>
       </fieldset>
 
+      <fieldset className="space-y-1.5" data-testid="festive-look">
+        <legend className="font-semibold text-ink">How festive the shop looks</legend>
+        {(
+          [
+            ['full', 'Festive', 'A garland under the header, a larger greeting with the days to go, a soft wash of the festival’s colour and a greeting at the foot of the shop.'],
+            ['subtle', 'Subtle', 'One slim greeting line at the top, as before.'],
+          ] as Array<[ThemeSettings['festiveLook'], string, string]>
+        ).map(([id, label, hint]) => (
+          <label key={id} className="flex items-start gap-2 min-h-11 sm:min-h-0">
+            <input type="radio" name="festive-look" className="mt-1" checked={(d.festiveLook ?? 'full') === id} onChange={() => void save({ ...d, festiveLook: id })} />
+            <span>
+              <strong className="text-ink">{label}</strong> <span className="text-ink-soft">{hint}</span>
+            </span>
+          </label>
+        ))}
+        <p className="text-ink-muted">Days of remembrance are always shown calmly, and nothing moves on a phone set to reduce motion.</p>
+      </fieldset>
+
       {/* Coming up */}
       <section className="space-y-2">
         <div className="flex items-center gap-2">

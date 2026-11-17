@@ -4,7 +4,7 @@ import React, { useState, useEffect, useMemo, useCallback, useRef } from 'react'
 import Link from 'next/link';
 import { Product, Order, CartItem, BedProfileMeasurement, BrandSettings, CatalogSettings, StoreSettings, DeliverySettings, PhoneVerificationConfig, DealView } from '@/types';
 import { DEFAULT_CATALOG, DEFAULT_DELIVERY, DEFAULT_STORE } from '@/data/catalogDefaults';
-import { askWhatsAppLink, piecesLeft, refreshCart, ShopProvider, type FestivalView, type ShopInfo } from '@/lib/client/shop';
+import { askWhatsAppLink, festiveFull, piecesLeft, refreshCart, ShopProvider, type FestivalView, type ShopInfo } from '@/lib/client/shop';
 import { captureLanding, decodeBag, type BagLine, type Landing } from '@/lib/client/landing';
 import { useLiveUpdates } from '@/lib/client/live';
 import { INITIAL_BRAND_SETTINGS } from '@/data/initialData';
@@ -113,6 +113,7 @@ import { VersionBadge } from '@/components/common/VersionBadge';
 
 import { Camera, ChevronRight, SlidersHorizontal, X } from 'lucide-react';
 import { festiveVars } from '@/components/store/FestiveGreeting';
+import { FestiveDivider, FestiveGarland, FestiveMotif } from '@/components/store/FestiveMotif';
 import { EMPTY_FILTERS, SORTS, activeChips, activeCount, applyFilters, buildStories, filtersToSearch, parseFilters, type Filters } from '@/lib/catalogFilter';
 
 const prefersReducedMotion = () => typeof window !== 'undefined' && window.matchMedia?.('(prefers-reduced-motion: reduce)').matches;
@@ -634,10 +635,12 @@ function ShopAppInner({
   }, []);
 
   const totalCartCount = cart.reduce((sum, i) => sum + i.quantity, 0);
+  // The fuller festive look (Settings → Festival themes): a festival, not a day of remembrance, set to Festive.
+  const festive = festiveFull(festival) ? festival : null;
 
   return (
     <ShopProvider value={shopInfo}>
-    <div className="min-h-screen flex flex-col font-sans px-safe" data-festive={festival?.festivalId ? '' : undefined} style={festival?.festivalId ? festiveVars(festival.theme) : undefined}>
+    <div className={`min-h-screen flex flex-col font-sans px-safe${festive ? ' festive-wash' : ''}`} data-festive={festival?.festivalId ? '' : undefined} data-festive-look={festive ? 'full' : undefined} style={festival?.festivalId ? festiveVars(festival.theme) : undefined}>
       {newVersion && (
         <div role="status" className="bg-ink text-paper text-xs px-3 py-1.5 flex items-center justify-center gap-3">
           <span>{t('newVersion')}</span>
@@ -657,6 +660,9 @@ function ShopAppInner({
           brandSettings={brandSettings}
         />
       </div>
+
+      {/* The fuller festive look: the festival's motif as a garland under the header (scrolls away with the page). */}
+      {festive && <FestiveGarland motif={festive.theme.motif} />}
 
       {/* Main Content Area (on phones, room at the bottom for the tab bar and the Help button) */}
       <main className="flex-1 max-w-7xl mx-auto w-full pb-[calc(5rem+env(safe-area-inset-bottom,0px))] md:pb-16 px-4 sm:px-6">
@@ -695,8 +701,9 @@ function ShopAppInner({
 
           <div ref={resultsRef} className="scroll-mt-28 space-y-3">
             {/* Count, and Filter (a bottom sheet) only when wanted */}
+            {!collection && festive && <FestiveDivider motif={festive.theme.motif} />}
             {!collection && (
-            <div className="flex flex-wrap items-center justify-between gap-3 border-t border-line pt-4">
+            <div className={`flex flex-wrap items-center justify-between gap-3 ${festive ? '' : 'border-t border-line pt-4'}`}>
               <p className="label-caps text-ink-muted" aria-live="polite">
                 {catalogLoaded ? t(filteredProducts.length === 1 ? 'piece' : 'pieces', { n: filteredProducts.length }) : ''}
               </p>
@@ -805,6 +812,13 @@ function ShopAppInner({
 
           {/* The version: in the footer on phones (never over the feed), bottom left on wider screens */}
           <footer className="pb-2 space-y-2">
+            {festive && (
+              <p data-testid="festive-footer" className="flex items-center justify-center gap-2 font-serif text-base text-festive">
+                <FestiveMotif motif={festive.theme.motif} className="h-4 w-4 shrink-0" />
+                <span className="break-anywhere text-center">{festive.theme.greeting}</span>
+                <FestiveMotif motif={festive.theme.motif} className="h-4 w-4 shrink-0" />
+              </p>
+            )}
             <p className="text-center text-xs">
               <Link href="/terms" data-testid="footer-terms" className="text-ink-soft underline underline-offset-4 hover:text-ink">
                 {t('terms')}

@@ -3,7 +3,7 @@
 import React from 'react';
 import { MapPin } from 'lucide-react';
 import type { BrandSettings } from '@/types';
-import { useShop } from '@/lib/client/shop';
+import { festiveFull, useShop } from '@/lib/client/shop';
 import { FestiveGreeting } from './FestiveGreeting';
 import { useT, type Words } from '@/lib/i18n';
 
@@ -17,6 +17,10 @@ const WORDS = {
   inDays: { en: '{name} in {days}', ar: '{name} خلال {days}' },
   more: { en: ' to all seven emirates · Cash on delivery or bank transfer', ar: ' إلى الإمارات السبع · الدفع عند الاستلام أو التحويل البنكي' },
   chat: { en: ' · Questions? Ask us in the chat.', ar: ' · لديك سؤال؟ اسألنا في المحادثة.' },
+  // The fuller festive look: how near the festival is.
+  tomorrow: { en: 'Tomorrow', ar: 'غداً' },
+  inDaysToGo: { en: 'In {n} days', ar: 'بعد {n} يوماً' },
+  now: { en: 'Celebrating now', ar: 'نحتفل الآن' },
 } as const satisfies Words;
 
 interface HeroBannerProps {
@@ -35,6 +39,7 @@ export const HeroBanner: React.FC<HeroBannerProps> = ({ brand, pieces }) => {
   const { festival, store, delivery, chat } = useShop();
   // A festival's look (3 weeks before to 1 week after it, or as the admin chose).
   const f = festival?.festivalId && festival.showBanner ? festival : null;
+  const full = festiveFull(f);
   const where = store.storeAddress?.trim();
   const t = useT(WORDS);
   return (
@@ -43,7 +48,13 @@ export const HeroBanner: React.FC<HeroBannerProps> = ({ brand, pieces }) => {
         {brand.storeName || 'Beautiful UAE Home'}
         {brand.tagline ? ` · ${brand.tagline}` : ''}
       </h1>
-      {f && <FestiveGreeting theme={f.theme} compact />}
+      {f &&
+        (full ? (
+          // The fuller festive look (Settings → Festival themes): the whole greeting, with the days to go.
+          <FestiveGreeting theme={f.theme} grand note={f.phase === 'during' ? t('now') : f.phase === 'upcoming' && f.daysToStart ? (f.daysToStart === 1 ? t('tomorrow') : t('inDaysToGo', { n: f.daysToStart })) : undefined} />
+        ) : (
+          <FestiveGreeting theme={f.theme} compact />
+        ))}
       <p className="text-[13px] text-ink-soft leading-relaxed flex flex-wrap items-center gap-x-3 gap-y-1">
         {/* On a phone one short line (the piece count shows again just above the products). */}
         {pieces !== null && (

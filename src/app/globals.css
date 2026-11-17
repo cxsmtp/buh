@@ -509,3 +509,39 @@ html.sheet-open {
     box-shadow: 0 0 0 2px color-mix(in srgb, var(--color-gold) 80%, transparent), 0 0 24px 6px color-mix(in srgb, var(--color-gold) 55%, transparent);
   }
 }
+
+/*
+ * The fuller festive look (Settings → Festival themes → "Festive"): a soft wash of the festival's
+ * tint behind the top of the shop, fading into the page, and the garland's motifs twinkling each
+ * on its own beat. Nothing moves when the device asks for less motion.
+ */
+.festive-wash {
+  background-image:
+    radial-gradient(ellipse 70% 22rem at 50% 0, color-mix(in srgb, var(--color-festive-glow) 26%, transparent), transparent),
+    linear-gradient(to bottom, var(--color-festive-soft), transparent 34rem);
+  background-repeat: no-repeat;
+}
+@media (prefers-reduced-motion: no-preference) {
+  .festive-twinkle {
+    animation: festive-twinkle 3.6s ease-in-out infinite;
+  }
+  [data-garland-swag]:nth-child(3n) .festive-twinkle {
+    animation-delay: 1.2s;
+  }
+  [data-garland-swag]:nth-child(3n + 1) .festive-twinkle {
+    animation-delay: 2.4s;
+  }
+  [data-garland-swag] > .festive-twinkle:nth-of-type(2) {
+    animation-delay: 0.6s;
+  }
+}
+@keyframes festive-twinkle {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.45;
+  }
+}
+
